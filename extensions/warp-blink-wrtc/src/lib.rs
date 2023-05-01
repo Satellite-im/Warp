@@ -346,7 +346,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
 impl<T: IpfsTypes> WebRtc<T> {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
         let identity = loop {
-            if let Ok(identity) = account.get_own_identity() {
+            if let Ok(identity) = account.get_own_identity().await {
                 break identity;
             }
             tokio::time::sleep(Duration::from_millis(100)).await
