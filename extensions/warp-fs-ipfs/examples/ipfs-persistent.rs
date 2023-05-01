@@ -5,7 +5,6 @@ use clap::{Parser, Subcommand};
 use comfy_table::Table;
 use futures::{StreamExt, TryStreamExt};
 use std::path::PathBuf;
-use tokio::io::AsyncWriteExt;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use warp::{
     constellation::{Constellation, Progression},

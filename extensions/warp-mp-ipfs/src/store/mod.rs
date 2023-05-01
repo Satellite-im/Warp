@@ -75,9 +75,9 @@ fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity:
 }
 
 fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
-    let pk = match public_key.clone().into_ed25519() {
-        Some(pk) => {
-            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
+    let pk = match public_key.clone().try_into_ed25519() {
+        Ok(pk) => {
+            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
             did.try_into()?
         }
         _ => anyhow::bail!(Error::PublicKeyInvalid),
