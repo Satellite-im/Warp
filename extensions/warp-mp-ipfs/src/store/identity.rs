@@ -1271,7 +1271,7 @@ impl IdentityStore {
         }
 
         let public_key =
-            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
+            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().to_bytes()));
 
         let username = username
             .map(str::to_string)
@@ -1583,17 +1583,16 @@ impl IdentityStore {
     }
 
     pub fn get_keypair_did(&self) -> anyhow::Result<DID> {
-        let kp = Zeroizing::new(self.get_raw_keypair()?.encode());
+        let kp = Zeroizing::new(self.get_raw_keypair()?.to_bytes());
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
         let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
         Ok(did.into())
     }
 
     pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
-        match self.get_keypair()?.into_ed25519() {
-            Some(kp) => Ok(kp),
-            _ => anyhow::bail!("Unsupported keypair"),
-        }
+        self.get_keypair()?
+            .try_into_ed25519()
+            .map_err(anyhow::Error::from)
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
