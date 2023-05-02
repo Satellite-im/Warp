@@ -11,14 +11,21 @@ use std::time::Duration;
 use anyhow::bail;
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
+use futures::Stream;
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::Ipfs;
 use ipfs::IpfsTypes;
+use ipfs::SubscriptionStream;
 use serde::Deserialize;
 use serde::Serialize;
+use simple_webrtc::events::EmittedEvents;
+use simple_webrtc::events::WebRtcEventStream;
 use simple_webrtc::media::SourceTrack;
+use simple_webrtc::Controller;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -38,6 +45,9 @@ use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+
+use crate::simple_webrtc::media::SinkTrack;
+use crate::simple_webrtc::media::SourceTrackType;
 
 mod signaling;
 mod simple_webrtc;
@@ -70,8 +80,10 @@ pub struct WebRtc<T: IpfsTypes> {
     account: Box<dyn MultiPass>,
     ipfs: Arc<RwLock<Ipfs<T>>>,
     id: DID,
-    // emitted for the UI
-    event_ch: broadcast::Sender<BlinkEventKind>,
+    // a tx channel which emits events to drive the UI
+    ui_event_ch: broadcast::Sender<BlinkEventKind>,
+    // manages media tracks
+    //media_track_ch: mpsc::UnboundedSender<media_track::Command>,
     webrtc: Arc<Mutex<simple_webrtc::Controller>>,
     active_call: Option<ActiveCall>,
     pending_calls: HashMap<Uuid, Call>,
@@ -174,7 +186,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
     // ------ Misc ------
     /// The event stream notifies the UI of call related events
     async fn get_event_stream(&mut self) -> Result<BlinkEventStream, Error> {
-        let mut rx = self.event_ch.subscribe();
+        let mut rx = self.ui_event_ch.subscribe();
         let stream = async_stream::stream! {
             loop {
                 match rx.recv().await {
@@ -378,12 +390,13 @@ impl<T: IpfsTypes> WebRtc<T> {
         };
 
         let (event_ch, _rx) = broadcast::channel(1024);
+
         let webrtc = Self {
             webrtc: Arc::new(Mutex::new(simple_webrtc::Controller::new(did.clone())?)),
             account,
             ipfs: Arc::new(RwLock::new(ipfs.clone())),
             id: did.clone(),
-            event_ch,
+            ui_event_ch: event_ch,
             active_call: None,
             pending_calls: HashMap::new(),
             cpal_host: cpal::default_host(),
@@ -474,7 +487,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         .await;
         // this one is already pinned to the heap
         let mut webrtc_event_stream = match get_event_stream {
-            Ok(s) => s,
+            Ok(s) => WebRtcEventStream(Box::pin(s)),
             Err(e) => {
                 log::error!("failed to get webrtc_event_stream: {e}");
                 unsubscribe.await;
@@ -484,52 +497,19 @@ impl<T: IpfsTypes> WebRtc<T> {
 
         // SimpleWebRTC instance
         let webrtc = self.webrtc.clone();
-        tokio::spawn(async move {
-            futures::pin_mut!(call_broadcast_stream);
-            futures::pin_mut!(call_signaling_stream);
+        tokio::task::spawn(async move {
+            handle_webrtc(
+                webrtc,
+                call_broadcast_stream,
+                call_signaling_stream,
+                webrtc_event_stream,
+                stop,
+            )
+            .await;
 
-            loop {
-                tokio::select! {
-                    opt = call_broadcast_stream.next() => {
-                        match opt {
-                            Some(message) => {
-                                if let Err(_e) = decode_broadcast_signal(message).await {
-                                    let _webrtc = webrtc.lock().await;
-                                    todo!("handle signal");
-                                }
-                            }
-                            None => {
-                                break
-                            }
-                        }
-                    }
-                    opt = call_signaling_stream.next() => {
-                        match opt {
-                            Some(_signal) => {
-                                let _webrtc = webrtc.lock().await;
-                                // todo: dial if needed
-                                todo!("handle signal");
-                            }
-                            None => break
-                        }
-                    }
-                    opt = webrtc_event_stream.next() => {
-                        match opt {
-                            Some(_event) => {
-                                todo!("handle event");
-                            }
-                            None => todo!()
-                        }
-                    }
-                    _ = stop.notified() => {
-                        log::debug!("call termniated via notify()");
-                        break;
-                    }
-                }
-            }
+            // todo: how to unsubscribe
         });
 
-        unsubscribe.await;
         Ok(())
     }
 }
@@ -544,16 +524,65 @@ async fn decode_broadcast_signal(message: Arc<GossipsubMessage>) -> anyhow::Resu
     todo!()
 }
 
-// todo: move this elsewhere
+async fn handle_webrtc(
+    webrtc: Arc<Mutex<Controller>>,
+    call_broadcast_stream: SubscriptionStream,
+    call_signaling_stream: SubscriptionStream,
+    mut webrtc_event_stream: WebRtcEventStream,
+    stop: Arc<Notify>,
+) {
+    futures::pin_mut!(call_broadcast_stream);
+    futures::pin_mut!(call_signaling_stream);
+
+    let mut sink_tracks: HashMap<Uuid, Box<dyn SinkTrack>> = HashMap::new();
+    let mut source_tracks: HashMap<SourceTrackType, Box<dyn SourceTrack>> = HashMap::new();
+
+    loop {
+        tokio::select! {
+            opt = call_broadcast_stream.next() => {
+                match opt {
+                    Some(message) => {
+                        if let Err(_e) = decode_broadcast_signal(message).await {
+                            let _webrtc = webrtc.lock().await;
+                            todo!("handle signal");
+                        }
+                    }
+                    None => {
+                        break
+                    }
+                }
+            }
+            opt = call_signaling_stream.next() => {
+                match opt {
+                    Some(_signal) => {
+                        let _webrtc = webrtc.lock().await;
+                        // todo: dial if needed
+                        todo!("handle signal");
+                    }
+                    None => break
+                }
+            }
+            opt = webrtc_event_stream.next() => {
+                match opt {
+                    Some(_event) => {
+                        let _webrtc = webrtc.lock().await;
+                        todo!("handle event");
+                    }
+                    None => todo!()
+                }
+            }
+            _ = stop.notified() => {
+                log::debug!("call termniated via notify()");
+                break;
+            }
+        }
+    }
+}
+
+// todo: move this elsewhere or delete it
 pub mod media_track {
-    use std::collections::HashMap;
 
-    use tokio::sync::mpsc;
-    use uuid::Uuid;
-
-    use crate::simple_webrtc::media::{SinkTrack, SourceTrack};
-
-    #[derive(Eq, PartialEq, Clone, Copy)]
+    #[derive(Eq, PartialEq, Clone, Copy, Hash)]
     enum SourceTrackType {
         Audio,
     }
@@ -564,13 +593,5 @@ pub mod media_track {
         CreateSinkTrack,
         RemoveSinkTrack,
         Reset,
-    }
-
-    // SourceTrack isn't Send due to cpal::Stream. need to use a thread to manage the
-    // tracks in response to commands.
-    pub async fn manage_tracks(mut ch: mpsc::UnboundedReceiver<Command>) {
-        let mut sink_tracks: HashMap<Uuid, Box<dyn SinkTrack>> = HashMap::new();
-        let mut source_tracks: HashMap<SourceTrackType, Box<dyn SourceTrack>> = HashMap::new();
-        while let Some(cmd) = ch.recv().await {}
     }
 }

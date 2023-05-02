@@ -1,11 +1,27 @@
 use std::sync::Arc;
 
+use futures::stream::BoxStream;
 use warp::crypto::DID;
 use webrtc::{
     ice_transport::ice_candidate::RTCIceCandidate,
     peer_connection::sdp::session_description::RTCSessionDescription,
     track::track_remote::TrackRemote,
 };
+
+pub struct WebRtcEventStream(pub BoxStream<'static, EmittedEvents>);
+
+impl core::ops::Deref for WebRtcEventStream {
+    type Target = BoxStream<'static, EmittedEvents>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for WebRtcEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum EmittedEvents {

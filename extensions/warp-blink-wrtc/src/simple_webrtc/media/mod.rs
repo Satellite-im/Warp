@@ -11,6 +11,11 @@ mod opus_source;
 pub use opus_sink::OpusSink;
 pub use opus_source::OpusSource;
 
+#[derive(Eq, PartialEq, Clone, Copy, Hash)]
+pub enum SourceTrackType {
+    Audio,
+}
+
 pub trait SourceTrack {
     fn init(
         input_device: cpal::Device,
@@ -38,6 +43,7 @@ pub trait SinkTrack {
 }
 
 pub fn create_source_track(
+    // todo: rename this to input_device?
     output_device: cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
     codec: RTCRtpCodecCapability,
