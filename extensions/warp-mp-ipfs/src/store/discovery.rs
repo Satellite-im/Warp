@@ -9,7 +9,11 @@ use std::{
     time::Duration,
 };
 
-use futures::{stream::FuturesUnordered, Stream, StreamExt};
+use futures::{
+    channel::{mpsc::Sender, oneshot},
+    stream::FuturesUnordered,
+    SinkExt, Stream, StreamExt,
+};
 use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, Ipfs, Multiaddr, PeerId, Protocol};
 use tokio::{
     sync::{broadcast, RwLock},
@@ -20,27 +24,153 @@ use warp::{crypto::DID, error::Error};
 
 use crate::config::{self, Discovery as DiscoveryConfig};
 
-use super::{did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, PeerType};
+use super::{did_to_libp2p_pub, PeerConnectionType, PeerIdExt, PeerTopic, PeerType};
 
 #[derive(Clone)]
 pub struct Discovery {
     ipfs: Ipfs,
     config: DiscoveryConfig,
-    relays: Vec<Multiaddr>,
-    entries: Arc<RwLock<HashSet<DiscoveryEntry>>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    event_task: Arc<JoinHandle<()>>,
+    event_sender: Sender<DiscoveryCommand>,
     events: broadcast::Sender<DID>,
+}
+
+impl Drop for Discovery {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.event_task) == 1 && !self.event_task.is_finished() {
+            self.event_task.abort();
+        }
+    }
+}
+
+enum DiscoveryCommand {
+    Insert(PeerType, oneshot::Sender<Result<(), Error>>),
+    Remove(PeerType, oneshot::Sender<Result<(), Error>>),
+    Get(PeerType, oneshot::Sender<Result<DiscoveryEntry, Error>>),
+    Contains(PeerType, oneshot::Sender<bool>),
+    List(oneshot::Sender<Vec<DiscoveryEntry>>),
 }
 
 impl Discovery {
     pub fn new(ipfs: Ipfs, config: DiscoveryConfig, relays: Vec<Multiaddr>) -> Self {
         let (events, _) = tokio::sync::broadcast::channel(2048);
+        let (tx, mut rx) = futures::channel::mpsc::channel::<DiscoveryCommand>(1);
+        let event_task = Arc::new(tokio::spawn({
+            let ipfs = ipfs.clone();
+            let config = config.clone();
+            let events = events.clone();
+            async move {
+                let mut entries = Vec::<DiscoveryEntry>::new();
+                while let Some(command) = rx.next().await {
+                    match command {
+                        DiscoveryCommand::Insert(peer_type, ret) => {
+                            let peer_id = match &peer_type {
+                                PeerType::PeerId(peer_id) => Ok(*peer_id),
+                                PeerType::DID(did_key) => {
+                                    did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())
+                                }
+                            };
+
+                            match peer_id {
+                                Ok(peer_id) => {
+                                    let entry = entries
+                                        .iter()
+                                        .position(|entry| entry.peer_id == peer_id)
+                                        .map(|index| entries.get(index));
+                                    match entry {
+                                        Some(Some(_entry)) => {
+                                            let _ = ret.send(Ok(()));
+                                        }
+                                        Some(None) | None => {
+                                            let entry = DiscoveryEntry::new(
+                                                &ipfs,
+                                                peer_id,
+                                                relays.clone(),
+                                                config.clone(),
+                                                events.clone(),
+                                            )
+                                            .await;
+                                            entry.enable_discovery();
+                                            entries.push(entry);
+                                            let _ = ret.send(Ok(()));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = ret.send(Err(e.into()));
+                                }
+                            }
+                        }
+                        DiscoveryCommand::Remove(peer_type, ret) => {
+                            let index = match &peer_type {
+                                PeerType::DID(did) => entries
+                                    .iter()
+                                    .filter_map(|entry| entry.peer_id().to_did().ok())
+                                    .position(|entry| entry.eq(did)),
+                                PeerType::PeerId(peer_id) => {
+                                    entries.iter().position(|entry| entry.peer_id().eq(peer_id))
+                                }
+                            };
+
+                            match index {
+                                Some(index) => {
+                                    let entry = entries.remove(index);
+                                    entry.cancel().await;
+                                    let _ = ret.send(Ok(()));
+                                }
+                                None => {
+                                    let _ = ret.send(Err(Error::ObjectNotFound));
+                                }
+                            }
+                        }
+                        DiscoveryCommand::Get(peer_type, ret) => {
+                            let entry = match &peer_type {
+                                PeerType::DID(did) => entries
+                                    .iter()
+                                    .filter_map(|entry| entry.peer_id().to_did().ok())
+                                    .position(|entry| entry.eq(did)),
+                                PeerType::PeerId(peer_id) => {
+                                    entries.iter().position(|entry| entry.peer_id().eq(peer_id))
+                                }
+                            }
+                            .map(|index| entries.get(index).cloned());
+
+                            match entry {
+                                Some(Some(entry)) => {
+                                    let _ = ret.send(Ok(entry));
+                                }
+                                _ => {
+                                    let _ = ret.send(Err(Error::ObjectNotFound));
+                                }
+                            }
+                        }
+                        DiscoveryCommand::Contains(peer_type, ret) => {
+                            let contains = match peer_type {
+                                PeerType::DID(did) => entries
+                                    .iter()
+                                    .filter_map(|entry| entry.peer_id().to_did().ok())
+                                    .any(|entry| entry.eq(&did)),
+                                PeerType::PeerId(peer_id) => {
+                                    entries.iter().any(|entry| entry.peer_id().eq(&peer_id))
+                                }
+                            };
+                            let _ = ret.send(contains);
+                        }
+                        DiscoveryCommand::List(ret) => {
+                            let _ = ret.send(entries.clone());
+                        }
+                    }
+                }
+            }
+        }));
+
         Self {
             ipfs,
             config,
-            relays,
-            entries: Arc::default(),
             task: Arc::default(),
+            event_sender: tx,
+            event_task,
             events,
         }
     }
@@ -78,17 +208,7 @@ impl Discovery {
                                     && cached.insert(peer_id)
                                 {
                                     if !discovery.contains(peer_id).await {
-                                        let entry = DiscoveryEntry::new(
-                                            &discovery.ipfs,
-                                            peer_id,
-                                            discovery.relays.clone(),
-                                            discovery.config.clone(),
-                                            discovery.events.clone(),
-                                        )
-                                        .await;
-                                        if !discovery.entries.write().await.insert(entry.clone()) {
-                                            entry.cancel().await;
-                                        }
+                                        let _ = discovery.insert(peer_id).await.ok();
                                     }
                                 }
                             }
@@ -103,92 +223,71 @@ impl Discovery {
         Ok(())
     }
 
-    pub fn events(&self) -> broadcast::Receiver<DID> {
-        self.events.subscribe()
-    }
-
     pub fn discovery_config(&self) -> DiscoveryConfig {
         self.config.clone()
     }
 
+    pub fn events(&self) -> broadcast::Receiver<DID> {
+        self.events.subscribe()
+    }
+
     #[tracing::instrument(skip(self))]
     pub async fn insert<P: Into<PeerType> + Debug>(&self, peer_type: P) -> Result<(), Error> {
-        let peer_id = match &peer_type.into() {
-            PeerType::PeerId(peer_id) => *peer_id,
-            PeerType::DID(did_key) => {
-                did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())?
-            }
-        };
-        if let Ok(entry) = self.get(peer_id).await {
-            if entry.valid().await {
-                return Ok(());
-            }
-        }
-
-        let entry = DiscoveryEntry::new(
-            &self.ipfs,
-            peer_id,
-            self.relays.clone(),
-            self.config.clone(),
-            self.events.clone(),
-        )
-        .await;
-        let prev = self.entries.write().await.replace(entry);
-        if let Some(entry) = prev {
-            entry.cancel().await;
-        }
-        Ok(())
+        let peer_type = peer_type.into();
+        let (tx, rx) = oneshot::channel();
+        self.event_sender
+            .clone()
+            .send(DiscoveryCommand::Insert(peer_type, tx))
+            .await
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn remove<P: Into<PeerType>>(&self, peer_type: P) -> Result<(), Error> {
-        let entry = self.get(peer_type).await?;
-
-        let removed = self.entries.write().await.remove(&entry);
-        if removed {
-            entry.cancel().await;
-            return Ok(());
-        }
-
-        Err(Error::ObjectNotFound)
+        let peer_type = peer_type.into();
+        let (tx, rx) = oneshot::channel();
+        self.event_sender
+            .clone()
+            .send(DiscoveryCommand::Remove(peer_type, tx))
+            .await
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn get<P: Into<PeerType>>(&self, peer_type: P) -> Result<DiscoveryEntry, Error> {
-        let peer_id = match &peer_type.into() {
-            PeerType::PeerId(peer_id) => *peer_id,
-            PeerType::DID(did_key) => did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())?,
-        };
-
-        if !self.contains(peer_id).await {
-            return Err(Error::ObjectNotFound);
-        }
-
-        self.entries
-            .read()
+        let peer_type = peer_type.into();
+        let (tx, rx) = oneshot::channel();
+        self.event_sender
+            .clone()
+            .send(DiscoveryCommand::Get(peer_type, tx))
             .await
-            .iter()
-            .find(|entry| entry.peer_id() == peer_id)
-            .cloned()
-            .ok_or(Error::ObjectNotFound)
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn contains<P: Into<PeerType>>(&self, peer_type: P) -> bool {
-        match &peer_type.into() {
-            PeerType::DID(did) => {
-                self.did_iter()
-                    .await
-                    .any(|did_key| async move { did_key.eq(did) })
-                    .await
-            }
-            PeerType::PeerId(peer_id) => self
-                .list()
-                .await
-                .iter()
-                .any(|entry| entry.peer_id().eq(peer_id)),
-        }
+        let peer_type = peer_type.into();
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .event_sender
+            .clone()
+            .send(DiscoveryCommand::Contains(peer_type, tx))
+            .await
+            .map_err(anyhow::Error::from)
+            .ok();
+        rx.await.map_err(anyhow::Error::from).unwrap_or_default()
     }
 
-    pub async fn list(&self) -> HashSet<DiscoveryEntry> {
-        self.entries.read().await.clone()
+    pub async fn list(&self) -> Vec<DiscoveryEntry> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .event_sender
+            .clone()
+            .send(DiscoveryCommand::List(tx))
+            .await
+            .map_err(anyhow::Error::from)
+            .ok();
+        rx.await.map_err(anyhow::Error::from).unwrap_or_default()
     }
 
     pub async fn did_iter(&self) -> impl Stream<Item = DID> + Send {
