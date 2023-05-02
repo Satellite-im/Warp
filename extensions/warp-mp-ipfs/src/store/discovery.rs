@@ -14,7 +14,7 @@ use futures::{
     stream::FuturesUnordered,
     SinkExt, Stream, StreamExt,
 };
-use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, Ipfs, Multiaddr, PeerId, Protocol};
+use rust_ipfs::{libp2p::swarm::dial_opts::{DialOpts, PeerCondition}, Ipfs, Multiaddr, PeerId, Protocol};
 use tokio::{
     sync::{broadcast, RwLock},
     task::JoinHandle,
@@ -376,7 +376,20 @@ impl DiscoveryEntry {
                             // Used for provider. Doesnt do anything right now
                             // TODO: Maybe have separate provider query in case
                             //       Discovery task isnt enabled?
-                            DiscoveryConfig::Provider(_) => {}
+                            DiscoveryConfig::Provider(_) => {
+                                let addrs = match ipfs.identity(Some(peer_id)).await {
+                                    Ok(info) => info.listen_addrs,
+                                    Err(_) => vec![],
+                                };
+
+                                let opts = DialOpts::peer_id(peer_id)
+                                    .condition(PeerCondition::Disconnected)
+                                    .addresses(addrs)
+                                    .extend_addresses_through_behaviour()
+                                    .build();
+
+                                if let Err(_e) = ipfs.connect(opts).await {}
+                            }
                             // Check over DHT
                             DiscoveryConfig::Direct => {
                                 tokio::select! {
