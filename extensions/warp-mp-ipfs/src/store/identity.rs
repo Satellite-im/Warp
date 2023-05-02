@@ -3,7 +3,7 @@
 #![allow(clippy::clone_on_copy)]
 use crate::{
     config::{Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, PeerTopic, VecExt},
+    store::{did_to_libp2p_pub, discovery::Discovery, PeerTopic, VecExt, PeerIdExt},
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -282,12 +282,15 @@ impl IdentityStore {
                             if let Some(message) = message {
                                 let entry = match message.source {
                                     Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
-                                        Some(entry) => entry,
-                                        None => continue,
+                                        Some(entry) => entry.did_key().await.ok(),
+                                        None => {
+                                            let _ = store.discovery.insert(peer_id).await.ok();
+                                            peer_id.to_did().ok()
+                                        },
                                     },
                                     None => continue,
                                 };
-                                if let Ok(in_did) = entry.did_key().await {
+                                if let Some(in_did) = entry {
                                     if let Err(e) = store.process_message(in_did, &message.data).await {
                                         error!("Error: {e}");
                                     }
