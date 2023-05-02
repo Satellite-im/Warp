@@ -73,6 +73,7 @@ pub trait Blink {
 }
 
 /// Drives the UI
+#[derive(Clone)]
 pub enum BlinkEventKind {
     /// A call has been offered
     IncomingCall { call_id: Uuid },

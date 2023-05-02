@@ -18,10 +18,12 @@ use ipfs::IpfsTypes;
 use serde::Deserialize;
 use serde::Serialize;
 use simple_webrtc::media::SourceTrack;
+use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
+use warp::blink::BlinkEventKind;
 use warp::blink::MimeType;
 use warp::libipld;
 use warp::multipass::MultiPass;
@@ -66,10 +68,10 @@ mod ipfs_routes {
 // todo: add option to init WebRtc using a configuration file
 pub struct WebRtc<T: IpfsTypes> {
     account: Box<dyn MultiPass>,
-    // todo: get this during initialization and don't use an option
     ipfs: Arc<RwLock<Ipfs<T>>>,
-    // todo: get this
     id: DID,
+    // emitted for the UI
+    event_ch: broadcast::Sender<BlinkEventKind>,
     webrtc: Arc<Mutex<simple_webrtc::Controller>>,
     active_call: Option<ActiveCall>,
     pending_calls: HashMap<Uuid, Call>,
@@ -172,7 +174,17 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
     // ------ Misc ------
     /// The event stream notifies the UI of call related events
     async fn get_event_stream(&mut self) -> Result<BlinkEventStream, Error> {
-        todo!()
+        let mut rx = self.event_ch.subscribe();
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+        Ok(BlinkEventStream(Box::pin(stream)))
     }
 
     // ------ Create/Join a call ------
@@ -365,11 +377,13 @@ impl<T: IpfsTypes> WebRtc<T> {
             }
         };
 
+        let (event_ch, _rx) = broadcast::channel(1024);
         let webrtc = Self {
             webrtc: Arc::new(Mutex::new(simple_webrtc::Controller::new(did.clone())?)),
             account,
             ipfs: Arc::new(RwLock::new(ipfs.clone())),
             id: did.clone(),
+            event_ch,
             active_call: None,
             pending_calls: HashMap::new(),
             cpal_host: cpal::default_host(),
@@ -388,6 +402,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         Ok(webrtc)
     }
 
+    // todo: make sure this only gets called once
     async fn init_call(&mut self, call: Call, stop: Arc<Notify>) -> anyhow::Result<()> {
         let ipfs = self.ipfs.read();
 
