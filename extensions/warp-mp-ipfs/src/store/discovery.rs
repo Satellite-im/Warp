@@ -416,7 +416,7 @@ impl DiscoveryEntry {
                                     .build();
 
                                 if let Err(_e) = ipfs.connect(opts).await {
-                                    tokio::time::sleep(Duration::from_secs(5)).await;
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
                                 }
                             }
                         }
