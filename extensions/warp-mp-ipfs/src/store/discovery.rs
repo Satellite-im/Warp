@@ -81,7 +81,6 @@ impl Discovery {
                                         let entry = DiscoveryEntry::new(
                                             &discovery.ipfs,
                                             peer_id,
-                                            None,
                                             discovery.relays.clone(),
                                             discovery.config.clone(),
                                             discovery.events.clone(),
@@ -114,32 +113,26 @@ impl Discovery {
 
     #[tracing::instrument(skip(self))]
     pub async fn insert<P: Into<PeerType> + Debug>(&self, peer_type: P) -> Result<(), Error> {
-        let (peer_id, did_key) = match &peer_type.into() {
-            PeerType::PeerId(peer_id) => (*peer_id, None),
+        let peer_id = match &peer_type.into() {
+            PeerType::PeerId(peer_id) => *peer_id,
             PeerType::DID(did_key) => {
-                let peer_id = did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())?;
-                (peer_id, Some(did_key.clone()))
+                did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())?
             }
         };
-        if let Some(did) = &did_key {
-            if let Ok(entry) = self.get(peer_id).await {
-                if !entry.valid().await {
-                    entry.set_did_key(did).await;
-                    return Ok(());
-                }
+        if let Ok(entry) = self.get(peer_id).await {
+            if entry.valid().await {
+                return Ok(());
             }
         }
 
         let entry = DiscoveryEntry::new(
             &self.ipfs,
             peer_id,
-            did_key,
             self.relays.clone(),
             self.config.clone(),
             self.events.clone(),
         )
         .await;
-        entry.enable_discovery();
         let prev = self.entries.write().await.replace(entry);
         if let Some(entry) = prev {
             entry.cancel().await;
@@ -241,14 +234,13 @@ impl DiscoveryEntry {
     pub async fn new(
         ipfs: &Ipfs,
         peer_id: PeerId,
-        did: Option<DID>,
         relays: Vec<Multiaddr>,
         config: DiscoveryConfig,
         sender: broadcast::Sender<DID>,
     ) -> Self {
         let entry = Self {
             ipfs: ipfs.clone(),
-            did: Arc::new(RwLock::new(did)),
+            did: Arc::new(RwLock::new(None)),
             peer_id,
             connection_type: Arc::default(),
             relays,
@@ -264,108 +256,17 @@ impl DiscoveryEntry {
             async move {
                 let mut timer = tokio::time::interval(Duration::from_secs(30));
                 if !entry.valid().await {
-                    //Done in case the peer is located over DHT or if peer is connected already
-                    if let Ok(info) = ipfs.identity(Some(peer_id)).await {
-                        // If it fails to convert then the public key may not be a ed25519 or may be corrupted in some way
-                        let did_key = libp2p_pub_to_did(&info.public_key)
-                            .expect("ed25519 is only supported at this time");
+                    let did_key = peer_id.to_did().expect("Ed25519 key is only supported");
 
-                        if let Err(e) = ipfs.whitelist(peer_id).await {
-                            log::warn!("Unable to whitelist peer: {e}");
-                        }
-
-                        *entry.did.write().await = Some(did_key.clone());
+                    if let Err(e) = ipfs.whitelist(peer_id).await {
+                        log::warn!("Unable to whitelist peer: {e}");
                     }
+
+                    *entry.did.write().await = Some(did_key);
                 }
 
                 let mut sent_initial_push = false;
                 loop {
-                    if !entry.valid().await {
-                        //TODO: Check discovery config option to determine if we should determine how we
-                        //      should check connectivity
-
-                        let info = loop {
-                            match entry.config {
-                                // Used for provider. Doesnt do anything right now
-                                // TODO: Maybe have separate provider query in case
-                                //       Discovery task isnt enabled?
-                                DiscoveryConfig::Provider(_) | DiscoveryConfig::Direct => {}
-                                config::Discovery::None => {
-                                    // As a precautionary check, check to determine if we are connected to the relays and if not, establish a connection *just in case*
-                                    for relay in entry.relays.iter() {
-                                        let Some(peer_id) = peer_id_extract(relay) else {
-                                            log::error!("Could not get peer_id from {relay}");
-                                            continue;
-                                        };
-
-                                        if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
-                                            if let Err(e) = ipfs.connect(relay.clone()).await {
-                                                log::error!(
-                                                    "Error while trying to connect to {relay}: {e}"
-                                                );
-                                                continue;
-                                            }
-                                        }
-                                    }
-
-                                    // Note:
-                                    // - This will work if both peers shares the relay(s) used.
-                                    // - We dont know if the peer would be connected to said relays, therefore we would need to
-                                    //   dial them through all relays listed
-                                    let opts = DialOpts::peer_id(peer_id)
-                                        .addresses(
-                                            entry
-                                                .relays
-                                                .iter()
-                                                .cloned()
-                                                .map(|addr| addr.with(Protocol::P2pCircuit))
-                                                .collect(),
-                                        )
-                                        .build();
-
-                                    if let Err(_e) = ipfs.connect(opts).await {
-                                        tokio::time::sleep(Duration::from_secs(5)).await;
-                                        continue;
-                                    }
-                                }
-                            }
-
-                            let Ok(connection_type) = super::connected_to_peer(&entry.ipfs, peer_id).await else {
-                                continue;
-                            };
-
-                            if matches!(connection_type, PeerConnectionType::NotConnected) {
-                                tokio::time::sleep(Duration::from_secs(5)).await;
-                                continue;
-                            }
-
-                            if let Ok(info) = entry.ipfs.identity(Some(entry.peer_id)).await {
-                                break info;
-                            }
-                            tokio::time::sleep(Duration::from_secs(5)).await;
-                        };
-
-                        if info.peer_id != entry.peer_id
-                            || info.peer_id != info.public_key.to_peer_id()
-                        {
-                            // Possibly panic in this task?
-                            break;
-                        }
-
-                        if let Err(e) = ipfs.whitelist(peer_id).await {
-                            log::warn!("Unable to whitelist peer: {e}");
-                        }
-
-                        // If it fails to convert then the public key may not be a ed25519 or may be corrupted in some way
-                        let did_key = libp2p_pub_to_did(&info.public_key)
-                            .expect("ed25519 is only supported at this time");
-
-                        // Used as a precaution
-                        if !entry.valid().await {
-                            *entry.did.write().await = Some(did_key.clone());
-                        }
-                    }
-
                     if entry.discover.load(Ordering::SeqCst)
                         && matches!(
                             entry.connection_type().await,
@@ -433,7 +334,7 @@ impl DiscoveryEntry {
                     {
                         let did = entry.did.read().await.clone();
                         if let Some(did) = did {
-                            let topic = format!("/peer/{did}/events");
+                            let topic = did.events();
                             let subscribed = ipfs
                                 .pubsub_peers(Some(topic))
                                 .await
@@ -464,21 +365,6 @@ impl DiscoveryEntry {
     /// Contains a valid did key
     pub async fn valid(&self) -> bool {
         self.did.read().await.is_some()
-    }
-
-    pub async fn set_did_key(&self, did: &DID) {
-        if self.valid().await {
-            return;
-        }
-
-        // Validate the peer_id against the entry id. If does not matches, then the did key is invalid.
-
-        match did_to_libp2p_pub(did).map(|pk| pk.to_peer_id()) {
-            Ok(peer_id) if self.peer_id == peer_id => {}
-            _ => return,
-        }
-
-        *self.did.write().await = Some(did.clone())
     }
 
     /// Returns a DID key
