@@ -748,12 +748,43 @@ async fn handle_webrtc(
             opt = webrtc_event_stream.next() => {
                 match opt {
                     Some(event) => {
+                        log::debug!("webrtc event: {event}");
                         let _webrtc = webrtc.lock().await;
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
-                                media_track_ch.send(media_track::Command::CreateAudioSinkTrack { peer_id: peer, track });
+                                if let Err(e) = media_track_ch.send(media_track::Command::CreateAudioSinkTrack { peer_id: peer, track }) {
+                                    log::error!("failed to send media_track command: {e}");
+                                }
                             }
-                            _ => todo!()
+                            EmittedEvents::Disconnected { peer } => {
+                                if let Err(e) = media_track_ch.send(media_track::Command::RemoveSinkTrack { peer_id: peer.clone() }) {
+                                    log::error!("failed to send media_track command: {e}");
+                                }
+                                let mut s = webrtc.lock().await;
+                                s.hang_up(&peer).await;
+                            }
+                            // todo: add audio devices when accepting a call
+                            // todo: prompt the user that a call is incoming and let them accept it
+                            EmittedEvents::CallInitiated { dest, sdp } => {
+                                let mut s = webrtc.lock().await;
+                                if let Err(e) = s.accept_call(&dest, *sdp).await {
+                                    log::error!("failed to accept_call: {}", e);
+                                    s.hang_up(&dest).await;
+                                    // todo: is a disconnect signal needed here?
+                                }
+                            }
+                            EmittedEvents::Sdp { dest, sdp } => {
+                                let s = webrtc.lock().await;
+                                if let Err(e) = s.recv_sdp(&dest, *sdp).await {
+                                    log::error!("failed to recv_sdp: {}", e);
+                                }
+                            }
+                            EmittedEvents::Ice { dest, candidate } => {
+                                let s = webrtc.lock().await;
+                                if let Err(e) = s.recv_ice(&dest, *candidate).await {
+                                    log::error!("failed to recv_ice {}", e);
+                                }
+                            }
                         }
                         todo!("handle event");
                     }

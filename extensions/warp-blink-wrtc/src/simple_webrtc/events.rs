@@ -23,26 +23,31 @@ impl core::ops::DerefMut for WebRtcEventStream {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, derive_more::Display)]
 pub enum EmittedEvents {
+    #[display(fmt = "Ice")]
     Ice {
         dest: DID,
         candidate: Box<RTCIceCandidate>,
     },
+    #[display(fmt = "Sdp")]
     Sdp {
         dest: DID,
         sdp: Box<RTCSessionDescription>,
     },
     /// created after calling `Dial`
+    #[display(fmt = "CallInitiated")]
     CallInitiated {
         dest: DID,
         sdp: Box<RTCSessionDescription>,
     },
     /// unless a CallTerminated event was received, results in a reconnect
     /// needs to be handled by the developer
+    #[display(fmt = "Disconnected")]
     Disconnected { peer: DID },
     /// a peer added a track. The calling application is responsible for reading from the track
     /// and processing the output
+    #[display(fmt = "TrackAdded")]
     TrackAdded { peer: DID, track: Arc<TrackRemote> },
     // it appears that WebRTC doesn't emit an event for this. perhaps the track is automatically
     // closed on the remote side when the local side calls `remove_track`
