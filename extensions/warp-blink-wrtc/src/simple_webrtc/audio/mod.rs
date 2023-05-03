@@ -18,9 +18,10 @@ pub enum SourceTrackType {
     Audio,
 }
 
+// stores the TrackRemote at least
 pub trait SourceTrack {
     fn init(
-        input_device: cpal::Device,
+        input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
         codec: RTCRtpCodecCapability,
     ) -> Result<Self>
@@ -29,31 +30,31 @@ pub trait SourceTrack {
 
     fn play(&self) -> Result<()>;
     // should not require RTP renegotiation
-    fn change_input_device(&mut self, input_device: cpal::Device);
+    fn change_input_device(&mut self, input_device: &cpal::Device);
     fn id(&self) -> Uuid;
 }
 
+// stores the TrackRemote at least
 pub trait SinkTrack {
     fn init(
-        output_device: cpal::Device,
+        output_device: &cpal::Device,
         track: Arc<TrackRemote>,
         codec: RTCRtpCodecCapability,
     ) -> Result<Self>
     where
         Self: Sized;
     fn play(&self) -> Result<()>;
-    fn change_output_device(&mut self, output_device: cpal::Device) -> anyhow::Result<()>;
+    fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
     fn id(&self) -> Uuid;
 }
 
 pub fn create_source_track(
-    // todo: rename this to input_device?
-    output_device: cpal::Device,
+    input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
     codec: RTCRtpCodecCapability,
 ) -> Result<Box<dyn SourceTrack>> {
     match MimeType::try_from(codec.mime_type.as_str())? {
-        MimeType::OPUS => Ok(Box::new(OpusSource::init(output_device, track, codec)?)),
+        MimeType::OPUS => Ok(Box::new(OpusSource::init(input_device, track, codec)?)),
         _ => {
             bail!("unhandled mime type: {}", &codec.mime_type);
         }
@@ -61,7 +62,7 @@ pub fn create_source_track(
 }
 
 pub fn create_sink_track(
-    output_device: cpal::Device,
+    output_device: &cpal::Device,
     track: Arc<TrackRemote>,
     codec: RTCRtpCodecCapability,
 ) -> Result<Box<dyn SinkTrack>> {

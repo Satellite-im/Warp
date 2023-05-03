@@ -17,8 +17,6 @@ use super::SourceTrack;
 pub struct OpusSource {
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     _track: Arc<TrackLocalStaticRTP>,
-    // may not need this but am saving it here because it's related to the `stream`, which needs to be kept in scope.
-    _device: cpal::Device,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     // used to cancel the current packetizer when the input device is changed.
@@ -28,7 +26,7 @@ pub struct OpusSource {
 
 impl SourceTrack for OpusSource {
     fn init(
-        input_device: cpal::Device,
+        input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
         codec: RTCRtpCodecCapability,
     ) -> Result<Self>
@@ -106,7 +104,6 @@ impl SourceTrack for OpusSource {
 
         Ok(Self {
             _track: track,
-            _device: input_device,
             stream: input_stream,
             _packetizer_handle: join_handle,
             id: Uuid::new_v4(),
@@ -120,7 +117,7 @@ impl SourceTrack for OpusSource {
         Ok(())
     }
     // should not require RTP renegotiation
-    fn change_input_device(&mut self, _input_device: cpal::Device) {
+    fn change_input_device(&mut self, _input_device: &cpal::Device) {
         todo!()
     }
 

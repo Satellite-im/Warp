@@ -15,8 +15,6 @@ use webrtc::{
 use super::SinkTrack;
 
 pub struct OpusSink {
-    // may not need this but am saving it here because it's related to the `stream`, which needs to be kept in scope.
-    _device: cpal::Device,
     // save this for changing the output device
     track: Arc<TrackRemote>,
     // same
@@ -37,7 +35,7 @@ impl Drop for OpusSink {
 // todo: ensure no zombie threads
 impl SinkTrack for OpusSink {
     fn init(
-        output_device: cpal::Device,
+        output_device: &cpal::Device,
         track: Arc<TrackRemote>,
         codec: RTCRtpCodecCapability,
     ) -> Result<Self> {
@@ -88,7 +86,6 @@ impl SinkTrack for OpusSink {
             output_device.build_output_stream(&config.into(), output_data_fn, err_fn, None)?;
 
         Ok(Self {
-            _device: output_device,
             stream: output_stream,
             track,
             codec,
@@ -103,7 +100,7 @@ impl SinkTrack for OpusSink {
         }
         Ok(())
     }
-    fn change_output_device(&mut self, output_device: cpal::Device) -> Result<()> {
+    fn change_output_device(&mut self, output_device: &cpal::Device) -> Result<()> {
         self.stream.pause()?;
         self.decoder_handle.abort();
 

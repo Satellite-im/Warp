@@ -469,16 +469,32 @@ impl<T: IpfsTypes> WebRtc<T> {
             };
             if let Err(e) = self
                 .media_track_ch
-                .send(media_track::Command::CreateAudioSourceTrack {
+                .send(media_track::Command::ChangeAudioInput {
                     host_id: self.cpal_host.id(),
                     device_name,
-                    codec,
                 })
+            {
+                log::error!("failed to send ChangeAudioInput command: {e}");
+            }
+            if let Err(e) = self
+                .media_track_ch
+                .send(media_track::Command::CreateAudioSourceTrack { codec })
             {
                 log::error!("failed to send CreateSourceTrack command: {e}");
             }
         }
-        //
+
+        if let Some(device_name) = self.audio_output.clone() {
+            if let Err(e) = self
+                .media_track_ch
+                .send(media_track::Command::ChangeAudioOutput {
+                    host_id: self.cpal_host.id(),
+                    device_name,
+                })
+            {
+                log::error!("failed to send ChangeAudioOutput command: {e}");
+            }
+        }
 
         let call_broadcast_stream = match ipfs
             .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
@@ -546,7 +562,7 @@ async fn decode_broadcast_signal(message: Arc<GossipsubMessage>) -> anyhow::Resu
 
 async fn create_source_track(
     webrtc: &Arc<Mutex<Controller>>,
-    device: cpal::Device,
+    device: &cpal::Device,
     codec: RTCRtpCodecCapability,
     source_id: MediaSourceId,
 ) -> Result<Box<dyn audio::SourceTrack>, Box<dyn std::error::Error>> {
@@ -569,17 +585,15 @@ fn manage_streams(
     mut ch: mpsc::UnboundedReceiver<media_track::Command>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let rt = Runtime::new()?;
+    let mut audio_input_device: Option<cpal::Device> = None;
+    let mut audio_output_device: Option<cpal::Device> = None;
     let mut audio_source: Option<Box<dyn audio::SourceTrack>> = None;
     let mut sink_tracks: HashMap<Uuid, Box<dyn audio::SinkTrack>> = HashMap::new();
 
     let audio_source_id = String::from("audio-input");
     while let Some(cmd) = ch.blocking_recv() {
         match cmd {
-            media_track::Command::CreateAudioSourceTrack {
-                host_id,
-                device_name,
-                codec,
-            } => {
+            media_track::Command::CreateAudioSourceTrack { codec } => {
                 if audio_source.is_some() {
                     rt.block_on(async {
                         let mut s = webrtc.lock().await;
@@ -589,14 +603,13 @@ fn manage_streams(
                     });
                 }
 
-                let input_device =
-                    match simple_webrtc::audio::get_input_device(host_id, device_name) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            log::error!("failed to get input device: {e}");
-                            continue;
-                        }
-                    };
+                let input_device = match audio_input_device.as_ref() {
+                    Some(d) => d,
+                    None => {
+                        log::error!("no audio input device selected");
+                        continue;
+                    }
+                };
 
                 let source_track = rt.block_on(async {
                     create_source_track(&webrtc, input_device, codec, audio_source_id.clone()).await
@@ -604,23 +617,18 @@ fn manage_streams(
                 source_track.play()?;
                 audio_source.replace(source_track);
             }
-            media_track::Command::CreateAudioSinkTrack {
-                host_id,
-                device_name,
-                track,
-            } => {
+            media_track::Command::CreateAudioSinkTrack { track } => {
                 let codec = rt.block_on(async { track.codec().await.capability });
-                let output_device =
-                    match simple_webrtc::audio::get_output_device(host_id, device_name) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            log::error!("failed to get audio output device: {e}");
-                            continue;
-                        }
-                    };
+                let output_device = match audio_output_device.as_ref() {
+                    Some(d) => d,
+                    None => {
+                        log::error!("no audio output device selected");
+                        continue;
+                    }
+                };
+
                 let sink_track =
                     simple_webrtc::audio::create_sink_track(output_device, track, codec)?;
-                //simple_webrtc::media::OpusSink::init(output_device, track, codec)?;
                 sink_track.play()?;
                 sink_tracks.insert(sink_track.id(), sink_track);
             }
@@ -628,38 +636,40 @@ fn manage_streams(
                 host_id,
                 device_name,
             } => {
-                let input_device =
-                    match simple_webrtc::audio::get_input_device(host_id, device_name) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            log::error!("failed to get input device: {e}");
-                            continue;
-                        }
-                    };
+                let device = match simple_webrtc::audio::get_input_device(host_id, device_name) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        log::error!("failed to get input device: {e}");
+                        continue;
+                    }
+                };
                 if let Some(source) = audio_source.as_mut() {
-                    source.change_input_device(input_device);
+                    source.change_input_device(&device);
                 } else {
                     log::error!("no audio input to change");
                 }
+
+                audio_input_device.replace(device);
             }
             media_track::Command::ChangeAudioOutput {
                 host_id,
                 device_name,
             } => {
+                let device =
+                    match simple_webrtc::audio::get_output_device(host_id, device_name.clone()) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            log::error!("failed to get output device: {e}");
+                            continue;
+                        }
+                    };
                 for (_k, v) in sink_tracks.iter_mut() {
-                    let output_device =
-                        match simple_webrtc::audio::get_output_device(host_id, device_name.clone())
-                        {
-                            Ok(d) => d,
-                            Err(e) => {
-                                log::error!("failed to get input device: {e}");
-                                continue;
-                            }
-                        };
-                    if let Err(e) = v.change_output_device(output_device) {
+                    if let Err(e) = v.change_output_device(&device) {
                         log::error!("failed to change output device: {e}");
                     }
                 }
+
+                audio_output_device.replace(device);
             }
             _ => todo!(),
         }
@@ -732,16 +742,12 @@ pub mod media_track {
 
     pub enum Command {
         CreateAudioSourceTrack {
-            host_id: cpal::HostId,
-            device_name: String,
             codec: RTCRtpCodecCapability,
         },
         RemoveSourceTrack {
             source_id: MediaSourceId,
         },
         CreateAudioSinkTrack {
-            host_id: cpal::HostId,
-            device_name: String,
             track: Arc<TrackRemote>,
         },
         ChangeAudioOutput {
