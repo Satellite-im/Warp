@@ -1,5 +1,7 @@
 use anyhow::{bail, Result};
-use std::sync::Arc;
+use cpal::traits::{DeviceTrait, HostTrait};
+use std::{error::Error, sync::Arc};
+use uuid::Uuid;
 use warp::blink::MimeType;
 use webrtc::{
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
@@ -28,6 +30,7 @@ pub trait SourceTrack {
     fn play(&self) -> Result<()>;
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: cpal::Device);
+    fn id(&self) -> Uuid;
 }
 
 pub trait SinkTrack {
@@ -40,6 +43,7 @@ pub trait SinkTrack {
         Self: Sized;
     fn play(&self) -> Result<()>;
     fn change_output_device(&mut self, output_device: cpal::Device);
+    fn id(&self) -> Uuid;
 }
 
 pub fn create_source_track(
@@ -66,5 +70,67 @@ pub fn create_sink_track(
         _ => {
             bail!("unhandled mime type: {}", &codec.mime_type);
         }
+    }
+}
+
+pub fn get_input_device(
+    host_id: cpal::HostId,
+    device_name: String,
+) -> anyhow::Result<cpal::Device> {
+    let host = match cpal::available_hosts().iter().find(|h| **h == host_id) {
+        Some(h) => match cpal::platform::host_from_id(*h) {
+            Ok(h) => h,
+            Err(e) => {
+                bail!("failed to get host from id: {e}");
+            }
+        },
+        None => {
+            bail!("failed to find host");
+        }
+    };
+
+    let device = host.input_devices()?.find(|d| {
+        if let Ok(n) = d.name() {
+            n == device_name
+        } else {
+            false
+        }
+    });
+
+    if let Some(d) = device {
+        Ok(d)
+    } else {
+        bail!("could not find device")
+    }
+}
+
+pub fn get_output_device(
+    host_id: cpal::HostId,
+    device_name: String,
+) -> anyhow::Result<cpal::Device> {
+    let host = match cpal::available_hosts().iter().find(|h| **h == host_id) {
+        Some(h) => match cpal::platform::host_from_id(*h) {
+            Ok(h) => h,
+            Err(e) => {
+                bail!("failed to get host from id: {e}");
+            }
+        },
+        None => {
+            bail!("failed to find host");
+        }
+    };
+
+    let device = host.output_devices()?.find(|d| {
+        if let Ok(n) = d.name() {
+            n == device_name
+        } else {
+            false
+        }
+    });
+
+    if let Some(d) = device {
+        Ok(d)
+    } else {
+        bail!("could not find device")
     }
 }

@@ -85,14 +85,15 @@ pub struct WebRtc<T: IpfsTypes> {
     // a tx channel which emits events to drive the UI
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     // manages media tracks
-    //media_track_ch: mpsc::UnboundedSender<media_track::Command>,
-    test: Option<Box<dyn SourceTrack + Send + Sync>>,
+    media_track_ch: mpsc::UnboundedSender<media_track::Command>,
     webrtc: Arc<Mutex<simple_webrtc::Controller>>,
     active_call: Option<ActiveCall>,
     pending_calls: HashMap<Uuid, Call>,
     cpal_host: cpal::Host,
-    audio_input: Option<cpal::Device>,
-    audio_output: Option<cpal::Device>,
+    // cpal::Device.name()
+    audio_input: Option<String>,
+    // cpal::Device.name()
+    audio_output: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -291,20 +292,21 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
             .collect())
     }
     async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
-        let device_iter = match self.cpal_host.input_devices() {
-            Ok(iter) => iter,
-            Err(e) => return Err(Error::Cpal(e.to_string())),
-        };
+        let new_input = Some(device_name.into());
+        if self.audio_input == new_input {
+            return Ok(());
+        }
 
-        let device = match device_iter
-            .filter(|d| d.name().unwrap_or_default() == device_name)
-            .next()
-        {
-            Some(d) => d,
-            None => return Err(Error::DeviceNotFound),
-        };
+        self.media_track_ch
+            .send(media_track::Command::ChangeAudioInput {
+                host_id: self.cpal_host.id(),
+                device_name: device_name.into(),
+            })
+            .map_err(|e| {
+                warp::error::Error::OtherWithContext(format!("failed to change input device: {e}"))
+            })?;
+        self.audio_input = new_input;
 
-        self.audio_input = Some(device);
         Ok(())
     }
     async fn get_available_speakers(&self) -> Result<Vec<String>, Error> {
@@ -317,20 +319,21 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
             .collect())
     }
     async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
-        let device_iter = match self.cpal_host.output_devices() {
-            Ok(iter) => iter,
-            Err(e) => return Err(Error::Cpal(e.to_string())),
-        };
+        let new_output = Some(device_name.into());
+        if self.audio_output == new_output {
+            return Ok(());
+        }
 
-        let device = match device_iter
-            .filter(|d| d.name().unwrap_or_default() == device_name)
-            .next()
-        {
-            Some(d) => d,
-            None => return Err(Error::DeviceNotFound),
-        };
+        self.media_track_ch
+            .send(media_track::Command::ChangeAudioOutput {
+                host_id: self.cpal_host.id(),
+                device_name: device_name.into(),
+            })
+            .map_err(|e| {
+                warp::error::Error::OtherWithContext(format!("failed to change output device: {e}"))
+            })?;
+        self.audio_output = new_output;
 
-        self.audio_output = Some(device);
         Ok(())
     }
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {
@@ -392,20 +395,38 @@ impl<T: IpfsTypes> WebRtc<T> {
             }
         };
 
-        let (event_ch, _rx) = broadcast::channel(1024);
+        let webrtc = Arc::new(Mutex::new(simple_webrtc::Controller::new(did.clone())?));
+
+        let (ui_event_ch, _rx) = broadcast::channel(1024);
+        let (media_track_ch, media_rx) = mpsc::unbounded_channel();
+
+        let webrtc2 = webrtc.clone();
+        std::thread::spawn(|| {
+            if let Err(_e) = manage_streams(webrtc2, media_rx) {
+                todo!();
+            }
+        });
+
+        let cpal_host = cpal::platform::default_host();
+        let input_device = cpal_host
+            .default_input_device()
+            .and_then(|device| device.name().ok());
+        let output_device = cpal_host
+            .default_output_device()
+            .and_then(|device| device.name().ok());
 
         let webrtc = Self {
-            webrtc: Arc::new(Mutex::new(simple_webrtc::Controller::new(did.clone())?)),
+            webrtc,
             account,
             ipfs: Arc::new(RwLock::new(ipfs.clone())),
             id: did.clone(),
-            test: None,
-            ui_event_ch: event_ch,
+            ui_event_ch,
+            media_track_ch,
             active_call: None,
             pending_calls: HashMap::new(),
-            cpal_host: cpal::default_host(),
-            audio_input: None,
-            audio_output: None,
+            cpal_host,
+            audio_input: input_device,
+            audio_output: output_device,
         };
 
         if let Err(e) = ipfs
@@ -440,26 +461,28 @@ impl<T: IpfsTypes> WebRtc<T> {
             }
         };
 
-        // todo: use a config struct instead of hardcoding this
-        // set up input devices before creating streams
         // warning: a media source must be added before attempting to connect or SDP will fail
-        /*let input_device: cpal::Device = match self.cpal_host.default_input_device() {
-            Some(d) => d,
-            None => {
-                bail!("failed to get default audio input device");
+        if let Some(device_name) = self.audio_input.clone() {
+            // todo: let the user pick the codec
+            let codec = RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: 48000,
+                channels: opus::Channels::Mono as u16,
+                ..Default::default()
+            };
+            if let Err(e) = self
+                .media_track_ch
+                .send(media_track::Command::CreateSourceTrack {
+                    host_id: self.cpal_host.id(),
+                    device_name,
+                    codec,
+                    source_id: "audio".into(),
+                })
+            {
+                log::error!("failed to send CreateSourceTrack command: {e}");
             }
-        };*/
-        let codec = RTCRtpCodecCapability {
-            mime_type: MimeType::OPUS.to_string(),
-            clock_rate: 48000,
-            channels: opus::Channels::Mono as u16,
-            ..Default::default()
-        };
-
-        let track = {
-            let mut webrtc = self.webrtc.lock().await;
-            webrtc.add_media_source("audio".into(), codec).await?
-        };
+        }
+        //
 
         let call_broadcast_stream = match ipfs
             .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
@@ -498,14 +521,6 @@ impl<T: IpfsTypes> WebRtc<T> {
                 return Err(e);
             }
         };
-
-        let webrtc = self.webrtc.clone();
-        let (tx, rx) = mpsc::unbounded_channel();
-        std::thread::spawn(|| {
-            if let Err(_e) = manage_streams(webrtc, rx) {
-                todo!();
-            }
-        });
         // SimpleWebRTC instance
         let webrtc = self.webrtc.clone();
         tokio::task::spawn(async move {
@@ -531,35 +546,6 @@ async fn decode_broadcast_signal(message: Arc<GossipsubMessage>) -> anyhow::Resu
     // todo: initiate WebRTC communications if needed
 
     todo!()
-}
-
-async fn get_source_track(
-    webrtc: Arc<Mutex<Controller>>,
-) -> Result<Box<dyn SourceTrack>, Box<dyn std::error::Error>> {
-    let host = cpal::default_host();
-    // todo: allow switching the input device during the call.
-    let input_device: cpal::Device = host
-        .default_input_device()
-        .expect("couldn't find default input device");
-
-    let codec = RTCRtpCodecCapability {
-        mime_type: MimeType::OPUS.to_string(),
-        clock_rate: 48000,
-        channels: opus::Channels::Mono as u16,
-        ..Default::default()
-    };
-    let track = {
-        let mut s = webrtc.lock().await;
-
-        // a media source must be added before attempting to connect or SDP will fail
-        s.add_media_source("audio".into(), codec.clone()).await?
-    };
-
-    // create an audio source
-    let source_track = //simple_webrtc::media::OpusSource::init(input_device, track, codec)?;
-     simple_webrtc::media::create_source_track(input_device, track, codec)?;
-
-    Ok(source_track)
 }
 
 async fn create_source_track(
@@ -592,21 +578,54 @@ fn manage_streams(
     while let Some(cmd) = ch.blocking_recv() {
         match cmd {
             media_track::Command::CreateSourceTrack {
-                device,
+                host_id,
+                device_name,
                 codec,
                 source_id,
             } => {
-                if let Some(track) = source_tracks.remove(&source_id) {
+                if source_tracks.remove(&source_id).is_some() {
                     rt.block_on(async {
                         let mut s = webrtc.lock().await;
-                        s.remove_media_source(source_id.clone());
+                        if let Err(e) = s.remove_media_source(source_id.clone()).await {
+                            log::error!("failed to remove media source: {e}");
+                        }
                     });
                 }
+
+                let input_device =
+                    match simple_webrtc::media::get_input_device(host_id, device_name) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            log::error!("failed to set input device: {e}");
+                            continue;
+                        }
+                    };
+
                 let source_track = rt.block_on(async {
-                    create_source_track(&webrtc, device, codec, source_id.clone()).await
+                    create_source_track(&webrtc, input_device, codec, source_id.clone()).await
                 })?;
                 source_track.play()?;
                 source_tracks.insert(source_id, source_track);
+            }
+            media_track::Command::CreateSinkTrack {
+                host_id,
+                device_name,
+                track,
+            } => {
+                let codec = rt.block_on(async { track.codec().await.capability });
+                let output_device =
+                    match simple_webrtc::media::get_output_device(host_id, device_name) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            log::error!("failed to get output device: {e}");
+                            continue;
+                        }
+                    };
+                let sink_track =
+                    simple_webrtc::media::create_sink_track(output_device, track, codec)?;
+                //simple_webrtc::media::OpusSink::init(output_device, track, codec)?;
+                sink_track.play()?;
+                sink_tracks.insert(sink_track.id(), sink_track);
             }
             _ => todo!(),
         }
@@ -669,18 +688,38 @@ async fn handle_webrtc(
 
 // todo: move this elsewhere or delete it
 pub mod media_track {
-    use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    use webrtc::{
+        rtp_transceiver::rtp_codec::RTCRtpCodecCapability, track::track_remote::TrackRemote,
+    };
 
     use crate::simple_webrtc::{media::SourceTrackType, MediaSourceId};
 
     pub enum Command {
         CreateSourceTrack {
-            device: cpal::Device,
+            host_id: cpal::HostId,
+            device_name: String,
             codec: RTCRtpCodecCapability,
             source_id: MediaSourceId,
         },
-        RemoveSourceTrack,
-        CreateSinkTrack,
+        RemoveSourceTrack {
+            source_id: MediaSourceId,
+        },
+        CreateSinkTrack {
+            host_id: cpal::HostId,
+            device_name: String,
+            track: Arc<TrackRemote>,
+        },
+        ChangeAudioOutput {
+            host_id: cpal::HostId,
+            device_name: String,
+        },
+        ChangeAudioInput {
+            host_id: cpal::HostId,
+            device_name: String,
+        },
         RemoveSinkTrack,
         Reset,
     }

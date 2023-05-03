@@ -5,6 +5,7 @@ use tokio::{
     sync::mpsc::{self, error::TryRecvError},
     task::JoinHandle,
 };
+use uuid::Uuid;
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability, track::track_remote::TrackRemote,
@@ -19,6 +20,7 @@ pub struct OpusSink {
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
+    id: Uuid,
 }
 
 impl Drop for OpusSink {
@@ -84,6 +86,7 @@ impl SinkTrack for OpusSink {
             _device: output_device,
             stream: output_stream,
             decoder_handle: join_handle,
+            id: Uuid::new_v4(),
         })
     }
 
@@ -95,6 +98,10 @@ impl SinkTrack for OpusSink {
     }
     fn change_output_device(&mut self, _output_device: cpal::Device) {
         todo!()
+    }
+
+    fn id(&self) -> Uuid {
+        self.id
     }
 }
 
