@@ -17,6 +17,10 @@ use super::SinkTrack;
 pub struct OpusSink {
     // may not need this but am saving it here because it's related to the `stream`, which needs to be kept in scope.
     _device: cpal::Device,
+    // save this for changing the output device
+    track: Arc<TrackRemote>,
+    // same
+    codec: RTCRtpCodecCapability,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
@@ -51,8 +55,9 @@ impl SinkTrack for OpusSink {
         let (producer, mut consumer) = mpsc::unbounded_channel::<i16>();
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
         let sample_builder = SampleBuilder::new(max_late, depacketizer, sample_rate as u32);
+        let track2 = track.clone();
         let join_handle = tokio::spawn(async move {
-            if let Err(e) = decode_media_stream(track, sample_builder, producer, decoder).await {
+            if let Err(e) = decode_media_stream(track2, sample_builder, producer, decoder).await {
                 log::error!("error decoding media stream: {}", e);
             }
             log::debug!("stopping decode_media_stream thread");
@@ -85,6 +90,8 @@ impl SinkTrack for OpusSink {
         Ok(Self {
             _device: output_device,
             stream: output_stream,
+            track,
+            codec,
             decoder_handle: join_handle,
             id: Uuid::new_v4(),
         })
@@ -96,8 +103,13 @@ impl SinkTrack for OpusSink {
         }
         Ok(())
     }
-    fn change_output_device(&mut self, _output_device: cpal::Device) {
-        todo!()
+    fn change_output_device(&mut self, output_device: cpal::Device) -> Result<()> {
+        self.stream.pause()?;
+        self.decoder_handle.abort();
+
+        let new_sink = Self::init(output_device, self.track.clone(), self.codec.clone())?;
+        *self = new_sink;
+        Ok(())
     }
 
     fn id(&self) -> Uuid {

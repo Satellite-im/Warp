@@ -19,9 +19,9 @@ use ipfs::IpfsTypes;
 use ipfs::SubscriptionStream;
 use serde::Deserialize;
 use serde::Serialize;
+use simple_webrtc::audio;
 use simple_webrtc::events::EmittedEvents;
 use simple_webrtc::events::WebRtcEventStream;
-use simple_webrtc::media::SourceTrack;
 use simple_webrtc::Controller;
 use simple_webrtc::MediaSourceId;
 use tokio::runtime::Runtime;
@@ -47,9 +47,6 @@ use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-
-use crate::simple_webrtc::media::SinkTrack;
-use crate::simple_webrtc::media::SourceTrackType;
 
 mod signaling;
 mod simple_webrtc;
@@ -472,7 +469,7 @@ impl<T: IpfsTypes> WebRtc<T> {
             };
             if let Err(e) = self
                 .media_track_ch
-                .send(media_track::Command::CreateSourceTrack {
+                .send(media_track::Command::CreateAudioSourceTrack {
                     host_id: self.cpal_host.id(),
                     device_name,
                     codec,
@@ -553,7 +550,7 @@ async fn create_source_track(
     device: cpal::Device,
     codec: RTCRtpCodecCapability,
     source_id: MediaSourceId,
-) -> Result<Box<dyn SourceTrack>, Box<dyn std::error::Error>> {
+) -> Result<Box<dyn audio::SourceTrack>, Box<dyn std::error::Error>> {
     let track = {
         let mut s = webrtc.lock().await;
 
@@ -563,7 +560,7 @@ async fn create_source_track(
 
     // create an audio source
     let source_track = //simple_webrtc::media::OpusSource::init(input_device, track, codec)?;
-     simple_webrtc::media::create_source_track(device, track, codec)?;
+     simple_webrtc::audio::create_source_track(device, track, codec)?;
 
     Ok(source_track)
 }
@@ -573,11 +570,11 @@ fn manage_streams(
     mut ch: mpsc::UnboundedReceiver<media_track::Command>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let rt = Runtime::new()?;
-    let mut source_tracks: HashMap<MediaSourceId, Box<dyn SourceTrack>> = HashMap::new();
-    let mut sink_tracks: HashMap<Uuid, Box<dyn SinkTrack>> = HashMap::new();
+    let mut source_tracks: HashMap<MediaSourceId, Box<dyn audio::SourceTrack>> = HashMap::new();
+    let mut sink_tracks: HashMap<Uuid, Box<dyn audio::SinkTrack>> = HashMap::new();
     while let Some(cmd) = ch.blocking_recv() {
         match cmd {
-            media_track::Command::CreateSourceTrack {
+            media_track::Command::CreateAudioSourceTrack {
                 host_id,
                 device_name,
                 codec,
@@ -593,7 +590,7 @@ fn manage_streams(
                 }
 
                 let input_device =
-                    match simple_webrtc::media::get_input_device(host_id, device_name) {
+                    match simple_webrtc::audio::get_input_device(host_id, device_name) {
                         Ok(d) => d,
                         Err(e) => {
                             log::error!("failed to set input device: {e}");
@@ -607,14 +604,14 @@ fn manage_streams(
                 source_track.play()?;
                 source_tracks.insert(source_id, source_track);
             }
-            media_track::Command::CreateSinkTrack {
+            media_track::Command::CreateAudioSinkTrack {
                 host_id,
                 device_name,
                 track,
             } => {
                 let codec = rt.block_on(async { track.codec().await.capability });
                 let output_device =
-                    match simple_webrtc::media::get_output_device(host_id, device_name) {
+                    match simple_webrtc::audio::get_output_device(host_id, device_name) {
                         Ok(d) => d,
                         Err(e) => {
                             log::error!("failed to get output device: {e}");
@@ -622,11 +619,19 @@ fn manage_streams(
                         }
                     };
                 let sink_track =
-                    simple_webrtc::media::create_sink_track(output_device, track, codec)?;
+                    simple_webrtc::audio::create_sink_track(output_device, track, codec)?;
                 //simple_webrtc::media::OpusSink::init(output_device, track, codec)?;
                 sink_track.play()?;
                 sink_tracks.insert(sink_track.id(), sink_track);
             }
+            media_track::Command::ChangeAudioInput {
+                host_id,
+                device_name,
+            } => {}
+            media_track::Command::ChangeAudioOutput {
+                host_id,
+                device_name,
+            } => {}
             _ => todo!(),
         }
     }
@@ -689,16 +694,15 @@ async fn handle_webrtc(
 // todo: move this elsewhere or delete it
 pub mod media_track {
     use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     use webrtc::{
         rtp_transceiver::rtp_codec::RTCRtpCodecCapability, track::track_remote::TrackRemote,
     };
 
-    use crate::simple_webrtc::{media::SourceTrackType, MediaSourceId};
+    use crate::simple_webrtc::MediaSourceId;
 
     pub enum Command {
-        CreateSourceTrack {
+        CreateAudioSourceTrack {
             host_id: cpal::HostId,
             device_name: String,
             codec: RTCRtpCodecCapability,
@@ -707,7 +711,7 @@ pub mod media_track {
         RemoveSourceTrack {
             source_id: MediaSourceId,
         },
-        CreateSinkTrack {
+        CreateAudioSinkTrack {
             host_id: cpal::HostId,
             device_name: String,
             track: Arc<TrackRemote>,

@@ -42,7 +42,7 @@ pub trait SinkTrack {
     where
         Self: Sized;
     fn play(&self) -> Result<()>;
-    fn change_output_device(&mut self, output_device: cpal::Device);
+    fn change_output_device(&mut self, output_device: cpal::Device) -> anyhow::Result<()>;
     fn id(&self) -> Uuid;
 }
 
