@@ -55,7 +55,7 @@ enum DiscoveryCommand {
 impl Discovery {
     pub fn new(ipfs: Ipfs, config: DiscoveryConfig, relays: Vec<Multiaddr>) -> Self {
         let (events, _) = tokio::sync::broadcast::channel(2048);
-        let (tx, mut rx) = futures::channel::mpsc::channel::<DiscoveryCommand>(1);
+        let (tx, mut rx) = futures::channel::mpsc::channel::<DiscoveryCommand>(64);
         let event_task = Arc::new(tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
@@ -377,6 +377,7 @@ impl DiscoveryEntry {
                             // TODO: Maybe have separate provider query in case
                             //       Discovery task isnt enabled?
                             DiscoveryConfig::Provider(_) => {
+                                //TODO: Possibly merge with `DiscoveryConfig::Direct`
                                 let addrs = match ipfs.identity(Some(peer_id)).await {
                                     Ok(info) => info.listen_addrs,
                                     Err(_) => vec![],
@@ -394,30 +395,17 @@ impl DiscoveryEntry {
                             DiscoveryConfig::Direct => {
                                 tokio::select! {
                                     _ = timer.tick() => {
+                                        //Note: Since we already added (or "whitelist") the peer, their identify will remain
+                                        //      So we should instead attempt to dial out over their existing addreesses
                                         let _ = entry.ipfs.identity(Some(entry.peer_id)).await.ok();
                                     }
                                     _ = async {} => {}
                                 }
                             }
                             config::Discovery::None => {
-                                for relay in entry.relays.iter() {
-                                    let Some(peer_id) = peer_id_extract(relay) else {
-                                        log::error!("Could not get peer_id from {relay}");
-                                        continue;
-                                    };
-
-                                    if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
-                                        if let Err(e) = ipfs.connect(relay.clone()).await {
-                                            log::error!(
-                                                "Error while trying to connect to {relay}: {e}"
-                                            );
-                                            continue;
-                                        }
-                                    }
-                                }
-
                                 // Note: This will work if both peers shares the relays used.
                                 let opts = DialOpts::peer_id(peer_id)
+                                    //Dial out to relays
                                     .addresses(
                                         entry
                                             .relays
@@ -426,6 +414,8 @@ impl DiscoveryEntry {
                                             .map(|addr| addr.with(Protocol::P2pCircuit))
                                             .collect(),
                                     )
+                                    //extend out to any behaviour that may have known addresses related to the peer
+                                    .extend_addresses_through_behaviour()
                                     .build();
 
                                 if let Err(_e) = ipfs.connect(opts).await {
@@ -507,6 +497,7 @@ impl DiscoveryEntry {
     }
 }
 
+#[allow(dead_code)]
 fn peer_id_extract(addr: &Multiaddr) -> Option<PeerId> {
     let mut addr = addr.clone();
     match addr.pop() {
