@@ -23,6 +23,8 @@ use simple_webrtc::events::EmittedEvents;
 use simple_webrtc::events::WebRtcEventStream;
 use simple_webrtc::media::SourceTrack;
 use simple_webrtc::Controller;
+use simple_webrtc::MediaSourceId;
+use tokio::runtime::Runtime;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::unbounded_channel;
@@ -84,6 +86,7 @@ pub struct WebRtc<T: IpfsTypes> {
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     // manages media tracks
     //media_track_ch: mpsc::UnboundedSender<media_track::Command>,
+    test: Option<Box<dyn SourceTrack + Send + Sync>>,
     webrtc: Arc<Mutex<simple_webrtc::Controller>>,
     active_call: Option<ActiveCall>,
     pending_calls: HashMap<Uuid, Call>,
@@ -396,6 +399,7 @@ impl<T: IpfsTypes> WebRtc<T> {
             account,
             ipfs: Arc::new(RwLock::new(ipfs.clone())),
             id: did.clone(),
+            test: None,
             ui_event_ch: event_ch,
             active_call: None,
             pending_calls: HashMap::new(),
@@ -452,10 +456,10 @@ impl<T: IpfsTypes> WebRtc<T> {
             ..Default::default()
         };
 
-        {
+        let track = {
             let mut webrtc = self.webrtc.lock().await;
-            webrtc.add_media_source("audio".into(), codec).await?;
-        }
+            webrtc.add_media_source("audio".into(), codec).await?
+        };
 
         let call_broadcast_stream = match ipfs
             .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
@@ -486,7 +490,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         }
         .await;
         // this one is already pinned to the heap
-        let mut webrtc_event_stream = match get_event_stream {
+        let webrtc_event_stream = match get_event_stream {
             Ok(s) => WebRtcEventStream(Box::pin(s)),
             Err(e) => {
                 log::error!("failed to get webrtc_event_stream: {e}");
@@ -495,6 +499,13 @@ impl<T: IpfsTypes> WebRtc<T> {
             }
         };
 
+        let webrtc = self.webrtc.clone();
+        let (tx, rx) = mpsc::unbounded_channel();
+        std::thread::spawn(|| {
+            if let Err(_e) = manage_streams(webrtc, rx) {
+                todo!();
+            }
+        });
         // SimpleWebRTC instance
         let webrtc = self.webrtc.clone();
         tokio::task::spawn(async move {
@@ -506,8 +517,6 @@ impl<T: IpfsTypes> WebRtc<T> {
                 stop,
             )
             .await;
-
-            // todo: how to unsubscribe
         });
 
         Ok(())
@@ -524,6 +533,88 @@ async fn decode_broadcast_signal(message: Arc<GossipsubMessage>) -> anyhow::Resu
     todo!()
 }
 
+async fn get_source_track(
+    webrtc: Arc<Mutex<Controller>>,
+) -> Result<Box<dyn SourceTrack>, Box<dyn std::error::Error>> {
+    let host = cpal::default_host();
+    // todo: allow switching the input device during the call.
+    let input_device: cpal::Device = host
+        .default_input_device()
+        .expect("couldn't find default input device");
+
+    let codec = RTCRtpCodecCapability {
+        mime_type: MimeType::OPUS.to_string(),
+        clock_rate: 48000,
+        channels: opus::Channels::Mono as u16,
+        ..Default::default()
+    };
+    let track = {
+        let mut s = webrtc.lock().await;
+
+        // a media source must be added before attempting to connect or SDP will fail
+        s.add_media_source("audio".into(), codec.clone()).await?
+    };
+
+    // create an audio source
+    let source_track = //simple_webrtc::media::OpusSource::init(input_device, track, codec)?;
+     simple_webrtc::media::create_source_track(input_device, track, codec)?;
+
+    Ok(source_track)
+}
+
+async fn create_source_track(
+    webrtc: &Arc<Mutex<Controller>>,
+    device: cpal::Device,
+    codec: RTCRtpCodecCapability,
+    source_id: MediaSourceId,
+) -> Result<Box<dyn SourceTrack>, Box<dyn std::error::Error>> {
+    let track = {
+        let mut s = webrtc.lock().await;
+
+        // a media source must be added before attempting to connect or SDP will fail
+        s.add_media_source(source_id, codec.clone()).await?
+    };
+
+    // create an audio source
+    let source_track = //simple_webrtc::media::OpusSource::init(input_device, track, codec)?;
+     simple_webrtc::media::create_source_track(device, track, codec)?;
+
+    Ok(source_track)
+}
+
+fn manage_streams(
+    webrtc: Arc<Mutex<Controller>>,
+    mut ch: mpsc::UnboundedReceiver<media_track::Command>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let rt = Runtime::new()?;
+    let mut source_tracks: HashMap<MediaSourceId, Box<dyn SourceTrack>> = HashMap::new();
+    let mut sink_tracks: HashMap<Uuid, Box<dyn SinkTrack>> = HashMap::new();
+    while let Some(cmd) = ch.blocking_recv() {
+        match cmd {
+            media_track::Command::CreateSourceTrack {
+                device,
+                codec,
+                source_id,
+            } => {
+                if let Some(track) = source_tracks.remove(&source_id) {
+                    rt.block_on(async {
+                        let mut s = webrtc.lock().await;
+                        s.remove_media_source(source_id.clone());
+                    });
+                }
+                let source_track = rt.block_on(async {
+                    create_source_track(&webrtc, device, codec, source_id.clone()).await
+                })?;
+                source_track.play()?;
+                source_tracks.insert(source_id, source_track);
+            }
+            _ => todo!(),
+        }
+    }
+
+    Ok(())
+}
+
 async fn handle_webrtc(
     webrtc: Arc<Mutex<Controller>>,
     call_broadcast_stream: SubscriptionStream,
@@ -533,9 +624,6 @@ async fn handle_webrtc(
 ) {
     futures::pin_mut!(call_broadcast_stream);
     futures::pin_mut!(call_signaling_stream);
-
-    let mut sink_tracks: HashMap<Uuid, Box<dyn SinkTrack>> = HashMap::new();
-    let mut source_tracks: HashMap<SourceTrackType, Box<dyn SourceTrack>> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -581,14 +669,16 @@ async fn handle_webrtc(
 
 // todo: move this elsewhere or delete it
 pub mod media_track {
+    use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
-    #[derive(Eq, PartialEq, Clone, Copy, Hash)]
-    enum SourceTrackType {
-        Audio,
-    }
+    use crate::simple_webrtc::{media::SourceTrackType, MediaSourceId};
 
     pub enum Command {
-        CreateSourceTrack,
+        CreateSourceTrack {
+            device: cpal::Device,
+            codec: RTCRtpCodecCapability,
+            source_id: MediaSourceId,
+        },
         RemoveSourceTrack,
         CreateSinkTrack,
         RemoveSinkTrack,
