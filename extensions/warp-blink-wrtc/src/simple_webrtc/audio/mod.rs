@@ -1,7 +1,6 @@
 use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
-use std::{error::Error, sync::Arc};
-use uuid::Uuid;
+use std::sync::Arc;
 use warp::blink::MimeType;
 use webrtc::{
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
@@ -12,11 +11,6 @@ mod opus_sink;
 mod opus_source;
 pub use opus_sink::OpusSink;
 pub use opus_source::OpusSource;
-
-#[derive(Eq, PartialEq, Clone, Copy, Hash)]
-pub enum SourceTrackType {
-    Audio,
-}
 
 // stores the TrackRemote at least
 pub trait SourceTrack {
@@ -29,9 +23,9 @@ pub trait SourceTrack {
         Self: Sized;
 
     fn play(&self) -> Result<()>;
+    fn pause(&self) -> Result<()>;
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: &cpal::Device);
-    fn id(&self) -> Uuid;
 }
 
 // stores the TrackRemote at least
@@ -44,10 +38,11 @@ pub trait SinkTrack {
     where
         Self: Sized;
     fn play(&self) -> Result<()>;
+    fn pause(&self) -> Result<()>;
     fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
-    fn id(&self) -> Uuid;
 }
 
+/// Uses the MIME type from codec to determine which implementation of SourceTrack to create
 pub fn create_source_track(
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
@@ -61,6 +56,7 @@ pub fn create_source_track(
     }
 }
 
+/// Uses the MIME type from codec to determine which implementation of SinkTrack to create
 pub fn create_sink_track(
     output_device: &cpal::Device,
     track: Arc<TrackRemote>,

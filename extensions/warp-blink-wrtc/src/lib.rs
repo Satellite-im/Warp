@@ -535,12 +535,14 @@ impl<T: IpfsTypes> WebRtc<T> {
         };
         // SimpleWebRTC instance
         let webrtc = self.webrtc.clone();
+        let media_track_ch = self.media_track_ch.clone();
         tokio::task::spawn(async move {
             handle_webrtc(
                 webrtc,
                 call_broadcast_stream,
                 call_signaling_stream,
                 webrtc_event_stream,
+                media_track_ch,
                 stop,
             )
             .await;
@@ -588,10 +590,11 @@ fn manage_streams(
     let mut audio_input_device: Option<cpal::Device> = None;
     let mut audio_output_device: Option<cpal::Device> = None;
     let mut audio_source: Option<Box<dyn audio::SourceTrack>> = None;
-    let mut sink_tracks: HashMap<Uuid, Box<dyn audio::SinkTrack>> = HashMap::new();
+    let mut sink_tracks: HashMap<DID, Box<dyn audio::SinkTrack>> = HashMap::new();
 
     let audio_source_id = String::from("audio-input");
     while let Some(cmd) = ch.blocking_recv() {
+        log::debug!("manage_streams cmd: {cmd}");
         match cmd {
             media_track::Command::CreateAudioSourceTrack { codec } => {
                 if audio_source.is_some() {
@@ -617,7 +620,7 @@ fn manage_streams(
                 source_track.play()?;
                 audio_source.replace(source_track);
             }
-            media_track::Command::CreateAudioSinkTrack { track } => {
+            media_track::Command::CreateAudioSinkTrack { peer_id, track } => {
                 let codec = rt.block_on(async { track.codec().await.capability });
                 let output_device = match audio_output_device.as_ref() {
                     Some(d) => d,
@@ -630,7 +633,7 @@ fn manage_streams(
                 let sink_track =
                     simple_webrtc::audio::create_sink_track(output_device, track, codec)?;
                 sink_track.play()?;
-                sink_tracks.insert(sink_track.id(), sink_track);
+                sink_tracks.insert(peer_id, sink_track);
             }
             media_track::Command::ChangeAudioInput {
                 host_id,
@@ -671,6 +674,34 @@ fn manage_streams(
 
                 audio_output_device.replace(device);
             }
+            media_track::Command::MutePeer { peer_id } => {
+                if let Some(track) = sink_tracks.get_mut(&peer_id) {
+                    if let Err(e) = track.pause() {
+                        log::error!("failed to pause track: {e}");
+                    }
+                }
+            }
+            media_track::Command::UnmutePeer { peer_id } => {
+                if let Some(track) = sink_tracks.get_mut(&peer_id) {
+                    if let Err(e) = track.play() {
+                        log::error!("failed to play track: {e}");
+                    }
+                }
+            }
+            media_track::Command::MuteSelf => {
+                if let Some(track) = audio_source.as_mut() {
+                    if let Err(e) = track.pause() {
+                        log::error!("failed to pause track: {e}");
+                    }
+                }
+            }
+            media_track::Command::UnmuteSelf => {
+                if let Some(track) = audio_source.as_mut() {
+                    if let Err(e) = track.play() {
+                        log::error!("failed to play track: {e}");
+                    }
+                }
+            }
             _ => todo!(),
         }
     }
@@ -683,6 +714,7 @@ async fn handle_webrtc(
     call_broadcast_stream: SubscriptionStream,
     call_signaling_stream: SubscriptionStream,
     mut webrtc_event_stream: WebRtcEventStream,
+    media_track_ch: mpsc::UnboundedSender<media_track::Command>,
     stop: Arc<Notify>,
 ) {
     futures::pin_mut!(call_broadcast_stream);
@@ -715,8 +747,14 @@ async fn handle_webrtc(
             }
             opt = webrtc_event_stream.next() => {
                 match opt {
-                    Some(_event) => {
+                    Some(event) => {
                         let _webrtc = webrtc.lock().await;
+                        match event {
+                            EmittedEvents::TrackAdded { peer, track } => {
+                                media_track_ch.send(media_track::Command::CreateAudioSinkTrack { peer_id: peer, track });
+                            }
+                            _ => todo!()
+                        }
                         todo!("handle event");
                     }
                     None => todo!()
@@ -734,31 +772,46 @@ async fn handle_webrtc(
 pub mod media_track {
     use std::sync::Arc;
 
+    use derive_more::Display;
+    use warp::crypto::DID;
     use webrtc::{
         rtp_transceiver::rtp_codec::RTCRtpCodecCapability, track::track_remote::TrackRemote,
     };
 
     use crate::simple_webrtc::MediaSourceId;
 
+    #[derive(Display)]
     pub enum Command {
-        CreateAudioSourceTrack {
-            codec: RTCRtpCodecCapability,
-        },
-        RemoveSourceTrack {
-            source_id: MediaSourceId,
-        },
+        #[display(fmt = "CreateAudioSourceTrack")]
+        CreateAudioSourceTrack { codec: RTCRtpCodecCapability },
+        #[display(fmt = "RemoveSourceTrack")]
+        RemoveSourceTrack { source_id: MediaSourceId },
+        #[display(fmt = "CreateAudioSinkTrack")]
         CreateAudioSinkTrack {
+            peer_id: DID,
             track: Arc<TrackRemote>,
         },
+        #[display(fmt = "ChangeAudioOutput")]
         ChangeAudioOutput {
             host_id: cpal::HostId,
             device_name: String,
         },
+        #[display(fmt = "ChangeAudioInput")]
         ChangeAudioInput {
             host_id: cpal::HostId,
             device_name: String,
         },
-        RemoveSinkTrack,
-        Reset,
+        #[display(fmt = "RemoveSinkTrack")]
+        RemoveSinkTrack { peer_id: DID },
+        #[display(fmt = "MutePeer")]
+        MutePeer { peer_id: DID },
+        #[display(fmt = "UnmutePeer")]
+        UnmutePeer { peer_id: DID },
+        #[display(fmt = "MuteSelf")]
+        MuteSelf,
+        #[display(fmt = "UnmuteSelf")]
+        UnmuteSelf,
+        #[display(fmt = "HangUp")]
+        HangUp,
     }
 }

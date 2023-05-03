@@ -22,7 +22,6 @@ pub struct OpusSink {
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
-    id: Uuid,
 }
 
 impl Drop for OpusSink {
@@ -90,12 +89,17 @@ impl SinkTrack for OpusSink {
             track,
             codec,
             decoder_handle: join_handle,
-            id: Uuid::new_v4(),
         })
     }
 
     fn play(&self) -> Result<()> {
         if let Err(e) = self.stream.play() {
+            return Err(e.into());
+        }
+        Ok(())
+    }
+    fn pause(&self) -> Result<()> {
+        if let Err(e) = self.stream.pause() {
             return Err(e.into());
         }
         Ok(())
@@ -107,10 +111,6 @@ impl SinkTrack for OpusSink {
         let new_sink = Self::init(output_device, self.track.clone(), self.codec.clone())?;
         *self = new_sink;
         Ok(())
-    }
-
-    fn id(&self) -> Uuid {
-        self.id
     }
 }
 

@@ -21,7 +21,6 @@ pub struct OpusSource {
     stream: cpal::Stream,
     // used to cancel the current packetizer when the input device is changed.
     _packetizer_handle: JoinHandle<()>,
-    id: Uuid,
 }
 
 impl SourceTrack for OpusSource {
@@ -106,7 +105,6 @@ impl SourceTrack for OpusSource {
             _track: track,
             stream: input_stream,
             _packetizer_handle: join_handle,
-            id: Uuid::new_v4(),
         })
     }
 
@@ -116,13 +114,15 @@ impl SourceTrack for OpusSource {
         }
         Ok(())
     }
+    fn pause(&self) -> Result<()> {
+        if let Err(e) = self.stream.pause() {
+            return Err(e.into());
+        }
+        Ok(())
+    }
     // should not require RTP renegotiation
     fn change_input_device(&mut self, _input_device: &cpal::Device) {
         todo!()
-    }
-
-    fn id(&self) -> Uuid {
-        self.id
     }
 }
 
