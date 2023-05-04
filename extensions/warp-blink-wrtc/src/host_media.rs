@@ -1,3 +1,7 @@
+//! CPAL is used for audio IO. cpal has a stream which isn't Send or Sync, making it difficult to use in an abstraction.
+//! To circumvent this, the collection of SinkTracks and the host's SourceTrack are static variables. Mutating static variables
+//! is `unsafe`. However, it should not be dangerous so long as the `SINGLETON_MUTEX` is acquired prior.
+//!
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{bail, Context};
@@ -13,8 +17,8 @@ use webrtc::{
 
 use crate::simple_webrtc::{self, audio, MediaSourceId};
 
-static MEDIA_CONTROLLER: Lazy<Mutex<MediaController>> =
-    Lazy::new(|| Mutex::new(MediaController {}));
+static SINGLETON_MUTEX: Lazy<Mutex<DummyStruct>> = Lazy::new(|| Mutex::new(DummyStruct {}));
+struct DummyStruct {}
 
 static mut AUDIO_INPUT_DEVICE: Lazy<Option<cpal::Device>> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
@@ -29,8 +33,6 @@ static mut SINK_TRACKS: Lazy<HashMap<DID, Box<dyn audio::SinkTrack>>> = Lazy::ne
 
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
 
-struct MediaController {}
-
 // turns a track, device, and codec into a SourceTrack, which reads and packetizes audio input
 // webrtc should remove the old media source before this is called
 // use AUDIO_SOURCE_ID
@@ -38,7 +40,7 @@ pub async fn create_audio_source_track(
     track: Arc<TrackLocalStaticRTP>,
     codec: RTCRtpCodecCapability,
 ) -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
 
     let input_device = unsafe {
         match AUDIO_INPUT_DEVICE.as_ref() {
@@ -61,12 +63,12 @@ pub async fn create_audio_source_track(
 }
 
 pub async fn remove_source_track(source_id: MediaSourceId) -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
     todo!()
 }
 
 pub async fn create_audio_sink_track(peer_id: DID, track: Arc<TrackRemote>) -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
     let codec = track.codec().await.capability;
     let output_device = unsafe {
         match AUDIO_OUTPUT_DEVICE.as_ref() {
@@ -86,7 +88,7 @@ pub async fn create_audio_sink_track(peer_id: DID, track: Arc<TrackRemote>) -> a
 }
 
 pub async fn change_audio_input(device: cpal::Device) {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
 
     unsafe {
         if let Some(source) = AUDIO_SOURCE.as_mut() {
@@ -97,7 +99,7 @@ pub async fn change_audio_input(device: cpal::Device) {
 }
 
 pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
 
     unsafe {
         // todo: if this fails, return an error or keep going?
@@ -112,12 +114,12 @@ pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
 }
 
 pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
     todo!()
 }
 
 pub async fn mute_peer(peer_id: DID) -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
     unsafe {
         if let Some(track) = SINK_TRACKS.get_mut(&peer_id) {
             track.pause().context("failed to pause (mute) track: {e}")?;
@@ -128,7 +130,7 @@ pub async fn mute_peer(peer_id: DID) -> anyhow::Result<()> {
 }
 
 pub async fn unmute_peer(peer_id: DID) -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
 
     unsafe {
         if let Some(track) = SINK_TRACKS.get_mut(&peer_id) {
@@ -140,7 +142,7 @@ pub async fn unmute_peer(peer_id: DID) -> anyhow::Result<()> {
 }
 
 pub async fn mute_self() -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
 
     unsafe {
         if let Some(track) = AUDIO_SOURCE.as_mut() {
@@ -152,7 +154,7 @@ pub async fn mute_self() -> anyhow::Result<()> {
 }
 
 pub async fn unmute_self() -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
 
     unsafe {
         if let Some(track) = AUDIO_SOURCE.as_mut() {
@@ -164,7 +166,7 @@ pub async fn unmute_self() -> anyhow::Result<()> {
 }
 
 pub async fn hangup() -> anyhow::Result<()> {
-    let media = MEDIA_CONTROLLER.lock().await;
+    let _lock = SINGLETON_MUTEX.lock().await;
 
     todo!()
 }

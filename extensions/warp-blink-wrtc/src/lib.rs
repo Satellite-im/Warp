@@ -48,7 +48,7 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
-mod media_track;
+mod host_media;
 mod signaling;
 mod simple_webrtc;
 
@@ -305,7 +305,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
         for device in devices {
             if let Ok(name) = device.name() {
                 if name == device_name {
-                    media_track::change_audio_input(device).await;
+                    host_media::change_audio_input(device).await;
                     self.audio_input = new_input;
                     return Ok(());
                 }
@@ -343,7 +343,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
         for device in devices {
             if let Ok(name) = device.name() {
                 if name == device_name {
-                    media_track::change_audio_output(device).await?;
+                    host_media::change_audio_output(device).await?;
                     self.audio_output = new_output;
                     return Ok(());
                 }
@@ -420,7 +420,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         let input_device = match cpal_host.default_input_device() {
             Some(d) => {
                 let name = d.name();
-                media_track::change_audio_input(d).await;
+                host_media::change_audio_input(d).await;
                 name.ok()
             }
             None => None,
@@ -428,7 +428,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         let output_device = match cpal_host.default_output_device() {
             Some(d) => {
                 let name = d.name();
-                media_track::change_audio_output(d).await?;
+                host_media::change_audio_output(d).await?;
                 name.ok()
             }
             None => None,
@@ -604,12 +604,12 @@ async fn handle_webrtc(
                         log::debug!("webrtc event: {event}");
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
-                                if let Err(e) =   media_track::create_audio_sink_track(peer, track).await {
+                                if let Err(e) =   host_media::create_audio_sink_track(peer, track).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                             }
                             EmittedEvents::Disconnected { peer } => {
-                                if let Err(e) = media_track::remove_sink_track(peer.clone()).await {
+                                if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                                 let mut s = webrtc.lock().await;
