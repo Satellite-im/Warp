@@ -13,7 +13,7 @@ pub use opus_sink::OpusSink;
 pub use opus_source::OpusSource;
 
 // stores the TrackRemote at least
-pub trait SourceTrack {
+pub trait SourceTrack: Send + Sync {
     fn init(
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
@@ -29,7 +29,7 @@ pub trait SourceTrack {
 }
 
 // stores the TrackRemote at least
-pub trait SinkTrack {
+pub trait SinkTrack: Send + Sync {
     fn init(
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
