@@ -3,7 +3,7 @@
 #![allow(clippy::clone_on_copy)]
 use crate::{
     config::{Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, PeerTopic, VecExt, PeerIdExt},
+    store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -1514,17 +1514,8 @@ impl IdentityStore {
                 .ok_or(Error::MultiPassExtensionUnavailable);
         }
 
-        //Note: This is checked because we may not be connected to those peers with the 2 options below
-        //      while with `Discovery::Provider`, they at some point should have been connected or discovered
-        if !matches!(
-            self.discovery_type(),
-            DiscoveryConfig::Direct | DiscoveryConfig::None
-        ) {
-            self.lookup(LookupBy::DidKey(did.clone()))
-                .await?
-                .first()
-                .cloned()
-                .ok_or(Error::IdentityDoesntExist)?;
+        if !self.discovery.contains(did).await {
+            self.discovery.insert(did).await?;
         }
 
         let status: IdentityStatus = connected_to_peer(&self.ipfs, did.clone())
