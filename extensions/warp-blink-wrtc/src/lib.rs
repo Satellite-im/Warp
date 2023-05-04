@@ -311,9 +311,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
             return Ok(());
         }
 
-        media_track::change_audio_output(device)
-            .await
-            .with_context("failed to change output device: {e}")?;
+        media_track::change_audio_output(device).await?;
         self.audio_output = new_output;
 
         Ok(())
@@ -378,9 +376,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         };
 
         let webrtc = Arc::new(Mutex::new(simple_webrtc::Controller::new(did.clone())?));
-
         let (ui_event_ch, _rx) = broadcast::channel(1024);
-        let (media_track_ch, media_rx) = mpsc::unbounded_channel();
 
         let cpal_host = cpal::platform::default_host();
         let input_device = match cpal_host.default_input_device() {
@@ -487,7 +483,6 @@ impl<T: IpfsTypes> WebRtc<T> {
         };
         // SimpleWebRTC instance
         let webrtc = self.webrtc.clone();
-        let media_track_ch = self.media_track_ch.clone();
         tokio::task::spawn(async move {
             handle_webrtc(
                 webrtc,
@@ -579,7 +574,7 @@ async fn handle_webrtc(
                                 }
                             }
                             EmittedEvents::Disconnected { peer } => {
-                                if let Err(e) = media_track::remove_sink_track(peer.clone).await {
+                                if let Err(e) = media_track::remove_sink_track(peer.clone()).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                                 let mut s = webrtc.lock().await;
