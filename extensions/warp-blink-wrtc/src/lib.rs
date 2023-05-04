@@ -420,7 +420,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         let input_device = match cpal_host.default_input_device() {
             Some(d) => {
                 let name = d.name();
-                media_track::change_audio_input(d);
+                media_track::change_audio_input(d).await;
                 name.ok()
             }
             None => None,
@@ -428,7 +428,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         let output_device = match cpal_host.default_output_device() {
             Some(d) => {
                 let name = d.name();
-                media_track::change_audio_output(d);
+                media_track::change_audio_output(d).await?;
                 name.ok()
             }
             None => None,
@@ -478,9 +478,6 @@ impl<T: IpfsTypes> WebRtc<T> {
                 log::error!("failed to unsubscribe cal_signal_route: {e}");
             }
         };
-
-        // this was moved to the init function
-        // self.configure_call_audio()?;
 
         let call_broadcast_stream = match ipfs
             .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
