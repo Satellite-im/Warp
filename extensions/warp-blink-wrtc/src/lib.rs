@@ -287,14 +287,34 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
             .map(|device| device.name().unwrap_or(String::from("unknown device")))
             .collect())
     }
-    async fn select_microphone(&mut self, device: cpal::Device, name: &str) {
-        let new_input = Some(name.into());
+    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
+        let new_input = Some(device_name.into());
         if self.audio_input == new_input {
-            return;
+            return Ok(());
         }
 
-        media_track::change_audio_input(device);
-        self.audio_input = new_input;
+        let host = cpal::default_host();
+        let devices = match host.input_devices() {
+            Ok(d) => d,
+            Err(e) => {
+                return Err(warp::error::Error::OtherWithContext(format!(
+                    "could not get input devices: {e}"
+                )));
+            }
+        };
+        for device in devices {
+            if let Ok(name) = device.name() {
+                if name == device_name {
+                    media_track::change_audio_input(device).await;
+                    self.audio_input = new_input;
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(warp::error::Error::OtherWithContext(
+            "input device not found".into(),
+        ))
     }
     async fn get_available_speakers(&self) -> Result<Vec<String>, Error> {
         let device_iter = match self.cpal_host.output_devices() {
@@ -305,16 +325,34 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
             .map(|device| device.name().unwrap_or(String::from("unknown device")))
             .collect())
     }
-    async fn select_speaker(&mut self, device: cpal::Device, name: &str) -> Result<(), Error> {
-        let new_output = Some(name.into());
+    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
+        let new_output = Some(device_name.into());
         if self.audio_output == new_output {
             return Ok(());
         }
 
-        media_track::change_audio_output(device).await?;
-        self.audio_output = new_output;
+        let host = cpal::default_host();
+        let devices = match host.output_devices() {
+            Ok(d) => d,
+            Err(e) => {
+                return Err(warp::error::Error::OtherWithContext(format!(
+                    "could not get input devices: {e}"
+                )));
+            }
+        };
+        for device in devices {
+            if let Ok(name) = device.name() {
+                if name == device_name {
+                    media_track::change_audio_output(device).await?;
+                    self.audio_output = new_output;
+                    return Ok(());
+                }
+            }
+        }
 
-        Ok(())
+        Err(warp::error::Error::OtherWithContext(
+            "output device not found".into(),
+        ))
     }
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {
         todo!()
