@@ -426,6 +426,9 @@ impl<T: IpfsTypes> WebRtc<T> {
             audio_output: output_device,
         };
 
+        // todo: not sure where to put this. but the answering side needs to have audio configured and it can't be done by handle_webrtc
+        webrtc.configure_call_audio();
+
         if let Err(e) = ipfs
             .pubsub_subscribe(ipfs_routes::offer_call_route(&did))
             .await
@@ -437,27 +440,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         Ok(webrtc)
     }
 
-    // todo: make sure this only gets called once
-    async fn init_call(&mut self, call: Call, stop: Arc<Notify>) -> anyhow::Result<()> {
-        let ipfs = self.ipfs.read();
-
-        // use this on error conditions and after terminating the call
-        let unsubscribe = async {
-            if let Err(e) = ipfs
-                .pubsub_unsubscribe(&ipfs_routes::call_broadcast_route(&call.id))
-                .await
-            {
-                log::error!("failed to unsubscribe call_broadcast_route: {e}");
-            }
-
-            if let Err(e) = ipfs
-                .pubsub_unsubscribe(&ipfs_routes::call_signal_route(&self.id, &call.id))
-                .await
-            {
-                log::error!("failed to unsubscribe cal_signal_route: {e}");
-            }
-        };
-
+    pub fn configure_call_audio(&self) -> anyhow::Result<()> {
         // warning: a media source must be added before attempting to connect or SDP will fail
         if let Some(device_name) = self.audio_input.clone() {
             // todo: let the user pick the codec
@@ -482,6 +465,8 @@ impl<T: IpfsTypes> WebRtc<T> {
             {
                 log::error!("failed to send CreateSourceTrack command: {e}");
             }
+        } else {
+            bail!("no audio input device");
         }
 
         if let Some(device_name) = self.audio_output.clone() {
@@ -494,7 +479,36 @@ impl<T: IpfsTypes> WebRtc<T> {
             {
                 log::error!("failed to send ChangeAudioOutput command: {e}");
             }
+        } else {
+            bail!("no audio output device");
         }
+
+        Ok(())
+    }
+
+    // todo: make sure this only gets called once
+    async fn init_call(&mut self, call: Call, stop: Arc<Notify>) -> anyhow::Result<()> {
+        let ipfs = self.ipfs.read();
+
+        // use this on error conditions and after terminating the call
+        let unsubscribe = async {
+            if let Err(e) = ipfs
+                .pubsub_unsubscribe(&ipfs_routes::call_broadcast_route(&call.id))
+                .await
+            {
+                log::error!("failed to unsubscribe call_broadcast_route: {e}");
+            }
+
+            if let Err(e) = ipfs
+                .pubsub_unsubscribe(&ipfs_routes::call_signal_route(&self.id, &call.id))
+                .await
+            {
+                log::error!("failed to unsubscribe cal_signal_route: {e}");
+            }
+        };
+
+        // this was moved to the init function
+        // self.configure_call_audio()?;
 
         let call_broadcast_stream = match ipfs
             .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
@@ -844,5 +858,7 @@ pub mod media_track {
         UnmuteSelf,
         #[display(fmt = "HangUp")]
         HangUp,
+        #[display(fmt = "Quit")]
+        Quit,
     }
 }
