@@ -14,9 +14,12 @@ use futures::{
     stream::FuturesUnordered,
     SinkExt, Stream, StreamExt,
 };
-use rust_ipfs::{libp2p::swarm::dial_opts::{DialOpts, PeerCondition}, Ipfs, Multiaddr, PeerId, Protocol};
+use rust_ipfs::{
+    libp2p::swarm::dial_opts::{DialOpts, PeerCondition},
+    Ipfs, Multiaddr, PeerId, Protocol,
+};
 use tokio::{
-    sync::{broadcast, RwLock},
+    sync::{broadcast, Mutex, RwLock},
     task::JoinHandle,
 };
 use tracing::log;
@@ -313,6 +316,7 @@ pub struct DiscoveryEntry {
     config: DiscoveryConfig,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
     sender: broadcast::Sender<DID>,
+    timer: Arc<Mutex<tokio::time::Interval>>,
 }
 
 impl PartialEq for DiscoveryEntry {
@@ -347,13 +351,13 @@ impl DiscoveryEntry {
             discover: Arc::default(),
             task: Arc::default(),
             sender,
+            timer: Arc::new(Mutex::new(tokio::time::interval(Duration::from_secs(30)))),
         };
 
         let task = tokio::spawn({
             let entry = entry.clone();
             let ipfs = ipfs.clone();
             async move {
-                let mut timer = tokio::time::interval(Duration::from_secs(30));
                 if !entry.valid().await {
                     let did_key = peer_id.to_did().expect("Ed25519 key is only supported");
 
@@ -372,57 +376,7 @@ impl DiscoveryEntry {
                             PeerConnectionType::NotConnected
                         )
                     {
-                        match entry.config {
-                            // Used for provider. Doesnt do anything right now
-                            // TODO: Maybe have separate provider query in case
-                            //       Discovery task isnt enabled?
-                            DiscoveryConfig::Provider(_) => {
-                                //TODO: Possibly merge with `DiscoveryConfig::Direct`
-                                let addrs = match ipfs.identity(Some(peer_id)).await {
-                                    Ok(info) => info.listen_addrs,
-                                    Err(_) => vec![],
-                                };
-
-                                let opts = DialOpts::peer_id(peer_id)
-                                    .condition(PeerCondition::Disconnected)
-                                    .addresses(addrs)
-                                    .extend_addresses_through_behaviour()
-                                    .build();
-
-                                if let Err(_e) = ipfs.connect(opts).await {}
-                            }
-                            // Check over DHT
-                            DiscoveryConfig::Direct => {
-                                tokio::select! {
-                                    _ = timer.tick() => {
-                                        //Note: Since we already added (or "whitelist") the peer, their identify will remain
-                                        //      So we should instead attempt to dial out over their existing addreesses
-                                        let _ = entry.ipfs.identity(Some(entry.peer_id)).await.ok();
-                                    }
-                                    _ = async {} => {}
-                                }
-                            }
-                            config::Discovery::None => {
-                                // Note: This will work if both peers shares the relays used.
-                                let opts = DialOpts::peer_id(peer_id)
-                                    //Dial out to relays
-                                    .addresses(
-                                        entry
-                                            .relays
-                                            .iter()
-                                            .cloned()
-                                            .map(|addr| addr.with(Protocol::P2pCircuit))
-                                            .collect(),
-                                    )
-                                    //extend out to any behaviour that may have known addresses related to the peer
-                                    .extend_addresses_through_behaviour()
-                                    .build();
-
-                                if let Err(_e) = ipfs.connect(opts).await {
-                                    tokio::time::sleep(Duration::from_secs(1)).await;
-                                }
-                            }
-                        }
+                        entry.connect().await.ok();
                     }
 
                     let connection_type = match ipfs.is_connected(entry.peer_id).await {
@@ -485,6 +439,64 @@ impl DiscoveryEntry {
 
     pub fn disable_discovery(&self) {
         self.discover.store(false, Ordering::SeqCst)
+    }
+
+    pub async fn connect(&self) -> Result<(), Error> {
+        let peer_id = self.peer_id;
+        let mut timer = self.timer.lock().await;
+        match self.config {
+            // Used for provider. Doesnt do anything right now
+            // TODO: Maybe have separate provider query in case
+            //       Discovery task isnt enabled?
+            DiscoveryConfig::Provider(_) => {
+                //TODO: Possibly merge with `DiscoveryConfig::Direct` to make sense of the direct connections attempts
+                let addrs = match self.ipfs.identity(Some(peer_id)).await {
+                    Ok(info) => info.listen_addrs,
+                    Err(_) => vec![],
+                };
+
+                let opts = DialOpts::peer_id(peer_id)
+                    .condition(PeerCondition::Disconnected)
+                    .addresses(addrs)
+                    .extend_addresses_through_behaviour()
+                    .build();
+
+                if let Err(_e) = self.ipfs.connect(opts).await {
+                    //Possibly retry if the initial addresses arent empty
+                }
+            }
+            // Check over DHT
+            DiscoveryConfig::Direct => {
+                tokio::select! {
+                    _ = timer.tick() => {
+                        //Note: Since we already added (or "whitelist") the peer, their identify will remain
+                        //      So we should instead attempt to dial out over their existing addreesses
+                        let _ = self.ipfs.identity(Some(peer_id)).await.ok();
+                    }
+                    _ = async {} => {}
+                }
+            }
+            config::Discovery::None => {
+                // Note: This will work if both peers shares the relays used.
+                let opts = DialOpts::peer_id(peer_id)
+                    //Dial out to relays
+                    .addresses(
+                        self.relays
+                            .iter()
+                            .cloned()
+                            .map(|addr| addr.with(Protocol::P2pCircuit))
+                            .collect(),
+                    )
+                    //extend out to any behaviour that may have known addresses related to the peer
+                    .extend_addresses_through_behaviour()
+                    .build();
+
+                if let Err(_e) = self.ipfs.connect(opts).await {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn cancel(&self) {
