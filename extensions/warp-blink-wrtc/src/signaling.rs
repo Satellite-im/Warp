@@ -8,13 +8,13 @@ use webrtc::{
 
 #[derive(Serialize, Deserialize)]
 pub struct SigSdp {
-    pub src: String,
+    pub src: DID,
     pub sdp: RTCSessionDescription,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct SigIce {
-    pub src: String,
+    pub src: DID,
     pub ice: RTCIceCandidate,
 }
 
@@ -23,23 +23,13 @@ pub enum PeerSignal {
     Ice(SigIce),
     Sdp(SigSdp),
     CallInitiated(SigSdp),
-    CallTerminated(String),
-    CallRejected(String),
+    CallTerminated(Uuid),
+    CallRejected(Uuid),
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum CallSignal {
-    Offer {
-        call_id: Uuid,
-        // the person who is offering you to join the call
-        sender: DID,
-        // the total set of participants who are invited to the call
-        participants: Vec<DID>,
-    },
-    Accept {
-        call_id: Uuid,
-    },
-    Reject {
-        call_id: Uuid,
-    },
+    Join { call_id: Uuid },
+    Reject { call_id: Uuid },
+    Leave { call_id: Uuid },
 }

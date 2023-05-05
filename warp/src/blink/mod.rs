@@ -7,6 +7,7 @@
 //!
 use std::str::FromStr;
 
+use aes_gcm::{aead::OsRng, Aes256Gcm, KeyInit};
 use async_trait::async_trait;
 use derive_more::Display;
 use futures::stream::BoxStream;
@@ -99,20 +100,34 @@ pub enum BlinkEventKind {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CallInfo {
     id: Uuid,
+    sender: DID,
     // the total set of participants who are invited to the call
     participants: Vec<DID>,
+    // for calls with more than 2 participants, need a symmetric key
+    group_key: Option<Vec<u8>>,
 }
 
 impl CallInfo {
-    pub fn new(participants: Vec<DID>) -> Self {
+    pub fn new(sender: DID, participants: Vec<DID>) -> Self {
+        let group_key = if participants.len() == 2 {
+            None
+        } else {
+            Some(Aes256Gcm::generate_key(&mut OsRng).as_slice().into())
+        };
         Self {
             id: Uuid::new_v4(),
+            sender,
             participants,
+            group_key,
         }
     }
 
     pub fn id(&self) -> Uuid {
         self.id
+    }
+
+    pub fn sender(&self) -> DID {
+        self.sender.clone()
     }
 
     pub fn participants(&self) -> Vec<DID> {

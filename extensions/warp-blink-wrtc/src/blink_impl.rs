@@ -4,7 +4,7 @@
 //! - note that topics are automatically unsubscribed to when the stream is dropped
 //! - call initiation: offer_call/<DID>
 //! - per call
-//!     - peer join/leave call: telecon/<Uuid>
+//!     - peer join/decline/leave call: telecon/<Uuid>
 //!     - webrtc signaling: telecon/<Uuid>/<DID>
 //!
 //! Async Tasks
@@ -28,6 +28,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 use ipfs::{libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsTypes, SubscriptionStream};
 use once_cell::sync::Lazy;
+use rand::rngs::OsRng;
 use serde::de::DeserializeOwned;
 use tokio::{
     sync::{
@@ -39,7 +40,7 @@ use tokio::{
 use uuid::Uuid;
 use warp::{
     blink::{BlinkEventKind, CallInfo},
-    crypto::DID,
+    crypto::{aes_gcm::Aes256Gcm, digest::KeyInit, DID},
     multipass::MultiPass,
     sata::Sata,
     sync::RwLock,
@@ -159,8 +160,9 @@ impl<T: IpfsTypes> WebRtc<T> {
 
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let ui_event_ch2 = ui_event_ch.clone();
+        let own_id = did.clone();
         let offer_handler = tokio::spawn(async {
-            handle_call_offers(call_offer_stream, ui_event_ch2).await;
+            handle_call_offers(own_id, call_offer_stream, ui_event_ch2).await;
         });
 
         let webrtc = Self {
@@ -213,8 +215,10 @@ impl<T: IpfsTypes> WebRtc<T> {
         ));
 
         let ui_event_ch = self.ui_event_ch.clone();
+        let own_id = self.id.clone();
         let webrtc_handle = tokio::task::spawn(async move {
             handle_webrtc(
+                own_id,
                 ui_event_ch,
                 call_broadcast_stream,
                 call_signaling_stream,
@@ -230,12 +234,6 @@ impl<T: IpfsTypes> WebRtc<T> {
     }
 
     async fn cleanup_call(&mut self) {}
-}
-
-async fn handle_call_offers(mut stream: SubscriptionStream, ch: Sender<BlinkEventKind>) {
-    while let Some(evt) = stream.next().await {
-        todo!("decode gossip message and handle it")
-    }
 }
 
 fn decode_gossipsub_msg<T: DeserializeOwned>(
@@ -263,6 +261,33 @@ fn decode_gossipsub_msg<T: DeserializeOwned>(
     Ok(data)
 }
 
+async fn handle_call_offers(
+    own_id: DID,
+    mut stream: SubscriptionStream,
+    ch: Sender<BlinkEventKind>,
+) {
+    while let Some(msg) = stream.next().await {
+        // todo: decrypt
+        let call_info: CallInfo = match decode_gossipsub_msg(&own_id, Some(msg.clone())) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("failed to decode msg from call signaling stream: {e}");
+                continue;
+            }
+        };
+
+        let evt = BlinkEventKind::IncomingCall {
+            call_id: call_info.id(),
+            sender: call_info.sender(),
+            participants: call_info.participants(),
+        };
+
+        let mut data: tokio::sync::MutexGuard<StaticData> = STATIC_DATA.lock().await;
+        data.pending_calls.insert(call_info.id(), call_info);
+        ch.send(evt);
+    }
+}
+
 async fn handle_webrtc(
     own_id: DID,
     ch: Sender<BlinkEventKind>,
@@ -284,12 +309,19 @@ async fn handle_webrtc(
                     },
                 };
                 match signal {
-                    CallSignal::Offer { call_id, sender, participants } => {}
-                    CallSignal::Accept { call_id } => {},
-                    CallSignal::Reject { call_id } => {}
+                    CallSignal::Join { call_id } => {
+                        // todo: initiate connection
+                    }
+                    CallSignal::Leave { call_id } => {
+                        // todo: don't retry
+                    },
+                    CallSignal::Reject { call_id } => {
+                       // todo: anything?
+                    }
                 }
             },
             opt = peer_signaling_stream.next() => {
+                // todo: decrypt
                 let signal: PeerSignal = match decode_gossipsub_msg(&own_id, opt) {
                     Ok(s) => s,
                     Err(e) => {
@@ -297,6 +329,15 @@ async fn handle_webrtc(
                         continue;
                     },
                 };
+
+                match signal {
+                    PeerSignal::Ice(icd) => {}
+                    PeerSignal::Sdp(sdp) => {}
+                    PeerSignal::CallInitiated(sdp) => {
+                    }
+                    PeerSignal::CallTerminated(call_id) => {}
+                    PeerSignal::CallRejected(call_id) => {}
+                }
             },
             opt = webrtc_event_stream.next() => {
                 match opt {
