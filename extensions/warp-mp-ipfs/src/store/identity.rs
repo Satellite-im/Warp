@@ -3,7 +3,7 @@
 #![allow(clippy::clone_on_copy)]
 use crate::{
     config::{Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, PeerTopic, VecExt},
+    store::{did_to_libp2p_pub, discovery::Discovery, PeerTopic, VecExt, PeerIdExt},
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -282,12 +282,15 @@ impl IdentityStore {
                             if let Some(message) = message {
                                 let entry = match message.source {
                                     Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
-                                        Some(entry) => entry,
-                                        None => continue,
+                                        Some(entry) => entry.did_key().await.ok(),
+                                        None => {
+                                            let _ = store.discovery.insert(peer_id).await.ok();
+                                            peer_id.to_did().ok()
+                                        },
                                     },
                                     None => continue,
                                 };
-                                if let Ok(in_did) = entry.did_key().await {
+                                if let Some(in_did) = entry {
                                     if let Err(e) = store.process_message(in_did, &message.data).await {
                                         error!("Error: {e}");
                                     }
@@ -1271,7 +1274,7 @@ impl IdentityStore {
         }
 
         let public_key =
-            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
+            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().to_bytes()));
 
         let username = username
             .map(str::to_string)
@@ -1583,17 +1586,16 @@ impl IdentityStore {
     }
 
     pub fn get_keypair_did(&self) -> anyhow::Result<DID> {
-        let kp = Zeroizing::new(self.get_raw_keypair()?.encode());
+        let kp = Zeroizing::new(self.get_raw_keypair()?.to_bytes());
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
         let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
         Ok(did.into())
     }
 
     pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
-        match self.get_keypair()?.into_ed25519() {
-            Some(kp) => Ok(kp),
-            _ => anyhow::bail!("Unsupported keypair"),
-        }
+        self.get_keypair()?
+            .try_into_ed25519()
+            .map_err(anyhow::Error::from)
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
