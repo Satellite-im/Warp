@@ -15,7 +15,7 @@ use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use item::Item;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
 
 #[cfg(target_arch = "wasm32")]

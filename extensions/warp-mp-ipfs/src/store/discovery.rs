@@ -1,11 +1,12 @@
 use std::{
     collections::HashSet,
+    fmt::Debug,
     hash::Hash,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration, fmt::Debug,
+    time::Duration,
 };
 
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
@@ -124,7 +125,7 @@ impl Discovery {
             if let Ok(entry) = self.get(peer_id).await {
                 if !entry.valid().await {
                     entry.set_did_key(did).await;
-                    return Ok(())
+                    return Ok(());
                 }
             }
         }

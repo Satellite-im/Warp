@@ -5,9 +5,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{bail, Context};
-use cpal::traits::HostTrait;
+use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use warp::crypto::DID;
 use webrtc::track::track_remote::TrackRemote;
 use webrtc::{
@@ -20,34 +20,52 @@ use crate::simple_webrtc::{self, audio, MediaSourceId};
 static SINGLETON_MUTEX: Lazy<Mutex<DummyStruct>> = Lazy::new(|| Mutex::new(DummyStruct {}));
 struct DummyStruct {}
 
-static mut AUDIO_INPUT_DEVICE: Lazy<Option<cpal::Device>> = Lazy::new(|| {
+// audio input and audio output have a RwLock to allow for a function that queries the device name, without needing to acquire the SINGLETON_MUTEX.
+// maybe this is a bad idea. idk. but the RwLock is only needed when changing the input/output device
+static AUDIO_INPUT_DEVICE: Lazy<RwLock<Option<cpal::Device>>> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
-    cpal_host.default_input_device()
+    RwLock::new(cpal_host.default_input_device())
 });
-static mut AUDIO_OUTPUT_DEVICE: Lazy<Option<cpal::Device>> = Lazy::new(|| {
+static AUDIO_OUTPUT_DEVICE: Lazy<RwLock<Option<cpal::Device>>> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
-    cpal_host.default_output_device()
+    RwLock::new(cpal_host.default_output_device())
 });
 static mut AUDIO_SOURCE: Option<Box<dyn audio::SourceTrack>> = None;
 static mut SINK_TRACKS: Lazy<HashMap<DID, Box<dyn audio::SinkTrack>>> = Lazy::new(HashMap::new);
 
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
 
-// turns a track, device, and codec into a SourceTrack, which reads and packetizes audio input
-// webrtc should remove the old media source before this is called
+pub async fn get_input_device_name() -> Option<String> {
+    let input_device = AUDIO_INPUT_DEVICE.read().await;
+    input_device.as_ref().and_then(|x| x.name().ok())
+}
+
+pub async fn get_output_device_name() -> Option<String> {
+    let output_device = AUDIO_OUTPUT_DEVICE.read().await;
+    output_device.as_ref().and_then(|x| x.name().ok())
+}
+
+pub async fn reset() {
+    let _lock = SINGLETON_MUTEX.lock().await;
+    unsafe {
+        AUDIO_SOURCE.take();
+        SINK_TRACKS.clear();
+    }
+}
+
+// turns a track, device, and codec into a SourceTrack, which reads and packetizes audio input.
+// webrtc should remove the old media source before this is called.
 // use AUDIO_SOURCE_ID
 pub async fn create_audio_source_track(
     track: Arc<TrackLocalStaticRTP>,
     codec: RTCRtpCodecCapability,
 ) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
-
-    let input_device = unsafe {
-        match AUDIO_INPUT_DEVICE.as_ref() {
-            Some(d) => d,
-            None => {
-                bail!("no audio input device selected");
-            }
+    let audio_input = AUDIO_INPUT_DEVICE.read().await;
+    let input_device = match audio_input.as_ref() {
+        Some(d) => d,
+        None => {
+            bail!("no audio input device selected");
         }
     };
 
@@ -69,13 +87,12 @@ pub async fn remove_source_track(source_id: MediaSourceId) -> anyhow::Result<()>
 
 pub async fn create_audio_sink_track(peer_id: DID, track: Arc<TrackRemote>) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
+    let audio_output = AUDIO_OUTPUT_DEVICE.read().await;
     let codec = track.codec().await.capability;
-    let output_device = unsafe {
-        match AUDIO_OUTPUT_DEVICE.as_ref() {
-            Some(d) => d,
-            None => {
-                bail!("no audio output device selected");
-            }
+    let output_device = match audio_output.as_ref() {
+        Some(d) => d,
+        None => {
+            bail!("no audio output device selected");
         }
     };
 
@@ -89,17 +106,20 @@ pub async fn create_audio_sink_track(peer_id: DID, track: Arc<TrackRemote>) -> a
 
 pub async fn change_audio_input(device: cpal::Device) {
     let _lock = SINGLETON_MUTEX.lock().await;
+    let mut audio_input = AUDIO_INPUT_DEVICE.write().await;
 
     unsafe {
         if let Some(source) = AUDIO_SOURCE.as_mut() {
             source.change_input_device(&device);
         }
-        AUDIO_INPUT_DEVICE.replace(device);
     }
+
+    audio_input.replace(device);
 }
 
 pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
+    let mut audio_output = AUDIO_OUTPUT_DEVICE.write().await;
 
     unsafe {
         // todo: if this fails, return an error or keep going?
@@ -108,8 +128,8 @@ pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
                 log::error!("failed to change output device: {e}");
             }
         }
-        AUDIO_OUTPUT_DEVICE.replace(device);
     }
+    audio_output.replace(device);
     Ok(())
 }
 

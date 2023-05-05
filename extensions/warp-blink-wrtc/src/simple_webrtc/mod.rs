@@ -21,6 +21,7 @@ use futures::Stream;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use uuid::Uuid;
 use warp::crypto::DID;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
@@ -68,7 +69,6 @@ use self::events::EmittedEvents;
 
 pub struct Controller {
     api: webrtc::api::API,
-    id: DID,
     peers: HashMap<DID, Peer>,
     event_ch: broadcast::Sender<EmittedEvents>,
     media_sources: HashMap<MediaSourceId, Arc<TrackLocalStaticRTP>>,
@@ -108,12 +108,11 @@ pub type MediaSourceId = String;
 /// recv_ice
 /// recv_sdp
 impl Controller {
-    pub fn new(did: DID) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         // todo: verify size
         let (event_ch, _rx) = broadcast::channel(1024);
         Ok(Self {
             api: create_api()?,
-            id: did,
             peers: HashMap::new(),
             event_ch,
             media_sources: HashMap::new(),
@@ -229,7 +228,7 @@ impl Controller {
         let track = Arc::new(TrackLocalStaticRTP::new(
             codec,
             source_id.clone(),
-            self.id.to_string(), // todo: don't use did
+            Uuid::new_v4().to_string(),
         ));
         // save this for later, for when connections are established to new peers
         self.media_sources.insert(source_id.clone(), track.clone());

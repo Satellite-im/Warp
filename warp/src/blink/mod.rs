@@ -67,16 +67,21 @@ pub trait Blink {
 
     // ------ Utility Functions ------
 
-    /// Returns the ID of the current call, or None if
-    /// a call is not in progress
-    fn get_call_id(&self) -> Option<Uuid>;
+    fn pending_calls(&self) -> Vec<CallInfo>;
+    fn current_call(&self) -> Option<CallInfo>;
 }
 
 /// Drives the UI
 #[derive(Clone)]
 pub enum BlinkEventKind {
     /// A call has been offered
-    IncomingCall { call_id: Uuid },
+    IncomingCall {
+        call_id: Uuid,
+        // the person who is offering you to join the call
+        sender: DID,
+        // the total set of participants who are invited to the call
+        participants: Vec<DID>,
+    },
     /// At least one participant accepted the call
     CallStarted { call_id: Uuid },
     /// All participants have left the call
@@ -89,6 +94,30 @@ pub enum BlinkEventKind {
     ParticipantSpeaking { call_id: Uuid, peer_id: DID },
     /// A participant stopped speaking
     ParticipantNotSpeaking { call_id: Uuid, peer_id: DID },
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CallInfo {
+    id: Uuid,
+    // the total set of participants who are invited to the call
+    participants: Vec<DID>,
+}
+
+impl CallInfo {
+    pub fn new(participants: Vec<DID>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            participants,
+        }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn participants(&self) -> Vec<DID> {
+        self.participants.clone()
+    }
 }
 
 pub struct BlinkEventStream(pub BoxStream<'static, BlinkEventKind>);

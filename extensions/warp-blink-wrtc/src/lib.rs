@@ -33,6 +33,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warp::blink::BlinkEventKind;
+use warp::blink::CallInfo;
 use warp::blink::MimeType;
 use warp::libipld;
 use warp::multipass::MultiPass;
@@ -48,6 +49,7 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
+mod blink_impl;
 mod host_media;
 mod signaling;
 mod simple_webrtc;
@@ -84,7 +86,7 @@ pub struct WebRtc<T: IpfsTypes> {
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     webrtc: Arc<Mutex<simple_webrtc::Controller>>,
     active_call: Option<ActiveCall>,
-    pending_calls: HashMap<Uuid, Call>,
+    pending_calls: HashMap<Uuid, CallInfo>,
     cpal_host: cpal::Host,
     // cpal::Device.name()
     audio_input: Option<String>,
@@ -92,17 +94,10 @@ pub struct WebRtc<T: IpfsTypes> {
     audio_output: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-struct Call {
-    id: Uuid,
-    participants: Vec<DID>,
-}
-
 #[derive(Clone)]
 struct ActiveCall {
-    call: Call,
+    call: CallInfo,
     state: CallState,
-    stop: Arc<Notify>,
 }
 
 #[derive(Clone)]
@@ -115,16 +110,7 @@ enum CallState {
 impl<T: IpfsTypes> Drop for WebRtc<T> {
     fn drop(&mut self) {
         if let Some(ac) = self.active_call.as_ref() {
-            ac.stop.notify_waiters();
-        }
-    }
-}
-
-impl Call {
-    fn new(participants: Vec<DID>) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            participants,
+            todo!()
         }
     }
 }
@@ -133,20 +119,18 @@ impl Call {
 impl ActiveCall {
     fn new(participants: Vec<DID>) -> Self {
         Self {
-            call: Call::new(participants),
+            call: CallInfo::new(participants),
             state: CallState::Pending,
-            stop: Arc::new(Notify::new()),
         }
     }
 }
 
 // used when a call is accepted
-impl From<Call> for ActiveCall {
-    fn from(value: Call) -> Self {
+impl From<CallInfo> for ActiveCall {
+    fn from(value: CallInfo) -> Self {
         Self {
             call: value,
             state: CallState::InProgress,
-            stop: Arc::new(Notify::new()),
         }
     }
 }
@@ -155,7 +139,7 @@ impl From<Call> for ActiveCall {
 #[derive(Serialize, Deserialize)]
 enum InitiationSignal {
     /// invite a peer to join a call
-    Offer(Call),
+    Offer(CallInfo),
     /// indicate that the peer will not be joining
     Reject(DID),
 }
@@ -230,7 +214,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
                 return Err(Error::SerdeCborError(e));
             }
         };
-        for participant in &ac.call.participants {
+        for participant in &ac.call.participants() {
             if let Err(e) = ipfs
                 .pubsub_publish(ipfs_routes::offer_call_route(participant), bytes.clone())
                 .await
@@ -384,10 +368,11 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
 
     // ------ Utility Functions ------
 
-    /// Returns the ID of the current call, or None if
-    /// a call is not in progress
-    fn get_call_id(&self) -> Option<Uuid> {
-        todo!()
+    fn pending_calls(&self) -> Vec<CallInfo> {
+        Vec::from_iter(self.pending_calls.values().cloned())
+    }
+    fn current_call(&self) -> Option<CallInfo> {
+        self.active_call.as_ref().map(|x| x.call.clone())
     }
 }
 
@@ -459,20 +444,20 @@ impl<T: IpfsTypes> WebRtc<T> {
     }
 
     // todo: make sure this only gets called once
-    async fn init_call(&mut self, call: Call, stop: Arc<Notify>) -> anyhow::Result<()> {
+    async fn init_call(&mut self, call: CallInfo, stop: Arc<Notify>) -> anyhow::Result<()> {
         let ipfs = self.ipfs.read();
 
         // use this on error conditions and after terminating the call
         let unsubscribe = async {
             if let Err(e) = ipfs
-                .pubsub_unsubscribe(&ipfs_routes::call_broadcast_route(&call.id))
+                .pubsub_unsubscribe(&ipfs_routes::call_broadcast_route(&call.id()))
                 .await
             {
                 log::error!("failed to unsubscribe call_broadcast_route: {e}");
             }
 
             if let Err(e) = ipfs
-                .pubsub_unsubscribe(&ipfs_routes::call_signal_route(&self.id, &call.id))
+                .pubsub_unsubscribe(&ipfs_routes::call_signal_route(&self.id, &call.id()))
                 .await
             {
                 log::error!("failed to unsubscribe cal_signal_route: {e}");
@@ -480,7 +465,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         };
 
         let call_broadcast_stream = match ipfs
-            .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
+            .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id()))
             .await
         {
             Ok(s) => s,
@@ -491,7 +476,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         };
 
         let call_signaling_stream = match ipfs
-            .pubsub_subscribe(ipfs_routes::call_signal_route(&self.id, &call.id))
+            .pubsub_subscribe(ipfs_routes::call_signal_route(&self.id, &call.id()))
             .await
         {
             Ok(s) => s,
@@ -518,7 +503,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         };
         // SimpleWebRTC instance
         let webrtc = self.webrtc.clone();
-        tokio::task::spawn(async move {
+        let webrtc_handle = tokio::task::spawn(async move {
             handle_webrtc(
                 webrtc,
                 call_broadcast_stream,

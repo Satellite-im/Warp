@@ -1,14 +1,13 @@
-
 pub mod common;
 #[cfg(test)]
 mod test {
     use std::time::Duration;
 
+    use crate::common::{create_account, create_accounts};
     use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
     use warp::multipass::MultiPass;
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::ipfs_identity_temporary;
-    use crate::common::{create_accounts, create_account};
 
     #[tokio::test]
     async fn create_identity() -> anyhow::Result<()> {

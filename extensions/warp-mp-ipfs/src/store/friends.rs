@@ -156,10 +156,7 @@ impl FriendsStore {
             wait_on_response,
         };
 
-        let stream = store
-            .ipfs
-            .pubsub_subscribe(store.did_key.inbox())
-            .await?;
+        let stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await?;
 
         tokio::spawn({
             let mut store = store.clone();

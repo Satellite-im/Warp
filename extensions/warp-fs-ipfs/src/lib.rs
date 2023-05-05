@@ -370,7 +370,6 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileExist);
         }
 
-
         let name = name.to_string();
         let fs = self.clone();
         let progress_stream = async_stream::stream! {

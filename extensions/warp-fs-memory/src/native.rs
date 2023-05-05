@@ -12,8 +12,7 @@ use crate::item::Item;
 use crate::{item, MemorySystem, Result};
 use warp::constellation::directory::Directory;
 use warp::constellation::{
-    Constellation, ConstellationEvent, ConstellationProgressStream,
-    Progression,
+    Constellation, ConstellationEvent, ConstellationProgressStream, Progression,
 };
 use warp::module::Module;
 
