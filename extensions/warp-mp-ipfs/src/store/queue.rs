@@ -1,7 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use futures::{channel::mpsc, StreamExt};
-use libipld::IpldCodec;
 use rust_ipfs::Ipfs;
 use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::log::{self, error};
@@ -13,10 +12,9 @@ use warp::{
         Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
-    sata::{Kind, Sata},
 };
 
-use crate::store::PeerTopic;
+use crate::store::{ecdh_encrypt, PeerTopic};
 
 use super::{connected_to_peer, discovery::Discovery, friends::PayloadEvent};
 
@@ -241,20 +239,9 @@ impl QueueEntry {
 
                         let res = async move {
                             let kp = &*entry.did;
-                            let mut data = Sata::default();
-                            data.add_recipient(&recipient)
-                                .map_err(anyhow::Error::from)?;
+                            let payload_bytes = serde_json::to_vec(&entry.item)?;
 
-                            let payload = data
-                                .encrypt(
-                                    IpldCodec::DagJson,
-                                    kp.as_ref(),
-                                    Kind::Reference,
-                                    entry.item,
-                                )
-                                .map_err(anyhow::Error::from)?;
-
-                            let bytes = serde_json::to_vec(&payload)?;
+                            let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
 
                             log::trace!("Payload size: {} bytes", bytes.len());
 
