@@ -243,6 +243,21 @@ pub struct StoreSetting {
     pub update_events: UpdateEvents,
     /// Disable providing images for identities
     pub disable_images: bool,
+
+    /// Allow only interactions with friends
+    /// Note: This is ignored when it comes to chating between group chat recipients
+    pub with_friends: bool,
+
+    /// Enables spam check
+    pub check_spam: bool,
+
+    /// Load conversation in a separate task
+    /// Note: While this is loaded in a separate task, not all conversations will be made available up front.
+    ///       If any conversations are corrupted for whatever reason they will not be made available
+    pub conversation_load_task: bool,
+
+    /// Disables emitting an event on stream for creating a conversation
+    pub disable_sender_event_emit: bool,
 }
 
 impl Default for StoreSetting {
@@ -259,12 +274,16 @@ impl Default for StoreSetting {
             emit_online_event: false,
             update_events: Default::default(),
             disable_images: false,
+            with_friends: false,
+            conversation_load_task: false,
+            check_spam: false,
+            disable_sender_event_emit: false,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MpIpfsConfig {
+pub struct IpfsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
     pub bootstrap: Bootstrap,
@@ -276,9 +295,9 @@ pub struct MpIpfsConfig {
     pub save_phrase: bool,
 }
 
-impl Default for MpIpfsConfig {
+impl Default for IpfsConfig {
     fn default() -> Self {
-        MpIpfsConfig {
+        IpfsConfig {
             path: None,
             bootstrap: Bootstrap::Ipfs,
             listen_on: vec!["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
@@ -297,15 +316,15 @@ impl Default for MpIpfsConfig {
     }
 }
 
-impl MpIpfsConfig {
+impl IpfsConfig {
     /// Default configuration for local development and writing test
-    pub fn development() -> MpIpfsConfig {
-        MpIpfsConfig::default()
+    pub fn development() -> Self {
+        Self::default()
     }
 
     /// Test configuration. Used for in-memory
-    pub fn testing(experimental: bool) -> MpIpfsConfig {
-        MpIpfsConfig {
+    pub fn testing(experimental: bool) -> Self {
+        Self {
             bootstrap: match experimental {
                 true => Bootstrap::Experimental,
                 false => Bootstrap::Ipfs,
@@ -328,8 +347,8 @@ impl MpIpfsConfig {
     }
 
     /// Minimal production configuration
-    pub fn minimal_testing() -> MpIpfsConfig {
-        MpIpfsConfig {
+    pub fn minimal_testing() -> Self {
+        IpfsConfig {
             bootstrap: Bootstrap::Ipfs,
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
@@ -349,8 +368,8 @@ impl MpIpfsConfig {
     }
 
     /// Minimal production configuration
-    pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> MpIpfsConfig {
-        MpIpfsConfig {
+    pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> Self {
+        Self {
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
@@ -371,8 +390,8 @@ impl MpIpfsConfig {
     }
 
     /// Recommended production configuration
-    pub fn production<P: AsRef<std::path::Path>>(path: P, experimental: bool) -> MpIpfsConfig {
-        MpIpfsConfig {
+    pub fn production<P: AsRef<std::path::Path>>(path: P, experimental: bool) -> Self {
+        Self {
             bootstrap: match experimental {
                 true => Bootstrap::Experimental,
                 false => Bootstrap::Ipfs,
@@ -395,7 +414,7 @@ impl MpIpfsConfig {
         }
     }
 
-    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<MpIpfsConfig> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let path = path.as_ref();
         let bytes = std::fs::read(path)?;
         let config = serde_json::from_slice(&bytes)?;
@@ -409,7 +428,7 @@ impl MpIpfsConfig {
         Ok(())
     }
 
-    pub fn from_string<S: AsRef<str>>(data: S) -> anyhow::Result<MpIpfsConfig> {
+    pub fn from_string<S: AsRef<str>>(data: S) -> anyhow::Result<Self> {
         let data = data.as_ref();
         let config = serde_json::from_str(data)?;
         Ok(config)
@@ -417,7 +436,7 @@ impl MpIpfsConfig {
 }
 
 pub mod ffi {
-    use crate::MpIpfsConfig;
+    use crate::config::IpfsConfig;
     use std::ffi::CStr;
     use std::os::raw::c_char;
     use warp::error::Error;
@@ -427,20 +446,20 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn mp_ipfs_config_from_file(
         file: *const c_char,
-    ) -> FFIResult<MpIpfsConfig> {
+    ) -> FFIResult<IpfsConfig> {
         if file.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("file cannot be null")));
         }
 
         let file = CStr::from_ptr(file).to_string_lossy().to_string();
 
-        MpIpfsConfig::from_file(file).map_err(Error::from).into()
+        IpfsConfig::from_file(file).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn mp_ipfs_config_to_file(
-        config: *const MpIpfsConfig,
+        config: *const IpfsConfig,
         file: *const c_char,
     ) -> FFIResult_Null {
         if config.is_null() {
@@ -457,7 +476,7 @@ pub mod ffi {
 
         let file = CStr::from_ptr(file).to_string_lossy().to_string();
 
-        MpIpfsConfig::to_file(&*config, file)
+        IpfsConfig::to_file(&*config, file)
             .map_err(Error::from)
             .into()
     }
@@ -466,21 +485,19 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn mp_ipfs_config_from_str(
         config: *const c_char,
-    ) -> FFIResult<MpIpfsConfig> {
+    ) -> FFIResult<IpfsConfig> {
         if config.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
         }
 
         let data = CStr::from_ptr(config).to_string_lossy().to_string();
 
-        MpIpfsConfig::from_string(data).map_err(Error::from).into()
+        IpfsConfig::from_string(data).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_to_str(
-        config: *const MpIpfsConfig,
-    ) -> FFIResult_String {
+    pub unsafe extern "C" fn mp_ipfs_config_to_str(config: *const IpfsConfig) -> FFIResult_String {
         if config.is_null() {
             return FFIResult_String::err(Error::Any(anyhow::anyhow!("config cannot be null")));
         }
@@ -490,14 +507,14 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_development() -> *mut MpIpfsConfig {
-        Box::into_raw(Box::new(MpIpfsConfig::development()))
+    pub unsafe extern "C" fn mp_ipfs_config_development() -> *mut IpfsConfig {
+        Box::into_raw(Box::new(IpfsConfig::development()))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_testing(experimental: bool) -> *mut MpIpfsConfig {
-        Box::into_raw(Box::new(MpIpfsConfig::testing(experimental)))
+    pub unsafe extern "C" fn mp_ipfs_config_testing(experimental: bool) -> *mut IpfsConfig {
+        Box::into_raw(Box::new(IpfsConfig::testing(experimental)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -505,27 +522,25 @@ pub mod ffi {
     pub unsafe extern "C" fn mp_ipfs_config_production(
         path: *const c_char,
         experimental: bool,
-    ) -> FFIResult<MpIpfsConfig> {
+    ) -> FFIResult<IpfsConfig> {
         if path.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
         }
 
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
 
-        FFIResult::ok(MpIpfsConfig::production(path, experimental))
+        FFIResult::ok(IpfsConfig::production(path, experimental))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_minimal(
-        path: *const c_char,
-    ) -> FFIResult<MpIpfsConfig> {
+    pub unsafe extern "C" fn mp_ipfs_config_minimal(path: *const c_char) -> FFIResult<IpfsConfig> {
         if path.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
         }
 
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
 
-        FFIResult::ok(MpIpfsConfig::minimal(path))
+        FFIResult::ok(IpfsConfig::minimal(path))
     }
 }

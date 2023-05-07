@@ -15,7 +15,7 @@ use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
-use crate::config::MpIpfsConfig;
+use crate::config::IpfsConfig as MpIpfsConfig;
 use crate::store::{ecdh_decrypt, ecdh_encrypt, PeerIdExt, PeerTopic};
 
 use super::identity::{IdentityStore, LookupBy, RequestOption};

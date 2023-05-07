@@ -5,22 +5,32 @@ pub mod identity;
 pub mod phonebook;
 pub mod queue;
 
+pub mod conversation;
+pub mod keystore;
+pub mod message;
+pub mod payload;
+
 use std::{fmt::Display, time::Duration};
 
+use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use libipld::Multihash;
 use rust_ipfs as ipfs;
 
 use ipfs::{Multiaddr, PeerId, Protocol, PublicKey};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use warp::{
     crypto::{
         cipher::Cipher,
-        did_key::{Generate, ECDH},
+        did_key::{CoreSign, Generate, ECDH},
+        hash::sha256_hash,
         zeroize::Zeroizing,
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
     multipass::identity::IdentityStatus,
+    raygun::{Message, MessageEvent, PinState, ReactionState},
     tesseract::Tesseract,
 };
 
@@ -33,6 +43,10 @@ pub trait PeerTopic: Display {
 
     fn events(&self) -> String {
         format!("/peer/{self}/events")
+    }
+
+    fn messaging(&self) -> String {
+        format!("{self}/messaging")
     }
 }
 
@@ -81,6 +95,139 @@ where
         }
         false
     }
+}
+
+#[allow(clippy::large_enum_variant)]
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum ConversationEvents {
+    NewConversation {
+        recipient: DID,
+    },
+    NewGroupConversation {
+        creator: DID,
+        name: Option<String>,
+        conversation_id: Uuid,
+        list: Vec<DID>,
+        signature: Option<String>,
+    },
+    LeaveConversation {
+        conversation_id: Uuid,
+        recipient: DID,
+        signature: String,
+    },
+    DeleteConversation {
+        conversation_id: Uuid,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum ConversationRequestResponse {
+    Request {
+        conversation_id: Uuid,
+        kind: ConversationRequestKind,
+    },
+    Response {
+        conversation_id: Uuid,
+        kind: ConversationResponseKind,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::type_complexity)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationRequestKind {
+    Key,
+    Ping,
+    RetrieveMessages {
+        // start/end
+        range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
+    },
+    WantMessage {
+        message_id: Uuid,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationResponseKind {
+    Key { key: Vec<u8> },
+    Pong,
+    HaveMessages { messages: Vec<Uuid> },
+}
+
+impl std::fmt::Debug for ConversationResponseKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConversationRespondKind")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum MessagingEvents {
+    New {
+        message: Message,
+    },
+    Edit {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        modified: DateTime<Utc>,
+        lines: Vec<String>,
+        signature: Vec<u8>,
+    },
+    Delete {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    Pin {
+        conversation_id: Uuid,
+        member: DID,
+        message_id: Uuid,
+        state: PinState,
+    },
+    React {
+        conversation_id: Uuid,
+        reactor: DID,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    },
+    UpdateConversationName {
+        conversation_id: Uuid,
+        name: String,
+        signature: String,
+    },
+    AddRecipient {
+        conversation_id: Uuid,
+        recipient: DID,
+        list: Vec<DID>,
+        signature: String,
+    },
+    RemoveRecipient {
+        conversation_id: Uuid,
+        recipient: DID,
+        list: Vec<DID>,
+        signature: String,
+    },
+    Event {
+        conversation_id: Uuid,
+        member: DID,
+        event: MessageEvent,
+        cancelled: bool,
+    },
+}
+
+pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {
+    let x25519_a = Ed25519KeyPair::from_secret_key(&did_a.private_key_bytes()).get_x25519();
+    let x25519_b = Ed25519KeyPair::from_public_key(&did_b.public_key_bytes()).get_x25519();
+    let shared_key = x25519_a.key_exchange(&x25519_b);
+    let topic_hash = sha256_hash(&shared_key, seed.map(|s| s.as_bytes().to_vec()));
+    //Note: Do we want to use the upper half or lower half of the hash for the uuid?
+    Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).map_err(anyhow::Error::from)
 }
 
 #[allow(deprecated)]
@@ -271,9 +418,23 @@ pub async fn discover_peer(
     Ok(())
 }
 
+// Note that this are temporary
+fn sign_serde<D: Serialize>(did: &DID, data: &D) -> anyhow::Result<Vec<u8>> {
+    let bytes = serde_json::to_vec(data)?;
+    Ok(did.as_ref().sign(&bytes))
+}
+
+// Note that this are temporary
+fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
+    let bytes = serde_json::to_vec(data)?;
+    pk.verify(&bytes, signature)
+        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
-    use rust_ipfs::{Keypair};
+    use rust_ipfs::Keypair;
     use warp::crypto::DID;
 
     use crate::store::did_to_libp2p_pub;

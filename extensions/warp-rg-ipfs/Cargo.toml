@@ -38,7 +38,7 @@ bytes.workspace = true
 fdlimit = "0.2"
 warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-pd-flatfile = { path = "../warp-pd-flatfile" }
-warp-mp-ipfs = { path = "../warp-mp-ipfs" }
+warp-ipfs = { path = "../warp-ipfs" }
 warp-fs-ipfs = { path = "../warp-fs-ipfs" }
 rustyline-async = "0.3"
 comfy-table = "6.1"

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use libipld::{
     serde::{from_ipld, to_ipld},
-    Cid,
+    Cid, Ipld,
 };
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{de::DeserializeOwned, Serialize};
@@ -12,6 +12,29 @@ use warp::error::Error;
 pub(crate) trait ToCid: Sized {
     async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error>;
 }
+
+#[async_trait::async_trait]
+pub(crate) trait GetIpldDag: Sized {
+    async fn get_ipld_dag(&self, ipfs: &Ipfs) -> Result<Ipld, Error>;
+}
+
+#[async_trait::async_trait]
+impl GetIpldDag for Cid {
+    async fn get_ipld_dag(&self, ipfs: &Ipfs) -> Result<Ipld, Error> {
+        IpfsPath::from(*self).get_ipld_dag(ipfs).await
+    }
+}
+
+#[async_trait::async_trait]
+impl GetIpldDag for IpfsPath {
+    async fn get_ipld_dag(&self, ipfs: &Ipfs) -> Result<Ipld, Error> {
+        match ipfs.dag().get(self.clone(), &[], true).await {
+            Ok(ipld) => Ok(ipld),
+            Err(e) => Err(Error::from(anyhow::anyhow!("{e}"))),
+        }
+    }
+}
+
 
 #[async_trait::async_trait]
 impl<T> ToCid for T

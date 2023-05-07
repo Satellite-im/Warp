@@ -7,7 +7,7 @@ mod test {
     use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
     use warp::multipass::MultiPass;
     use warp::tesseract::Tesseract;
-    use warp_mp_ipfs::ipfs_identity_temporary;
+    use warp_ipfs::ipfs_identity_temporary;
     use crate::common::{create_accounts, create_account};
 
     #[tokio::test]

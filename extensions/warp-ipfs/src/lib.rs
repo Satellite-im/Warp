@@ -1,7 +1,8 @@
 pub mod config;
+mod spam_filter;
 pub mod store;
 
-use config::MpIpfsConfig;
+use config::IpfsConfig as MpIpfsConfig;
 use either::Either;
 use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
@@ -11,18 +12,24 @@ use ipfs::p2p::{
     ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
 };
 use rust_ipfs as ipfs;
+use uuid::Uuid;
 use std::any::Any;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
+use store::message::MessageStore;
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::debug;
 use tracing::log::{self, error, info, trace, warn};
+use warp::constellation::{ConstellationEventKind, ConstellationProgressStream};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
+use warp::raygun::{RayGunEventKind, RayGunEvents, MessageEvent, MessageEventStream, RayGunEventStream, RayGunStream, RayGunGroupConversation, Location, RayGunAttachment, EmbedState, PinState, ReactionState, MessageStatus, MessageOptions, Messages, Message, Conversation, RayGun};
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -53,8 +60,11 @@ pub struct IpfsIdentity {
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore>>>,
     identity_store: Arc<RwLock<Option<IdentityStore>>>,
+    message_store: Arc<RwLock<Option<MessageStore>>>,
     initialized: Arc<AtomicBool>,
-    tx: broadcast::Sender<MultiPassEventKind>,
+    multipass_tx: broadcast::Sender<MultiPassEventKind>,
+    raygun_tx: broadcast::Sender<RayGunEventKind>,
+    constellation_tx: broadcast::Sender<ConstellationEventKind>,
 }
 
 pub async fn ipfs_identity_persistent(
@@ -86,7 +96,9 @@ impl IpfsIdentity {
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-        let (tx, _) = broadcast::channel(1024);
+        let (multipass_tx, _) = broadcast::channel(1024);
+        let (raygun_tx, _) = tokio::sync::broadcast::channel(1024);
+        let (constellation_tx, _) = tokio::sync::broadcast::channel(1024);
         trace!("Initializing Multipass");
 
         let mut identity = IpfsIdentity {
@@ -96,8 +108,11 @@ impl IpfsIdentity {
             ipfs: Default::default(),
             friend_store: Default::default(),
             identity_store: Default::default(),
+            message_store: Default::default(),
             initialized: Default::default(),
-            tx,
+            multipass_tx,
+            raygun_tx,
+            constellation_tx,
         };
 
         if !identity.tesseract.is_unlock() {
@@ -451,7 +466,7 @@ impl IpfsIdentity {
             config.path.clone(),
             tesseract.clone(),
             config.store_setting.auto_push,
-            self.tx.clone(),
+            self.multipass_tx.clone(),
             (
                 discovery.clone(),
                 relays,
@@ -470,12 +485,32 @@ impl IpfsIdentity {
             discovery,
             config.clone(),
             tesseract.clone(),
-            self.tx.clone(),
+            self.multipass_tx.clone(),
         )
         .await?;
+
         info!("friends store initialized");
 
         identity_store.set_friend_store(friend_store.clone()).await;
+
+        *self.message_store.write() = Some(
+            MessageStore::new(
+                ipfs.clone(),
+                config.path.map(|path| path.join("messages")),
+                identity_store.clone(),
+                None,
+                false,
+                1000, //TODO
+                self.raygun_tx.clone(),
+                (
+                    config.store_setting.check_spam,
+                    config.store_setting.disable_sender_event_emit,
+                    config.store_setting.with_friends,
+                    config.store_setting.conversation_load_task,
+                ),
+            )
+            .await?,
+        );
 
         *self.identity_store.write() = Some(identity_store);
         *self.friend_store.write() = Some(friend_store);
@@ -500,6 +535,13 @@ impl IpfsIdentity {
             return Err(Error::IdentityNotCreated);
         }
         Ok(store)
+    }
+
+    pub fn messaging_store(&self) -> std::result::Result<MessageStore, Error> {
+        self.message_store
+            .read()
+            .clone()
+            .ok_or(Error::RayGunExtensionUnavailable)
     }
 
     pub fn identity_store_sync(&self) -> Result<IdentityStore, Error> {
@@ -1010,7 +1052,7 @@ impl Friends for IpfsIdentity {
 #[async_trait::async_trait]
 impl FriendsEvent for IpfsIdentity {
     async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
-        let mut rx = self.tx.subscribe();
+        let mut rx = self.multipass_tx.subscribe();
 
         let stream = async_stream::stream! {
             loop {
@@ -1065,90 +1107,309 @@ impl IdentityInformation for IpfsIdentity {
     }
 }
 
-pub mod ffi {
-    use crate::config::MpIpfsConfig;
-    use crate::IpfsIdentity;
-    use warp::async_on_block;
-    use warp::error::Error;
-    use warp::ffi::FFIResult;
-    use warp::multipass::MultiPassAdapter;
-    use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::tesseract::Tesseract;
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_mp_ipfs_temporary(
-        pocketdimension: *const PocketDimensionAdapter,
-        tesseract: *const Tesseract,
-        config: *const MpIpfsConfig,
-    ) -> FFIResult<MultiPassAdapter> {
-        let tesseract = match tesseract.is_null() {
-            false => {
-                let tesseract = &*tesseract;
-                tesseract.clone()
-            }
-            true => Tesseract::default(),
-        };
-
-        let mut config = match config.is_null() {
-            true => MpIpfsConfig::testing(true),
-            false => (*config).clone(),
-        };
-
-        config.path = None;
-
-        let cache = match pocketdimension.is_null() {
-            true => None,
-            false => Some(&*pocketdimension),
-        };
-
-        let future =
-            async move { IpfsIdentity::new(config, tesseract, cache.map(|c| c.inner())).await };
-
-        let account = match async_on_block(future) {
-            Ok(identity) => identity,
-            Err(e) => return FFIResult::err(Error::from(e)),
-        };
-
-        FFIResult::ok(MultiPassAdapter::new(Box::new(account)))
+#[async_trait::async_trait]
+impl RayGun for IpfsIdentity {
+    async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
+        self.messaging_store()?.create_conversation(did_key).await
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_mp_ipfs_persistent(
-        pocketdimension: *const PocketDimensionAdapter,
-        tesseract: *const Tesseract,
-        config: *const MpIpfsConfig,
-    ) -> FFIResult<MultiPassAdapter> {
-        let tesseract = match tesseract.is_null() {
-            false => {
-                let tesseract = &*tesseract;
-                tesseract.clone()
-            }
-            true => Tesseract::default(),
-        };
+    async fn create_group_conversation(
+        &mut self,
+        name: Option<String>,
+        recipients: Vec<DID>,
+    ) -> Result<Conversation, Error> {
+        self.messaging_store()?
+            .create_group_conversation(name, HashSet::from_iter(recipients))
+            .await
+    }
 
-        let config = match config.is_null() {
-            true => {
-                return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid")))
-            }
-            false => (*config).clone(),
-        };
+    async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation, Error> {
+        self.messaging_store()?
+            .get_conversation(conversation_id)
+            .await
+            .map(|convo| convo.into())
+    }
 
-        let cache = match pocketdimension.is_null() {
-            true => None,
-            false => Some(&*pocketdimension),
-        };
+    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+        self.messaging_store()?.list_conversations().await
+    }
 
-        let account = match async_on_block(IpfsIdentity::new(
-            config,
-            tesseract,
-            cache.map(|c| c.inner()),
-        )) {
-            Ok(identity) => identity,
-            Err(e) => return FFIResult::err(Error::from(e)),
-        };
+    async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
+        self.messaging_store()?
+            .messages_count(conversation_id)
+            .await
+    }
 
-        FFIResult::ok(MultiPassAdapter::new(Box::new(account)))
+    async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
+        self.messaging_store()?
+            .get_message(conversation_id, message_id)
+            .await
+    }
+
+    async fn message_status(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        self.messaging_store()?
+            .message_status(conversation_id, message_id)
+            .await
+    }
+
+    async fn get_messages(&self, conversation_id: Uuid, opt: MessageOptions) -> Result<Messages, Error> {
+        self.messaging_store()?
+            .get_messages(conversation_id, opt)
+            .await
+    }
+
+    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<(), Error> {
+        let mut store = self.messaging_store()?;
+        store.send_message(conversation_id, value).await
+    }
+
+    async fn edit(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        value: Vec<String>,
+    ) -> Result<(), Error> {
+        let mut store = self.messaging_store()?;
+        store.edit_message(conversation_id, message_id, value).await
+    }
+
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Option<Uuid>) -> Result<(), Error> {
+        let mut store = self.messaging_store()?;
+        match message_id {
+            Some(id) => store.delete_message(conversation_id, id, true).await,
+            None => store
+                .delete_conversation(conversation_id, true)
+                .await
+                .map(|_| ()),
+        }
+    }
+
+    async fn react(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .react(conversation_id, message_id, state, emoji)
+            .await
+    }
+
+    async fn pin(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .pin_message(conversation_id, message_id, state)
+            .await
+    }
+
+    async fn reply(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        value: Vec<String>,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .reply_message(conversation_id, message_id, value)
+            .await
+    }
+
+    async fn embeds(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: EmbedState,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .embeds(conversation_id, message_id, state)
+            .await
     }
 }
+
+#[async_trait::async_trait]
+impl RayGunAttachment for IpfsIdentity {
+    async fn attach(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        location: Location,
+        files: Vec<PathBuf>,
+        message: Vec<String>,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .attach(conversation_id, message_id, location, files, message)
+            .await
+    }
+
+    async fn download(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        path: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
+        self.messaging_store()?
+            .download(conversation_id, message_id, &file, path, false)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl RayGunGroupConversation for IpfsIdentity {
+    async fn update_conversation_name(&mut self, conversation_id: Uuid, name: &str) -> Result<(), Error> {
+        self.messaging_store()?
+            .update_conversation_name(conversation_id, name)
+            .await
+    }
+
+    async fn add_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<(), Error> {
+        self.messaging_store()?
+            .add_recipient(conversation_id, did_key)
+            .await
+    }
+
+    async fn remove_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<(), Error> {
+        self.messaging_store()?
+            .remove_recipient(conversation_id, did_key, true)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl RayGunStream for IpfsIdentity {
+    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
+        let mut rx = self.raygun_tx.subscribe();
+
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(RayGunEventStream(Box::pin(stream)))
+    }
+    async fn get_conversation_stream(
+        &mut self,
+        conversation_id: Uuid,
+    ) -> Result<MessageEventStream, Error> {
+        let store = self.messaging_store()?;
+        let stream = store.get_conversation_stream(conversation_id).await?;
+        Ok(MessageEventStream(stream.boxed()))
+    }
+}
+
+#[async_trait::async_trait]
+impl RayGunEvents for IpfsIdentity {
+    async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<(), Error> {
+        self.messaging_store()?
+            .send_event(conversation_id, event)
+            .await
+    }
+
+    async fn cancel_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<(), Error> {
+        self.messaging_store()?
+            .cancel_event(conversation_id, event)
+            .await
+    }
+}
+
+
+// pub mod ffi {
+//     use crate::config::MpIpfsConfig;
+//     use crate::IpfsIdentity;
+//     use warp::async_on_block;
+//     use warp::error::Error;
+//     use warp::ffi::FFIResult;
+//     use warp::multipass::MultiPassAdapter;
+//     use warp::pocket_dimension::PocketDimensionAdapter;
+//     use warp::tesseract::Tesseract;
+
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn multipass_mp_ipfs_temporary(
+//         pocketdimension: *const PocketDimensionAdapter,
+//         tesseract: *const Tesseract,
+//         config: *const MpIpfsConfig,
+//     ) -> FFIResult<MultiPassAdapter> {
+//         let tesseract = match tesseract.is_null() {
+//             false => {
+//                 let tesseract = &*tesseract;
+//                 tesseract.clone()
+//             }
+//             true => Tesseract::default(),
+//         };
+
+//         let mut config = match config.is_null() {
+//             true => MpIpfsConfig::testing(true),
+//             false => (*config).clone(),
+//         };
+
+//         config.path = None;
+
+//         let cache = match pocketdimension.is_null() {
+//             true => None,
+//             false => Some(&*pocketdimension),
+//         };
+
+//         let future =
+//             async move { IpfsIdentity::new(config, tesseract, cache.map(|c| c.inner())).await };
+
+//         let account = match async_on_block(future) {
+//             Ok(identity) => identity,
+//             Err(e) => return FFIResult::err(Error::from(e)),
+//         };
+
+//         FFIResult::ok(MultiPassAdapter::new(Box::new(account)))
+//     }
+
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn multipass_mp_ipfs_persistent(
+//         pocketdimension: *const PocketDimensionAdapter,
+//         tesseract: *const Tesseract,
+//         config: *const MpIpfsConfig,
+//     ) -> FFIResult<MultiPassAdapter> {
+//         let tesseract = match tesseract.is_null() {
+//             false => {
+//                 let tesseract = &*tesseract;
+//                 tesseract.clone()
+//             }
+//             true => Tesseract::default(),
+//         };
+
+//         let config = match config.is_null() {
+//             true => {
+//                 return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid")))
+//             }
+//             false => (*config).clone(),
+//         };
+
+//         let cache = match pocketdimension.is_null() {
+//             true => None,
+//             false => Some(&*pocketdimension),
+//         };
+
+//         let account = match async_on_block(IpfsIdentity::new(
+//             config,
+//             tesseract,
+//             cache.map(|c| c.inner()),
+//         )) {
+//             Ok(identity) => identity,
+//             Err(e) => return FFIResult::err(Error::from(e)),
+//         };
+
+//         FFIResult::ok(MultiPassAdapter::new(Box::new(account)))
+//     }
+// }

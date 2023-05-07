@@ -1,5 +1,5 @@
 [package]
-name = "warp-mp-ipfs"
+name = "warp-ipfs"
 version = "0.1.0"
 edition = "2021"
 
@@ -12,8 +12,11 @@ warp = { path = "../../warp" }
 rust-ipfs.workspace = true
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
+
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["net"] }
+
 futures.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
@@ -26,6 +29,12 @@ bs58 = "0.4"
 tracing = "0.1"
 
 chrono = { workspace = true, features = ["serde"] }
+
+bytes.workspace = true
+
+bincode.workspace = true
+
+bayespam = "1.1.0"
 
 [dev-dependencies]
 fdlimit = "0.2"

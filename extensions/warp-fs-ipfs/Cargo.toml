@@ -25,7 +25,7 @@ serde_json.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
-warp-mp-ipfs = { path = "../warp-mp-ipfs" }
+warp-ipfs = { path = "../warp-ipfs" }
 fdlimit = "0.2"
 bs58 = "0.4"
 rustyline-async = "0.3"

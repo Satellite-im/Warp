@@ -5,7 +5,7 @@ use warp::{
     multipass::{identity::Identity, MultiPass},
     tesseract::Tesseract,
 };
-use warp_mp_ipfs::{
+use warp_ipfs::{
     config::{Bootstrap, Discovery},
     IpfsIdentity,
 };
