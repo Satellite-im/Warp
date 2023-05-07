@@ -329,7 +329,7 @@ impl IdentityStore {
         *self.friend_store.write().await = Some(store)
     }
 
-    async fn friend_store(&self) -> Result<FriendsStore, Error> {
+    pub(crate) async fn friend_store(&self) -> Result<FriendsStore, Error> {
         self.friend_store.read().await.clone().ok_or(Error::Other)
     }
 

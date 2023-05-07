@@ -459,7 +459,7 @@ impl WarpIpfsInstance {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
-            discovery,
+            discovery.clone(),
             config.clone(),
             tesseract.clone(),
             self.multipass_tx.clone(),
@@ -476,7 +476,7 @@ impl WarpIpfsInstance {
                 config.path.map(|path| path.join("messages")),
                 identity_store.clone(),
                 None,
-                false,
+                discovery,
                 1000, //TODO
                 self.raygun_tx.clone(),
                 (
