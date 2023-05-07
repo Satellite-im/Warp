@@ -29,7 +29,6 @@ use warp::error::Error;
 use warp::logging::tracing::log::{debug, error, info, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::identity::Identifier;
-use warp::multipass::MultiPass;
 use warp::raygun::{
     Conversation, ConversationType, EmbedState, Location, Message, MessageEvent, MessageEventKind,
     MessageOptions, MessageStatus, MessageStream, MessageType, Messages, MessagesType, PinState,
@@ -40,7 +39,7 @@ use warp::sync::Arc;
 use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;
 use crate::store::{
-    connected_to_peer, ecdh_decrypt, ecdh_encrypt, sign_serde, ConversationRequestKind,
+    ecdh_decrypt, ecdh_encrypt, sign_serde, ConversationRequestKind,
     ConversationRequestResponse, ConversationResponseKind, PeerTopic,
 };
 

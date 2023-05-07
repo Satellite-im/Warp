@@ -5,9 +5,6 @@ mod test {
     use std::time::Duration;
 
     use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
-    use warp::multipass::MultiPass;
-    use warp::tesseract::Tesseract;
-    use warp_ipfs::ipfs_identity_temporary;
     use crate::common::{create_accounts, create_account};
 
     #[tokio::test]
@@ -121,16 +118,7 @@ mod test {
 
     #[tokio::test]
     async fn update_identity_username() -> anyhow::Result<()> {
-        let tesseract = Tesseract::default();
-        tesseract.unlock(b"internal pass").unwrap();
-
-        let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
-        account
-            .create_identity(
-                Some("JohnDoe"),
-                Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-            )
-            .await?;
+        let (mut account, _, _) = create_account(Some("JohnDoe"), Some("morning caution dose lab six actress pond humble pause enact virtual train"), None).await?;
 
         let old_identity = account.get_own_identity().await?;
 
@@ -147,16 +135,7 @@ mod test {
 
     #[tokio::test]
     async fn update_identity_status_message() -> anyhow::Result<()> {
-        let tesseract = Tesseract::default();
-        tesseract.unlock(b"internal pass").unwrap();
-
-        let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
-        account
-            .create_identity(
-                Some("JohnDoe"),
-                Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-            )
-            .await?;
+        let (mut account, _, _) = create_account(Some("JohnDoe"), Some("morning caution dose lab six actress pond humble pause enact virtual train"), None).await?;
 
         let old_identity = account.get_own_identity().await?;
 

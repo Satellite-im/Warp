@@ -53,7 +53,7 @@ use crate::config::Bootstrap;
 use crate::store::discovery::Discovery;
 
 #[derive(Clone)]
-pub struct IpfsIdentity {
+pub struct WarpIpfsInstance {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     config: MpIpfsConfig,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
@@ -67,41 +67,18 @@ pub struct IpfsIdentity {
     constellation_tx: broadcast::Sender<ConstellationEventKind>,
 }
 
-pub async fn ipfs_identity_persistent(
-    config: MpIpfsConfig,
-    tesseract: Tesseract,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-) -> anyhow::Result<IpfsIdentity> {
-    if config.path.is_none() {
-        anyhow::bail!("Path is required for identity to be persistent")
-    }
-    IpfsIdentity::new(config, tesseract, cache).await
-}
-pub async fn ipfs_identity_temporary(
-    config: Option<MpIpfsConfig>,
-    tesseract: Tesseract,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-) -> anyhow::Result<IpfsIdentity> {
-    if let Some(config) = &config {
-        if config.path.is_some() {
-            anyhow::bail!("Path cannot be set")
-        }
-    }
-    IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
-}
-
-impl IpfsIdentity {
+impl WarpIpfsInstance {
     pub async fn new(
         config: MpIpfsConfig,
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    ) -> anyhow::Result<IpfsIdentity> {
+    ) -> anyhow::Result<WarpIpfsInstance> {
         let (multipass_tx, _) = broadcast::channel(1024);
         let (raygun_tx, _) = tokio::sync::broadcast::channel(1024);
         let (constellation_tx, _) = tokio::sync::broadcast::channel(1024);
         trace!("Initializing Multipass");
 
-        let mut identity = IpfsIdentity {
+        let mut identity = WarpIpfsInstance {
             cache,
             config,
             tesseract,
@@ -600,7 +577,7 @@ impl IpfsIdentity {
     }
 }
 
-impl Extension for IpfsIdentity {
+impl Extension for WarpIpfsInstance {
     fn id(&self) -> String {
         "warp-mp-ipfs".to_string()
     }
@@ -613,14 +590,14 @@ impl Extension for IpfsIdentity {
     }
 }
 
-impl SingleHandle for IpfsIdentity {
+impl SingleHandle for WarpIpfsInstance {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
         self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
 }
 
 #[async_trait::async_trait]
-impl MultiPass for IpfsIdentity {
+impl MultiPass for WarpIpfsInstance {
     async fn create_identity(
         &mut self,
         username: Option<&str>,
@@ -972,7 +949,7 @@ impl MultiPass for IpfsIdentity {
 }
 
 #[async_trait::async_trait]
-impl Friends for IpfsIdentity {
+impl Friends for WarpIpfsInstance {
     async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.send_request(pubkey).await
@@ -1050,7 +1027,7 @@ impl Friends for IpfsIdentity {
 }
 
 #[async_trait::async_trait]
-impl FriendsEvent for IpfsIdentity {
+impl FriendsEvent for WarpIpfsInstance {
     async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let mut rx = self.multipass_tx.subscribe();
 
@@ -1069,7 +1046,7 @@ impl FriendsEvent for IpfsIdentity {
 }
 
 #[async_trait::async_trait]
-impl IdentityInformation for IpfsIdentity {
+impl IdentityInformation for WarpIpfsInstance {
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store(true).await?;
         store.identity_status(did).await
@@ -1108,7 +1085,7 @@ impl IdentityInformation for IpfsIdentity {
 }
 
 #[async_trait::async_trait]
-impl RayGun for IpfsIdentity {
+impl RayGun for WarpIpfsInstance {
     async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         self.messaging_store()?.create_conversation(did_key).await
     }
@@ -1235,7 +1212,7 @@ impl RayGun for IpfsIdentity {
 }
 
 #[async_trait::async_trait]
-impl RayGunAttachment for IpfsIdentity {
+impl RayGunAttachment for WarpIpfsInstance {
     async fn attach(
         &mut self,
         conversation_id: Uuid,
@@ -1263,7 +1240,7 @@ impl RayGunAttachment for IpfsIdentity {
 }
 
 #[async_trait::async_trait]
-impl RayGunGroupConversation for IpfsIdentity {
+impl RayGunGroupConversation for WarpIpfsInstance {
     async fn update_conversation_name(&mut self, conversation_id: Uuid, name: &str) -> Result<(), Error> {
         self.messaging_store()?
             .update_conversation_name(conversation_id, name)
@@ -1284,7 +1261,7 @@ impl RayGunGroupConversation for IpfsIdentity {
 }
 
 #[async_trait::async_trait]
-impl RayGunStream for IpfsIdentity {
+impl RayGunStream for WarpIpfsInstance {
     async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         let mut rx = self.raygun_tx.subscribe();
 
@@ -1311,7 +1288,7 @@ impl RayGunStream for IpfsIdentity {
 }
 
 #[async_trait::async_trait]
-impl RayGunEvents for IpfsIdentity {
+impl RayGunEvents for WarpIpfsInstance {
     async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<(), Error> {
         self.messaging_store()?
             .send_event(conversation_id, event)

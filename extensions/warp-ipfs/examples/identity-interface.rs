@@ -2,6 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
+use warp_ipfs::WarpIpfsInstance;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -13,8 +14,7 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::{Discovery, MpIpfsConfig};
-use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
+use warp_ipfs::config::{Discovery, IpfsConfig};
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
 
@@ -76,8 +76,8 @@ async fn account(
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let mut config = match path.as_ref() {
-        Some(path) => MpIpfsConfig::production(path, opt.experimental_node),
-        None => MpIpfsConfig::testing(opt.experimental_node),
+        Some(path) => IpfsConfig::production(path, opt.experimental_node),
+        None => IpfsConfig::testing(opt.experimental_node),
     };
 
     if !opt.direct || !opt.no_discovery {
@@ -112,9 +112,9 @@ async fn account(
     config.ipfs_setting.mdns.enable = opt.mdns;
 
     let mut account = match path.is_some() {
-        false => Box::new(ipfs_identity_temporary(Some(config), tesseract, cache).await?)
+        false => Box::new(WarpIpfsInstance::new(config, tesseract, cache).await?)
             as Box<dyn MultiPass>,
-        true => Box::new(ipfs_identity_persistent(config, tesseract, cache).await?)
+        true => Box::new(WarpIpfsInstance::new(config, tesseract, cache).await?)
             as Box<dyn MultiPass>,
     };
 
