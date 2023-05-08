@@ -274,7 +274,7 @@ pub async fn discovery<S: AsRef<str>>(ipfs: ipfs::Ipfs, topic: S) -> anyhow::Res
     }
 }
 
-fn ecdh_encrypt<K: AsRef<[u8]>>(
+pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
     did: &DID,
     recipient: Option<&DID>,
     data: K,
@@ -292,7 +292,7 @@ fn ecdh_encrypt<K: AsRef<[u8]>>(
     Ok(data)
 }
 
-fn ecdh_decrypt<K: AsRef<[u8]>>(
+pub(crate) fn ecdh_decrypt<K: AsRef<[u8]>>(
     did: &DID,
     recipient: Option<&DID>,
     data: K,

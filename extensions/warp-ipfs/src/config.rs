@@ -291,6 +291,9 @@ pub struct IpfsConfig {
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
+    pub max_storage_size: Option<usize>,
+    pub max_file_size: Option<usize>,
+    pub chunking: Option<usize>,
     pub debug: bool,
     pub save_phrase: bool,
 }
@@ -312,6 +315,9 @@ impl Default for IpfsConfig {
             store_setting: Default::default(),
             debug: false,
             save_phrase: false,
+            max_storage_size: Some(1024 * 1024 * 1024),
+            max_file_size: Some(50 * 1024 * 1024),
+            chunking: None,
         }
     }
 }
