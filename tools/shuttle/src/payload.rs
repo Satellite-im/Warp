@@ -32,11 +32,11 @@ impl<'a> Payload<'a> {
 
 impl Payload<'_> {
     pub fn sender(&self) -> Result<PublicKey, anyhow::Error> {
-        PublicKey::from_protobuf_encoding(&self.sender).map_err(anyhow::Error::from)
+        PublicKey::try_decode_protobuf(&self.sender).map_err(anyhow::Error::from)
     }
 
     pub fn recipient(&self) -> Result<PublicKey, anyhow::Error> {
-        PublicKey::from_protobuf_encoding(&self.recipient).map_err(anyhow::Error::from)
+        PublicKey::try_decode_protobuf(&self.recipient).map_err(anyhow::Error::from)
     }
 
     pub fn metadata(&self) -> &[u8] {
@@ -84,8 +84,8 @@ mod test {
         message: &[u8],
     ) -> anyhow::Result<Payload<'a>> {
         let sender_pk = sender.public();
-        let sender_pk_bytes = sender_pk.to_protobuf_encoding();
-        let receiver_pk_bytes = receiver.to_protobuf_encoding();
+        let sender_pk_bytes = sender_pk.encode_protobuf();
+        let receiver_pk_bytes = receiver.encode_protobuf();
         let data = ecdh_encrypt(sender, Some(receiver), message)?;
         let signature = sender.sign(&data)?;
         Ok(Payload::new(
@@ -103,8 +103,8 @@ mod test {
         message: &'a [u8],
     ) -> anyhow::Result<Payload<'a>> {
         let sender_pk = sender.public();
-        let sender_pk_bytes = sender_pk.to_protobuf_encoding();
-        let receiver_pk_bytes = receiver.to_protobuf_encoding();
+        let sender_pk_bytes = sender_pk.encode_protobuf();
+        let receiver_pk_bytes = receiver.encode_protobuf();
         let signature = sender.sign(message)?;
         Ok(Payload::new(
             sender_pk_bytes.into(),

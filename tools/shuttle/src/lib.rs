@@ -84,11 +84,8 @@ fn convert_ed25519_to_x25519_priv(
 fn convert_ed25519_to_x25519_pub(
     publickey: &rust_ipfs::PublicKey,
 ) -> anyhow::Result<x25519_dalek::PublicKey> {
-    let ed25519_pubkey = publickey
-        .clone()
-        .into_ed25519()
-        .ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
-    let ep = CompressedEdwardsY(ed25519_pubkey.encode())
+    let ed25519_pubkey = publickey.clone().try_into_ed25519()?;
+    let ep = CompressedEdwardsY(ed25519_pubkey.to_bytes())
         .decompress()
         .ok_or(anyhow::anyhow!("Unsupported"))?;
     let mon = ep.to_montgomery();
@@ -100,10 +97,7 @@ pub(crate) fn ecdh_encrypt(
     public_key: Option<&rust_ipfs::PublicKey>,
     data: impl AsRef<[u8]>,
 ) -> anyhow::Result<Vec<u8>> {
-    let ed25519_keypair = keypair
-        .clone()
-        .into_ed25519()
-        .ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
+    let ed25519_keypair = keypair.clone().try_into_ed25519()?;
     let xpriv = convert_ed25519_to_x25519_priv(&ed25519_keypair.secret());
     let xpub = match public_key {
         Some(pubkey) => convert_ed25519_to_x25519_pub(pubkey)?,
@@ -122,8 +116,7 @@ pub(crate) fn ecdh_decrypt(
 ) -> anyhow::Result<Vec<u8>> {
     let ed25519_keypair = keypair
         .clone()
-        .into_ed25519()
-        .ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
+        .try_into_ed25519()?;
     let xpriv = convert_ed25519_to_x25519_priv(&ed25519_keypair.secret());
     let xpub = match public_key {
         Some(pubkey) => convert_ed25519_to_x25519_pub(pubkey)?,

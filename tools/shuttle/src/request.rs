@@ -139,8 +139,8 @@ mod test {
         message: &[u8],
     ) -> anyhow::Result<Payload<'a>> {
         let sender_pk = sender.public();
-        let sender_pk_bytes = sender_pk.to_protobuf_encoding();
-        let receiver_pk_bytes = receiver.to_protobuf_encoding();
+        let sender_pk_bytes = sender_pk.encode_protobuf();
+        let receiver_pk_bytes = receiver.encode_protobuf();
         let data = ecdh_encrypt(sender, Some(receiver), message)?;
         let signature = sender.sign(&data)?;
         Ok(Payload::new(
