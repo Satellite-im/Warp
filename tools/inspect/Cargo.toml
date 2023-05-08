@@ -12,8 +12,6 @@ clap = { version = "4.0", features = ["derive"] }
 rpassword = "7.2"
 warp = { path = "../../warp" }
 warp-ipfs = { path = "../../extensions/warp-ipfs" }
-warp-rg-ipfs = { path = "../../extensions/warp-rg-ipfs" }
-warp-fs-ipfs = { path = "../../extensions/warp-fs-ipfs" }
 
 uuid = { workspace = true, features = ["serde", "v4"] }
 tokio = { workspace = true, features = ["full"] }

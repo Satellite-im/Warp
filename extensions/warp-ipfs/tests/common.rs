@@ -90,6 +90,8 @@ pub async fn create_accounts_and_chat(
     Ok(accounts)
 }
 
+//Note: Function is not dead code. used in tests::accounts, tests::friends
+#[allow(dead_code)]
 pub async fn create_account(
     username: Option<&str>,
     passphrase: Option<&str>,
@@ -111,6 +113,8 @@ pub async fn create_account(
     Ok((Box::new(account), did, identity))
 }
 
+//Note: Function is not dead code. used in tests::accounts, tests::friends
+#[allow(dead_code)]
 pub async fn create_accounts(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
 ) -> anyhow::Result<Vec<(Box<dyn MultiPass>, DID, Identity)>> {
