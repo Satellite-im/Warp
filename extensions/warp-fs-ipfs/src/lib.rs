@@ -353,6 +353,13 @@ impl Constellation for IpfsFileSystem {
         self.index.clone()
     }
 
+    fn max_size(&self) -> usize {
+        self.config
+            .as_ref()
+            .and_then(|config| config.max_storage_size)
+            .unwrap_or(1024 * 1024 * 1024)
+    }
+
     async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context
@@ -369,7 +376,6 @@ impl Constellation for IpfsFileSystem {
         if current_directory.get_item_by_path(name).is_ok() {
             return Err(Error::FileExist);
         }
-
 
         let name = name.to_string();
         let fs = self.clone();

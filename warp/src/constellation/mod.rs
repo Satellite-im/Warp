@@ -119,6 +119,14 @@ pub trait Constellation:
     /// Get root directory
     fn root_directory(&self) -> Directory;
 
+    /// Current size of the file system
+    fn current_size(&self) -> usize {
+        self.root_directory().size()
+    }
+
+    /// Max size allowed in the file system
+    fn max_size(&self) -> usize;
+
     /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<(), Error> {
         let path = Path::new(path).to_path_buf();

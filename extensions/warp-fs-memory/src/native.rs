@@ -23,6 +23,10 @@ impl Constellation for MemorySystem {
         self.modified
     }
 
+    fn max_size(&self) -> usize {
+        5 * 1024
+    }
+
     fn root_directory(&self) -> Directory {
         self.index.clone()
     }
