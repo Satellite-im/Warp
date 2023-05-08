@@ -673,9 +673,9 @@ impl Constellation for IpfsFileSystem {
                 Ok(ste) => ste,
                 Err(e) => {
                     yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: Some(e.to_string()),
+                        name,
+                        last_size: Some(last_written),
+                        error: Some(e.to_string()),
                     };
                     return;
                 }
@@ -704,7 +704,6 @@ impl Constellation for IpfsFileSystem {
                             error: error.map(|e| e.to_string()),
                         };
                         return;
-                        // return Err(error.map(Error::Any).unwrap_or(Error::Other));
                     }
                     UnixfsStatus::ProgressStatus { written, .. } => {
                         last_written = written;
