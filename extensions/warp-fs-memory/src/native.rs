@@ -12,8 +12,7 @@ use crate::item::Item;
 use crate::{item, MemorySystem, Result};
 use warp::constellation::directory::Directory;
 use warp::constellation::{
-    Constellation, ConstellationEvent, ConstellationProgressStream,
-    Progression,
+    Constellation, ConstellationEvent, ConstellationProgressStream, Progression,
 };
 use warp::module::Module;
 
@@ -120,10 +119,10 @@ impl Constellation for MemorySystem {
     async fn put_buffer(
         &mut self,
         name: &str,
-        buf: &Vec<u8>,
+        buf: &[u8],
     ) -> std::result::Result<(), warp::error::Error> {
         let mut internal_file = item::file::File::new(name);
-        let bytes = internal_file.insert_buffer(buf.clone()).unwrap();
+        let bytes = internal_file.insert_buffer(buf.to_vec()).unwrap();
         self.internal
             .write()
             .0

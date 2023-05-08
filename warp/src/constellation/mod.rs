@@ -193,7 +193,7 @@ pub trait Constellation:
 
     /// Used to upload file to the filesystem with data from buffer
     #[allow(clippy::ptr_arg)]
-    async fn put_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<(), Error> {
+    async fn put_buffer(&mut self, _: &str, _: &[u8]) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
@@ -691,7 +691,7 @@ pub mod ffi {
 
         rt.block_on(async move {
             constellation
-                .put_buffer(&remote.to_string_lossy(), &slice.to_vec())
+                .put_buffer(&remote.to_string_lossy(), slice)
                 .await
         })
         .into()

@@ -526,7 +526,7 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn put_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
+    async fn put_buffer(&mut self, name: &str, buffer: &[u8]) -> Result<()> {
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context
         let handle = warp::async_handle();
@@ -536,7 +536,7 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileExist);
         }
 
-        let reader = ReaderStream::new(Cursor::new(buffer.clone()))
+        let reader = ReaderStream::new(Cursor::new(buffer))
             .map(|result| result.map(|x| x.into()))
             .boxed();
 
