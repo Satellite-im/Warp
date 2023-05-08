@@ -35,7 +35,7 @@ use rust_ipfs::{
     },
     Ipfs, SubscriptionStream,
 };
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{
     sync::{
         broadcast::{self, Sender},
@@ -60,6 +60,8 @@ use crate::{
         events::{EmittedEvents, WebRtcEventStream},
         Controller,
     },
+    store::PeerIdExt,
+    InitiationSignal,
 };
 
 #[derive(Clone)]
@@ -91,6 +93,7 @@ pub struct WebRtc {
     account: Box<dyn MultiPass>,
     ipfs: Arc<RwLock<Ipfs>>,
     id: DID,
+    private_key: DID,
     // a tx channel which emits events to drive the UI
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     // subscribes to IPFS topic to receive incoming calls
@@ -167,12 +170,15 @@ impl WebRtc {
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let ui_event_ch2 = ui_event_ch.clone();
         let own_id = did.clone();
+        // todo: get private key from DID
+        let private_key = todo!();
         let offer_handler = tokio::spawn(async {
-            handle_call_offers(own_id, call_offer_stream, ui_event_ch2).await;
+            handle_call_initiation(own_id, private_key, call_offer_stream, ui_event_ch2).await;
         });
 
         let webrtc = Self {
             account,
+            private_key,
             ipfs: Arc::new(RwLock::new(ipfs.clone())),
             id: did.clone(),
             ui_event_ch,
@@ -222,9 +228,11 @@ impl WebRtc {
 
         let ui_event_ch = self.ui_event_ch.clone();
         let own_id = self.id.clone();
+        let private_key = self.private_key.clone();
         let webrtc_handle = tokio::task::spawn(async move {
             handle_webrtc(
                 own_id,
+                private_key,
                 ui_event_ch,
                 call_broadcast_stream,
                 call_signaling_stream,
@@ -243,59 +251,81 @@ impl WebRtc {
 }
 
 fn decode_gossipsub_msg<T: DeserializeOwned>(
-    own_id: &DID,
-    opt: Option<Arc<libp2p::gossipsub::Behaviour::Message>>,
+    private_key: &DID,
+    msg: &libp2p::gossipsub::Message,
 ) -> anyhow::Result<T> {
-    let msg = match opt {
-        Some(s) => s,
-        None => bail!("message was None"),
-    };
-    let encoded_data = match serde_cbor::from_slice::<Sata>(&msg.data) {
-        Ok(d) => d,
-        Err(e) => {
-            bail!("failed to decode payload: {e}");
-        }
-    };
-
-    let data: T = match encoded_data.decrypt(own_id) {
-        Ok(d) => d,
-        Err(e) => {
-            bail!("failed to decrypt payload: {e}");
-        }
-    };
-
+    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.data)?;
+    let data: T = serde_cbor::from_slice(&bytes)?;
     Ok(data)
 }
 
-async fn handle_call_offers(
+async fn handle_call_initiation(
     own_id: DID,
+    private_key: DID,
     mut stream: SubscriptionStream,
     ch: Sender<BlinkEventKind>,
 ) {
     while let Some(msg) = stream.next().await {
-        // todo: decrypt
-        let call_info: CallInfo = match decode_gossipsub_msg(&own_id, Some(msg.clone())) {
+        let signal: InitiationSignal = match decode_gossipsub_msg(&private_key, &msg) {
             Ok(s) => s,
             Err(e) => {
-                log::error!("failed to decode msg from call signaling stream: {e}");
+                log::error!("failed to decode msg from call initiation stream: {e}");
                 continue;
             }
         };
 
-        let evt = BlinkEventKind::IncomingCall {
-            call_id: call_info.id(),
-            sender: call_info.sender(),
-            participants: call_info.participants(),
-        };
+        match signal {
+            InitiationSignal::Offer {
+                call_id,
+                sender,
+                participants,
+                group_key,
+            } => {
+                let call_info = CallInfo {
+                    id: call_id.clone(),
+                    participants: participants.clone(),
+                    group_key,
+                };
+                let evt = BlinkEventKind::IncomingCall {
+                    call_id,
+                    sender,
+                    participants,
+                };
 
-        let mut data: tokio::sync::MutexGuard<StaticData> = STATIC_DATA.lock().await;
-        data.pending_calls.insert(call_info.id(), call_info);
-        ch.send(evt);
+                let mut data = STATIC_DATA.lock().await;
+                data.pending_calls.insert(call_info.id(), call_info);
+                ch.send(evt);
+            }
+            InitiationSignal::Reject {
+                call_id,
+                participant,
+            } => {
+                let mut data = STATIC_DATA.lock().await;
+                // for direct calls, if they hang up, don't bother waiting.
+                let no_answer = data
+                    .active_call
+                    .as_ref()
+                    .map(|ac| {
+                        let participants = ac.call.participants();
+                        participants.len() == 2 && participants.iter().any(|id| id == &participant)
+                    })
+                    .unwrap_or(false);
+                if no_answer {
+                    if let Some(ac) = data.active_call.take() {
+                        let evt = BlinkEventKind::CallEnded {
+                            call_id: ac.call.id(),
+                        };
+                        ch.send(evt);
+                    }
+                }
+            }
+        }
     }
 }
 
 async fn handle_webrtc(
     own_id: DID,
+    private_key: DID,
     ch: Sender<BlinkEventKind>,
     call_signaling_stream: SubscriptionStream,
     peer_signaling_stream: SubscriptionStream,
@@ -307,7 +337,18 @@ async fn handle_webrtc(
     loop {
         tokio::select! {
             opt = call_signaling_stream.next() => {
-                let signal: CallSignal = match decode_gossipsub_msg(&own_id, opt) {
+                let msg = match opt {
+                    Some(m) => m,
+                    None => continue
+                };
+                let sender = match msg.source.and_then(|s| s.to_did().ok()) {
+                    Some(id) => id,
+                    None => {
+                        log::error!("msg received without source");
+                        continue
+                    }
+                };
+                let signal: CallSignal = match decode_gossipsub_msg(&private_key, &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
@@ -317,18 +358,34 @@ async fn handle_webrtc(
                 match signal {
                     CallSignal::Join { call_id } => {
                         // todo: initiate connection
+                        let mut data = STATIC_DATA.lock().await;
+                        if let Some(ac) = data.active_call.as_mut() {
+                            ac.connected_participants.insert(sender);
+                        }
                     }
                     CallSignal::Leave { call_id } => {
                         // todo: don't retry
+                        let mut data = STATIC_DATA.lock().await;
+                        if let Some(ac) = data.active_call.as_mut() {
+                            ac.connected_participants.remove(&sender);
+                        }
+
                     },
-                    CallSignal::Reject { call_id } => {
-                       // todo: anything?
-                    }
                 }
             },
             opt = peer_signaling_stream.next() => {
-                // todo: decrypt
-                let signal: PeerSignal = match decode_gossipsub_msg(&own_id, opt) {
+                let msg = match opt {
+                    Some(m) => m,
+                    None => continue
+                };
+                let sender = match msg.source.and_then(|s| s.to_did().ok()) {
+                    Some(id) => id,
+                    None => {
+                        log::error!("msg received without source");
+                        continue
+                    }
+                };
+                let signal: PeerSignal = match decode_gossipsub_msg(&private_key, &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
@@ -407,21 +464,4 @@ async fn handle_webrtc(
             }
         }
     }
-}
-
-fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<rust_ipfs::libp2p::identity::PublicKey> {
-    let pub_key =
-        rust_ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?;
-    Ok(rust_ipfs::libp2p::identity::PublicKey::Ed25519(pub_key))
-}
-
-fn libp2p_pub_to_did(public_key: &rust_ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
-    let pk = match public_key.clone().try_into_ed25519() {
-        Ok(pk) => {
-            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
-            did.try_into()?
-        }
-        _ => anyhow::bail!(warp::error::Error::PublicKeyInvalid),
-    };
-    Ok(pk)
 }

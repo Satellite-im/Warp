@@ -30,6 +30,6 @@ pub enum PeerSignal {
 #[derive(Serialize, Deserialize)]
 pub enum CallSignal {
     Join { call_id: Uuid },
-    Reject { call_id: Uuid },
+
     Leave { call_id: Uuid },
 }

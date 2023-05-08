@@ -5,6 +5,7 @@
 //!     create signal handling functions
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -53,6 +54,7 @@ mod blink_impl;
 mod host_media;
 mod signaling;
 mod simple_webrtc;
+mod store;
 
 mod ipfs_routes {
     use uuid::Uuid;
@@ -78,9 +80,9 @@ mod ipfs_routes {
 }
 
 // todo: add option to init WebRtc using a configuration file
-pub struct WebRtc<T: Ipfs> {
+pub struct WebRtc {
     account: Box<dyn MultiPass>,
-    ipfs: Arc<RwLock<Ipfs<T>>>,
+    ipfs: Arc<RwLock<Ipfs>>,
     id: DID,
     // a tx channel which emits events to drive the UI
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
@@ -96,8 +98,10 @@ pub struct WebRtc<T: Ipfs> {
 
 #[derive(Clone)]
 struct ActiveCall {
-    call: CallInfo,
-    state: CallState,
+    pub info: CallInfo,
+    pub participants_declined: HashSet<DID>,
+    pub state: CallState,
+    pub stop: Arc<Notify>,
 }
 
 #[derive(Clone)]
@@ -107,7 +111,7 @@ enum CallState {
     Ended,
 }
 
-impl<T: IpfsTypes> Drop for WebRtc<T> {
+impl Drop for WebRtc {
     fn drop(&mut self) {
         if let Some(ac) = self.active_call.as_ref() {
             todo!()
@@ -118,19 +122,19 @@ impl<T: IpfsTypes> Drop for WebRtc<T> {
 // used when a call is offered
 impl ActiveCall {
     fn new(participants: Vec<DID>) -> Self {
-        Self {
-            call: CallInfo::new(participants),
-            state: CallState::Pending,
-        }
+        let call_info = CallInfo::new(participants);
+        call_info.into()
     }
 }
 
 // used when a call is accepted
 impl From<CallInfo> for ActiveCall {
-    fn from(value: CallInfo) -> Self {
+    fn from(call: CallInfo) -> Self {
         Self {
-            call: value,
+            info: call,
+            participants_declined: HashSet::new(),
             state: CallState::InProgress,
+            stop: Arc::new(Notify::new()),
         }
     }
 }
@@ -139,9 +143,21 @@ impl From<CallInfo> for ActiveCall {
 #[derive(Serialize, Deserialize)]
 enum InitiationSignal {
     /// invite a peer to join a call
-    Offer(CallInfo),
+    Offer {
+        call_id: Uuid,
+        // the person who is offering you to join the call
+        sender: DID,
+        // the total set of participants who are invited to the call
+        participants: Vec<DID>,
+        group_key: Option<Vec<u8>>,
+    },
     /// indicate that the peer will not be joining
-    Reject(DID),
+    Reject {
+        // the call being rejected
+        call_id: Uuid,
+        // the participant who is rejecting the call
+        participant: DID,
+    },
 }
 
 /// sent via telecon/<Uuid>
@@ -149,9 +165,9 @@ enum InitiationSignal {
 enum BroadcastSignal {
     /// Sent when a peer joins a call.
     /// Used by the peers to dial each other
-    Hello,
+    Join,
     /// sent when a peer leaves the call
-    HangUp,
+    Leave,
 }
 
 /// sent via telecon/<Uuid>/<DID>
@@ -166,7 +182,7 @@ enum DirectSignal {
 }
 
 #[async_trait]
-impl<T: IpfsTypes> Blink for WebRtc<T> {
+impl Blink for WebRtc {
     // ------ Misc ------
     /// The event stream notifies the UI of call related events
     async fn get_event_stream(&mut self) -> Result<BlinkEventStream, Error> {
@@ -193,15 +209,16 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
         if let Some(_call) = self.active_call.as_ref() {
             // todo: end call
         }
-        let ac = ActiveCall::new(participants);
+        let call_info = CallInfo::new(participants);
+        let ac = ActiveCall::from(call_info.clone());
         self.active_call = Some(ac.clone());
 
-        self.init_call(ac.call.clone(), ac.stop).await?;
+        self.init_call(call_info.clone(), ac.stop).await?;
 
         let ipfs = self.ipfs.read();
         // send message until participants accept or decline.
         let data = Sata::default();
-        let payload = ac.call.clone();
+        let payload = call_info.clone();
         let res = data.encode(
             libipld::IpldCodec::DagJson,
             warp::sata::Kind::Static,
@@ -214,7 +231,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
                 return Err(Error::SerdeCborError(e));
             }
         };
-        for participant in &ac.call.participants() {
+        for participant in &call_info.participants() {
             if let Err(e) = ipfs
                 .pubsub_publish(ipfs_routes::offer_call_route(participant), bytes.clone())
                 .await
@@ -234,8 +251,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
 
         if let Some(call) = self.pending_calls.remove(&call_id) {
             let ac: ActiveCall = call.into();
-            self.active_call = Some(ac.clone());
-            self.init_call(ac.call, ac.stop).await?;
+            self.init_call(ac).await?;
         }
         todo!()
     }
@@ -372,11 +388,11 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
         Vec::from_iter(self.pending_calls.values().cloned())
     }
     fn current_call(&self) -> Option<CallInfo> {
-        self.active_call.as_ref().map(|x| x.call.clone())
+        self.active_call.as_ref().map(|x| x.info.clone())
     }
 }
 
-impl<T: IpfsTypes> WebRtc<T> {
+impl WebRtc {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
         let identity = loop {
             if let Ok(identity) = account.get_own_identity().await {
@@ -444,7 +460,8 @@ impl<T: IpfsTypes> WebRtc<T> {
     }
 
     // todo: make sure this only gets called once
-    async fn init_call(&mut self, call: CallInfo, stop: Arc<Notify>) -> anyhow::Result<()> {
+    async fn init_call(&mut self, ac: ActiveCall) -> anyhow::Result<()> {
+        self.active_call = Some(ac.clone());
         let ipfs = self.ipfs.read();
 
         // use this on error conditions and after terminating the call
@@ -509,7 +526,7 @@ impl<T: IpfsTypes> WebRtc<T> {
                 call_broadcast_stream,
                 call_signaling_stream,
                 webrtc_event_stream,
-                stop,
+                ac.stop,
             )
             .await;
         });

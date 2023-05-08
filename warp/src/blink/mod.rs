@@ -107,7 +107,7 @@ pub struct CallInfo {
 }
 
 impl CallInfo {
-    pub fn new(sender: DID, participants: Vec<DID>) -> Self {
+    pub fn new(participants: Vec<DID>) -> Self {
         let group_key = if participants.len() == 2 {
             None
         } else {
@@ -126,6 +126,10 @@ impl CallInfo {
 
     pub fn participants(&self) -> Vec<DID> {
         self.participants.clone()
+    }
+
+    pub fn group_key(&self) -> Option<Vec<u8>> {
+        self.group_key.clone()
     }
 }
 
