@@ -100,7 +100,6 @@ pub enum BlinkEventKind {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CallInfo {
     id: Uuid,
-    sender: DID,
     // the total set of participants who are invited to the call
     participants: Vec<DID>,
     // for calls with more than 2 participants, need a symmetric key
@@ -116,7 +115,6 @@ impl CallInfo {
         };
         Self {
             id: Uuid::new_v4(),
-            sender,
             participants,
             group_key,
         }
@@ -124,10 +122,6 @@ impl CallInfo {
 
     pub fn id(&self) -> Uuid {
         self.id
-    }
-
-    pub fn sender(&self) -> DID {
-        self.sender.clone()
     }
 
     pub fn participants(&self) -> Vec<DID> {

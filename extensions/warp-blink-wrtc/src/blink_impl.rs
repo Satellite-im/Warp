@@ -26,9 +26,15 @@ use std::{
 use anyhow::{bail, Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
-use ipfs::{libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsTypes, SubscriptionStream};
 use once_cell::sync::Lazy;
 use rand::rngs::OsRng;
+use rust_ipfs::{
+    libp2p::{
+        self,
+        gossipsub::{Gossipsub, GossipsubMessage},
+    },
+    Ipfs, SubscriptionStream,
+};
 use serde::de::DeserializeOwned;
 use tokio::{
     sync::{
@@ -40,7 +46,7 @@ use tokio::{
 use uuid::Uuid;
 use warp::{
     blink::{BlinkEventKind, CallInfo},
-    crypto::{aes_gcm::Aes256Gcm, digest::KeyInit, DID},
+    crypto::{aes_gcm::Aes256Gcm, digest::KeyInit, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     multipass::MultiPass,
     sata::Sata,
     sync::RwLock,
@@ -81,9 +87,9 @@ enum CallState {
     Ended,
 }
 
-pub struct WebRtc<T: IpfsTypes> {
+pub struct WebRtc {
     account: Box<dyn MultiPass>,
-    ipfs: Arc<RwLock<Ipfs<T>>>,
+    ipfs: Arc<RwLock<Ipfs>>,
     id: DID,
     // a tx channel which emits events to drive the UI
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
@@ -116,7 +122,7 @@ struct StaticData {
     cpal_host: cpal::Host,
 }
 
-impl<T: IpfsTypes> WebRtc<T> {
+impl WebRtc {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
         let _data = STATIC_DATA.lock().await;
         let identity = loop {
@@ -128,7 +134,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         let did = identity.did_key();
 
         let ipfs_handle = match account.handle() {
-            Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
+            Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
             _ => anyhow::bail!("Unable to obtain IPFS Handle"),
         };
 
@@ -238,7 +244,7 @@ impl<T: IpfsTypes> WebRtc<T> {
 
 fn decode_gossipsub_msg<T: DeserializeOwned>(
     own_id: &DID,
-    opt: Option<Arc<GossipsubMessage>>,
+    opt: Option<Arc<libp2p::gossipsub::Behaviour::Message>>,
 ) -> anyhow::Result<T> {
     let msg = match opt {
         Some(s) => s,
@@ -401,4 +407,21 @@ async fn handle_webrtc(
             }
         }
     }
+}
+
+fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<rust_ipfs::libp2p::identity::PublicKey> {
+    let pub_key =
+        rust_ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?;
+    Ok(rust_ipfs::libp2p::identity::PublicKey::Ed25519(pub_key))
+}
+
+fn libp2p_pub_to_did(public_key: &rust_ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
+    let pk = match public_key.clone().try_into_ed25519() {
+        Ok(pk) => {
+            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
+            did.try_into()?
+        }
+        _ => anyhow::bail!(warp::error::Error::PublicKeyInvalid),
+    };
+    Ok(pk)
 }

@@ -13,10 +13,10 @@ use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::Stream;
 use futures::StreamExt;
-use ipfs::libp2p::gossipsub::GossipsubMessage;
-use ipfs::Ipfs;
-use ipfs::IpfsTypes;
-use ipfs::SubscriptionStream;
+
+use rust_ipfs::libp2p::gossipsub::GossipsubMessage;
+use rust_ipfs::Ipfs;
+use rust_ipfs::SubscriptionStream;
 use serde::Deserialize;
 use serde::Serialize;
 use simple_webrtc::audio;
@@ -78,7 +78,7 @@ mod ipfs_routes {
 }
 
 // todo: add option to init WebRtc using a configuration file
-pub struct WebRtc<T: IpfsTypes> {
+pub struct WebRtc<T: Ipfs> {
     account: Box<dyn MultiPass>,
     ipfs: Arc<RwLock<Ipfs<T>>>,
     id: DID,
