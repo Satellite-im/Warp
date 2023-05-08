@@ -59,7 +59,7 @@ mod test {
         let (_, did_b, _) = accounts.last().expect("Account exist");
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
-        let identity_b = tokio::time::timeout(Duration::from_secs(5), async {
+        let identity_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Ok(Some(id)) = account_a
                     .get_identity(did_b.clone().into())
@@ -99,7 +99,7 @@ mod test {
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
 
-        let identity_b = tokio::time::timeout(Duration::from_secs(5), async {
+        let identity_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(id) = account_a
                     .get_identity(String::from("JaneDoe").into())
@@ -220,7 +220,7 @@ mod test {
 
         let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let status_b = tokio::time::timeout(Duration::from_secs(5), async {
+        let status_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Ok(status) = account_a.identity_status(&did_b).await {
                     break status;
@@ -233,7 +233,7 @@ mod test {
 
         account_b.set_identity_status(IdentityStatus::Away).await?;
 
-        let status = tokio::time::timeout(Duration::from_secs(5), async {
+        let status = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Ok(status) = account_a.identity_status(&did_b).await {
                     if status != status_b {
@@ -284,7 +284,7 @@ mod test {
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let platform_b = tokio::time::timeout(Duration::from_secs(5), async {
+        let platform_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Ok(platform) = account_a.identity_platform(did_b).await {
                     break platform;

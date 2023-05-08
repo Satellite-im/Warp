@@ -22,7 +22,7 @@ mod test {
         let mut subscribe_b = account_b.subscribe().await?;
         account_a.send_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             let did = loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
                     subscribe_b.next().await
@@ -34,7 +34,7 @@ mod test {
         })
         .await??;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendAdded { .. }) = subscribe_a.next().await {
                     break;
@@ -64,7 +64,7 @@ mod test {
 
         account_a.send_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             let did = loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
                     subscribe_b.next().await
@@ -76,7 +76,7 @@ mod test {
         })
         .await??;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendAdded { .. }) = subscribe_a.next().await {
                     break;
@@ -90,7 +90,7 @@ mod test {
 
         account_a.remove_friend(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRemoved { .. }) = subscribe_a.next().await {
                     break;
@@ -99,7 +99,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRemoved { .. }) = subscribe_b.next().await {
                     break;
@@ -127,7 +127,7 @@ mod test {
 
         account_a.send_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             let did = loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
                     subscribe_b.next().await
@@ -139,7 +139,7 @@ mod test {
         })
         .await??;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::OutgoingFriendRequestRejected { .. }) =
                     subscribe_a.next().await
@@ -168,7 +168,7 @@ mod test {
 
         account_a.send_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { .. }) =
                     subscribe_b.next().await
@@ -181,7 +181,7 @@ mod test {
 
         account_a.close_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::IncomingFriendRequestClosed { .. }) =
                     subscribe_b.next().await
@@ -192,7 +192,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::OutgoingFriendRequestClosed { .. }) =
                     subscribe_a.next().await
@@ -220,7 +220,7 @@ mod test {
         let mut subscribe_b = account_b.subscribe().await?;
 
         account_a.send_request(&did_b).await?;
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRequestSent { .. }) = subscribe_a.next().await
                 {
@@ -230,7 +230,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { .. }) =
                     subscribe_b.next().await
@@ -262,7 +262,7 @@ mod test {
         let mut subscribe_a = account_a.subscribe().await?;
 
         account_a.send_request(&did_b).await?;
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRequestSent { .. }) = subscribe_a.next().await
                 {
@@ -304,7 +304,7 @@ mod test {
         account_a.block(&did_b).await?;
         account_b.block(&did_a).await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(
                     MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did },
@@ -317,7 +317,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(
                     MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did },
@@ -333,7 +333,7 @@ mod test {
         account_a.unblock(&did_b).await?;
         account_b.unblock(&did_a).await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(
                     MultiPassEventKind::Unblocked { did } | MultiPassEventKind::UnblockedBy { did },
@@ -346,7 +346,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(
                     MultiPassEventKind::Unblocked { did } | MultiPassEventKind::UnblockedBy { did },

@@ -2,7 +2,6 @@
 use futures::channel::oneshot;
 use futures::StreamExt;
 use ipfs::{Ipfs, PeerId};
-use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,13 +11,12 @@ use tracing::log::{self, error, warn};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::MultiPassEventKind;
-use warp::sata::{Kind, Sata};
 use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
 use crate::config::MpIpfsConfig;
-use crate::store::PeerTopic;
+use crate::store::{ecdh_decrypt, ecdh_encrypt, PeerIdExt, PeerTopic};
 
 use super::identity::{IdentityStore, LookupBy, RequestOption};
 use super::phonebook::PhoneBook;
@@ -220,11 +218,19 @@ impl FriendsStore {
                 futures::pin_mut!(stream);
 
                 while let Some(message) = stream.next().await {
-                    let Ok(data) = serde_json::from_slice::<Sata>(&message.data) else {
+                    let Some(peer_id) = message.source else {
+                        //Note: Due to configuration, we should ALWAYS have a peer set in its source
+                        //      thus we can ignore the request if no peer is provided
                         continue;
                     };
 
-                    if let Err(e) = store.check_request_message(data).await {
+                    let Ok(did) = peer_id.to_did() else {
+                        //Note: The peer id is embeded with ed25519 public key, therefore we can decode it into a did key
+                        //      otherwise we can ignore
+                        continue;
+                    };
+
+                    if let Err(e) = store.check_request_message(&did, &message.data).await {
                         error!("Error: {e}");
                     }
                 }
@@ -236,9 +242,14 @@ impl FriendsStore {
 
     //TODO: Implement Errors
     //TODO: Uncomment below once sata is nolonger used here
-    // #[tracing::instrument(skip(self, data))]
-    async fn check_request_message(&mut self, data: Sata) -> anyhow::Result<()> {
-        let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
+    #[tracing::instrument(skip(self, data))]
+    async fn check_request_message(&mut self, did: &DID, data: &[u8]) -> anyhow::Result<()> {
+        let pk_did = &*self.did_key;
+
+        let bytes = ecdh_decrypt(pk_did, Some(did), data)?;
+        let data = serde_json::from_slice::<PayloadEvent>(&bytes)?;
+
+        log::info!("Received event from {did}");
 
         if self
             .list_incoming_request()
@@ -903,7 +914,6 @@ impl FriendsStore {
         })
     }
 
-    //TODO: Replace "Sata" with a light payload
     #[tracing::instrument(skip(self))]
     pub async fn broadcast_request(
         &mut self,
@@ -927,20 +937,11 @@ impl FriendsStore {
             }
         }
 
-        let mut data = Sata::default();
-        data.add_recipient(recipient).map_err(anyhow::Error::from)?;
-
         let kp = &*self.did_key;
-        let e_payload = data
-            .encrypt(
-                IpldCodec::DagJson,
-                kp.as_ref(),
-                Kind::Static,
-                payload.clone(),
-            )
-            .map_err(anyhow::Error::from)?;
 
-        let bytes = serde_json::to_vec(&e_payload)?;
+        let payload_bytes = serde_json::to_vec(&payload)?;
+
+        let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
 
         log::trace!("Rquest Payload size: {} bytes", bytes.len());
 
