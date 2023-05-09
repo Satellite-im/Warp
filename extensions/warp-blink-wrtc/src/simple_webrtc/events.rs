@@ -36,7 +36,7 @@ pub enum EmittedEvents {
         dest: DID,
         sdp: Box<RTCSessionDescription>,
     },
-    /// created after calling `Dial`
+    /// emitted in response to `Dial`
     #[display(fmt = "CallInitiated")]
     CallInitiated {
         dest: DID,

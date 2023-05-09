@@ -68,8 +68,8 @@ pub trait Blink {
 
     // ------ Utility Functions ------
 
-    fn pending_calls(&self) -> Vec<CallInfo>;
-    fn current_call(&self) -> Option<CallInfo>;
+    async fn pending_calls(&self) -> Vec<CallInfo>;
+    async fn current_call(&self) -> Option<CallInfo>;
 }
 
 /// Drives the UI

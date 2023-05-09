@@ -16,6 +16,7 @@
 //! WebRTC management
 //! - the struct implementing Blink will keep a Arc<Mutex<simple_webrtc::Controller>>, allowing calls to be initiated by the UI
 //! - the webrtc task also has that simple_webrtc::Controller
+use async_trait::async_trait;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
@@ -45,8 +46,9 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{BlinkEventKind, CallInfo},
+    blink::{Blink, BlinkEventKind, BlinkEventStream, CallInfo},
     crypto::{aes_gcm::Aes256Gcm, digest::KeyInit, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
+    error::Error,
     multipass::MultiPass,
     sata::Sata,
 };
@@ -189,22 +191,16 @@ impl WebRtc {
     }
 
     // todo: make sure this only gets called once
-    async fn init_call(&mut self, call: CallInfo, stop: Arc<Notify>) -> anyhow::Result<()> {
-        let mut _data = STATIC_DATA.lock().await;
-
+    async fn init_call(&mut self, data: &mut StaticData, call: CallInfo) -> anyhow::Result<()> {
         // this will cause the ipfs streams to be dropped and unsubscribe from the topics
         if let Some(handle) = self.webrtc_handler.take() {
             handle.abort();
         }
         // there is no longer an active call
-        _data.active_call.take();
+        data.active_call.take();
 
         // ensure there is no ongoing webrtc call
-        _data
-            .webrtc
-            .deinit()
-            .await
-            .context("webrtc deinit failed")?;
+        data.webrtc.deinit().await.context("webrtc deinit failed")?;
 
         // next, create event streams and pass them to a task
         let ipfs = self.ipfs.read().await;
@@ -219,8 +215,7 @@ impl WebRtc {
             .context("failed to subscribe to call_signaling_route")?;
 
         let webrtc_event_stream = WebRtcEventStream(Box::pin(
-            _data
-                .webrtc
+            data.webrtc
                 .get_event_stream()
                 .context("failed to get webrtc event stream")?,
         ));
@@ -243,7 +238,7 @@ impl WebRtc {
         });
 
         self.webrtc_handler.replace(webrtc_handle);
-        _data.active_call.replace(call.into());
+        data.active_call.replace(call.into());
 
         Ok(())
     }
@@ -386,6 +381,7 @@ async fn handle_webrtc(
                         continue
                     }
                 };
+                let mut data = STATIC_DATA.lock().await;
                 let signal: PeerSignal = match decode_gossipsub_msg(&private_key, &msg) {
                     Ok(s) => s,
                     Err(e) => {
@@ -396,26 +392,23 @@ async fn handle_webrtc(
 
                 match signal {
                     PeerSignal::Ice(ice) => {
-                        let _data = STATIC_DATA.lock().await;
-                        if let Err(e) = _data.webrtc.recv_ice(&sender, ice).await {
+                        if let Err(e) = data.webrtc.recv_ice(&sender, ice).await {
                             log::error!("failed to recv_ice {}", e);
                         }
                         todo!()
                     }
                     PeerSignal::Sdp(sdp) => {
-                        let _data = STATIC_DATA.lock().await;
-                        if let Err(e) = _data.webrtc.recv_sdp(&sender, sdp).await {
+                        if let Err(e) = data.webrtc.recv_sdp(&sender, sdp).await {
                             log::error!("failed to recv_sdp: {}", e);
                         }
                         todo!()
                     }
                     PeerSignal::CallInitiated(sdp) => {
                         // if sender is part of ongoing call, start the call
-                        let mut _data = STATIC_DATA.lock().await;
-                        if _data.active_call.as_ref().map(|ac| ac.call.participants().contains(&sender)).unwrap_or(false) {
-                            if let Err(e) = _data.webrtc.accept_call(&sender, sdp).await {
+                        if data.active_call.as_ref().map(|ac| ac.call.participants().contains(&sender)).unwrap_or(false) {
+                            if let Err(e) = data.webrtc.accept_call(&sender, sdp).await {
                                 log::error!("failed to accept_call: {}", e);
-                                _data.webrtc.hang_up(&sender).await;
+                                data.webrtc.hang_up(&sender).await;
                                 // todo: is a disconnect signal needed here? perhaps a retry
                                 todo!()
                             }
@@ -451,11 +444,23 @@ async fn handle_webrtc(
                                 } else {
                                     data.webrtc.hang_up(&peer).await;
                                 }
-
-                            }
-                            // todo: store the (dest, sdp) pair and let the UI decide what to do about it.
-                            EmittedEvents::CallInitiated { dest, sdp } => {
                                 todo!()
+                            }
+                            EmittedEvents::CallInitiated { dest, sdp } => {
+                                let data = STATIC_DATA.lock().await;
+                                let call_id = match data.active_call.as_ref() {
+                                    Some(ac) => ac.call.id(),
+                                    None => {
+                                        log::error!("sdp event emitted but no active call");
+                                        continue;
+                                    }
+                                };
+                                let ipfs = ipfs.read().await;
+                                let topic = ipfs_routes::call_signal_route(&dest, &call_id);
+                                let signal = PeerSignal::CallInitiated(*sdp);
+                                if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+                                    log::error!("failed to send signal: {e}");
+                                }
                             }
                             EmittedEvents::Sdp { dest, sdp } => {
                                 // need to transmit this to dest via signal
@@ -532,5 +537,212 @@ mod ipfs_routes {
     /// subscribe to this when initializing Blink
     pub fn offer_call_route(peer: &DID) -> String {
         format!("{OFFER_CALL}/{peer}")
+    }
+}
+
+/// blink implementation
+///
+///
+#[async_trait]
+impl Blink for WebRtc {
+    // ------ Misc ------
+    /// The event stream notifies the UI of call related events
+    async fn get_event_stream(&mut self) -> Result<BlinkEventStream, Error> {
+        let mut rx = self.ui_event_ch.subscribe();
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+        Ok(BlinkEventStream(Box::pin(stream)))
+    }
+
+    // ------ Create/Join a call ------
+
+    /// attempt to initiate a call. Only one call may be offered at a time.
+    /// cannot offer a call if another call is in progress.
+    /// During a call, WebRTC connections should only be made to
+    /// peers included in the Vec<DID>.
+    async fn offer_call(&mut self, participants: Vec<DID>) -> Result<(), Error> {
+        let mut data = STATIC_DATA.lock().await;
+        let call_info = CallInfo::new(participants);
+        let ac = ActiveCall::from(call_info.clone());
+        if let Some(old_call) = data.active_call.replace(ac.clone()) {
+            // todo: end call
+        }
+
+        self.init_call(&mut data, call_info.clone()).await?;
+
+        let ipfs = self.ipfs.read().await;
+        // send message until participants accept or decline.
+        let data = Sata::default();
+        let payload = call_info.clone();
+        let res = data.encode(
+            libipld::IpldCodec::DagJson,
+            warp::sata::Kind::Static,
+            payload,
+        )?;
+        let bytes = match serde_cbor::to_vec(&res) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("failed to encode Call struct: {e}");
+                return Err(Error::SerdeCborError(e));
+            }
+        };
+        for participant in &call_info.participants() {
+            if let Err(e) = ipfs
+                .pubsub_publish(ipfs_routes::offer_call_route(participant), bytes.clone())
+                .await
+            {
+                log::error!("failed to offer call to participant {participant}: {e}");
+            }
+            todo!();
+        }
+
+        todo!();
+    }
+    /// accept/join a call. Automatically send and receive audio
+    async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
+        let mut data = STATIC_DATA.lock().await;
+        if let Some(_call) = data.active_call.take() {
+            // todo: end call
+        }
+
+        if let Some(call) = data.pending_calls.remove(&call_id) {
+            self.init_call(&mut data, call).await?;
+        }
+
+        Ok(())
+    }
+    /// notify a sender/group that you will not join a call
+    async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error> {
+        let mut data = STATIC_DATA.lock().await;
+        if let Some(mut _call) = data.pending_calls.remove(&call_id) {
+            // todo: signal
+        }
+        todo!()
+    }
+    /// end/leave the current call
+    async fn leave_call(&mut self) -> Result<(), Error> {
+        let mut data = STATIC_DATA.lock().await;
+        if let Some(ac) = data.active_call.take() {
+            // todo: leave call
+
+            data.webrtc.deinit().await?;
+
+            // todo: remove media streams
+        }
+        todo!()
+    }
+
+    // ------ Select input/output devices ------
+
+    async fn get_available_microphones(&self) -> Result<Vec<String>, Error> {
+        let mut data = STATIC_DATA.lock().await;
+        let device_iter = match data.cpal_host.input_devices() {
+            Ok(iter) => iter,
+            Err(e) => return Err(Error::Cpal(e.to_string())),
+        };
+        Ok(device_iter
+            .map(|device| device.name().unwrap_or(String::from("unknown device")))
+            .collect())
+    }
+    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
+        let host = cpal::default_host();
+        let devices = match host.input_devices() {
+            Ok(d) => d,
+            Err(e) => {
+                return Err(warp::error::Error::OtherWithContext(format!(
+                    "could not get input devices: {e}"
+                )));
+            }
+        };
+        for device in devices {
+            if let Ok(name) = device.name() {
+                if name == device_name {
+                    host_media::change_audio_input(device).await;
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(warp::error::Error::OtherWithContext(
+            "input device not found".into(),
+        ))
+    }
+    async fn get_available_speakers(&self) -> Result<Vec<String>, Error> {
+        let mut data = STATIC_DATA.lock().await;
+        let device_iter = match data.cpal_host.output_devices() {
+            Ok(iter) => iter,
+            Err(e) => return Err(Error::Cpal(e.to_string())),
+        };
+        Ok(device_iter
+            .map(|device| device.name().unwrap_or(String::from("unknown device")))
+            .collect())
+    }
+    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
+        let host = cpal::default_host();
+        let devices = match host.output_devices() {
+            Ok(d) => d,
+            Err(e) => {
+                return Err(warp::error::Error::OtherWithContext(format!(
+                    "could not get input devices: {e}"
+                )));
+            }
+        };
+        for device in devices {
+            if let Ok(name) = device.name() {
+                if name == device_name {
+                    host_media::change_audio_output(device).await?;
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(warp::error::Error::OtherWithContext(
+            "output device not found".into(),
+        ))
+    }
+    async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {
+        todo!()
+    }
+    async fn select_camera(&mut self, _device_name: &str) -> Result<(), Error> {
+        todo!()
+    }
+
+    // ------ Media controls ------
+
+    async fn mute_self(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+    async fn unmute_self(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+    async fn enable_camera(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+    async fn disable_camera(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+    async fn record_call(&mut self, _output_file: &str) -> Result<(), Error> {
+        todo!()
+    }
+    async fn stop_recording(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+
+    // ------ Utility Functions ------
+
+    async fn pending_calls(&self) -> Vec<CallInfo> {
+        let data = STATIC_DATA.lock().await;
+        Vec::from_iter(data.pending_calls.values().cloned())
+    }
+    async fn current_call(&self) -> Option<CallInfo> {
+        let data = STATIC_DATA.lock().await;
+        data.active_call.as_ref().map(|x| x.call.clone())
     }
 }
