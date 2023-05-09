@@ -121,7 +121,10 @@ impl File {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new(name: &str) -> File {
         let file = File::default();
-        let name = name.trim();
+        let mut name = name.trim();
+        if name.len() > 256 {
+            name = &name[..256];
+        }
         if !name.is_empty() {
             *file.name.write() = name.to_string();
         }

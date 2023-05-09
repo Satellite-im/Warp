@@ -121,7 +121,11 @@ impl Directory {
             return directory;
         }
 
-        let name = path.remove(0);
+        let mut name = path.remove(0);
+        if name.len() > 256 {
+            name = &name[..256];
+        }
+
         *directory.name.write() = name.to_string();
 
         if !path.is_empty() {
