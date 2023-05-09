@@ -118,7 +118,10 @@ impl File {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new(name: &str) -> File {
         let file = File::default();
-        let name = name.trim();
+        let mut name = name.trim();
+        if name.len() > 256 {
+            name = &name[..256];
+        }
         if !name.is_empty() {
             *file.name.write() = name.to_string();
         }
@@ -132,6 +135,10 @@ impl File {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_name(&self, name: &str) {
+        let mut name = name.trim();
+        if name.len() > 256 {
+            name = &name[..256];
+        }
         *self.name.write() = name.to_string()
     }
 
@@ -483,6 +490,25 @@ impl Hash {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_sha256hash(&mut self, hash: &[u8]) {
         self.sha256 = Some(bs58::encode(&hash).into_string());
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::File;
+
+    #[test]
+    fn name_length() {
+        let short_name = "test";
+        let long_name = "x".repeat(300);
+
+        let short_file = File::new(short_name);
+        let long_file = File::new(&long_name);
+
+        assert!(short_file.name().len() == 4);
+        assert!(long_file.name().len() == 256);
+        assert_eq!(long_file.name(), &long_name[..256]);
+        assert_ne!(long_file.name(), &long_name[..255]);
     }
 }
 
