@@ -55,14 +55,13 @@ use warp::{
 
 use crate::{
     host_media,
-    signaling::{CallSignal, PeerSignal},
+    signaling::{CallSignal, InitiationSignal, PeerSignal},
     simple_webrtc::{
         self,
         events::{EmittedEvents, WebRtcEventStream},
         Controller,
     },
     store::{ecdh_encrypt, PeerIdExt},
-    InitiationSignal,
 };
 
 #[derive(Clone)]
@@ -250,7 +249,7 @@ fn decode_gossipsub_msg<T: DeserializeOwned>(
     private_key: &DID,
     msg: &libp2p::gossipsub::Message,
 ) -> anyhow::Result<T> {
-    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.data)?;
+    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.data.clone())?;
     let data: T = serde_cbor::from_slice(&bytes)?;
     Ok(data)
 }
@@ -270,22 +269,20 @@ async fn handle_call_initiation(
             }
         };
 
+        let sender = match msg.source.and_then(|s| s.to_did().ok()) {
+            Some(id) => id,
+            None => {
+                log::error!("msg received without source");
+                continue;
+            }
+        };
+
         match signal {
-            InitiationSignal::Offer {
-                call_id,
-                sender,
-                participants,
-                group_key,
-            } => {
-                let call_info = CallInfo {
-                    id: call_id.clone(),
-                    participants: participants.clone(),
-                    group_key,
-                };
+            InitiationSignal::Offer { call_info } => {
                 let evt = BlinkEventKind::IncomingCall {
-                    call_id,
+                    call_id: call_info.id(),
                     sender,
-                    participants,
+                    participants: call_info.participants(),
                 };
 
                 let mut data = STATIC_DATA.lock().await;
@@ -492,9 +489,9 @@ async fn handle_webrtc(
                                let ipfs = ipfs.read().await;
                                let topic = ipfs_routes::call_signal_route(&dest, &call_id);
                                let signal = PeerSignal::Ice(*candidate);
-                               if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
-                                log::error!("failed to send signal: {e}");
-                            }
+                                if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+                                    log::error!("failed to send signal: {e}");
+                                }
                             }
                         }
                     }
@@ -569,7 +566,7 @@ impl Blink for WebRtc {
     /// peers included in the Vec<DID>.
     async fn offer_call(&mut self, participants: Vec<DID>) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
-        let call_info = CallInfo::new(participants);
+        let call_info = CallInfo::new(participants.clone());
         let ac = ActiveCall::from(call_info.clone());
         if let Some(old_call) = data.active_call.replace(ac.clone()) {
             // todo: end call
@@ -578,29 +575,14 @@ impl Blink for WebRtc {
         self.init_call(&mut data, call_info.clone()).await?;
 
         let ipfs = self.ipfs.read().await;
-        // send message until participants accept or decline.
-        let data = Sata::default();
-        let payload = call_info.clone();
-        let res = data.encode(
-            libipld::IpldCodec::DagJson,
-            warp::sata::Kind::Static,
-            payload,
-        )?;
-        let bytes = match serde_cbor::to_vec(&res) {
-            Ok(b) => b,
-            Err(e) => {
-                log::error!("failed to encode Call struct: {e}");
-                return Err(Error::SerdeCborError(e));
+        for dest in participants {
+            let topic = ipfs_routes::offer_call_route(&dest);
+            let signal = InitiationSignal::Offer {
+                call_info: ac.call.clone(),
+            };
+            if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+                log::error!("failed to send signal: {e}");
             }
-        };
-        for participant in &call_info.participants() {
-            if let Err(e) = ipfs
-                .pubsub_publish(ipfs_routes::offer_call_route(participant), bytes.clone())
-                .await
-            {
-                log::error!("failed to offer call to participant {participant}: {e}");
-            }
-            todo!();
         }
 
         todo!();
