@@ -138,6 +138,10 @@ impl File {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_name(&self, name: &str) {
+        let mut name = name.trim();
+        if name.len() > 256 {
+            name = &name[..256];
+        }
         *self.name.write() = name.to_string()
     }
 
