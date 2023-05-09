@@ -492,6 +492,25 @@ impl Hash {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::File;
+
+    #[test]
+    fn name_length() {
+        let short_name = "test";
+        let long_name = "x".repeat(300);
+
+        let short_file = File::new(short_name);
+        let long_file = File::new(&long_name);
+
+        assert!(short_file.name().len() == 4);
+        assert!(long_file.name().len() == 256);
+        assert_eq!(long_file.name(), &long_name[..256]);
+        assert_ne!(long_file.name(), &long_name[..255]);
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::constellation::file::File;
