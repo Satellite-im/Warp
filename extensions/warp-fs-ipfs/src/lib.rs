@@ -402,7 +402,7 @@ impl Constellation for IpfsFileSystem {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = match ipfs.add_file_unixfs(&path).await {
+            let mut stream = match ipfs.unixfs().add(path.clone(), Some(AddOption { pin: true, ..Default::default() })).await {
                 Ok(ste) => ste,
                 Err(e) => {
                     yield Progression::ProgressFailed {
@@ -460,27 +460,7 @@ impl Constellation for IpfsFileSystem {
                         return;
                     }
                 };
-            let cid = match ipfs_path
-                .root()
-                .cid() {
-                    Some(cid) => cid,
-                    None => {
-                        yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: Some("Cid not set".into()),
-                        };
-                        return;
-                    }
-                };
-            if let Err(e) = ipfs.insert_pin(cid, true).await {
-                yield Progression::ProgressFailed {
-                    name,
-                    last_size: Some(last_written),
-                    error: Some(e.to_string()),
-                };
-                return;
-            }
+
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
@@ -568,7 +548,16 @@ impl Constellation for IpfsFileSystem {
         let mut total_written = 0;
         let mut returned_path = None;
 
-        let mut stream = ipfs.add_unixfs(reader).await?;
+        let mut stream = ipfs
+            .unixfs()
+            .add(
+                reader,
+                Some(AddOption {
+                    pin: true,
+                    ..Default::default()
+                }),
+            )
+            .await?;
 
         while let Some(status) = stream.next().await {
             match status {
@@ -669,7 +658,7 @@ impl Constellation for IpfsFileSystem {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = match ipfs.add_unixfs(stream).await {
+            let mut stream = match ipfs.unixfs().add(stream, Some(AddOption { pin: true, ..Default::default() })).await {
                 Ok(ste) => ste,
                 Err(e) => {
                     yield Progression::ProgressFailed {
@@ -742,27 +731,7 @@ impl Constellation for IpfsFileSystem {
                         return;
                     }
                 };
-            let cid = match ipfs_path
-                .root()
-                .cid() {
-                    Some(cid) => cid,
-                    None => {
-                        yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: Some("Cid not set".into()),
-                        };
-                        return;
-                    }
-                };
-            if let Err(e) = ipfs.insert_pin(cid, true).await {
-                yield Progression::ProgressFailed {
-                    name,
-                    last_size: Some(last_written),
-                    error: Some(e.to_string()),
-                };
-                return;
-            }
+
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
