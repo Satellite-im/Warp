@@ -362,6 +362,16 @@ impl Constellation for IpfsFileSystem {
     }
 
     async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
+        let name = name.trim();
+        if name.len() < 2 || name.len() > 256 {
+            return Err(Error::InvalidLength {
+                context: "name".into(),
+                current: name.len(),
+                minimum: Some(2),
+                maximum: Some(256),
+            });
+        }
+
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context
         let handle = warp::async_handle();
@@ -523,6 +533,16 @@ impl Constellation for IpfsFileSystem {
     }
 
     async fn put_buffer(&mut self, name: &str, buffer: &[u8]) -> Result<()> {
+        let name = name.trim();
+        if name.len() < 2 || name.len() > 256 {
+            return Err(Error::InvalidLength {
+                context: "name".into(),
+                current: name.len(),
+                minimum: Some(2),
+                maximum: Some(256),
+            });
+        }
+
         if self.current_size() + buffer.len() >= self.max_size() {
             return Err(Error::InvalidLength {
                 context: "buffer".into(),
@@ -637,6 +657,16 @@ impl Constellation for IpfsFileSystem {
         total_size: Option<usize>,
         stream: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream> {
+        let name = name.trim();
+        if name.len() < 2 || name.len() > 256 {
+            return Err(Error::InvalidLength {
+                context: "name".into(),
+                current: name.len(),
+                minimum: Some(2),
+                maximum: Some(256),
+            });
+        }
+
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context
         let handle = warp::async_handle();
