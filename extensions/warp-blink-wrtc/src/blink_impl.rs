@@ -39,7 +39,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{
     sync::{
         broadcast::{self, Sender},
-        Mutex, Notify,
+        Mutex, Notify, RwLock,
     },
     task::JoinHandle,
 };
@@ -49,18 +49,17 @@ use warp::{
     crypto::{aes_gcm::Aes256Gcm, digest::KeyInit, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     multipass::MultiPass,
     sata::Sata,
-    sync::RwLock,
 };
 
 use crate::{
-    host_media, ipfs_routes,
+    host_media,
     signaling::{CallSignal, PeerSignal},
     simple_webrtc::{
         self,
         events::{EmittedEvents, WebRtcEventStream},
         Controller,
     },
-    store::PeerIdExt,
+    store::{ecdh_encrypt, PeerIdExt},
     InitiationSignal,
 };
 
@@ -208,7 +207,7 @@ impl WebRtc {
             .context("webrtc deinit failed")?;
 
         // next, create event streams and pass them to a task
-        let ipfs = self.ipfs.read();
+        let ipfs = self.ipfs.read().await;
         let call_broadcast_stream = ipfs
             .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id()))
             .await
@@ -229,10 +228,12 @@ impl WebRtc {
         let ui_event_ch = self.ui_event_ch.clone();
         let own_id = self.id.clone();
         let private_key = self.private_key.clone();
+        let ipfs2 = self.ipfs.clone();
         let webrtc_handle = tokio::task::spawn(async move {
             handle_webrtc(
                 own_id,
                 private_key,
+                ipfs2,
                 ui_event_ch,
                 call_broadcast_stream,
                 call_signaling_stream,
@@ -326,6 +327,7 @@ async fn handle_call_initiation(
 async fn handle_webrtc(
     own_id: DID,
     private_key: DID,
+    ipfs: Arc<RwLock<Ipfs>>,
     ch: Sender<BlinkEventKind>,
     call_signaling_stream: SubscriptionStream,
     peer_signaling_stream: SubscriptionStream,
@@ -393,9 +395,9 @@ async fn handle_webrtc(
                 };
 
                 match signal {
-                    PeerSignal::Ice(icd) => {
+                    PeerSignal::Ice(ice) => {
                         let _data = STATIC_DATA.lock().await;
-                        if let Err(e) = _data.webrtc.recv_ice(&sender, icd).await {
+                        if let Err(e) = _data.webrtc.recv_ice(&sender, ice).await {
                             log::error!("failed to recv_ice {}", e);
                         }
                         todo!()
@@ -457,18 +459,78 @@ async fn handle_webrtc(
                             }
                             EmittedEvents::Sdp { dest, sdp } => {
                                 // need to transmit this to dest via signal
-                                todo!()
+                                let data = STATIC_DATA.lock().await;
+                                let call_id = match data.active_call.as_ref() {
+                                    Some(ac) => ac.call.id(),
+                                    None => {
+                                        log::error!("sdp event emitted but no active call");
+                                        continue;
+                                    }
+                                };
+                                let ipfs = ipfs.read().await;
+                                let topic = ipfs_routes::call_signal_route(&dest, &call_id);
+                                let signal = PeerSignal::Sdp(*sdp);
+                                if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+                                    log::error!("failed to send signal: {e}");
+                                }
                             }
                             EmittedEvents::Ice { dest, candidate } => {
                                // need to transmit this to dest via signal
-                               todo!()
+                               let data = STATIC_DATA.lock().await;
+                               let call_id = match data.active_call.as_ref() {
+                                   Some(ac) => ac.call.id(),
+                                   None => {
+                                       log::error!("sdp event emitted but no active call");
+                                       continue;
+                                   }
+                               };
+                               let ipfs = ipfs.read().await;
+                               let topic = ipfs_routes::call_signal_route(&dest, &call_id);
+                               let signal = PeerSignal::Ice(*candidate);
+                               if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+                                log::error!("failed to send signal: {e}");
+                            }
                             }
                         }
-                        todo!("handle event");
                     }
                     None => todo!()
                 }
             }
         }
+    }
+}
+
+async fn send_signal<T: Serialize>(
+    ipfs: &Ipfs,
+    dest: DID,
+    signal: T,
+    topic: String,
+) -> anyhow::Result<()> {
+    let serialized = serde_cbor::to_vec(&signal)?;
+    let encrypted = ecdh_encrypt(&dest, Some(dest.clone()), serialized)?;
+    ipfs.pubsub_publish(topic, encrypted).await?;
+    Ok(())
+}
+
+mod ipfs_routes {
+    use uuid::Uuid;
+    use warp::crypto::DID;
+
+    const TELECON_BROADCAST: &str = "telecon";
+    const OFFER_CALL: &str = "offer_call";
+
+    /// subscribe/unsubscribe per-call
+    pub fn call_broadcast_route(call_id: &Uuid) -> String {
+        format!("{TELECON_BROADCAST}/{call_id}")
+    }
+
+    /// subscribe/unsubscribe per-call
+    pub fn call_signal_route(peer: &DID, call_id: &Uuid) -> String {
+        format!("{TELECON_BROADCAST}/{call_id}/{peer}")
+    }
+
+    /// subscribe to this when initializing Blink
+    pub fn offer_call_route(peer: &DID) -> String {
+        format!("{OFFER_CALL}/{peer}")
     }
 }

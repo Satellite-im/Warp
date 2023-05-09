@@ -11,6 +11,7 @@ pub enum PeerSignal {
     Ice(RTCIceCandidate),
     // sent in response to accepting the call
     Sdp(RTCSessionDescription),
+    // the user may accept the call, and that will cause simple-webrtc to generate a SDP event
     CallInitiated(RTCSessionDescription),
 }
 
