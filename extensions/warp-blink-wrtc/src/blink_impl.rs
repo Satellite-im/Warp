@@ -357,19 +357,18 @@ async fn handle_webrtc(
                 };
                 match signal {
                     CallSignal::Join { call_id } => {
-                        // todo: initiate connection
                         let mut data = STATIC_DATA.lock().await;
                         if let Some(ac) = data.active_call.as_mut() {
-                            ac.connected_participants.insert(sender);
+                            ac.connected_participants.insert(sender.clone());
                         }
+                        ch.send(BlinkEventKind::ParticipantJoined { call_id, peer_id: sender });
                     }
                     CallSignal::Leave { call_id } => {
-                        // todo: don't retry
                         let mut data = STATIC_DATA.lock().await;
                         if let Some(ac) = data.active_call.as_mut() {
                             ac.connected_participants.remove(&sender);
                         }
-
+                        ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender });
                     },
                 }
             },
@@ -394,12 +393,32 @@ async fn handle_webrtc(
                 };
 
                 match signal {
-                    PeerSignal::Ice(icd) => {}
-                    PeerSignal::Sdp(sdp) => {}
-                    PeerSignal::CallInitiated(sdp) => {
+                    PeerSignal::Ice(icd) => {
+                        let _data = STATIC_DATA.lock().await;
+                        if let Err(e) = _data.webrtc.recv_ice(&sender, icd).await {
+                            log::error!("failed to recv_ice {}", e);
+                        }
+                        todo!()
                     }
-                    PeerSignal::CallTerminated(call_id) => {}
-                    PeerSignal::CallRejected(call_id) => {}
+                    PeerSignal::Sdp(sdp) => {
+                        let _data = STATIC_DATA.lock().await;
+                        if let Err(e) = _data.webrtc.recv_sdp(&sender, sdp).await {
+                            log::error!("failed to recv_sdp: {}", e);
+                        }
+                        todo!()
+                    }
+                    PeerSignal::CallInitiated(sdp) => {
+                        // if sender is part of ongoing call, start the call
+                        let mut _data = STATIC_DATA.lock().await;
+                        if _data.active_call.as_ref().map(|ac| ac.call.participants().contains(&sender)).unwrap_or(false) {
+                            if let Err(e) = _data.webrtc.accept_call(&sender, sdp).await {
+                                log::error!("failed to accept_call: {}", e);
+                                _data.webrtc.hang_up(&sender).await;
+                                // todo: is a disconnect signal needed here? perhaps a retry
+                                todo!()
+                            }
+                        }
+                    }
                 }
             },
             opt = webrtc_event_stream.next() => {
@@ -419,42 +438,30 @@ async fn handle_webrtc(
                                 if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
-
-                                ch.send(BlinkEventKind::ParticipantJoined { call_id, peer_id: peer });
                             }
                             EmittedEvents::Disconnected { peer } => {
-                                let mut _data = STATIC_DATA.lock().await;
-                                // todo: retry unless the hangup signal was sent
+                                let mut data = STATIC_DATA.lock().await;
                                 if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
+                                if  data.active_call.as_ref().map(|ac| ac.connected_participants.contains(&peer)).unwrap_or(false) {
+                                    // todo: retry connection
+                                } else {
+                                    data.webrtc.hang_up(&peer).await;
+                                }
 
-                                _data.webrtc.hang_up(&peer).await;
                             }
                             // todo: store the (dest, sdp) pair and let the UI decide what to do about it.
                             EmittedEvents::CallInitiated { dest, sdp } => {
-                                let mut _data = STATIC_DATA.lock().await;
-                                if !_data.active_call.as_ref().map(|ac| ac.call.participants().contains(&dest)).unwrap_or(false) {
-                                    todo!("send signal to reject call");
-                                }
-
-                                if let Err(e) = _data.webrtc.accept_call(&dest, *sdp).await {
-                                    log::error!("failed to accept_call: {}", e);
-                                    _data.webrtc.hang_up(&dest).await;
-                                    // todo: is a disconnect signal needed here?
-                                }
+                                todo!()
                             }
                             EmittedEvents::Sdp { dest, sdp } => {
-                                let _data = STATIC_DATA.lock().await;
-                                if let Err(e) = _data.webrtc.recv_sdp(&dest, *sdp).await {
-                                    log::error!("failed to recv_sdp: {}", e);
-                                }
+                                // need to transmit this to dest via signal
+                                todo!()
                             }
                             EmittedEvents::Ice { dest, candidate } => {
-                                let _data = STATIC_DATA.lock().await;
-                                if let Err(e) = _data.webrtc.recv_ice(&dest, *candidate).await {
-                                    log::error!("failed to recv_ice {}", e);
-                                }
+                               // need to transmit this to dest via signal
+                               todo!()
                             }
                         }
                         todo!("handle event");

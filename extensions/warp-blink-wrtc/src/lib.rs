@@ -139,6 +139,8 @@ impl From<CallInfo> for ActiveCall {
     }
 }
 
+// todo: move these signals out of blink API
+
 /// sent via offer_call/<DID>
 #[derive(Serialize, Deserialize)]
 enum InitiationSignal {

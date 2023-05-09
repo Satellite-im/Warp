@@ -30,6 +30,7 @@ pub enum EmittedEvents {
         dest: DID,
         candidate: Box<RTCIceCandidate>,
     },
+    /// emitted in response to accept_call. the sdp should be sent to dest
     #[display(fmt = "Sdp")]
     Sdp {
         dest: DID,

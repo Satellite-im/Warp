@@ -7,29 +7,15 @@ use webrtc::{
 };
 
 #[derive(Serialize, Deserialize)]
-pub struct SigSdp {
-    pub src: DID,
-    pub sdp: RTCSessionDescription,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct SigIce {
-    pub src: DID,
-    pub ice: RTCIceCandidate,
-}
-
-#[derive(Serialize, Deserialize)]
 pub enum PeerSignal {
-    Ice(SigIce),
-    Sdp(SigSdp),
-    CallInitiated(SigSdp),
-    CallTerminated(Uuid),
-    CallRejected(Uuid),
+    Ice(RTCIceCandidate),
+    // sent in response to accepting the call
+    Sdp(RTCSessionDescription),
+    CallInitiated(RTCSessionDescription),
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum CallSignal {
     Join { call_id: Uuid },
-
     Leave { call_id: Uuid },
 }
