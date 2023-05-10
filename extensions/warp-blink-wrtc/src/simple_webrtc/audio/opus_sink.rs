@@ -5,7 +5,7 @@ use tokio::{
     sync::mpsc::{self, error::TryRecvError},
     task::JoinHandle,
 };
-use uuid::Uuid;
+
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability, track::track_remote::TrackRemote,
@@ -41,17 +41,12 @@ impl SinkTrack for OpusSink {
         // number of late samples allowed (for RTP)
         let max_late = 480;
         let sample_rate = codec.clock_rate;
-        let channels = match codec.channels {
-            _ => opus::Channels::Mono,
-            /*1 => opus::Channels::Mono,
-            2 => opus::Channels::Stereo,
-            _ => bail!("invalid number of channels"),*/
-        };
+        let channels = opus::Channels::Mono;
 
         let decoder = opus::Decoder::new(sample_rate, channels)?;
         let (producer, mut consumer) = mpsc::unbounded_channel::<i16>();
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
-        let sample_builder = SampleBuilder::new(max_late, depacketizer, sample_rate as u32);
+        let sample_builder = SampleBuilder::new(max_late, depacketizer, sample_rate);
         let track2 = track.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = decode_media_stream(track2, sample_builder, producer, decoder).await {

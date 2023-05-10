@@ -80,7 +80,7 @@ pub async fn create_audio_source_track(
     Ok(())
 }
 
-pub async fn remove_source_track(source_id: MediaSourceId) -> anyhow::Result<()> {
+pub async fn remove_source_track(_source_id: MediaSourceId) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     todo!()
 }
@@ -133,7 +133,7 @@ pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
+pub async fn remove_sink_track(_peer_id: DID) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     todo!()
 }

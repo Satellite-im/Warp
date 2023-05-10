@@ -23,17 +23,17 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Context};
+use anyhow::{Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 use once_cell::sync::Lazy;
 
 use rust_ipfs::{Ipfs, SubscriptionStream};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
 use tokio::{
     sync::{
         broadcast::{self, Sender},
-        Mutex, Notify, RwLock,
+        Mutex,
     },
     task::JoinHandle,
 };
@@ -41,14 +41,10 @@ use uuid::Uuid;
 use warp::{
     blink::{Blink, BlinkEventKind, BlinkEventStream, CallInfo},
     crypto::{
-        aes_gcm::{aead::Aead, aes::Aes256, AeadInPlace, Aes256Gcm, Nonce},
-        digest::KeyInit,
-        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+        digest::KeyInit, DID,
     },
     error::Error,
     multipass::MultiPass,
-    sata::Sata,
-    tesseract::Tesseract,
 };
 
 use crate::{
@@ -57,7 +53,6 @@ use crate::{
     simple_webrtc::{
         self,
         events::{EmittedEvents, WebRtcEventStream},
-        Controller,
     },
     store::{decode_gossipsub_msg_ecdh, send_signal_aes, send_signal_ecdh, PeerIdExt},
 };
@@ -260,7 +255,7 @@ impl WebRtc {
 }
 
 async fn handle_call_initiation(
-    own_id: DID,
+    _own_id: DID,
     private_key: Arc<DID>,
     mut stream: SubscriptionStream,
     ch: Sender<BlinkEventKind>,
@@ -299,7 +294,7 @@ async fn handle_call_initiation(
 }
 
 async fn handle_webrtc(
-    own_id: DID,
+    _own_id: DID,
     private_key: Arc<DID>,
     ipfs: Ipfs,
     ch: Sender<BlinkEventKind>,

@@ -5,7 +5,7 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use rand::Rng;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinHandle};
-use uuid::Uuid;
+
 use webrtc::{
     rtp::{self, packetizer::Packetizer},
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
@@ -55,7 +55,7 @@ impl SourceTrack for OpusSource {
             // i16 is 2 bytes
             // frame size is number of i16 samles
             // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
-            (frame_size * 2 + 12) as usize,
+            frame_size * 2 + 12,
             // payload type means nothing
             // https://en.wikipedia.org/wiki/RTP_payload_formats
             // todo: use an enum for this
@@ -140,7 +140,7 @@ pub struct OpusFramer {
 impl OpusFramer {
     pub fn init(frame_size: usize, sample_rate: u32, channels: opus::Channels) -> Result<Self> {
         let mut buf = Vec::new();
-        buf.reserve(frame_size as usize);
+        buf.reserve(frame_size);
         let mut opus_out = Vec::new();
         opus_out.resize(frame_size, 0);
         let encoder = opus::Encoder::new(sample_rate, channels, opus::Application::Voip)?;

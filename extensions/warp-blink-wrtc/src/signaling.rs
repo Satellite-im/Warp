@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warp::{blink::CallInfo, crypto::DID};
+use warp::{blink::CallInfo};
 use webrtc::{
     ice_transport::ice_candidate::RTCIceCandidate,
     peer_connection::sdp::session_description::RTCSessionDescription,
