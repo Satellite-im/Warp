@@ -48,6 +48,7 @@ use warp::{
     error::Error,
     multipass::MultiPass,
     sata::Sata,
+    tesseract::Tesseract,
 };
 
 use crate::{
@@ -88,9 +89,9 @@ enum CallState {
 
 pub struct WebRtc {
     account: Box<dyn MultiPass>,
-    ipfs: Arc<RwLock<Ipfs>>,
+    ipfs: Ipfs,
     id: DID,
-    private_key: DID,
+    private_key: Arc<DID>,
     // a tx channel which emits events to drive the UI
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     // subscribes to IPFS topic to receive incoming calls
@@ -123,6 +124,7 @@ struct StaticData {
 }
 
 impl WebRtc {
+    // todo: may not need Multipass if tesseract keystore will be retrieved anyway
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
         let _data = STATIC_DATA.lock().await;
         let identity = loop {
@@ -167,16 +169,16 @@ impl WebRtc {
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let ui_event_ch2 = ui_event_ch.clone();
         let own_id = did.clone();
-        // todo: get private key from DID
-        let private_key = todo!();
+        let private_key = Arc::new(account.decrypt_private_key(None)?);
+        let private_key2 = private_key.clone();
         let offer_handler = tokio::spawn(async {
-            handle_call_initiation(own_id, private_key, call_offer_stream, ui_event_ch2).await;
+            handle_call_initiation(own_id, private_key2, call_offer_stream, ui_event_ch2).await;
         });
 
         let webrtc = Self {
             account,
             private_key,
-            ipfs: Arc::new(RwLock::new(ipfs.clone())),
+            ipfs,
             id: did.clone(),
             ui_event_ch,
             offer_handler,
@@ -199,13 +201,14 @@ impl WebRtc {
         data.webrtc.deinit().await.context("webrtc deinit failed")?;
 
         // next, create event streams and pass them to a task
-        let ipfs = self.ipfs.read().await;
-        let call_broadcast_stream = ipfs
+        let call_broadcast_stream = self
+            .ipfs
             .pubsub_subscribe(ipfs_routes::call_signal_route(&call.id()))
             .await
             .context("failed to subscribe to call_broadcast_route")?;
 
-        let call_signaling_stream = ipfs
+        let call_signaling_stream = self
+            .ipfs
             .pubsub_subscribe(ipfs_routes::peer_signal_route(&self.id, &call.id()))
             .await
             .context("failed to subscribe to call_signaling_route")?;
@@ -241,12 +244,11 @@ impl WebRtc {
 
     async fn leave_call_internal(&mut self, data: &mut StaticData) -> anyhow::Result<()> {
         if let Some(ac) = data.active_call.take() {
-            let ipfs = self.ipfs.read().await;
             let call_id = ac.call.id();
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Leave { call_id };
 
-            if let Err(e) = send_signal_aes(&ipfs, &ac.call.group_key(), signal, topic).await {
+            if let Err(e) = send_signal_aes(&self.ipfs, &ac.call.group_key(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
 
@@ -260,7 +262,7 @@ impl WebRtc {
 
 async fn handle_call_initiation(
     own_id: DID,
-    private_key: DID,
+    private_key: Arc<DID>,
     mut stream: SubscriptionStream,
     ch: Sender<BlinkEventKind>,
 ) {
@@ -322,8 +324,8 @@ async fn handle_call_initiation(
 
 async fn handle_webrtc(
     own_id: DID,
-    private_key: DID,
-    ipfs: Arc<RwLock<Ipfs>>,
+    private_key: Arc<DID>,
+    ipfs: Ipfs,
     ch: Sender<BlinkEventKind>,
     call_signaling_stream: SubscriptionStream,
     peer_signaling_stream: SubscriptionStream,
@@ -460,7 +462,6 @@ async fn handle_webrtc(
                                         continue;
                                     }
                                 };
-                                let ipfs = ipfs.read().await;
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Dial(*sdp);
                                 if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
@@ -477,7 +478,6 @@ async fn handle_webrtc(
                                         continue;
                                     }
                                 };
-                                let ipfs = ipfs.read().await;
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Sdp(*sdp);
                                 if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
@@ -494,7 +494,6 @@ async fn handle_webrtc(
                                        continue;
                                    }
                                };
-                               let ipfs = ipfs.read().await;
                                let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                let signal = PeerSignal::Ice(*candidate);
                                 if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
@@ -573,13 +572,12 @@ impl Blink for WebRtc {
 
         self.init_call(&mut data, call_info.clone()).await?;
 
-        let ipfs = self.ipfs.read().await;
         for dest in participants {
             let topic = ipfs_routes::call_initiation_route(&dest);
             let signal = InitiationSignal::Offer {
                 call_info: ac.call.clone(),
             };
-            if let Err(e) = send_signal_ecdh(&ipfs, dest.clone(), signal, topic).await {
+            if let Err(e) = send_signal_ecdh(&self.ipfs, dest.clone(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
@@ -596,12 +594,11 @@ impl Blink for WebRtc {
         if let Some(call) = data.pending_calls.remove(&call_id) {
             self.init_call(&mut data, call.clone()).await?;
 
-            let ipfs = self.ipfs.read().await;
             let call_id = call.id();
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Join { call_id };
 
-            if let Err(e) = send_signal_aes(&ipfs, &call.group_key(), signal, topic).await {
+            if let Err(e) = send_signal_aes(&self.ipfs, &call.group_key(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }

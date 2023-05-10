@@ -11,6 +11,9 @@ use warp::crypto::{DIDKey, KeyMaterial};
 use warp::error::Error;
 type Result<T> = std::result::Result<T, Error>;
 use warp::crypto::{cipher::Cipher, zeroize::Zeroizing, Ed25519KeyPair, DID};
+use warp::tesseract::Tesseract;
+
+const NONCE_LEN: usize = 12;
 
 pub trait PeerIdExt {
     fn to_did(&self) -> std::result::Result<DID, anyhow::Error>;
@@ -25,6 +28,14 @@ impl PeerIdExt for ipfs::PeerId {
         let public_key = ipfs::PublicKey::try_decode_protobuf(multihash.digest())?;
         libp2p_pub_to_did(&public_key)
     }
+}
+
+pub fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
+    let kp = tesseract.retrieve("keypair")?;
+    let kp = bs58::decode(kp).into_vec()?;
+    let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes()));
+    Ok(did.into())
 }
 
 // uses asymetric encryption
@@ -48,7 +59,7 @@ pub async fn send_signal_aes<T: Serialize>(
     topic: String,
 ) -> anyhow::Result<()> {
     let serialized = serde_cbor::to_vec(&signal)?;
-    let random_bytes: Vec<u8> = (0..96).map(|_| rand::random::<u8>()).collect();
+    let random_bytes: Vec<u8> = (0..NONCE_LEN).map(|_| rand::random::<u8>()).collect();
     let nonce = Nonce::from_slice(&random_bytes);
     let cipher = Aes256Gcm::new_from_slice(key)?;
     let encrypted = match cipher.encrypt(nonce, serialized.as_ref()) {
@@ -80,11 +91,11 @@ pub fn decode_gossipsub_msg_aes<T: DeserializeOwned>(
     key: &[u8],
     msg: &libp2p::gossipsub::Message,
 ) -> anyhow::Result<T> {
-    let nonce = Nonce::from_slice(&msg.data[0..96]);
-    let encrypted = &msg.data[96..];
+    let nonce = Nonce::from_slice(&msg.data[0..NONCE_LEN]);
+    let encrypted = &msg.data[NONCE_LEN..];
 
     let cipher = Aes256Gcm::new_from_slice(key)?;
-    let mut decrypted = match cipher.decrypt(nonce, encrypted) {
+    let decrypted = match cipher.decrypt(nonce, encrypted) {
         Ok(r) => r,
         Err(e) => bail!("failed to decrypt gossipsub msg: {e}"),
     };
