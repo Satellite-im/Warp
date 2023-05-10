@@ -3249,10 +3249,14 @@ impl MessageStore {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        let files = files
-            .iter()
-            .filter(|path| path.is_file())
-            .collect::<Vec<_>>();
+        let files = if matches!(location, Location::Disk) {
+            files
+                .iter()
+                .filter(|path| path.is_file())
+                .collect::<Vec<_>>()
+        } else {
+            files.iter().collect::<Vec<_>>()
+        };
 
         if files.is_empty() {
             return Err(Error::InvalidMessage);
