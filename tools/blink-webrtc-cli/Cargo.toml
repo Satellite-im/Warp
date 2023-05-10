@@ -1,0 +1,32 @@
+[package]
+name = "blink-webrtc-cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+fdlimit = "0.2"
+comfy-table = "6.1"
+clap = { version = "4.0", features = ["derive"] }
+rpassword = "7.2"
+warp = { path = "../../warp" }
+warp-blink-wrtc = { path = "../../extensions/warp-blink-wrtc" }
+warp-mp-ipfs = { path = "../../extensions/warp-mp-ipfs" }
+warp-rg-ipfs = { path = "../../extensions/warp-rg-ipfs" }
+warp-fs-ipfs = { path = "../../extensions/warp-fs-ipfs" }
+
+uuid = { workspace = true, features = ["serde", "v4"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["net"] }
+
+rand = "0.8.5"
+simple_logger = "4.1.0"
+
+futures.workspace = true
+async-trait.workspace = true
+async-stream.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true

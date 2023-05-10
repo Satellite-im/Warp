@@ -42,8 +42,7 @@ pub enum EmittedEvents {
         dest: DID,
         sdp: Box<RTCSessionDescription>,
     },
-    /// unless a CallTerminated event was received, results in a reconnect
-    /// needs to be handled by the developer
+    /// for now let the peer re-join the call manually if they get disconnected
     #[display(fmt = "Disconnected")]
     Disconnected { peer: DID },
     /// a peer added a track. The calling application is responsible for reading from the track
