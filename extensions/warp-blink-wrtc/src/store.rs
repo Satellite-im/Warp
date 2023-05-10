@@ -7,26 +7,17 @@ use warp::crypto::aes_gcm::aead::Aead;
 use warp::crypto::aes_gcm::{Aes256Gcm, Nonce};
 use warp::crypto::did_key::{Generate, ECDH};
 use warp::crypto::digest::KeyInit;
-use warp::crypto::hash::sha256_hash;
 use warp::crypto::{DIDKey, KeyMaterial};
 use warp::error::Error;
 type Result<T> = std::result::Result<T, Error>;
 use warp::crypto::{cipher::Cipher, zeroize::Zeroizing, Ed25519KeyPair, DID};
-use warp::tesseract::Tesseract;
 
 const NONCE_LEN: usize = 12;
 
 #[derive(Serialize, Deserialize)]
 pub struct AesMsg {
+    msg: Vec<u8>,
     nonce: Vec<u8>,
-    msg: Vec<u8>,
-    signature: Vec<u8>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct EcdhMsg {
-    msg: Vec<u8>,
-    signature: Vec<u8>,
 }
 
 pub trait PeerIdExt {
@@ -54,15 +45,8 @@ pub async fn send_signal_ecdh<T: Serialize>(
 ) -> anyhow::Result<()> {
     let serialized = serde_cbor::to_vec(&signal)?;
     let encrypted = ecdh_encrypt(&dest, Some(dest.clone()), serialized)?;
-    let hash = sha256_hash(&encrypted, None);
-    let signature = ecdh_encrypt(&src, None, &hash)?;
 
-    let msg = EcdhMsg {
-        msg: encrypted,
-        signature,
-    };
-    let bytes = serde_cbor::to_vec(&msg)?;
-    ipfs.pubsub_publish(topic, bytes).await?;
+    ipfs.pubsub_publish(topic, encrypted).await?;
     Ok(())
 }
 
@@ -84,13 +68,10 @@ pub async fn send_signal_aes<T: Serialize>(
             bail!("encrypt failed! {e}");
         }
     };
-    let hash = sha256_hash(&encrypted, None);
-    let signature = ecdh_encrypt(&src, None, &hash)?;
 
     let msg = AesMsg {
-        nonce: random_bytes,
         msg: encrypted,
-        signature,
+        nonce: random_bytes,
     };
     let bytes = serde_cbor::to_vec(&msg)?;
     ipfs.pubsub_publish(topic, bytes).await?;
@@ -102,13 +83,7 @@ pub fn decode_gossipsub_msg_ecdh<T: DeserializeOwned>(
     sender: DID,
     private_key: &DID,
 ) -> anyhow::Result<T> {
-    let msg: EcdhMsg = serde_cbor::from_slice(&msg.data)?;
-    let test_hash = sha256_hash(&msg.msg, None);
-    let hash = ecdh_decrypt(&sender, None, &msg.signature)?;
-    if hash != test_hash {
-        bail!("invalid signature");
-    }
-    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.msg.clone())?;
+    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.data.clone())?;
     let data: T = serde_cbor::from_slice(&bytes)?;
     Ok(data)
 }
@@ -119,12 +94,6 @@ pub fn decode_gossipsub_msg_aes<T: DeserializeOwned>(
     key: &[u8],
 ) -> anyhow::Result<T> {
     let msg: AesMsg = serde_cbor::from_slice(&msg.data)?;
-    let test_hash = sha256_hash(&msg.msg, None);
-    let hash = ecdh_decrypt(&sender, None, &msg.signature)?;
-    if hash != test_hash {
-        bail!("invalid signature");
-    }
-
     let nonce = Nonce::from_slice(&msg.nonce);
     let cipher = Aes256Gcm::new_from_slice(key)?;
     let decrypted = match cipher.decrypt(nonce, msg.msg.as_ref()) {
