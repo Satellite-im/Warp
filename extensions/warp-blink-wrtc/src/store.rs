@@ -38,7 +38,6 @@ impl PeerIdExt for ipfs::PeerId {
 // uses asymetric encryption
 pub async fn send_signal_ecdh<T: Serialize>(
     ipfs: &Ipfs,
-    src: DID,
     dest: DID,
     signal: T,
     topic: String,
@@ -54,7 +53,6 @@ pub async fn send_signal_ecdh<T: Serialize>(
 pub async fn send_signal_aes<T: Serialize>(
     ipfs: &Ipfs,
     key: &[u8],
-    src: DID,
     signal: T,
     topic: String,
 ) -> anyhow::Result<()> {
@@ -79,9 +77,8 @@ pub async fn send_signal_aes<T: Serialize>(
 }
 
 pub fn decode_gossipsub_msg_ecdh<T: DeserializeOwned>(
-    msg: &libp2p::gossipsub::Message,
-    sender: DID,
     private_key: &DID,
+    msg: &libp2p::gossipsub::Message,
 ) -> anyhow::Result<T> {
     let bytes = crate::store::ecdh_decrypt(private_key, None, msg.data.clone())?;
     let data: T = serde_cbor::from_slice(&bytes)?;
@@ -89,9 +86,8 @@ pub fn decode_gossipsub_msg_ecdh<T: DeserializeOwned>(
 }
 
 pub fn decode_gossipsub_msg_aes<T: DeserializeOwned>(
-    msg: &libp2p::gossipsub::Message,
-    sender: DID,
     key: &[u8],
+    msg: &libp2p::gossipsub::Message,
 ) -> anyhow::Result<T> {
     let msg: AesMsg = serde_cbor::from_slice(&msg.data)?;
     let nonce = Nonce::from_slice(&msg.nonce);
