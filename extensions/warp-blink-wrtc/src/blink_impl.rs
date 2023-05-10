@@ -124,7 +124,6 @@ struct StaticData {
 }
 
 impl WebRtc {
-    // todo: may not need Multipass if tesseract keystore will be retrieved anyway
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
         let _data = STATIC_DATA.lock().await;
         let identity = loop {
@@ -295,29 +294,6 @@ async fn handle_call_initiation(
                 data.pending_calls.insert(call_info.id(), call_info);
                 ch.send(evt);
             }
-            InitiationSignal::Reject {
-                call_id,
-                participant,
-            } => {
-                let mut data = STATIC_DATA.lock().await;
-                // for direct calls, if they hang up, don't bother waiting.
-                let no_answer = data
-                    .active_call
-                    .as_ref()
-                    .map(|ac| {
-                        let participants = ac.call.participants();
-                        participants.len() == 2 && participants.iter().any(|id| id == &participant)
-                    })
-                    .unwrap_or(false);
-                if no_answer {
-                    if let Some(ac) = data.active_call.take() {
-                        let evt = BlinkEventKind::CallEnded {
-                            call_id: ac.call.id(),
-                        };
-                        ch.send(evt);
-                    }
-                }
-            }
         }
     }
 }
@@ -430,13 +406,10 @@ async fn handle_webrtc(
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
                                 let mut _data = STATIC_DATA.lock().await;
-                                let call_id = match _data.active_call.as_ref() {
-                                    Some(ac) => ac.call.id(),
-                                    None => {
-                                        log::error!("webrtc track added without an ongoing call");
-                                        continue;
-                                    }
-                                };
+                                if _data.active_call.is_none() {
+                                    log::error!("webrtc track added without an ongoing call");
+                                    continue;
+                                }
                                 if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
@@ -446,12 +419,11 @@ async fn handle_webrtc(
                                 if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
+                                data.webrtc.hang_up(&peer).await;
                                 if  data.active_call.as_ref().map(|ac| ac.connected_participants.contains(&peer)).unwrap_or(false) {
                                     // todo: retry connection
-                                } else {
-                                    data.webrtc.hang_up(&peer).await;
                                 }
-                                todo!()
+                                todo!();
                             }
                             EmittedEvents::CallInitiated { dest, sdp } => {
                                 let data = STATIC_DATA.lock().await;
@@ -567,11 +539,8 @@ impl Blink for WebRtc {
         let call_info = CallInfo::new(participants.clone());
         let ac = ActiveCall::from(call_info.clone());
 
-        // leave old call
         self.leave_call_internal(&mut data).await?;
-
         self.init_call(&mut data, call_info.clone()).await?;
-
         for dest in participants {
             let topic = ipfs_routes::call_initiation_route(&dest);
             let signal = InitiationSignal::Offer {
@@ -581,43 +550,41 @@ impl Blink for WebRtc {
                 log::error!("failed to send signal: {e}");
             }
         }
-
-        todo!();
+        Ok(())
     }
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
 
-        // leave old call
         self.leave_call_internal(&mut data).await?;
-
         if let Some(call) = data.pending_calls.remove(&call_id) {
             self.init_call(&mut data, call.clone()).await?;
-
             let call_id = call.id();
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Join { call_id };
-
             if let Err(e) = send_signal_aes(&self.ipfs, &call.group_key(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
-
         Ok(())
     }
-    /// notify a sender/group that you will not join a call
+    /// use the Leave signal as a courtesy, to let the group know not to expect you to join.
     async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
-        if let Some(mut _call) = data.pending_calls.remove(&call_id) {
-            // todo: signal
+        if let Some(call) = data.pending_calls.remove(&call_id) {
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Leave { call_id };
+            if let Err(e) = send_signal_aes(&self.ipfs, &call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
+            }
         }
-        todo!()
+        Ok(())
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
         self.leave_call_internal(&mut data).await?;
-        todo!()
+        Ok(())
     }
 
     // ------ Select input/output devices ------
@@ -656,7 +623,7 @@ impl Blink for WebRtc {
         ))
     }
     async fn get_available_speakers(&self) -> Result<Vec<String>, Error> {
-        let mut data = STATIC_DATA.lock().await;
+        let data = STATIC_DATA.lock().await;
         let device_iter = match data.cpal_host.output_devices() {
             Ok(iter) => iter,
             Err(e) => return Err(Error::Cpal(e.to_string())),

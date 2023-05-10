@@ -83,10 +83,6 @@ pub enum BlinkEventKind {
         // the total set of participants who are invited to the call
         participants: Vec<DID>,
     },
-    /// At least one participant accepted the call
-    CallStarted { call_id: Uuid },
-    /// All participants have left the call
-    CallEnded { call_id: Uuid },
     /// Someone joined the call
     ParticipantJoined { call_id: Uuid, peer_id: DID },
     /// Someone left the call

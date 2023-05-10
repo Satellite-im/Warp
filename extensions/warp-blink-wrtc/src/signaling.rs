@@ -25,11 +25,4 @@ pub enum CallSignal {
 pub enum InitiationSignal {
     /// invite a peer to join a call
     Offer { call_info: CallInfo },
-    /// indicate that the peer will not be joining
-    Reject {
-        // the call being rejected
-        call_id: Uuid,
-        // the participant who is rejecting the call
-        participant: DID,
-    },
 }
