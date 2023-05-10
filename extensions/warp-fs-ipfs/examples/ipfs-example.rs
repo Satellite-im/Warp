@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     let account = account().await?;
     let mut filesystem = IpfsFileSystem::new(account.clone(), None).await?;
     filesystem
-        .put_buffer("readme.txt", &b"Hello, World!".to_vec())
+        .put_buffer("readme.txt", b"Hello, World!")
         .await?;
     let buffer = filesystem.get_buffer("readme.txt").await?;
     let data = String::from_utf8_lossy(&buffer);
