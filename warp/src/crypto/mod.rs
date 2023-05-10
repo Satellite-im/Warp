@@ -173,6 +173,13 @@ pub fn generate(limit: usize) -> Vec<u8> {
     buf.to_vec()
 }
 
+pub fn generate_slice<const N: usize>() -> [u8; N] {
+    let mut buf = [0u8; N];
+    getrandom::getrandom(&mut buf).unwrap();
+    buf
+}
+
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use std::{
