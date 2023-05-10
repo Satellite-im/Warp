@@ -19,7 +19,6 @@
 use async_trait::async_trait;
 use std::{
     collections::{HashMap, HashSet},
-    hash::Hash,
     sync::Arc,
     time::Duration,
 };
@@ -28,14 +27,8 @@ use anyhow::{bail, Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 use once_cell::sync::Lazy;
-use rand::rngs::OsRng;
-use rust_ipfs::{
-    libp2p::{
-        self,
-        gossipsub::{Gossipsub, GossipsubMessage},
-    },
-    Ipfs, SubscriptionStream,
-};
+
+use rust_ipfs::{Ipfs, SubscriptionStream};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{
     sync::{
@@ -47,7 +40,11 @@ use tokio::{
 use uuid::Uuid;
 use warp::{
     blink::{Blink, BlinkEventKind, BlinkEventStream, CallInfo},
-    crypto::{aes_gcm::Aes256Gcm, digest::KeyInit, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
+    crypto::{
+        aes_gcm::{aead::Aead, aes::Aes256, AeadInPlace, Aes256Gcm, Nonce},
+        digest::KeyInit,
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+    },
     error::Error,
     multipass::MultiPass,
     sata::Sata,
@@ -61,7 +58,7 @@ use crate::{
         events::{EmittedEvents, WebRtcEventStream},
         Controller,
     },
-    store::{ecdh_encrypt, PeerIdExt},
+    store::{decode_gossipsub_msg_ecdh, send_signal_aes, send_signal_ecdh, PeerIdExt},
 };
 
 #[derive(Clone)]
@@ -242,16 +239,23 @@ impl WebRtc {
         Ok(())
     }
 
-    async fn cleanup_call(&mut self) {}
-}
+    async fn leave_call_internal(&mut self, data: &mut StaticData) -> anyhow::Result<()> {
+        if let Some(ac) = data.active_call.take() {
+            let ipfs = self.ipfs.read().await;
+            let call_id = ac.call.id();
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Leave { call_id };
 
-fn decode_gossipsub_msg<T: DeserializeOwned>(
-    private_key: &DID,
-    msg: &libp2p::gossipsub::Message,
-) -> anyhow::Result<T> {
-    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.data.clone())?;
-    let data: T = serde_cbor::from_slice(&bytes)?;
-    Ok(data)
+            if let Err(e) = send_signal_aes(&ipfs, &ac.call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
+            }
+
+            data.webrtc.deinit().await?;
+            host_media::reset().await;
+        }
+
+        Ok(())
+    }
 }
 
 async fn handle_call_initiation(
@@ -261,7 +265,7 @@ async fn handle_call_initiation(
     ch: Sender<BlinkEventKind>,
 ) {
     while let Some(msg) = stream.next().await {
-        let signal: InitiationSignal = match decode_gossipsub_msg(&private_key, &msg) {
+        let signal: InitiationSignal = match decode_gossipsub_msg_ecdh(&private_key, &msg) {
             Ok(s) => s,
             Err(e) => {
                 log::error!("failed to decode msg from call initiation stream: {e}");
@@ -342,7 +346,7 @@ async fn handle_webrtc(
                         continue
                     }
                 };
-                let signal: CallSignal = match decode_gossipsub_msg(&private_key, &msg) {
+                let signal: CallSignal = match decode_gossipsub_msg_ecdh(&private_key, &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
@@ -355,7 +359,10 @@ async fn handle_webrtc(
                         if let Some(ac) = data.active_call.as_mut() {
                             ac.connected_participants.insert(sender.clone());
                         }
+                        // emits CallInitiated Event, which returns the local sdp. will be sent to the peer with the dial signal
+                        data.webrtc.dial(&sender).await;
                         ch.send(BlinkEventKind::ParticipantJoined { call_id, peer_id: sender });
+
                     }
                     CallSignal::Leave { call_id } => {
                         let mut data = STATIC_DATA.lock().await;
@@ -379,7 +386,7 @@ async fn handle_webrtc(
                     }
                 };
                 let mut data = STATIC_DATA.lock().await;
-                let signal: PeerSignal = match decode_gossipsub_msg(&private_key, &msg) {
+                let signal: PeerSignal = match decode_gossipsub_msg_ecdh(&private_key, &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
@@ -400,9 +407,10 @@ async fn handle_webrtc(
                         }
                         todo!()
                     }
-                    PeerSignal::CallInitiated(sdp) => {
+                    PeerSignal::Dial(sdp) => {
                         // if sender is part of ongoing call, start the call
                         if data.active_call.as_ref().map(|ac| ac.call.participants().contains(&sender)).unwrap_or(false) {
+                            // emits the SDP Event, which is sent to the peer via the SDP signal
                             if let Err(e) = data.webrtc.accept_call(&sender, sdp).await {
                                 log::error!("failed to accept_call: {}", e);
                                 data.webrtc.hang_up(&sender).await;
@@ -454,8 +462,8 @@ async fn handle_webrtc(
                                 };
                                 let ipfs = ipfs.read().await;
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
-                                let signal = PeerSignal::CallInitiated(*sdp);
-                                if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+                                let signal = PeerSignal::Dial(*sdp);
+                                if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
@@ -472,7 +480,7 @@ async fn handle_webrtc(
                                 let ipfs = ipfs.read().await;
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Sdp(*sdp);
-                                if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+                                if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
@@ -489,7 +497,7 @@ async fn handle_webrtc(
                                let ipfs = ipfs.read().await;
                                let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                let signal = PeerSignal::Ice(*candidate);
-                                if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+                                if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
@@ -500,18 +508,6 @@ async fn handle_webrtc(
             }
         }
     }
-}
-
-async fn send_signal<T: Serialize>(
-    ipfs: &Ipfs,
-    dest: DID,
-    signal: T,
-    topic: String,
-) -> anyhow::Result<()> {
-    let serialized = serde_cbor::to_vec(&signal)?;
-    let encrypted = ecdh_encrypt(&dest, Some(dest.clone()), serialized)?;
-    ipfs.pubsub_publish(topic, encrypted).await?;
-    Ok(())
 }
 
 mod ipfs_routes {
@@ -571,10 +567,9 @@ impl Blink for WebRtc {
         let mut data = STATIC_DATA.lock().await;
         let call_info = CallInfo::new(participants.clone());
         let ac = ActiveCall::from(call_info.clone());
-        if let Some(old_call) = data.active_call.replace(ac.clone()) {
-            // todo: end call
-            todo!();
-        }
+
+        // leave old call
+        self.leave_call_internal(&mut data).await?;
 
         self.init_call(&mut data, call_info.clone()).await?;
 
@@ -584,7 +579,7 @@ impl Blink for WebRtc {
             let signal = InitiationSignal::Offer {
                 call_info: ac.call.clone(),
             };
-            if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+            if let Err(e) = send_signal_ecdh(&ipfs, dest.clone(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
@@ -594,12 +589,21 @@ impl Blink for WebRtc {
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
-        if let Some(_call) = data.active_call.take() {
-            // todo: end call
-        }
+
+        // leave old call
+        self.leave_call_internal(&mut data).await?;
 
         if let Some(call) = data.pending_calls.remove(&call_id) {
-            self.init_call(&mut data, call).await?;
+            self.init_call(&mut data, call.clone()).await?;
+
+            let ipfs = self.ipfs.read().await;
+            let call_id = call.id();
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Join { call_id };
+
+            if let Err(e) = send_signal_aes(&ipfs, &call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
+            }
         }
 
         Ok(())
@@ -615,26 +619,14 @@ impl Blink for WebRtc {
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
-        let ipfs = ipfs.read().await;
-        let topic = ipfs_routes::call_signal_route(&dest, &call_id);
-        let signal = PeerSignal::CallInitiated(*sdp);
-        if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
-            log::error!("failed to send signal: {e}");
-        }
-        if let Some(ac) = data.active_call.take() {
-            // todo: leave call
-
-            data.webrtc.deinit().await?;
-
-            // todo: remove media streams
-        }
+        self.leave_call_internal(&mut data).await?;
         todo!()
     }
 
     // ------ Select input/output devices ------
 
     async fn get_available_microphones(&self) -> Result<Vec<String>, Error> {
-        let mut data = STATIC_DATA.lock().await;
+        let data = STATIC_DATA.lock().await;
         let device_iter = match data.cpal_host.input_devices() {
             Ok(iter) => iter,
             Err(e) => return Err(Error::Cpal(e.to_string())),

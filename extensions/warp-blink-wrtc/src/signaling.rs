@@ -9,10 +9,10 @@ use webrtc::{
 #[derive(Serialize, Deserialize)]
 pub enum PeerSignal {
     Ice(RTCIceCandidate),
-    // sent in response to accepting the call
+    // sent after receiving the dial signal
     Sdp(RTCSessionDescription),
-    // the user may accept the call, and that will cause simple-webrtc to generate a SDP event
-    CallInitiated(RTCSessionDescription),
+    // sent first
+    Dial(RTCSessionDescription),
 }
 
 #[derive(Serialize, Deserialize)]

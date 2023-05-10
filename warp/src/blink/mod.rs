@@ -102,17 +102,13 @@ pub struct CallInfo {
     id: Uuid,
     // the total set of participants who are invited to the call
     participants: Vec<DID>,
-    // for calls with more than 2 participants, need a symmetric key
-    group_key: Option<Vec<u8>>,
+    // for call wide broadcasts
+    group_key: Vec<u8>,
 }
 
 impl CallInfo {
     pub fn new(participants: Vec<DID>) -> Self {
-        let group_key = if participants.len() == 2 {
-            None
-        } else {
-            Some(Aes256Gcm::generate_key(&mut OsRng).as_slice().into())
-        };
+        let group_key = Aes256Gcm::generate_key(&mut OsRng).as_slice().into();
         Self {
             id: Uuid::new_v4(),
             participants,
@@ -128,7 +124,7 @@ impl CallInfo {
         self.participants.clone()
     }
 
-    pub fn group_key(&self) -> Option<Vec<u8>> {
+    pub fn group_key(&self) -> Vec<u8> {
         self.group_key.clone()
     }
 }
