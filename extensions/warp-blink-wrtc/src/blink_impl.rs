@@ -157,7 +157,7 @@ impl WebRtc {
         }
 
         let call_offer_stream = match ipfs
-            .pubsub_subscribe(ipfs_routes::offer_call_route(&did))
+            .pubsub_subscribe(ipfs_routes::call_initiation_route(&did))
             .await
         {
             Ok(s) => s,
@@ -204,12 +204,12 @@ impl WebRtc {
         // next, create event streams and pass them to a task
         let ipfs = self.ipfs.read().await;
         let call_broadcast_stream = ipfs
-            .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id()))
+            .pubsub_subscribe(ipfs_routes::call_signal_route(&call.id()))
             .await
             .context("failed to subscribe to call_broadcast_route")?;
 
         let call_signaling_stream = ipfs
-            .pubsub_subscribe(ipfs_routes::call_signal_route(&self.id, &call.id()))
+            .pubsub_subscribe(ipfs_routes::peer_signal_route(&self.id, &call.id()))
             .await
             .context("failed to subscribe to call_signaling_route")?;
 
@@ -453,7 +453,7 @@ async fn handle_webrtc(
                                     }
                                 };
                                 let ipfs = ipfs.read().await;
-                                let topic = ipfs_routes::call_signal_route(&dest, &call_id);
+                                let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::CallInitiated(*sdp);
                                 if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
@@ -470,7 +470,7 @@ async fn handle_webrtc(
                                     }
                                 };
                                 let ipfs = ipfs.read().await;
-                                let topic = ipfs_routes::call_signal_route(&dest, &call_id);
+                                let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Sdp(*sdp);
                                 if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
@@ -487,7 +487,7 @@ async fn handle_webrtc(
                                    }
                                };
                                let ipfs = ipfs.read().await;
-                               let topic = ipfs_routes::call_signal_route(&dest, &call_id);
+                               let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                let signal = PeerSignal::Ice(*candidate);
                                 if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
@@ -522,17 +522,20 @@ mod ipfs_routes {
     const OFFER_CALL: &str = "offer_call";
 
     /// subscribe/unsubscribe per-call
-    pub fn call_broadcast_route(call_id: &Uuid) -> String {
+    /// CallSignal
+    pub fn call_signal_route(call_id: &Uuid) -> String {
         format!("{TELECON_BROADCAST}/{call_id}")
     }
 
     /// subscribe/unsubscribe per-call
-    pub fn call_signal_route(peer: &DID, call_id: &Uuid) -> String {
+    /// PeerSignal
+    pub fn peer_signal_route(peer: &DID, call_id: &Uuid) -> String {
         format!("{TELECON_BROADCAST}/{call_id}/{peer}")
     }
 
     /// subscribe to this when initializing Blink
-    pub fn offer_call_route(peer: &DID) -> String {
+    /// InitiationSignal
+    pub fn call_initiation_route(peer: &DID) -> String {
         format!("{OFFER_CALL}/{peer}")
     }
 }
@@ -570,13 +573,14 @@ impl Blink for WebRtc {
         let ac = ActiveCall::from(call_info.clone());
         if let Some(old_call) = data.active_call.replace(ac.clone()) {
             // todo: end call
+            todo!();
         }
 
         self.init_call(&mut data, call_info.clone()).await?;
 
         let ipfs = self.ipfs.read().await;
         for dest in participants {
-            let topic = ipfs_routes::offer_call_route(&dest);
+            let topic = ipfs_routes::call_initiation_route(&dest);
             let signal = InitiationSignal::Offer {
                 call_info: ac.call.clone(),
             };
@@ -611,6 +615,12 @@ impl Blink for WebRtc {
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
+        let ipfs = ipfs.read().await;
+        let topic = ipfs_routes::call_signal_route(&dest, &call_id);
+        let signal = PeerSignal::CallInitiated(*sdp);
+        if let Err(e) = send_signal(&ipfs, dest, signal, topic).await {
+            log::error!("failed to send signal: {e}");
+        }
         if let Some(ac) = data.active_call.take() {
             // todo: leave call
 
