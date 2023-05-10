@@ -2,11 +2,12 @@ use anyhow::bail;
 use ipfs::{libp2p, Ipfs};
 use rust_ipfs as ipfs;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use warp::crypto::aes_gcm::aead::Aead;
 use warp::crypto::aes_gcm::{Aes256Gcm, Nonce};
 use warp::crypto::did_key::{Generate, ECDH};
 use warp::crypto::digest::KeyInit;
+use warp::crypto::hash::sha256_hash;
 use warp::crypto::{DIDKey, KeyMaterial};
 use warp::error::Error;
 type Result<T> = std::result::Result<T, Error>;
@@ -14,6 +15,19 @@ use warp::crypto::{cipher::Cipher, zeroize::Zeroizing, Ed25519KeyPair, DID};
 use warp::tesseract::Tesseract;
 
 const NONCE_LEN: usize = 12;
+
+#[derive(Serialize, Deserialize)]
+pub struct AesMsg {
+    nonce: Vec<u8>,
+    msg: Vec<u8>,
+    signature: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EcdhMsg {
+    msg: Vec<u8>,
+    signature: Vec<u8>,
+}
 
 pub trait PeerIdExt {
     fn to_did(&self) -> std::result::Result<DID, anyhow::Error>;
@@ -30,24 +44,25 @@ impl PeerIdExt for ipfs::PeerId {
     }
 }
 
-pub fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
-    let kp = tesseract.retrieve("keypair")?;
-    let kp = bs58::decode(kp).into_vec()?;
-    let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes()));
-    Ok(did.into())
-}
-
 // uses asymetric encryption
 pub async fn send_signal_ecdh<T: Serialize>(
     ipfs: &Ipfs,
+    src: DID,
     dest: DID,
     signal: T,
     topic: String,
 ) -> anyhow::Result<()> {
     let serialized = serde_cbor::to_vec(&signal)?;
     let encrypted = ecdh_encrypt(&dest, Some(dest.clone()), serialized)?;
-    ipfs.pubsub_publish(topic, encrypted).await?;
+    let hash = sha256_hash(&encrypted, None);
+    let signature = ecdh_encrypt(&src, None, &hash)?;
+
+    let msg = EcdhMsg {
+        msg: encrypted,
+        signature,
+    };
+    let bytes = serde_cbor::to_vec(&msg)?;
+    ipfs.pubsub_publish(topic, bytes).await?;
     Ok(())
 }
 
@@ -55,6 +70,7 @@ pub async fn send_signal_ecdh<T: Serialize>(
 pub async fn send_signal_aes<T: Serialize>(
     ipfs: &Ipfs,
     key: &[u8],
+    src: DID,
     signal: T,
     topic: String,
 ) -> anyhow::Result<()> {
@@ -68,34 +84,50 @@ pub async fn send_signal_aes<T: Serialize>(
             bail!("encrypt failed! {e}");
         }
     };
-    let msg: Vec<u8> = random_bytes
-        .iter()
-        .cloned()
-        .chain(encrypted.iter().cloned())
-        .collect();
+    let hash = sha256_hash(&encrypted, None);
+    let signature = ecdh_encrypt(&src, None, &hash)?;
 
-    ipfs.pubsub_publish(topic, msg).await?;
+    let msg = AesMsg {
+        nonce: random_bytes,
+        msg: encrypted,
+        signature,
+    };
+    let bytes = serde_cbor::to_vec(&msg)?;
+    ipfs.pubsub_publish(topic, bytes).await?;
     Ok(())
 }
 
 pub fn decode_gossipsub_msg_ecdh<T: DeserializeOwned>(
-    private_key: &DID,
     msg: &libp2p::gossipsub::Message,
+    sender: DID,
+    private_key: &DID,
 ) -> anyhow::Result<T> {
-    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.data.clone())?;
+    let msg: EcdhMsg = serde_cbor::from_slice(&msg.data)?;
+    let test_hash = sha256_hash(&msg.msg, None);
+    let hash = ecdh_decrypt(&sender, None, &msg.signature)?;
+    if hash != test_hash {
+        bail!("invalid signature");
+    }
+    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.msg.clone())?;
     let data: T = serde_cbor::from_slice(&bytes)?;
     Ok(data)
 }
 
 pub fn decode_gossipsub_msg_aes<T: DeserializeOwned>(
-    key: &[u8],
     msg: &libp2p::gossipsub::Message,
+    sender: DID,
+    key: &[u8],
 ) -> anyhow::Result<T> {
-    let nonce = Nonce::from_slice(&msg.data[0..NONCE_LEN]);
-    let encrypted = &msg.data[NONCE_LEN..];
+    let msg: AesMsg = serde_cbor::from_slice(&msg.data)?;
+    let test_hash = sha256_hash(&msg.msg, None);
+    let hash = ecdh_decrypt(&sender, None, &msg.signature)?;
+    if hash != test_hash {
+        bail!("invalid signature");
+    }
 
+    let nonce = Nonce::from_slice(&msg.nonce);
     let cipher = Aes256Gcm::new_from_slice(key)?;
-    let decrypted = match cipher.decrypt(nonce, encrypted) {
+    let decrypted = match cipher.decrypt(nonce, msg.msg.as_ref()) {
         Ok(r) => r,
         Err(e) => bail!("failed to decrypt gossipsub msg: {e}"),
     };
