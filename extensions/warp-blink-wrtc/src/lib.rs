@@ -120,6 +120,7 @@ struct StaticData {
 
 impl WebRtc {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
+        log::trace!("initializing WebRTC");
         let _data = STATIC_DATA.lock().await;
         let identity = loop {
             if let Ok(identity) = account.get_own_identity().await {
@@ -179,6 +180,7 @@ impl WebRtc {
             webrtc_handler: None,
         };
 
+        log::trace!("finished initializing WebRTC");
         Ok(webrtc)
     }
 
