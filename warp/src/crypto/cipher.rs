@@ -93,11 +93,11 @@ impl Cipher {
 
     /// Used to encrypt data
     pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let nonce = crate::crypto::generate(12);
+        let nonce = crate::crypto::generate_slice::<12>();
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce.clone())),
+            _ => sha256_hash(&self.private_key, Some(&nonce)),
         });
 
         let cipher = Aes256Gcm::new(key.as_slice().into());
@@ -116,7 +116,7 @@ impl Cipher {
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+            _ => sha256_hash(&self.private_key, Some(nonce)),
         });
 
         let cipher = Aes256Gcm::new(key.as_slice().into());
@@ -181,19 +181,19 @@ impl Cipher {
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let mut reader = stream.into_async_read();
 
-        let nonce = crate::crypto::generate(7);
+        let nonce = crate::crypto::generate_slice::<7>();
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+            _ => sha256_hash(&self.private_key, Some(&nonce)),
         });
 
         let stream = async_stream::stream! {
             let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
             let cipher = Aes256Gcm::new(key.as_slice().into());
-            let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
+            let mut stream = EncryptorBE32::from_aead(cipher, (&nonce).into());
 
-            yield Ok(nonce);
+            yield Ok(nonce.to_vec());
 
             loop {
                 match reader.read(&mut buffer).await {
@@ -233,7 +233,7 @@ impl Cipher {
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+            _ => sha256_hash(&self.private_key, Some(&nonce)),
         });
 
         let stream = async_stream::stream! {
@@ -286,7 +286,7 @@ impl Cipher {
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+            _ => sha256_hash(&self.private_key, Some(&nonce)),
         });
         let stream = async_stream::stream! {
             let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
@@ -331,7 +331,7 @@ impl Cipher {
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+            _ => sha256_hash(&self.private_key, Some(&nonce)),
         });
 
         let stream = async_stream::stream! {
@@ -401,7 +401,7 @@ impl Cipher {
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+            _ => sha256_hash(&self.private_key, Some(&nonce)),
         });
 
         let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
@@ -443,7 +443,7 @@ impl Cipher {
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+            _ => sha256_hash(&self.private_key, Some(&nonce)),
         });
 
         let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];

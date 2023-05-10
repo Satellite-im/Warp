@@ -159,7 +159,7 @@ pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> an
     let x25519_a = Ed25519KeyPair::from_secret_key(&did_a.private_key_bytes()).get_x25519();
     let x25519_b = Ed25519KeyPair::from_public_key(&did_b.public_key_bytes()).get_x25519();
     let shared_key = x25519_a.key_exchange(&x25519_b);
-    let topic_hash = sha256_hash(&shared_key, seed.map(|s| s.as_bytes().to_vec()));
+    let topic_hash = sha256_hash(&shared_key, seed.map(|s| s.as_bytes()));
     //Note: Do we want to use the upper half or lower half of the hash for the uuid?
     Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).map_err(anyhow::Error::from)
 }
