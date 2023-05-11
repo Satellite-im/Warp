@@ -1,17 +1,20 @@
 use anyhow::bail;
 use clap::Parser;
+use futures::StreamExt;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use warp::blink::Blink;
+use uuid::Uuid;
+use warp::blink::{Blink, BlinkEventKind, BlinkEventStream};
 use warp::logging::tracing::log::Level;
 use warp_blink_wrtc::WebRtc;
 
 use std::path::{Path, PathBuf};
 
+use std::str::FromStr;
 use std::time::Duration;
 
 use warp::crypto::DID;
-use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
+use warp::multipass::identity::{Identifier, Identity, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
@@ -26,6 +29,12 @@ enum Cli {
     Run,
     /// show your DID
     ShowDid,
+    /// given a DID, initiate a call
+    Dial { id: String },
+    /// given a Uuid, answer a call
+    Answer { id: String },
+    /// end the current call
+    Hangup,
     /// show audio I/O devices currently being used by blink
     ShowAudioDevices,
     /// use default device for webrtc input
@@ -38,9 +47,59 @@ enum Cli {
     DisconnectSpeaker,
 }
 
+async fn handle_command(
+    blink: &mut Box<dyn Blink>,
+    own_id: &Identity,
+    cmd: Cli,
+) -> anyhow::Result<()> {
+    match cmd {
+        Cli::Run => {
+            println!("already running");
+        }
+        Cli::ShowDid => {
+            println!("own identity: {}", own_id.did_key());
+        }
+        Cli::Dial { id } => {
+            let did = DID::from_str(&id)?;
+            blink.offer_call(vec![did]).await?;
+        }
+        Cli::Answer { id } => {
+            let call_id = Uuid::from_str(&id)?;
+            blink.answer_call(call_id).await?;
+        }
+        Cli::Hangup => {
+            blink.leave_call().await?;
+        }
+        Cli::ShowAudioDevices => {}
+        Cli::ConnectMicrophone => {}
+        Cli::ConnectSpeaker => {}
+        Cli::DisconnectMicrophone => {}
+        Cli::DisconnectSpeaker => {}
+    }
+    Ok(())
+}
+
+async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
+    while let Some(evt) = stream.next().await {
+        println!("BlinkEvent: {evt}");
+        match evt {
+            BlinkEventKind::IncomingCall {
+                call_id,
+                sender,
+                participants,
+            } => {
+                println!("incoming call. id is: {call_id}. sender is: {sender}");
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    simple_logger::init_with_level(Level::Debug)?;
+    // simple_logger::init_with_level(Level::Debug)?;
     fdlimit::raise_fd_limit();
 
     let random_name: String = rand::thread_rng()
@@ -87,7 +146,13 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let blink: Box<dyn Blink> = Box::new(WebRtc::new(multipass).await?);
+    let mut blink: Box<dyn Blink> = Box::new(WebRtc::new(multipass).await?);
+    let event_stream = blink.get_event_stream().await?;
+    let handle = tokio::spawn(async {
+        if let Err(e) = handle_event_stream(event_stream).await {
+            println!("handle event stream failed: {e}");
+        }
+    });
 
     let _cli = Cli::parse();
     if _cli != Cli::Run {
@@ -99,8 +164,12 @@ async fn main() -> anyhow::Result<()> {
         let mut v = vec![""];
         v.extend(line.split_ascii_whitespace());
         let cli = Cli::parse_from(v);
-        println!("{cli:?}");
+        if let Err(e) = handle_command(&mut blink, &own_identity, cli).await {
+            println!("command failed: {e}");
+        }
     }
+
+    handle.abort();
 
     Ok(())
 }

@@ -73,9 +73,10 @@ pub trait Blink {
 }
 
 /// Drives the UI
-#[derive(Clone)]
+#[derive(Clone, Display)]
 pub enum BlinkEventKind {
     /// A call has been offered
+    #[display(fmt = "IncomingCall")]
     IncomingCall {
         call_id: Uuid,
         // the person who is offering you to join the call
@@ -84,12 +85,16 @@ pub enum BlinkEventKind {
         participants: Vec<DID>,
     },
     /// Someone joined the call
+    #[display(fmt = "ParticipantJoined")]
     ParticipantJoined { call_id: Uuid, peer_id: DID },
     /// Someone left the call
+    #[display(fmt = "ParticipantLeft")]
     ParticipantLeft { call_id: Uuid, peer_id: DID },
     /// A participant is speaking
+    #[display(fmt = "ParticipantSpeaking")]
     ParticipantSpeaking { call_id: Uuid, peer_id: DID },
     /// A participant stopped speaking
+    #[display(fmt = "ParticipantNotSpeaking")]
     ParticipantNotSpeaking { call_id: Uuid, peer_id: DID },
 }
 
