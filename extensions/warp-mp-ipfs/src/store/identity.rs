@@ -3,7 +3,7 @@
 #![allow(clippy::clone_on_copy)]
 use crate::{
     config::{Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, PeerTopic, VecExt, PeerIdExt},
+    store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
 };
 use futures::{
     channel::{mpsc, oneshot},

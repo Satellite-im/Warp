@@ -176,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
-                            if !opt.autoaccept_friend { 
+                            if !opt.autoaccept_friend {
                                 writeln!(stdout, "> Pending request from {username}. Do \"request accept {did}\" to accept.")?;
                             } else {
                                 account.accept_request(&did).await?;

@@ -3362,7 +3362,10 @@ impl MessageStore {
 
             let thumbnail = file.thumbnail();
 
-            if total_thumbnail_size < 3 * 1024 * 1024 && !thumbnail.is_empty() && thumbnail.len() <= 1024 * 1024 {
+            if total_thumbnail_size < 3 * 1024 * 1024
+                && !thumbnail.is_empty()
+                && thumbnail.len() <= 1024 * 1024
+            {
                 new_file.set_thumbnail(&thumbnail);
                 total_thumbnail_size += thumbnail.len();
             }
