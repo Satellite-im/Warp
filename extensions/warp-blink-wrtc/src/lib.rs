@@ -29,6 +29,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
 use anyhow::Context;
 use cpal::traits::{DeviceTrait, HostTrait};
@@ -46,7 +47,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{Blink, BlinkEventKind, BlinkEventStream, CallInfo},
+    blink::{Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
     crypto::{digest::KeyInit, Fingerprint, KeyMaterial, DID},
     error::Error,
     multipass::MultiPass,
@@ -395,12 +396,16 @@ async fn handle_webrtc(
                 match opt {
                     Some(event) => {
                         log::debug!("webrtc event: {event}");
+                        let active_call = match data.active_call.as_ref() {
+                            Some(ac) => ac,
+                            None => {
+                                log::error!("event emitted but no active call");
+                                continue;
+                            }
+                        };
+                        let call_id = active_call.call.id();
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
-                                if data.active_call.is_none() {
-                                    log::error!("webrtc track added without an ongoing call");
-                                    continue;
-                                }
                                 if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
@@ -412,13 +417,6 @@ async fn handle_webrtc(
                                 data.webrtc.hang_up(&peer).await;
                             }
                             EmittedEvents::CallInitiated { dest, sdp } => {
-                                let call_id = match data.active_call.as_ref() {
-                                    Some(ac) => ac.call.id(),
-                                    None => {
-                                        log::error!("sdp event emitted but no active call");
-                                        continue;
-                                    }
-                                };
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Dial(*sdp);
                                 if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
@@ -426,14 +424,6 @@ async fn handle_webrtc(
                                 }
                             }
                             EmittedEvents::Sdp { dest, sdp } => {
-                                // need to transmit this to dest via signal
-                                let call_id = match data.active_call.as_ref() {
-                                    Some(ac) => ac.call.id(),
-                                    None => {
-                                        log::error!("sdp event emitted but no active call");
-                                        continue;
-                                    }
-                                };
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Sdp(*sdp);
                                 if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
@@ -441,14 +431,6 @@ async fn handle_webrtc(
                                 }
                             }
                             EmittedEvents::Ice { dest, candidate } => {
-                               // need to transmit this to dest via signal
-                               let call_id = match data.active_call.as_ref() {
-                                   Some(ac) => ac.call.id(),
-                                   None => {
-                                       log::error!("sdp event emitted but no active call");
-                                       continue;
-                                   }
-                               };
                                let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                let signal = PeerSignal::Ice(*candidate);
                                 if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
@@ -526,8 +508,26 @@ impl Blink for WebRtc {
         let ac = ActiveCall::from(call_info.clone());
 
         self.leave_call_internal(&mut data).await?;
+
+        // ensure there is an audio source track
+        // todo: specify a default codec
+        let codec = RTCRtpCodecCapability {
+            mime_type: MimeType::OPUS.to_string(),
+            clock_rate: 48000,
+            channels: opus::Channels::Mono as u16,
+            ..Default::default()
+        };
+        let track = data
+            .webrtc
+            .add_media_source(host_media::AUDIO_SOURCE_ID.into(), codec.clone())
+            .await?;
+        host_media::create_audio_source_track(track, codec).await?;
+
         self.init_call(&mut data, call_info.clone()).await?;
         for dest in participants {
+            if dest == *self.id {
+                continue;
+            }
             let topic = ipfs_routes::call_initiation_route(&dest);
             let signal = InitiationSignal::Offer {
                 call_info: ac.call.clone(),
@@ -569,6 +569,7 @@ impl Blink for WebRtc {
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
+        // todo: host_media::remove_source_track(host_media::AUDIO_SOURCE_ID).await?;
         self.leave_call_internal(&mut data).await?;
         Ok(())
     }
