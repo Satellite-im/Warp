@@ -603,10 +603,10 @@ mod test {
     fn name_length() {
         let short_name = "test";
         let long_name = "x".repeat(300);
-        
+
         let short_directory = Directory::new(short_name);
         let long_directory = Directory::new(&long_name);
-        
+
         assert!(short_directory.name().len() == 4);
         assert!(long_directory.name().len() == 256);
         assert_eq!(long_directory.name(), &long_name[..256]);

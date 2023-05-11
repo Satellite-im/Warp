@@ -124,7 +124,7 @@ pub enum MessageEvent {
 #[derive(Debug, FFIFree)]
 pub enum AttachmentKind {
     AttachedProgress(Progression),
-    Pending(Result<(), Error>)
+    Pending(Result<(), Error>),
 }
 
 #[derive(FFIFree)]
@@ -815,7 +815,11 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
-    async fn create_group_conversation(&mut self, _: Option<String>, _: Vec<DID>) -> Result<Conversation, Error> {
+    async fn create_group_conversation(
+        &mut self,
+        _: Option<String>,
+        _: Vec<DID>,
+    ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -927,7 +931,14 @@ pub trait RayGunGroupConversation: Sync + Send {
 pub trait RayGunAttachment: Sync + Send {
     /// Send files to a conversation.
     /// If no files is provided in the array, it will throw an error
-    async fn attach(&mut self, _: Uuid, _: Option<Uuid>, _: Location, _: Vec<PathBuf>, _: Vec<String>) -> Result<AttachmentEventStream, Error> {
+    async fn attach(
+        &mut self,
+        _: Uuid,
+        _: Option<Uuid>,
+        _: Location,
+        _: Vec<PathBuf>,
+        _: Vec<String>,
+    ) -> Result<AttachmentEventStream, Error> {
         Err(Error::Unimplemented)
     }
 
