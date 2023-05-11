@@ -3415,6 +3415,9 @@ impl MessageStore {
                 }
             }
 
+            s_tx.close_channel();
+            drop(s_tx);
+
             let final_results = {
                 let mut store = store.clone();
                 async move {
