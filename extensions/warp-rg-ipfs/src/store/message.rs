@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
@@ -3341,6 +3341,7 @@ impl MessageStore {
                         }
 
                         if skip {
+                            s_tx.send((Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None)).await.ok();
                             continue;
                         }
 
@@ -3350,6 +3351,7 @@ impl MessageStore {
                             Ok(stream) => stream,
                             Err(e) => {
                                 error!("Error uploading {filename}: {e}");
+                                s_tx.send((Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None)).await.ok();
                                 continue;
                             }
                         };
