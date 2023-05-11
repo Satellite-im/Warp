@@ -317,7 +317,15 @@ async fn handle_webrtc(
                         continue
                     }
                 };
-                let signal: CallSignal = match decode_gossipsub_msg_aes(&own_id.private_key_bytes(), &msg) {
+                let mut data = STATIC_DATA.lock().await;
+                let ac = match data.active_call.as_ref() {
+                    Some(r) => r,
+                    None => {
+                        log::error!("received call signal without an active call");
+                        continue;
+                    }
+                };
+                let signal: CallSignal = match decode_gossipsub_msg_aes(&ac.call.group_key(), &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
@@ -326,7 +334,6 @@ async fn handle_webrtc(
                 };
                 match signal {
                     CallSignal::Join { call_id } => {
-                        let mut data = STATIC_DATA.lock().await;
                         if let Some(ac) = data.active_call.as_mut() {
                             ac.connected_participants.insert(sender.clone());
                         }
@@ -336,7 +343,6 @@ async fn handle_webrtc(
 
                     }
                     CallSignal::Leave { call_id } => {
-                        let mut data = STATIC_DATA.lock().await;
                         if let Some(ac) = data.active_call.as_mut() {
                             ac.connected_participants.remove(&sender);
                         }
@@ -393,13 +399,13 @@ async fn handle_webrtc(
                 }
             },
             opt = webrtc_event_stream.next() => {
+                let mut data = STATIC_DATA.lock().await;
                 match opt {
                     Some(event) => {
                         log::debug!("webrtc event: {event}");
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
-                                let mut _data = STATIC_DATA.lock().await;
-                                if _data.active_call.is_none() {
+                                if data.active_call.is_none() {
                                     log::error!("webrtc track added without an ongoing call");
                                     continue;
                                 }
@@ -408,14 +414,12 @@ async fn handle_webrtc(
                                 }
                             }
                             EmittedEvents::Disconnected { peer } => {
-                                let mut data = STATIC_DATA.lock().await;
                                 if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                                 data.webrtc.hang_up(&peer).await;
                             }
                             EmittedEvents::CallInitiated { dest, sdp } => {
-                                let data = STATIC_DATA.lock().await;
                                 let call_id = match data.active_call.as_ref() {
                                     Some(ac) => ac.call.id(),
                                     None => {
@@ -431,7 +435,6 @@ async fn handle_webrtc(
                             }
                             EmittedEvents::Sdp { dest, sdp } => {
                                 // need to transmit this to dest via signal
-                                let data = STATIC_DATA.lock().await;
                                 let call_id = match data.active_call.as_ref() {
                                     Some(ac) => ac.call.id(),
                                     None => {
@@ -447,7 +450,6 @@ async fn handle_webrtc(
                             }
                             EmittedEvents::Ice { dest, candidate } => {
                                // need to transmit this to dest via signal
-                               let data = STATIC_DATA.lock().await;
                                let call_id = match data.active_call.as_ref() {
                                    Some(ac) => ac.call.id(),
                                    None => {
