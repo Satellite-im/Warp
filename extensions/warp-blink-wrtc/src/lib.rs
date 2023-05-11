@@ -54,7 +54,10 @@ use warp::{
 use crate::{
     signaling::{CallSignal, InitiationSignal, PeerSignal},
     simple_webrtc::events::{EmittedEvents, WebRtcEventStream},
-    store::{decode_gossipsub_msg_ecdh, send_signal_aes, send_signal_ecdh, PeerIdExt},
+    store::{
+        decode_gossipsub_msg_aes, decode_gossipsub_msg_ecdh, send_signal_aes, send_signal_ecdh,
+        PeerIdExt,
+    },
 };
 
 #[derive(Clone)]
@@ -85,8 +88,7 @@ enum CallState {
 pub struct WebRtc {
     account: Box<dyn MultiPass>,
     ipfs: Ipfs,
-    id: DID,
-    private_key: Arc<DID>,
+    id: Arc<DID>,
     // a tx channel which emits events to drive the UI
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     // subscribes to IPFS topic to receive incoming calls
@@ -163,18 +165,16 @@ impl WebRtc {
 
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let ui_event_ch2 = ui_event_ch.clone();
-        let own_id = did.clone();
-        let private_key = Arc::new(account.decrypt_private_key(None)?);
-        let private_key2 = private_key.clone();
+        let own_id = Arc::new(account.decrypt_private_key(None)?);
+        let own_id2 = own_id.clone();
         let offer_handler = tokio::spawn(async {
-            handle_call_initiation(own_id, private_key2, call_offer_stream, ui_event_ch2).await;
+            handle_call_initiation(own_id2, call_offer_stream, ui_event_ch2).await;
         });
 
         let webrtc = Self {
             account,
-            private_key,
             ipfs,
-            id: did.clone(),
+            id: own_id,
             ui_event_ch,
             offer_handler,
             webrtc_handler: None,
@@ -217,12 +217,10 @@ impl WebRtc {
 
         let ui_event_ch = self.ui_event_ch.clone();
         let own_id = self.id.clone();
-        let private_key = self.private_key.clone();
         let ipfs2 = self.ipfs.clone();
         let webrtc_handle = tokio::task::spawn(async move {
             handle_webrtc(
                 own_id,
-                private_key,
                 ipfs2,
                 ui_event_ch,
                 call_broadcast_stream,
@@ -257,13 +255,12 @@ impl WebRtc {
 }
 
 async fn handle_call_initiation(
-    _own_id: DID,
-    private_key: Arc<DID>,
+    own_id: Arc<DID>,
     mut stream: SubscriptionStream,
     ch: Sender<BlinkEventKind>,
 ) {
     while let Some(msg) = stream.next().await {
-        let signal: InitiationSignal = match decode_gossipsub_msg_ecdh(&private_key, &msg) {
+        let signal: InitiationSignal = match decode_gossipsub_msg_ecdh(&own_id, &msg) {
             Ok(s) => s,
             Err(e) => {
                 log::error!("failed to decode msg from call initiation stream: {e}");
@@ -296,8 +293,7 @@ async fn handle_call_initiation(
 }
 
 async fn handle_webrtc(
-    own_id: DID,
-    private_key: Arc<DID>,
+    own_id: Arc<DID>,
     ipfs: Ipfs,
     ch: Sender<BlinkEventKind>,
     call_signaling_stream: SubscriptionStream,
@@ -321,7 +317,7 @@ async fn handle_webrtc(
                         continue
                     }
                 };
-                let signal: CallSignal = match decode_gossipsub_msg_ecdh(&private_key, &msg) {
+                let signal: CallSignal = match decode_gossipsub_msg_aes(&own_id.private_key_bytes(), &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
@@ -361,7 +357,7 @@ async fn handle_webrtc(
                     }
                 };
                 let mut data = STATIC_DATA.lock().await;
-                let signal: PeerSignal = match decode_gossipsub_msg_ecdh(&private_key, &msg) {
+                let signal: PeerSignal = match decode_gossipsub_msg_ecdh(&own_id, &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
