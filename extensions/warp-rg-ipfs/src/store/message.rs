@@ -3210,7 +3210,6 @@ impl MessageStore {
         self.publish(conversation_id, None, event, true).await
     }
 
-    //TODO: Return a vector of streams for events of progression for uploading (possibly passing it through to raygun events)
     pub async fn attach(
         &mut self,
         conversation_id: Uuid,
@@ -3280,11 +3279,10 @@ impl MessageStore {
             let mut attachments = vec![];
             let mut total_thumbnail_size = 0;
 
-            let mut receivers = vec![];
-
+            let mut receivers_count = 0;
+            let receivers_completed = Arc::new(AtomicUsize::new(0));
+            let (mut s_tx, s_rx) = futures::channel::mpsc::unbounded::<(Progression, Option<warp::constellation::file::File>)>();
             for file in files {
-                let (mut s_tx, s_rx) = futures::channel::mpsc::unbounded::<(Progression, Option<warp::constellation::file::File>)>();
-                receivers.push(s_rx);
                 match location {
                     Location::Constellation => {
                         let path = file.display().to_string();
@@ -3356,11 +3354,12 @@ impl MessageStore {
                             }
                         };
 
-
+                        receivers_count += 1;
                         tokio::spawn({
                             let tx = s_tx.clone();
                             let current_directory = current_directory.clone();
                             let filename = filename.to_string();
+                            let counter = receivers_completed.clone();
                             async move {
                                 while let Some(progress) = progress.next().await {
                                     match progress {
@@ -3370,10 +3369,12 @@ impl MessageStore {
                                         progress @ Progression::ProgressComplete { .. } => {
                                             let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
                                             let _ = tx.unbounded_send((progress, file)).ok();
+                                            counter.fetch_add(1, Ordering::SeqCst);
                                             break;
                                         },
                                         progress @ Progression::ProgressFailed { .. } => {
                                             let _ = tx.unbounded_send((progress, None)).ok();
+                                            counter.fetch_add(1, Ordering::SeqCst);
                                             break;
                                         }
                                     }
@@ -3383,30 +3384,6 @@ impl MessageStore {
                     }
                 };
             }
-
-            let (s_tx, s_rx) = futures::channel::mpsc::unbounded::<(Progression, Option<warp::constellation::file::File>)>();
-
-            let receiver_counts = receivers.len();
-            let receivers_completed = Arc::new(AtomicUsize::new(0));
-
-            for receiver in receivers {
-                tokio::spawn({
-                    let s_tx = s_tx.clone();
-                    let mut receiver = receiver;
-                    let counter = receivers_completed.clone();
-                    async move {
-                        while let Some((progress, file)) = receiver.next().await {
-                            s_tx.unbounded_send((progress.clone(), file)).ok();
-                            if matches!(progress, Progression::ProgressComplete { .. } | Progression::ProgressFailed { .. }) {
-                                counter.fetch_add(1, Ordering::SeqCst);
-                                drop(receiver);
-                                break;
-                            }
-                        }
-                    }
-                });
-            }
-
 
             for await (progress, file) in s_rx {
                 yield AttachmentKind::AttachedProgress(progress);
@@ -3427,7 +3404,7 @@ impl MessageStore {
                     new_file.set_hash(file.hash());
                     new_file.set_reference(&file.reference().unwrap_or_default());
                     attachments.push(new_file);
-                    if receivers_completed.load(Ordering::SeqCst) == receiver_counts {
+                    if receivers_completed.load(Ordering::SeqCst) == receivers_count {
                         break;
                     }
                 }
