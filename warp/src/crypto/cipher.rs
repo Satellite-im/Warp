@@ -34,7 +34,7 @@ impl Drop for Cipher {
 
 impl Default for Cipher {
     fn default() -> Self {
-        let private_key = crate::crypto::generate(34);
+        let private_key = crate::crypto::generate::<34>().into();
         Cipher { private_key }
     }
 }
@@ -73,7 +73,7 @@ impl Cipher {
 
     /// Used to decrypt data with a key that was attached to the data
     pub fn self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
-        let (key, data) = extract_data_slice(data, 34);
+        let (key, data) = extract_data_slice::<34>(data);
         let cipher = Cipher::from_bytes(key);
         let data = cipher.decrypt(data)?;
         Ok(data)
@@ -93,7 +93,7 @@ impl Cipher {
 
     /// Used to encrypt data
     pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let nonce = crate::crypto::generate_slice::<12>();
+        let nonce = crate::crypto::generate::<12>();
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
@@ -112,7 +112,7 @@ impl Cipher {
 
     /// Used to decrypt data
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let (nonce, payload) = extract_data_slice(data, 12);
+        let (nonce, payload) = extract_data_slice::<12>(data);
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
@@ -181,7 +181,7 @@ impl Cipher {
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let mut reader = stream.into_async_read();
 
-        let nonce = crate::crypto::generate_slice::<7>();
+        let nonce = crate::crypto::generate::<7>();
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
@@ -282,7 +282,7 @@ impl Cipher {
         &self,
         mut reader: R,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
-        let nonce = crate::crypto::generate(7);
+        let nonce = crate::crypto::generate::<7>();
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
@@ -293,7 +293,7 @@ impl Cipher {
             let cipher = Aes256Gcm::new(key.as_slice().into());
             let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
-            yield Ok(nonce);
+            yield Ok(nonce.to_vec());
 
             loop {
                 match reader.read(&mut buffer).await {
@@ -397,7 +397,7 @@ impl Cipher {
 
     /// Encrypts data from std reader into std writer
     pub fn encrypt_stream(&self, reader: &mut impl Read, writer: &mut impl Write) -> Result<()> {
-        let nonce = crate::crypto::generate(7);
+        let nonce = crate::crypto::generate::<7>();
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
@@ -478,9 +478,9 @@ impl Cipher {
     }
 }
 
-fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
-    let extracted = &data[data.len() - size..];
-    let payload = &data[..data.len() - size];
+fn extract_data_slice<const N: usize>(data: &[u8]) -> (&[u8], &[u8]) {
+    let extracted = &data[data.len() - N..];
+    let payload = &data[..data.len() - N];
     (extracted, payload)
 }
 
