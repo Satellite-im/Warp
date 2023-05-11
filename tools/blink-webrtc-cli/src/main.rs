@@ -22,6 +22,8 @@ use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{Discovery, MpIpfsConfig, UpdateEvents};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
 
+mod logger;
+
 /// test warp-blink-webrtc via command line
 #[derive(Parser, Debug, Eq, PartialEq)]
 enum Cli {
@@ -99,7 +101,7 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // simple_logger::init_with_level(Level::Debug)?;
+    logger::init_with_level(log::LevelFilter::Debug)?;
     fdlimit::raise_fd_limit();
 
     let random_name: String = rand::thread_rng()
