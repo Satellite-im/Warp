@@ -6,7 +6,6 @@ use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use futures::StreamExt;
 use rust_ipfs::Ipfs;
-use warp::raygun::AttachmentEventStream;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -24,6 +23,7 @@ use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
+use warp::raygun::AttachmentEventStream;
 use warp::raygun::Messages;
 use warp::raygun::{
     Conversation, Location, MessageEvent, MessageEventStream, MessageStatus, RayGunEventStream,
