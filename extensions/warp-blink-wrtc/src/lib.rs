@@ -260,18 +260,18 @@ async fn handle_call_initiation(
     ch: Sender<BlinkEventKind>,
 ) {
     while let Some(msg) = stream.next().await {
-        let signal: InitiationSignal = match decode_gossipsub_msg_ecdh(&own_id, &msg) {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("failed to decode msg from call initiation stream: {e}");
-                continue;
-            }
-        };
-
         let sender = match msg.source.and_then(|s| s.to_did().ok()) {
             Some(id) => id,
             None => {
                 log::error!("msg received without source");
+                continue;
+            }
+        };
+
+        let signal: InitiationSignal = match decode_gossipsub_msg_ecdh(&own_id, &sender, &msg) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("failed to decode msg from call initiation stream: {e}");
                 continue;
             }
         };
@@ -363,7 +363,7 @@ async fn handle_webrtc(
                     }
                 };
                 let mut data = STATIC_DATA.lock().await;
-                let signal: PeerSignal = match decode_gossipsub_msg_ecdh(&own_id, &msg) {
+                let signal: PeerSignal = match decode_gossipsub_msg_ecdh(&own_id, &sender, &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
@@ -429,7 +429,7 @@ async fn handle_webrtc(
                                 };
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Dial(*sdp);
-                                if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
+                                if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
@@ -444,7 +444,7 @@ async fn handle_webrtc(
                                 };
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Sdp(*sdp);
-                                if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
+                                if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
@@ -459,7 +459,7 @@ async fn handle_webrtc(
                                };
                                let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                let signal = PeerSignal::Ice(*candidate);
-                                if let Err(e) = send_signal_ecdh(&ipfs, dest, signal, topic).await {
+                                if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
@@ -538,7 +538,7 @@ impl Blink for WebRtc {
                 call_info: ac.call.clone(),
             };
 
-            if let Err(e) = send_signal_ecdh(&self.ipfs, dest, signal, topic).await {
+            if let Err(e) = send_signal_ecdh(&self.ipfs, &self.id, &dest, signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
