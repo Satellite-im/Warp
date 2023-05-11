@@ -53,6 +53,11 @@ pub async fn reset() {
     }
 }
 
+pub async fn has_audio_source() -> bool {
+    let input_device = AUDIO_INPUT_DEVICE.read().await;
+    input_device.is_some()
+}
+
 // turns a track, device, and codec into a SourceTrack, which reads and packetizes audio input.
 // webrtc should remove the old media source before this is called.
 // use AUDIO_SOURCE_ID
@@ -70,8 +75,10 @@ pub async fn create_audio_source_track(
     };
 
     let source_track = simple_webrtc::audio::create_source_track(input_device, track, codec)
-        .context("failed to create source track")?;
-    source_track.play().context("failed to play source track")?;
+        .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
+    source_track
+        .play()
+        .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;
 
     unsafe {
         AUDIO_SOURCE.replace(source_track);
@@ -142,7 +149,9 @@ pub async fn mute_peer(peer_id: DID) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     unsafe {
         if let Some(track) = SINK_TRACKS.get_mut(&peer_id) {
-            track.pause().context("failed to pause (mute) track: {e}")?;
+            track
+                .pause()
+                .map_err(|e| anyhow::anyhow!("failed to pause (mute) track: {e}"))?;
         }
     }
 
@@ -154,7 +163,9 @@ pub async fn unmute_peer(peer_id: DID) -> anyhow::Result<()> {
 
     unsafe {
         if let Some(track) = SINK_TRACKS.get_mut(&peer_id) {
-            track.play().context("failed to play (unmute) track: {e}")?;
+            track
+                .play()
+                .map_err(|e| anyhow::anyhow!("failed to play (unmute) track: {e}"))?;
         }
     }
 
@@ -166,7 +177,9 @@ pub async fn mute_self() -> anyhow::Result<()> {
 
     unsafe {
         if let Some(track) = AUDIO_SOURCE.as_mut() {
-            track.pause().context("failed to pause (mute) track: {e}")?;
+            track
+                .pause()
+                .map_err(|e| anyhow::anyhow!("failed to pause (mute) track: {e}"))?;
         }
     }
 
@@ -178,7 +191,9 @@ pub async fn unmute_self() -> anyhow::Result<()> {
 
     unsafe {
         if let Some(track) = AUDIO_SOURCE.as_mut() {
-            track.play().context("failed to play (unmute) track: {e}")?;
+            track
+                .play()
+                .map_err(|e| anyhow::anyhow!("failed to play (unmute) track: {e}"))?;
         }
     }
 
