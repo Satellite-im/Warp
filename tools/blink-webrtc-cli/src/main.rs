@@ -165,7 +165,13 @@ async fn main() -> anyhow::Result<()> {
     while let Some(Ok(line)) = iter.next() {
         let mut v = vec![""];
         v.extend(line.split_ascii_whitespace());
-        let cli = Cli::parse_from(v);
+        let cli = match Cli::try_parse_from(v) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("{e}");
+                continue;
+            }
+        };
         if let Err(e) = handle_command(&mut blink, &own_identity, cli).await {
             println!("command failed: {e}");
         }

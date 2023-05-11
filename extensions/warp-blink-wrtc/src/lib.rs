@@ -25,6 +25,7 @@ mod store;
 use async_trait::async_trait;
 use std::{
     collections::{HashMap, HashSet},
+    str::FromStr,
     sync::Arc,
     time::Duration,
 };
@@ -46,7 +47,7 @@ use tokio::{
 use uuid::Uuid;
 use warp::{
     blink::{Blink, BlinkEventKind, BlinkEventStream, CallInfo},
-    crypto::{digest::KeyInit, KeyMaterial, DID},
+    crypto::{digest::KeyInit, Fingerprint, KeyMaterial, DID},
     error::Error,
     multipass::MultiPass,
 };
@@ -190,11 +191,8 @@ impl WebRtc {
         if let Some(handle) = self.webrtc_handler.take() {
             handle.abort();
         }
-        // there is no longer an active call
-        data.active_call.take();
-
-        // ensure there is no ongoing webrtc call
         data.webrtc.deinit().await.context("webrtc deinit failed")?;
+        data.active_call.replace(call.clone().into());
 
         // next, create event streams and pass them to a task
         let call_broadcast_stream = self
@@ -231,8 +229,6 @@ impl WebRtc {
         });
 
         self.webrtc_handler.replace(webrtc_handle);
-        data.active_call.replace(call.into());
-
         Ok(())
     }
 
@@ -362,7 +358,6 @@ async fn handle_webrtc(
                         continue
                     }
                 };
-                let mut data = STATIC_DATA.lock().await;
                 let signal: PeerSignal = match decode_gossipsub_msg_ecdh(&own_id, &sender, &msg) {
                     Ok(s) => s,
                     Err(e) => {
@@ -370,19 +365,22 @@ async fn handle_webrtc(
                         continue;
                     },
                 };
+                let mut data = STATIC_DATA.lock().await;
+                if !data.active_call.as_ref().map(|ac| ac.call.participants().contains(&sender)).unwrap_or(false) {
+                    log::error!("received a signal from a peer who isn't part of the call");
+                    continue;
+                }
 
                 match signal {
                     PeerSignal::Ice(ice) => {
                         if let Err(e) = data.webrtc.recv_ice(&sender, ice).await {
                             log::error!("failed to recv_ice {}", e);
                         }
-                        todo!()
                     }
                     PeerSignal::Sdp(sdp) => {
                         if let Err(e) = data.webrtc.recv_sdp(&sender, sdp).await {
                             log::error!("failed to recv_sdp: {}", e);
                         }
-                        todo!()
                     }
                     PeerSignal::Dial(sdp) => {
                         // if sender is part of ongoing call, start the call
@@ -525,7 +523,10 @@ impl Blink for WebRtc {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
-    async fn offer_call(&mut self, participants: Vec<DID>) -> Result<(), Error> {
+    async fn offer_call(&mut self, mut participants: Vec<DID>) -> Result<(), Error> {
+        if !participants.contains(&self.id) {
+            participants.push(DID::from_str(&self.id.fingerprint())?);
+        };
         let mut data = STATIC_DATA.lock().await;
         let call_info = CallInfo::new(participants.clone());
         let ac = ActiveCall::from(call_info.clone());
@@ -547,7 +548,6 @@ impl Blink for WebRtc {
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
-
         self.leave_call_internal(&mut data).await?;
         if let Some(call) = data.pending_calls.remove(&call_id) {
             self.init_call(&mut data, call.clone()).await?;
