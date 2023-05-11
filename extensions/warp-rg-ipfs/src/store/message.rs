@@ -3320,7 +3320,7 @@ impl MessageStore {
                         let skip;
                         loop {
                             if current_directory.has_item(&filename) {
-                                if interval >= 20 {
+                                if interval > 20 {
                                     skip = true;
                                     break;
                                 }
