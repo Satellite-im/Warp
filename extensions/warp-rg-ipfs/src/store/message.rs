@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering, AtomicUsize};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
@@ -3280,9 +3280,11 @@ impl MessageStore {
             let mut attachments = vec![];
             let mut total_thumbnail_size = 0;
 
-            let (mut s_tx, mut s_rx) = futures::channel::mpsc::unbounded::<(Progression, Option<warp::constellation::file::File>)>();
+            let mut receivers = vec![];
 
             for file in files {
+                let (mut s_tx, s_rx) = futures::channel::mpsc::unbounded::<(Progression, Option<warp::constellation::file::File>)>();
+                receivers.push(s_rx);
                 match location {
                     Location::Constellation => {
                         let path = file.display().to_string();
@@ -3382,7 +3384,31 @@ impl MessageStore {
                 };
             }
 
-            while let Some((progress, file)) = s_rx.next().await {
+            let (s_tx, s_rx) = futures::channel::mpsc::unbounded::<(Progression, Option<warp::constellation::file::File>)>();
+
+            let receiver_counts = receivers.len();
+            let receivers_completed = Arc::new(AtomicUsize::new(0));
+
+            for receiver in receivers {
+                tokio::spawn({
+                    let s_tx = s_tx.clone();
+                    let mut receiver = receiver;
+                    let counter = receivers_completed.clone();
+                    async move {
+                        while let Some((progress, file)) = receiver.next().await {
+                            s_tx.unbounded_send((progress.clone(), file)).ok();
+                            if matches!(progress, Progression::ProgressComplete { .. } | Progression::ProgressFailed { .. }) {
+                                counter.fetch_add(1, Ordering::SeqCst);
+                                drop(receiver);
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+
+
+            for await (progress, file) in s_rx {
                 yield AttachmentKind::AttachedProgress(progress);
                 if let Some(file) = file {
                     // We reconstruct it to avoid out any metadata that was apart of the `File` structure that we dont want to share
@@ -3401,6 +3427,9 @@ impl MessageStore {
                     new_file.set_hash(file.hash());
                     new_file.set_reference(&file.reference().unwrap_or_default());
                     attachments.push(new_file);
+                    if receivers_completed.load(Ordering::SeqCst) == receiver_counts {
+                        break;
+                    }
                 }
             }
 
