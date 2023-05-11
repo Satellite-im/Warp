@@ -3275,6 +3275,7 @@ impl MessageStore {
         let store = self.clone();
 
         let stream = async_stream::stream! {
+            let mut in_stack = vec![];
 
             let mut attachments = vec![];
             let mut total_thumbnail_size = 0;
@@ -3317,7 +3318,7 @@ impl MessageStore {
                         let mut interval = 0;
                         let skip;
                         loop {
-                            if current_directory.has_item(&filename) {
+                            if in_stack.contains(&filename) || current_directory.has_item(&filename) {
                                 if interval > 20 {
                                     skip = true;
                                     break;
@@ -3347,6 +3348,8 @@ impl MessageStore {
 
                         let file = file.display().to_string();
 
+                        in_stack.push(filename.clone());
+                        
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
                             Err(e) => {
