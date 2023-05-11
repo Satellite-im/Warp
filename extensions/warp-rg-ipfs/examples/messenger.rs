@@ -19,7 +19,7 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
     Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions, MessageStream,
-    MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
+    MessageType, Messages, MessagesType, PinState, RayGun, ReactionState, AttachmentKind,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -860,10 +860,29 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    if let Err(e) = chat.attach(conversation_id, None, Default::default(), vec![file], message).await {
-                                        writeln!(stdout, "Error: {e}")?;
-                                    } else {
-                                        writeln!(stdout, "File sent")?
+                                    let mut stream = match chat.attach(conversation_id, None, Default::default(), vec![file], message).await {
+                                        Ok(stream) => stream,
+                                        Err(e) => {
+                                            writeln!(stdout, "> Error: {e}")?;
+                                            return Err::<_, anyhow::Error>(anyhow::Error::from(e));
+                                        },
+                                    };
+                                    while let Some(event) = stream.next().await {
+                                        match event {
+                                            AttachmentKind::AttachedProgress(Progression::CurrentProgress { .. }) => {},
+                                            AttachmentKind::AttachedProgress(Progression::ProgressComplete { name, .. }) => {
+                                                writeln!(stdout, "> {name} is uploaded")?;
+                                            },
+                                            AttachmentKind::AttachedProgress(Progression::ProgressFailed { name, error, .. }) => {
+                                                writeln!(stdout, "> {name} failed to upload: {}", error.unwrap_or_default())?;
+                                            },
+                                            AttachmentKind::Pending(Ok(_)) => {
+                                                writeln!(stdout, "> File sent")?;
+                                            },
+                                            AttachmentKind::Pending(Err(e)) => {
+                                                writeln!(stdout, "> Error: {e}")?;
+                                            },
+                                        }
                                     }
                                     Ok::<_, anyhow::Error>(())
                                 }

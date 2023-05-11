@@ -6,6 +6,7 @@ use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use futures::StreamExt;
 use rust_ipfs::Ipfs;
+use warp::raygun::AttachmentEventStream;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -369,7 +370,7 @@ impl RayGunAttachment for IpfsMessaging {
         location: Location,
         files: Vec<PathBuf>,
         message: Vec<String>,
-    ) -> Result<()> {
+    ) -> Result<AttachmentEventStream> {
         self.messaging_store()?
             .attach(conversation_id, message_id, location, files, message)
             .await
