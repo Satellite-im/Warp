@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use ipfs::{libp2p, Ipfs};
 use rust_ipfs as ipfs;
 use serde::de::DeserializeOwned;
@@ -25,13 +27,14 @@ impl PeerIdExt for ipfs::PeerId {
 }
 
 // uses asymetric encryption
-pub async fn send_signal_ecdh<T: Serialize>(
+pub async fn send_signal_ecdh<T: Serialize + Display>(
     ipfs: &Ipfs,
     own_did: &DID,
     dest: &DID,
     signal: T,
     topic: String,
 ) -> anyhow::Result<()> {
+    log::debug!("sending signal: {signal}");
     let serialized = serde_cbor::to_vec(&signal)?;
     let encrypted = ecdh_encrypt(own_did, dest, serialized)?;
     ipfs.pubsub_publish(topic, encrypted).await?;
@@ -39,34 +42,37 @@ pub async fn send_signal_ecdh<T: Serialize>(
 }
 
 // uses symmetric encryption
-pub async fn send_signal_aes<T: Serialize>(
+pub async fn send_signal_aes<T: Serialize + Display>(
     ipfs: &Ipfs,
     key: &[u8],
     signal: T,
     topic: String,
 ) -> anyhow::Result<()> {
+    log::debug!("sending signal: {signal}");
     let serialized = serde_cbor::to_vec(&signal)?;
     let msg = Cipher::direct_encrypt(&serialized, key)?;
     ipfs.pubsub_publish(topic, msg).await?;
     Ok(())
 }
 
-pub fn decode_gossipsub_msg_ecdh<T: DeserializeOwned>(
+pub fn decode_gossipsub_msg_ecdh<T: DeserializeOwned + Display>(
     own_did: &DID,
     sender: &DID,
     msg: &libp2p::gossipsub::Message,
 ) -> anyhow::Result<T> {
     let bytes = ecdh_decrypt(own_did, sender, &msg.data)?;
     let data: T = serde_cbor::from_slice(&bytes)?;
+    log::debug!("received signal: {data}");
     Ok(data)
 }
 
-pub fn decode_gossipsub_msg_aes<T: DeserializeOwned>(
+pub fn decode_gossipsub_msg_aes<T: DeserializeOwned + Display>(
     key: &[u8],
     msg: &libp2p::gossipsub::Message,
 ) -> anyhow::Result<T> {
     let decrypted = Cipher::direct_decrypt(&msg.data, key)?;
     let data: T = serde_cbor::from_slice(&decrypted)?;
+    log::debug!("received signal: {data}");
     Ok(data)
 }
 

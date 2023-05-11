@@ -185,13 +185,7 @@ impl WebRtc {
         Ok(webrtc)
     }
 
-    // todo: make sure this only gets called once
     async fn init_call(&mut self, data: &mut StaticData, call: CallInfo) -> anyhow::Result<()> {
-        // this will cause the ipfs streams to be dropped and unsubscribe from the topics
-        if let Some(handle) = self.webrtc_handler.take() {
-            handle.abort();
-        }
-        data.webrtc.deinit().await.context("webrtc deinit failed")?;
         data.active_call.replace(call.clone().into());
 
         // next, create event streams and pass them to a task

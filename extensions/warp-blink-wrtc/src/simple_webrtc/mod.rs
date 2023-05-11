@@ -167,18 +167,18 @@ impl Controller {
         let pc = self
             .connect(peer_id)
             .await
-            .context(format!("{}:{}", file!(), line!()))?;
+            .map_err(|e| anyhow::anyhow!(format!("{e}: {}:{}", file!(), line!())))?;
         pc.set_remote_description(remote_sdp)
             .await
-            .context(format!("{}:{}", file!(), line!()))?;
+            .map_err(|e| anyhow::anyhow!(format!("{e}: {}:{}", file!(), line!())))?;
 
         let answer = pc
             .create_answer(None)
             .await
-            .context(format!("{}:{}", file!(), line!()))?;
+            .map_err(|e| anyhow::anyhow!(format!("{e}: {}:{}", file!(), line!())))?;
         pc.set_local_description(answer.clone())
             .await
-            .context(format!("{}:{}", file!(), line!()))?;
+            .map_err(|e| anyhow::anyhow!(format!("{e}: {}:{}", file!(), line!())))?;
 
         if let Some(p) = self.peers.get_mut(peer_id) {
             p.state = PeerState::WaitingForIce;
