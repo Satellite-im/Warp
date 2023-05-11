@@ -3308,8 +3308,8 @@ impl MessageStore {
 
                         let current_directory = match constellation.current_directory() {
                             Ok(directory) => directory,
-                            Err(_) => {
-
+                            Err(e) => {
+                                yield AttachmentKind::Pending(Err(e));
                                 return;
                             }
                         };
