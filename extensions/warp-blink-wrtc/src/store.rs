@@ -5,12 +5,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use warp::crypto::aes_gcm::aead::Aead;
 use warp::crypto::aes_gcm::{Aes256Gcm, Nonce};
-use warp::crypto::did_key::{Generate, ECDH};
 use warp::crypto::digest::KeyInit;
 use warp::crypto::{DIDKey, KeyMaterial};
 use warp::error::Error;
 type Result<T> = std::result::Result<T, Error>;
-use warp::crypto::{cipher::Cipher, zeroize::Zeroizing, Ed25519KeyPair, DID};
+use warp::crypto::{cipher::Cipher, Ed25519KeyPair, DID};
 
 const NONCE_LEN: usize = 12;
 
@@ -43,7 +42,7 @@ pub async fn send_signal_ecdh<T: Serialize>(
     topic: String,
 ) -> anyhow::Result<()> {
     let serialized = serde_cbor::to_vec(&signal)?;
-    let encrypted = ecdh_encrypt(&dest, Some(dest.clone()), serialized)?;
+    let encrypted = Cipher::direct_encrypt(serialized.as_ref(), &dest.public_key_bytes())?;
 
     ipfs.pubsub_publish(topic, encrypted).await?;
     Ok(())
@@ -77,10 +76,10 @@ pub async fn send_signal_aes<T: Serialize>(
 }
 
 pub fn decode_gossipsub_msg_ecdh<T: DeserializeOwned>(
-    private_key: &DID,
+    did: &DID,
     msg: &libp2p::gossipsub::Message,
 ) -> anyhow::Result<T> {
-    let bytes = crate::store::ecdh_decrypt(private_key, None, msg.data.clone())?;
+    let bytes = Cipher::direct_decrypt(msg.data.as_ref(), &did.private_key_bytes())?;
     let data: T = serde_cbor::from_slice(&bytes)?;
     Ok(data)
 }
@@ -97,34 +96,6 @@ pub fn decode_gossipsub_msg_aes<T: DeserializeOwned>(
         Err(e) => bail!("failed to decrypt gossipsub msg: {e}"),
     };
     let data: T = serde_cbor::from_slice(&decrypted)?;
-    Ok(data)
-}
-
-fn ecdh_encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>> {
-    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
-    let did_pubkey = match recipient {
-        Some(did) => did.public_key_bytes(),
-        None => did.public_key_bytes(),
-    };
-
-    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
-    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
-
-    Ok(data)
-}
-
-fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>> {
-    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
-    let did_pubkey = match recipient {
-        Some(did) => did.public_key_bytes(),
-        None => did.public_key_bytes(),
-    };
-
-    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
-    let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
-
     Ok(data)
 }
 

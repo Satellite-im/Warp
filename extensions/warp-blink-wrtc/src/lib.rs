@@ -539,7 +539,8 @@ impl Blink for WebRtc {
             let signal = InitiationSignal::Offer {
                 call_info: ac.call.clone(),
             };
-            if let Err(e) = send_signal_ecdh(&self.ipfs, dest.clone(), signal, topic).await {
+
+            if let Err(e) = send_signal_ecdh(&self.ipfs, dest, signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
