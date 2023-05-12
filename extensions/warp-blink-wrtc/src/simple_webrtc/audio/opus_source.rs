@@ -192,8 +192,17 @@ fn create_source_track(
         }
     };
 
-    let config = input_device.default_input_config().unwrap();
-    let input_stream =
-        input_device.build_input_stream(&config.into(), input_data_fn, err_fn, None)?;
+    let config = input_device.default_input_config().map_err(|e| {
+        anyhow::anyhow!("failed to get input config: {e}, {}, {}", file!(), line!())
+    })?;
+    let input_stream = input_device
+        .build_input_stream(&config.into(), input_data_fn, err_fn, None)
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to build input stream: {e}, {}, {}",
+                file!(),
+                line!()
+            )
+        })?;
     Ok((input_stream, join_handle))
 }

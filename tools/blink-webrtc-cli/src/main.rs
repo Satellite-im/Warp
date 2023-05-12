@@ -39,8 +39,10 @@ enum Cli {
     MuteSelf,
     /// unmute self
     UnmuteSelf,
-    /// show audio I/O devices currently being used by blink
-    ShowAudioDevices,
+    /// show currently connected audio I/O devices
+    ShowSelectedDevices,
+    /// show available audio I/O devices
+    ShowAvailableDevices,
     /// specify which microphone to use for input
     ConnectMicrophone { device_name: String },
     /// specify which speaker to use for output
@@ -73,7 +75,11 @@ async fn handle_command(
         Cli::UnmuteSelf => {
             blink.unmute_self().await?;
         }
-        Cli::ShowAudioDevices => {
+        Cli::ShowSelectedDevices => {
+            println!("microphone: {:?}", blink.get_current_microphone().await);
+            println!("speaker: {:?}", blink.get_current_speaker().await);
+        }
+        Cli::ShowAvailableDevices => {
             let microphones = blink.get_available_microphones().await?;
             let speakers = blink.get_available_speakers().await?;
             println!("available microphones: {microphones:#?}");

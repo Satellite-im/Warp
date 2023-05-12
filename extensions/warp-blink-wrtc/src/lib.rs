@@ -609,6 +609,9 @@ impl Blink for WebRtc {
             .map(|device| device.name().unwrap_or(String::from("unknown device")))
             .collect())
     }
+    async fn get_current_microphone(&self) -> Option<String> {
+        host_media::get_input_device_name().await
+    }
     async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
         let devices = match host.input_devices() {
@@ -641,6 +644,9 @@ impl Blink for WebRtc {
         Ok(device_iter
             .map(|device| device.name().unwrap_or(String::from("unknown device")))
             .collect())
+    }
+    async fn get_current_speaker(&self) -> Option<String> {
+        host_media::get_output_device_name().await
     }
     async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
