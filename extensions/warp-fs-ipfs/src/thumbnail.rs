@@ -61,6 +61,8 @@ pub enum ThumbnailExtensionType {
     SVG,
     #[display(fmt = "image/gif")]
     GIF,
+    #[display(fmt = "image/webp")]
+    WEBP,
     #[display(fmt = "image/bmp")]
     BMP,
     #[display(fmt = "image/vnd.microsoft.icon")]
@@ -96,6 +98,7 @@ impl From<&str> for ThumbnailExtensionType {
             "ico" => Self::ICO,
             "mp4" => Self::MP4,
             "avi" => Self::AVI,
+            "webp" => Self::WEBP,
             "webm" => Self::WEBM,
             "mkv" => Self::MKV,
             "pdf" => Self::PDF,
@@ -113,6 +116,7 @@ impl TryFrom<ThumbnailExtensionType> for ImageFormat {
             ThumbnailExtensionType::GIF => Ok(ImageFormat::Gif),
             ThumbnailExtensionType::ICO => Ok(ImageFormat::Ico),
             ThumbnailExtensionType::BMP => Ok(ImageFormat::Bmp),
+            ThumbnailExtensionType::WEBP => Ok(ImageFormat::WebP),
             _ => Err(Error::Unimplemented),
         }
     }
