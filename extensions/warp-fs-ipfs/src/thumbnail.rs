@@ -13,6 +13,7 @@ use std::{
     time::Instant,
 };
 
+use image::ImageFormat;
 use mediatype::MediaTypeBuf;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -103,6 +104,20 @@ impl From<&str> for ThumbnailExtensionType {
     }
 }
 
+impl TryFrom<ThumbnailExtensionType> for ImageFormat {
+    type Error = Error;
+    fn try_from(value: ThumbnailExtensionType) -> Result<Self, Self::Error> {
+        match value {
+            ThumbnailExtensionType::JPG => Ok(ImageFormat::Jpeg),
+            ThumbnailExtensionType::PNG => Ok(ImageFormat::Png),
+            ThumbnailExtensionType::GIF => Ok(ImageFormat::Gif),
+            ThumbnailExtensionType::ICO => Ok(ImageFormat::Ico),
+            ThumbnailExtensionType::BMP => Ok(ImageFormat::Bmp),
+            _ => Err(Error::Unimplemented),
+        }
+    }
+}
+
 impl TryFrom<ThumbnailExtensionType> for MediaTypeBuf {
     type Error = Error;
     fn try_from(ext: ThumbnailExtensionType) -> Result<Self, Self::Error> {
@@ -149,9 +164,14 @@ impl ThumbnailGenerator {
             let result = match extension.try_into() {
                 Ok(FileType::Mime(media)) => match media.ty().as_str() {
                     "image" => tokio::task::spawn_blocking(move || {
+                        let format: ImageFormat = extension.try_into()?;
                         let image = image::open(own_path).map_err(anyhow::Error::from)?;
                         let thumbnail = image.thumbnail(width, height);
-                        Ok::<_, Error>((extension, thumbnail.as_bytes().to_vec()))
+                        let mut t_buffer = std::io::Cursor::new(vec![]);
+                        thumbnail
+                            .write_to(&mut t_buffer, format)
+                            .map_err(anyhow::Error::from)?;
+                        Ok::<_, Error>((extension, t_buffer.into_inner()))
                     })
                     .await
                     .map_err(anyhow::Error::from)?,
