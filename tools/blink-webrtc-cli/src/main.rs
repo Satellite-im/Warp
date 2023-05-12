@@ -27,8 +27,6 @@ mod logger;
 /// test warp-blink-webrtc via command line
 #[derive(Parser, Debug, Eq, PartialEq)]
 enum Cli {
-    /// this one must be used first
-    Run,
     /// show your DID
     ShowDid,
     /// given a DID, initiate a call
@@ -55,9 +53,6 @@ async fn handle_command(
     cmd: Cli,
 ) -> anyhow::Result<()> {
     match cmd {
-        Cli::Run => {
-            println!("already running");
-        }
         Cli::ShowDid => {
             println!("own identity: {}", own_id.did_key());
         }
@@ -169,10 +164,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let _cli = Cli::parse();
-    if _cli != Cli::Run {
-        println!("ignoring command. starting repl");
-    }
+    println!("starting REPL");
+    println!("enter --help to see available commands");
+    println!("your DID is {}", own_identity.did_key());
 
     let mut iter = std::io::stdin().lines();
     while let Some(Ok(line)) = iter.next() {
