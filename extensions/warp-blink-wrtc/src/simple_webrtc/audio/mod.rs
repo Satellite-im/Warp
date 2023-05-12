@@ -25,7 +25,7 @@ pub trait SourceTrack {
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
     // should not require RTP renegotiation
-    fn change_input_device(&mut self, input_device: &cpal::Device);
+    fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()>;
 }
 
 // stores the TrackRemote at least

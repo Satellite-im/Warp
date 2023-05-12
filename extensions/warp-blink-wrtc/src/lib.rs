@@ -148,7 +148,7 @@ impl WebRtc {
 
         let cpal_host = cpal::platform::default_host();
         if let Some(d) = cpal_host.default_input_device() {
-            host_media::change_audio_input(d).await;
+            host_media::change_audio_input(d).await?;
         }
         if let Some(d) = cpal_host.default_output_device() {
             host_media::change_audio_output(d).await?;
@@ -622,7 +622,7 @@ impl Blink for WebRtc {
         for device in devices {
             if let Ok(name) = device.name() {
                 if name == device_name {
-                    host_media::change_audio_input(device).await;
+                    host_media::change_audio_input(device).await?;
                     return Ok(());
                 }
             }

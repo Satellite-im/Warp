@@ -111,17 +111,22 @@ pub async fn create_audio_sink_track(peer_id: DID, track: Arc<TrackRemote>) -> a
     Ok(())
 }
 
-pub async fn change_audio_input(device: cpal::Device) {
+pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     let mut audio_input = AUDIO_INPUT_DEVICE.write().await;
 
+    // change_input_device destroys the audio stream. if that function fails. there should be
+    // no audio_input.
+    audio_input.take();
+
     unsafe {
         if let Some(source) = AUDIO_SOURCE.as_mut() {
-            source.change_input_device(&device);
+            source.change_input_device(&device)?;
         }
     }
 
     audio_input.replace(device);
+    Ok(())
 }
 
 pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
