@@ -37,16 +37,16 @@ enum Cli {
     Answer { id: String },
     /// end the current call
     Hangup,
+    /// mute self
+    MuteSelf,
+    /// unmute self
+    UnmuteSelf,
     /// show audio I/O devices currently being used by blink
     ShowAudioDevices,
-    /// use default device for webrtc input
-    ConnectMicrophone,
-    /// use default device for webrtc output
-    ConnectSpeaker,
-    /// disconnect webrtc input device
-    DisconnectMicrophone,
-    /// disconnect webrtc output device
-    DisconnectSpeaker,
+    /// specify which microphone to use for input
+    ConnectMicrophone { device_name: String },
+    /// specify which speaker to use for output
+    ConnectSpeaker { device_name: String },
 }
 
 async fn handle_command(
@@ -72,11 +72,24 @@ async fn handle_command(
         Cli::Hangup => {
             blink.leave_call().await?;
         }
-        Cli::ShowAudioDevices => {}
-        Cli::ConnectMicrophone => {}
-        Cli::ConnectSpeaker => {}
-        Cli::DisconnectMicrophone => {}
-        Cli::DisconnectSpeaker => {}
+        Cli::MuteSelf => {
+            blink.mute_self().await?;
+        }
+        Cli::UnmuteSelf => {
+            blink.unmute_self().await?;
+        }
+        Cli::ShowAudioDevices => {
+            let microphones = blink.get_available_microphones().await?;
+            let speakers = blink.get_available_speakers().await?;
+            println!("available microphones: {microphones:#?}");
+            println!("available speakers: {speakers:#?}");
+        }
+        Cli::ConnectMicrophone { device_name } => {
+            blink.select_microphone(&device_name).await?;
+        }
+        Cli::ConnectSpeaker { device_name } => {
+            blink.select_speaker(&device_name).await?;
+        }
     }
     Ok(())
 }
