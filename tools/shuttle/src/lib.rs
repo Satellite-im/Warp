@@ -114,9 +114,7 @@ pub(crate) fn ecdh_decrypt(
     public_key: Option<&rust_ipfs::PublicKey>,
     data: impl AsRef<[u8]>,
 ) -> anyhow::Result<Vec<u8>> {
-    let ed25519_keypair = keypair
-        .clone()
-        .try_into_ed25519()?;
+    let ed25519_keypair = keypair.clone().try_into_ed25519()?;
     let xpriv = convert_ed25519_to_x25519_priv(&ed25519_keypair.secret());
     let xpub = match public_key {
         Some(pubkey) => convert_ed25519_to_x25519_pub(pubkey)?,

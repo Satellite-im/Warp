@@ -95,7 +95,7 @@ impl<'a> Response<'a> {
 #[cfg(test)]
 mod test {
 
-    use rust_ipfs::{Keypair};
+    use rust_ipfs::Keypair;
     use uuid::Uuid;
 
     use super::{Response, Status};

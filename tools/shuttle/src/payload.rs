@@ -77,7 +77,7 @@ mod test {
     use rust_ipfs::{Keypair, PublicKey};
 
     use crate::{ecdh_decrypt, ecdh_encrypt, payload::Payload};
-    
+
     fn construct_payload<'a>(
         sender: &Keypair,
         receiver: &PublicKey,

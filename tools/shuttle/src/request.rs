@@ -4,7 +4,7 @@ use rust_ipfs::PublicKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{sha256_iter, payload::Payload};
+use crate::{payload::Payload, sha256_iter};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -115,7 +115,9 @@ impl<'a> Request<'a> {
                 Some(identifier_byte.as_slice()),
                 Some(self.namespace()),
                 self.key(),
-                self.payload().and_then(|payload| payload.to_bytes().ok()).as_deref(),
+                self.payload()
+                    .and_then(|payload| payload.to_bytes().ok())
+                    .as_deref(),
             ]
             .into_iter(),
         );
@@ -172,8 +174,14 @@ mod test {
             );
             sender.sign(&hash)?
         };
-        
-        Ok(Request::new(identifier, namespace.into(), key.map(Cow::Borrowed), Some(payload), signature.into()))
+
+        Ok(Request::new(
+            identifier,
+            namespace.into(),
+            key.map(Cow::Borrowed),
+            Some(payload),
+            signature.into(),
+        ))
     }
 
     #[test]

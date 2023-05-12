@@ -5,12 +5,15 @@ use base64::{
     engine::{general_purpose::PAD, GeneralPurpose},
     Engine,
 };
-use futures::{StreamExt, SinkExt};
+use futures::{SinkExt, StreamExt};
 use rust_ipfs::{
-    p2p::{IdentifyConfiguration, PeerInfo, RelayConfig, SwarmConfig, TransportConfig, UpgradeVersion, UpdateMode},
+    p2p::{
+        IdentifyConfiguration, PeerInfo, RelayConfig, SwarmConfig, TransportConfig, UpdateMode,
+        UpgradeVersion,
+    },
     FDLimit, IpfsOptions, Keypair, Multiaddr, UninitializedIpfs,
 };
-use tokio::{sync::Notify, fs::OpenOptions, io::AsyncWriteExt};
+use tokio::{fs::OpenOptions, io::AsyncWriteExt, sync::Notify};
 
 use zeroize::Zeroizing;
 
@@ -34,8 +37,14 @@ async fn main() -> anyhow::Result<()> {
 
     let keypair_pb = std::env::var("KEYPAIR").ok();
     let listen_addr = std::env::var("LISTEN_ADDR").ok();
-    let logging = std::env::var("LOG_SWARM").ok().and_then(|s| s.parse::<bool>().ok()).unwrap_or_default();
-    let disable_kad = std::env::var("DISABLE_DHT").ok().and_then(|s| s.parse::<bool>().ok()).unwrap_or_default();
+    let logging = std::env::var("LOG_SWARM")
+        .ok()
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or_default();
+    let disable_kad = std::env::var("DISABLE_DHT")
+        .ok()
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or_default();
     let keypair = match keypair_pb {
         Some(kp) => decode_kp(&kp)?,
         None => {
@@ -59,10 +68,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (tx, mut rx) = futures::channel::mpsc::channel::<String>(1024);
-    
+
     if logging {
         tokio::spawn(async move {
-            let mut fs = OpenOptions::new().create(true).append(true).open("relay.log").await.expect("File to create");
+            let mut fs = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("relay.log")
+                .await
+                .expect("File to create");
             while let Some(data) = rx.next().await {
                 fs.write_all(data.as_bytes()).await.unwrap();
                 fs.sync_all().await.unwrap();
@@ -99,7 +113,8 @@ async fn main() -> anyhow::Result<()> {
             max_circuit_duration: Duration::from_secs(2 * 60),
             max_circuit_bytes: 8 * 1024 * 1024,
             circuit_src_rate_limiters: vec![],
-        })).swarm_events(move |_, event| {
+        }))
+        .swarm_events(move |_, event| {
             if logging {
                 let log = format!("{event:?}\n");
                 tokio::spawn({
@@ -114,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
     if disable_kad {
         uninitialized = uninitialized.disable_kad();
     }
-    
+
     let ipfs = uninitialized.start().await?;
 
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;

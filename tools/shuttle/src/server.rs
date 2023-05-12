@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use futures::{StreamExt, stream};
-use rust_ipfs::{Ipfs, unixfs::AddOption};
+use futures::{stream, StreamExt};
+use rust_ipfs::{unixfs::AddOption, Ipfs};
 use tokio::sync::Mutex;
 
 use crate::{
     ecdh_decrypt,
-    request::{Request, Identifier},
+    request::{Identifier, Request},
     response::{Response, Status},
     sha256_iter,
     store::Store,
@@ -70,56 +70,126 @@ impl ShuttleServer {
                     let task = {
                         let ipfs = ipfs.clone();
                         let store = store.clone();
-                        
+
                         async move {
                             //We borrow again due to the lifetime of `request_bytes`
                             let request = Request::from_bytes(&request_bytes)?;
 
                             match request.identifier() {
                                 Identifier::Store => {
-                                    let payload = request.payload().ok_or(anyhow::anyhow!("No payload supplied"))?;
+                                    let payload = request
+                                        .payload()
+                                        .ok_or(anyhow::anyhow!("No payload supplied"))?;
                                     let bytes = payload.to_bytes().map(Result::Ok)?;
                                     let bytes_stream = stream::iter(vec![bytes]).boxed();
 
                                     //storing as a unixfs block for future compatibility
-                                    let mut stream = ipfs.unixfs().add((format!("{}/{peer_id}", String::from_utf8_lossy(request.namespace())), bytes_stream), Some(AddOption {
-                                        wrap: true,
-                                        ..Default::default()
-                                    })).await?;
+                                    let mut stream = ipfs
+                                        .unixfs()
+                                        .add(
+                                            (
+                                                format!(
+                                                    "{}/{peer_id}",
+                                                    String::from_utf8_lossy(request.namespace())
+                                                ),
+                                                bytes_stream,
+                                            ),
+                                            Some(AddOption {
+                                                wrap: true,
+                                                ..Default::default()
+                                            }),
+                                        )
+                                        .await?;
 
                                     let mut ipfs_path = None;
 
                                     while let Some(status) = stream.next().await {
-                                        match status{
-                                            rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { path, .. } => ipfs_path = Some(path),
-                                            rust_ipfs::unixfs::UnixfsStatus::FailedStatus { error, .. } => {
-                                                let error = error.unwrap_or(anyhow::anyhow!("Unknown error has occurred"));
+                                        match status {
+                                            rust_ipfs::unixfs::UnixfsStatus::CompletedStatus {
+                                                path,
+                                                ..
+                                            } => ipfs_path = Some(path),
+                                            rust_ipfs::unixfs::UnixfsStatus::FailedStatus {
+                                                error,
+                                                ..
+                                            } => {
+                                                let error = error.unwrap_or(anyhow::anyhow!(
+                                                    "Unknown error has occurred"
+                                                ));
                                                 return Err(error);
-                                            },
+                                            }
                                             _ => {}
                                         }
                                     }
 
-                                    let path = ipfs_path.ok_or(anyhow::anyhow!("Could not obtain cid"))?;
+                                    let path =
+                                        ipfs_path.ok_or(anyhow::anyhow!("Could not obtain cid"))?;
 
                                     let mut store = store.lock().await;
-                                    store.insert(request.key().unwrap_or(&[request.namespace(), b"/", peer_id.to_bytes().as_slice()].concat()), path.to_string().as_bytes()).await?;
-                                },
+                                    store
+                                        .insert(
+                                            request.key().unwrap_or(
+                                                &[
+                                                    request.namespace(),
+                                                    b"/",
+                                                    peer_id.to_bytes().as_slice(),
+                                                ]
+                                                .concat(),
+                                            ),
+                                            path.to_string().as_bytes(),
+                                        )
+                                        .await?;
+                                }
                                 Identifier::Replace => {
-                                    let payload = request.payload().ok_or(anyhow::anyhow!("No payload supplied"))?;
+                                    let payload = request
+                                        .payload()
+                                        .ok_or(anyhow::anyhow!("No payload supplied"))?;
                                     let bytes = payload.to_bytes()?;
                                     let mut store = store.lock().await;
-                                    store.replace(request.key().unwrap_or(&[request.namespace(), b"/", peer_id.to_bytes().as_slice()].concat()), &bytes).await?;
-                                },
+                                    store
+                                        .replace(
+                                            request.key().unwrap_or(
+                                                &[
+                                                    request.namespace(),
+                                                    b"/",
+                                                    peer_id.to_bytes().as_slice(),
+                                                ]
+                                                .concat(),
+                                            ),
+                                            &bytes,
+                                        )
+                                        .await?;
+                                }
                                 Identifier::Find => {
                                     let store = store.lock().await;
-                                    let _data = store.find(request.key().unwrap_or(&[request.namespace(), b"/", peer_id.to_bytes().as_slice()].concat())).await?;
-
-                                },
+                                    let _data = store
+                                        .find(
+                                            request.key().unwrap_or(
+                                                &[
+                                                    request.namespace(),
+                                                    b"/",
+                                                    peer_id.to_bytes().as_slice(),
+                                                ]
+                                                .concat(),
+                                            ),
+                                        )
+                                        .await?;
+                                }
                                 Identifier::Delete => {
                                     let mut store = store.lock().await;
-                                    store.remove(request.key().unwrap_or(&[request.namespace(), b"/", peer_id.to_bytes().as_slice()].concat())).await?;
-                                },
+                                    store
+                                        .remove(
+                                            request.key().unwrap_or(
+                                                &[
+                                                    request.namespace(),
+                                                    b"/",
+                                                    peer_id.to_bytes().as_slice(),
+                                                ]
+                                                .concat(),
+                                            ),
+                                        )
+                                        .await?;
+                                }
                             }
                             Ok::<_, anyhow::Error>(())
                         }
@@ -211,7 +281,6 @@ impl ShuttleServer {
                     }
 
                     let _response_id = resp.id();
-
                 }
 
                 Ok::<_, anyhow::Error>(())

@@ -5,7 +5,7 @@ use crate::agent::{Agent, AgentStatus};
 use crate::payload::Payload;
 use crate::request::{Identifier, Request};
 use crate::response::{Response, Status};
-use crate::{ecdh_encrypt, ecdh_decrypt, MAX_TRANSMIT_SIZE};
+use crate::{ecdh_decrypt, ecdh_encrypt, MAX_TRANSMIT_SIZE};
 use futures::channel::oneshot;
 use futures::StreamExt;
 use rust_ipfs::{Ipfs, PeerId, PublicKey};
@@ -106,7 +106,7 @@ impl ShuttleClient {
                                     let Ok(signature) = keypair.sign(&bytes) else {
                                         continue;
                                     };
-                                    
+
                                     let request = Request::new(Identifier::Store, namespace.into(), None, Some(payload), signature.into());
 
                                     let request_id = request.id();
