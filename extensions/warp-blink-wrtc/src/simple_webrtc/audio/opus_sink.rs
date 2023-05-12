@@ -44,7 +44,7 @@ impl SinkTrack for OpusSink {
         let channels = opus::Channels::Mono;
 
         let decoder = opus::Decoder::new(sample_rate, channels)?;
-        let (producer, mut consumer) = mpsc::unbounded_channel::<i16>();
+        let (producer, mut consumer) = mpsc::unbounded_channel::<f32>();
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
         let sample_builder = SampleBuilder::new(max_late, depacketizer, sample_rate);
         let track2 = track.clone();
@@ -55,18 +55,18 @@ impl SinkTrack for OpusSink {
             log::debug!("stopping decode_media_stream thread");
         });
 
-        let output_data_fn = move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+        let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut input_fell_behind = false;
             for sample in data {
                 *sample = match consumer.try_recv() {
                     Ok(s) => s,
                     Err(TryRecvError::Empty) => {
                         input_fell_behind = true;
-                        0
+                        0_f32
                     }
                     Err(e) => {
                         log::error!("channel closed: {}", e);
-                        0
+                        0_f32
                     }
                 }
             }
@@ -112,13 +112,13 @@ impl SinkTrack for OpusSink {
 async fn decode_media_stream<T>(
     track: Arc<TrackRemote>,
     mut sample_builder: SampleBuilder<T>,
-    producer: mpsc::UnboundedSender<i16>,
+    producer: mpsc::UnboundedSender<f32>,
     mut decoder: opus::Decoder,
 ) -> Result<()>
 where
     T: Depacketizer,
 {
-    let mut decoder_output_buf = [0; 4096];
+    let mut decoder_output_buf = [0_f32; 4096];
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 4096];
     loop {
@@ -145,8 +145,11 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
-                    match decoder.decode(media_sample.data.as_ref(), &mut decoder_output_buf, false)
-                    {
+                    match decoder.decode_float(
+                        media_sample.data.as_ref(),
+                        &mut decoder_output_buf,
+                        false,
+                    ) {
                         Ok(siz) => {
                             let to_send = decoder_output_buf.iter().take(siz);
                             for audio_sample in to_send {
