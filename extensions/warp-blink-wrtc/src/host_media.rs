@@ -4,7 +4,7 @@
 //!
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{bail, Context};
+use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use tokio::sync::{Mutex, RwLock};
@@ -30,8 +30,9 @@ static AUDIO_OUTPUT_DEVICE: Lazy<RwLock<Option<cpal::Device>>> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
     RwLock::new(cpal_host.default_output_device())
 });
-static mut AUDIO_SOURCE: Option<Box<dyn audio::SourceTrack>> = None;
-static mut SINK_TRACKS: Lazy<HashMap<DID, Box<dyn audio::SinkTrack>>> = Lazy::new(HashMap::new);
+static mut AUDIO_SOURCE_TRACK: Option<Box<dyn audio::SourceTrack>> = None;
+static mut AUDIO_SINK_TRACKS: Lazy<HashMap<DID, Box<dyn audio::SinkTrack>>> =
+    Lazy::new(HashMap::new);
 
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
 
@@ -48,8 +49,8 @@ pub async fn get_output_device_name() -> Option<String> {
 pub async fn reset() {
     let _lock = SINGLETON_MUTEX.lock().await;
     unsafe {
-        AUDIO_SOURCE.take();
-        SINK_TRACKS.clear();
+        AUDIO_SOURCE_TRACK.take();
+        AUDIO_SINK_TRACKS.clear();
     }
 }
 
@@ -81,15 +82,19 @@ pub async fn create_audio_source_track(
         .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;
 
     unsafe {
-        AUDIO_SOURCE.replace(source_track);
+        AUDIO_SOURCE_TRACK.replace(source_track);
     }
 
     Ok(())
 }
 
-pub async fn remove_source_track(_source_id: MediaSourceId) -> anyhow::Result<()> {
+pub async fn remove_audio_source_track(_source_id: MediaSourceId) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
-    todo!()
+    unsafe {
+        AUDIO_SOURCE_TRACK.take();
+    }
+
+    Ok(())
 }
 
 pub async fn create_audio_sink_track(peer_id: DID, track: Arc<TrackRemote>) -> anyhow::Result<()> {
@@ -106,7 +111,7 @@ pub async fn create_audio_sink_track(peer_id: DID, track: Arc<TrackRemote>) -> a
     let sink_track = simple_webrtc::audio::create_sink_track(output_device, track, codec)?;
     sink_track.play()?;
     unsafe {
-        SINK_TRACKS.insert(peer_id, sink_track);
+        AUDIO_SINK_TRACKS.insert(peer_id, sink_track);
     }
     Ok(())
 }
@@ -120,7 +125,7 @@ pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
     audio_input.take();
 
     unsafe {
-        if let Some(source) = AUDIO_SOURCE.as_mut() {
+        if let Some(source) = AUDIO_SOURCE_TRACK.as_mut() {
             source.change_input_device(&device)?;
         }
     }
@@ -135,7 +140,7 @@ pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
 
     unsafe {
         // todo: if this fails, return an error or keep going?
-        for (_k, v) in SINK_TRACKS.iter_mut() {
+        for (_k, v) in AUDIO_SINK_TRACKS.iter_mut() {
             if let Err(e) = v.change_output_device(&device) {
                 log::error!("failed to change output device: {e}");
             }
@@ -145,15 +150,19 @@ pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn remove_sink_track(_peer_id: DID) -> anyhow::Result<()> {
+pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
-    todo!()
+    unsafe {
+        AUDIO_SINK_TRACKS.remove(&peer_id);
+    }
+
+    Ok(())
 }
 
 pub async fn mute_peer(peer_id: DID) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     unsafe {
-        if let Some(track) = SINK_TRACKS.get_mut(&peer_id) {
+        if let Some(track) = AUDIO_SINK_TRACKS.get_mut(&peer_id) {
             track
                 .pause()
                 .map_err(|e| anyhow::anyhow!("failed to pause (mute) track: {e}"))?;
@@ -167,7 +176,7 @@ pub async fn unmute_peer(peer_id: DID) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
 
     unsafe {
-        if let Some(track) = SINK_TRACKS.get_mut(&peer_id) {
+        if let Some(track) = AUDIO_SINK_TRACKS.get_mut(&peer_id) {
             track
                 .play()
                 .map_err(|e| anyhow::anyhow!("failed to play (unmute) track: {e}"))?;
@@ -181,7 +190,7 @@ pub async fn mute_self() -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
 
     unsafe {
-        if let Some(track) = AUDIO_SOURCE.as_mut() {
+        if let Some(track) = AUDIO_SOURCE_TRACK.as_mut() {
             track
                 .pause()
                 .map_err(|e| anyhow::anyhow!("failed to pause (mute) track: {e}"))?;
@@ -195,7 +204,7 @@ pub async fn unmute_self() -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
 
     unsafe {
-        if let Some(track) = AUDIO_SOURCE.as_mut() {
+        if let Some(track) = AUDIO_SOURCE_TRACK.as_mut() {
             track
                 .play()
                 .map_err(|e| anyhow::anyhow!("failed to play (unmute) track: {e}"))?;
@@ -207,6 +216,9 @@ pub async fn unmute_self() -> anyhow::Result<()> {
 
 pub async fn hangup() -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
-
-    todo!()
+    unsafe {
+        AUDIO_SOURCE_TRACK.take();
+        AUDIO_SINK_TRACKS.clear();
+    }
+    Ok(())
 }
