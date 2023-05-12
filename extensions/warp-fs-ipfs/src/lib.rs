@@ -372,7 +372,6 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileNotFound);
         }
 
-
         let file_size = tokio::fs::metadata(&path).await?.len();
 
         if self.current_size() + (file_size as usize) >= self.max_size() {
@@ -388,7 +387,11 @@ impl Constellation for IpfsFileSystem {
             });
         }
 
-        let (width, height) = self.config.as_ref().map(|c| c.thumbnail_size).unwrap_or((128, 128));
+        let (width, height) = self
+            .config
+            .as_ref()
+            .map(|c| c.thumbnail_size)
+            .unwrap_or((128, 128));
 
         let ticket = self.thumbnail_store.insert(&path, width, height).await?;
         let current_directory = self.current_directory()?;
@@ -472,9 +475,9 @@ impl Constellation for IpfsFileSystem {
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
-            
 
-            if let Ok(Err(_e)) = tokio::task::spawn_blocking({ 
+
+            if let Ok(Err(_e)) = tokio::task::spawn_blocking({
                 let f = file.clone();
                 move || f.hash_mut().hash_from_file(&path)
             }).await {}
