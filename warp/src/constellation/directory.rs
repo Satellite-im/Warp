@@ -36,7 +36,7 @@ pub struct Directory {
     description: Arc<RwLock<String>>,
 
     /// Thumbnail of the `Directory`
-    thumbnail: Arc<RwLock<String>>,
+    thumbnail: Arc<RwLock<Vec<u8>>>,
 
     /// Favorite Directory
     favorite: Arc<RwLock<bool>>,
@@ -520,13 +520,13 @@ impl Directory {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_thumbnail(&self, desc: &str) {
-        *self.thumbnail.write() = desc.to_string()
+    pub fn set_thumbnail(&self, desc: &[u8]) {
+        *self.thumbnail.write() = desc.to_vec()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn thumbnail(&self) -> String {
-        self.thumbnail.read().to_string()
+    pub fn thumbnail(&self) -> Vec<u8> {
+        self.thumbnail.read().to_vec()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
@@ -1015,7 +1015,7 @@ pub mod ffi {
 
         let thumbnail = CStr::from_ptr(thumbnail).to_string_lossy().to_string();
 
-        Directory::set_thumbnail(&*dir, &thumbnail)
+        Directory::set_thumbnail(&*dir, thumbnail.as_bytes())
     }
 
     #[allow(clippy::missing_safety_doc)]

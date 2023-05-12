@@ -45,7 +45,7 @@ pub struct File {
     /// Thumbnail of the `File`
     /// Note: This should be set if the file is an image, unless
     ///       one plans to add a generic thumbnail for the file
-    thumbnail: Arc<RwLock<String>>,
+    thumbnail: Arc<RwLock<Vec<u8>>>,
 
     /// Favorite File
     favorite: Arc<RwLock<bool>>,
@@ -167,14 +167,14 @@ impl File {
 
     /// Set the thumbnail to the file
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_thumbnail(&self, data: &str) {
-        *self.thumbnail.write() = data.to_string();
+    pub fn set_thumbnail(&self, data: &[u8]) {
+        *self.thumbnail.write() = data.to_vec();
         *self.modified.write() = Utc::now()
     }
 
     /// Get the thumbnail from the file
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn thumbnail(&self) -> String {
+    pub fn thumbnail(&self) -> Vec<u8> {
         self.thumbnail.read().clone()
     }
 

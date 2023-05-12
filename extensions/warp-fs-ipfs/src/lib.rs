@@ -492,7 +492,7 @@ impl Constellation for IpfsFileSystem {
             }
 
             if let Err(_e) = fs.export_index().await {}
-            
+
             let task = {
                 let fs = fs.clone();
                 let store = fs.thumbnail_store.clone();
@@ -500,7 +500,7 @@ impl Constellation for IpfsFileSystem {
                 async move {
                     match store.get(ticket).await {
                         Ok((_extension_type, thumbnail)) => {
-                            file.set_thumbnail(&String::from_utf8_lossy(&thumbnail));
+                            file.set_thumbnail(&thumbnail);
                             //We export again so the thumbnail can be apart of the index
                             if let Err(_e) = fs.export_index().await {}
                         }

@@ -208,7 +208,7 @@ impl Item {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn thumbnail(&self) -> String {
+    pub fn thumbnail(&self) -> Vec<u8> {
         match &self.0 {
             ItemInner::File(file) => file.thumbnail(),
             ItemInner::Directory(directory) => directory.thumbnail(),
@@ -279,7 +279,7 @@ impl Item {
 
     /// Set thumbnail of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_thumbnail(&self, data: &str) {
+    pub fn set_thumbnail(&self, data: &[u8]) {
         match &self.0 {
             ItemInner::File(file) => file.set_thumbnail(data),
             ItemInner::Directory(directory) => directory.set_thumbnail(data),
@@ -487,7 +487,7 @@ pub mod ffi {
         }
 
         let thumbnail = CStr::from_ptr(data).to_string_lossy().to_string();
-        Item::set_thumbnail(&*item, &thumbnail)
+        Item::set_thumbnail(&*item, thumbnail.as_bytes())
     }
 
     #[allow(clippy::missing_safety_doc)]
