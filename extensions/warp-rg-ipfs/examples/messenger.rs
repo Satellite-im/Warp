@@ -249,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
         identity.username(),
         identity.short_id()
     );
-    
+
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         identity.username(),

@@ -121,7 +121,11 @@ impl Directory {
             return directory;
         }
 
-        let name = path.remove(0);
+        let mut name = path.remove(0);
+        if name.len() > 256 {
+            name = &name[..256];
+        }
+
         *directory.name.write() = name.to_string();
 
         if !path.is_empty() {
@@ -508,6 +512,10 @@ impl Directory {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_name(&self, name: &str) {
+        let mut name = name.trim();
+        if name.len() > 256 {
+            name = &name[..256];
+        }
         *self.name.write() = name.to_string()
     }
 
@@ -584,6 +592,25 @@ impl Directory {
     #[wasm_bindgen(getter)]
     pub fn modified(&self) -> i64 {
         self.modified.timestamp()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Directory;
+
+    #[test]
+    fn name_length() {
+        let short_name = "test";
+        let long_name = "x".repeat(300);
+
+        let short_directory = Directory::new(short_name);
+        let long_directory = Directory::new(&long_name);
+
+        assert!(short_directory.name().len() == 4);
+        assert!(long_directory.name().len() == 256);
+        assert_eq!(long_directory.name(), &long_name[..256]);
+        assert_ne!(long_directory.name(), &long_name[..255]);
     }
 }
 
