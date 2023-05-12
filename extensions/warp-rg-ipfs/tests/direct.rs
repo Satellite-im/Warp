@@ -2,8 +2,8 @@ mod common;
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
     use futures::StreamExt;
+    use std::time::Duration;
     use warp::raygun::{
         ConversationType, MessageEvent, MessageEventKind, PinState, RayGunEventKind, ReactionState,
     };
