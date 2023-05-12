@@ -3349,7 +3349,7 @@ impl MessageStore {
                         let file = file.display().to_string();
 
                         in_stack.push(filename.clone());
-                        
+
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
                             Err(e) => {
