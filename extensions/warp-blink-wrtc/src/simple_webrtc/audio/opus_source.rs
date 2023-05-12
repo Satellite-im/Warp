@@ -1,6 +1,9 @@
 use anyhow::{bail, Result};
 use bytes::Bytes;
-use cpal::traits::{DeviceTrait, StreamTrait};
+use cpal::{
+    traits::{DeviceTrait, StreamTrait},
+    SampleFormat,
+};
 
 use rand::Rng;
 use std::sync::Arc;
@@ -13,6 +16,35 @@ use webrtc::{
 };
 
 use super::SourceTrack;
+
+// thank you https://github.com/RustAudio/cpal/issues/657
+macro_rules! get_input_stream {
+    ($sample_t:ty, $config:ident, $input_device:ident, $framer:ident, $producer:ident) => {
+        $input_device
+            .build_input_stream(
+                &$config.into(),
+                move |data: &[$sample_t], _: &cpal::InputCallbackInfo| {
+                    for sample in data {
+                        let converted = *sample as i16;
+                        if let Some(bytes) = $framer.frame(converted) {
+                            if let Err(e) = $producer.send(bytes) {
+                                log::error!("SourceTrack failed to send sample: {}", e);
+                            }
+                        }
+                    }
+                },
+                err_fn,
+                None,
+            )
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to build input stream: {e}, {}, {}",
+                    file!(),
+                    line!()
+                )
+            })?;
+    };
+}
 
 pub struct OpusSource {
     // holding on to the track in case the input device is changed. in that case a new track is needed.
@@ -127,6 +159,10 @@ fn create_source_track(
     codec: RTCRtpCodecCapability,
     input_device: &cpal::Device,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
+    let config = input_device.default_input_config().map_err(|e| {
+        anyhow::anyhow!("failed to get input config: {e}, {}, {}", file!(), line!())
+    })?;
+
     // number of samples to send in a RTP packet
     let frame_size = 120;
     let sample_rate = codec.clock_rate;
@@ -182,27 +218,41 @@ fn create_source_track(
         }
         log::debug!("SourceTrack packetizer thread quitting");
     });
-    let input_data_fn = move |data: &[i16], _: &cpal::InputCallbackInfo| {
-        for sample in data {
-            if let Some(bytes) = framer.frame(*sample) {
-                if let Err(e) = producer.send(bytes) {
-                    log::error!("SourceTrack failed to send sample: {}", e);
-                }
-            }
-        }
+
+    // CPAL expects the samples to be i16 but some platforms, like Mac, force the samples to be f32.
+    // the below code was turned into a macro
+    //let input_data_fn = move |data: &[i16], _: &cpal::InputCallbackInfo| {
+    //    for sample in data {
+    //        if let Some(bytes) = framer.frame(*sample) {
+    //            if let Err(e) = producer.send(bytes) {
+    //                log::error!("SourceTrack failed to send sample: {}", e);
+    //            }
+    //        }
+    //    }
+    //};
+    //let input_stream = input_device
+    //    .build_input_stream(&config.into(), input_data_fn, err_fn, None)
+    //    .map_err(|e| {
+    //        anyhow::anyhow!(
+    //            "failed to build input stream: {e}, {}, {}",
+    //            file!(),
+    //            line!()
+    //        )
+    //    })?;
+
+    let input_stream: cpal::Stream = match config.sample_format() {
+        SampleFormat::F32 => get_input_stream!(f32, config, input_device, framer, producer),
+        SampleFormat::I16 => get_input_stream!(i16, config, input_device, framer, producer),
+        SampleFormat::U16 => get_input_stream!(u16, config, input_device, framer, producer),
+        SampleFormat::I8 => get_input_stream!(i8, config, input_device, framer, producer),
+        SampleFormat::I32 => get_input_stream!(i32, config, input_device, framer, producer),
+        SampleFormat::I64 => get_input_stream!(i64, config, input_device, framer, producer),
+        SampleFormat::U8 => get_input_stream!(u8, config, input_device, framer, producer),
+        SampleFormat::U32 => get_input_stream!(u32, config, input_device, framer, producer),
+        SampleFormat::U64 => get_input_stream!(u64, config, input_device, framer, producer),
+        SampleFormat::F64 => get_input_stream!(f64, config, input_device, framer, producer),
+        x @ _ => bail!("invalid sample format: {x:?}"),
     };
 
-    let config = input_device.default_input_config().map_err(|e| {
-        anyhow::anyhow!("failed to get input config: {e}, {}, {}", file!(), line!())
-    })?;
-    let input_stream = input_device
-        .build_input_stream(&config.into(), input_data_fn, err_fn, None)
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "failed to build input stream: {e}, {}, {}",
-                file!(),
-                line!()
-            )
-        })?;
     Ok((input_stream, join_handle))
 }

@@ -407,6 +407,9 @@ async fn handle_webrtc(
                                         };
                                     if let Err(e) = host_media::create_audio_source_track(track, codec).await {
                                         log::error!("failed to create audio source track: {e}");
+                                        data.webrtc.hang_up(&sender).await;
+                                        // todo: how to leave the call...may need to send a signal
+                                        todo!()
                                     }
                                 }
                             }
