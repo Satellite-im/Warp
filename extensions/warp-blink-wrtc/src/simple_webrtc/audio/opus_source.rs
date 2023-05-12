@@ -25,7 +25,7 @@ macro_rules! get_input_stream {
                 &$config.into(),
                 move |data: &[$sample_t], _: &cpal::InputCallbackInfo| {
                     for sample in data {
-                        let converted = *sample as i16;
+                        let converted = *sample as f32;
                         if let Some(bytes) = $framer.frame(converted) {
                             if let Err(e) = $producer.send(bytes) {
                                 log::error!("SourceTrack failed to send sample: {}", e);
@@ -103,7 +103,8 @@ pub struct OpusFramer {
     // encodes groups of samples (frames)
     encoder: opus::Encoder,
     // queues samples, to build a frame
-    raw_samples: Vec<i16>,
+    // options are i16 and f32. seems safer to use a f32.
+    raw_samples: Vec<f32>,
     // used for the encoder
     opus_out: Vec<u8>,
     // number of samples in a frame
@@ -126,10 +127,10 @@ impl OpusFramer {
         })
     }
 
-    pub fn frame(&mut self, sample: i16) -> Option<Bytes> {
+    pub fn frame(&mut self, sample: f32) -> Option<Bytes> {
         self.raw_samples.push(sample);
         if self.raw_samples.len() == self.frame_size {
-            match self.encoder.encode(
+            match self.encoder.encode_float(
                 self.raw_samples.as_mut_slice(),
                 self.opus_out.as_mut_slice(),
             ) {
@@ -219,7 +220,8 @@ fn create_source_track(
         log::debug!("SourceTrack packetizer thread quitting");
     });
 
-    // CPAL expects the samples to be i16 but some platforms, like Mac, force the samples to be f32.
+    // CPAL expects the samples to be a specific type. some platforms force the samples to be f32. need to use a macro to enforce the correct
+    // type for input_data_fn
     // the below code was turned into a macro
     //let input_data_fn = move |data: &[i16], _: &cpal::InputCallbackInfo| {
     //    for sample in data {
