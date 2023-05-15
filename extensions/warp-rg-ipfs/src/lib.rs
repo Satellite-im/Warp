@@ -23,6 +23,7 @@ use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
+use warp::raygun::AttachmentEventStream;
 use warp::raygun::Messages;
 use warp::raygun::{
     Conversation, Location, MessageEvent, MessageEventStream, MessageStatus, RayGunEventStream,
@@ -369,7 +370,7 @@ impl RayGunAttachment for IpfsMessaging {
         location: Location,
         files: Vec<PathBuf>,
         message: Vec<String>,
-    ) -> Result<()> {
+    ) -> Result<AttachmentEventStream> {
         self.messaging_store()?
             .attach(conversation_id, message_id, location, files, message)
             .await

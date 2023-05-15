@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
@@ -20,7 +20,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_stream::wrappers::ReadDirStream;
-use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
@@ -31,9 +30,9 @@ use warp::logging::tracing::warn;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, ConversationType, EmbedState, Location, Message, MessageEvent, MessageEventKind,
-    MessageOptions, MessageStatus, MessageStream, MessageType, Messages, MessagesType, PinState,
-    RayGunEventKind, Reaction, ReactionState,
+    AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState, Location,
+    Message, MessageEvent, MessageEventKind, MessageOptions, MessageStatus, MessageStream,
+    MessageType, Messages, MessagesType, PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sync::Arc;
 
@@ -3211,7 +3210,6 @@ impl MessageStore {
         self.publish(conversation_id, None, event, true).await
     }
 
-    //TODO: Return a vector of streams for events of progression for uploading (possibly passing it through to raygun events)
     pub async fn attach(
         &mut self,
         conversation_id: Uuid,
@@ -3219,7 +3217,16 @@ impl MessageStore {
         location: Location,
         files: Vec<PathBuf>,
         messages: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<AttachmentEventStream, Error> {
+        if files.len() > 8 {
+            return Err(Error::InvalidLength {
+                context: "files".into(),
+                current: files.len(),
+                minimum: Some(1),
+                maximum: Some(8),
+            });
+        }
+
         if !messages.is_empty() {
             let lines_value_length: usize = messages
                 .iter()
@@ -3251,162 +3258,207 @@ impl MessageStore {
 
         let files = files
             .iter()
-            .filter(|path| path.is_file())
+            .filter(|path| {
+                if matches!(location, Location::Disk) {
+                    path.is_file()
+                } else {
+                    true
+                }
+            })
+            .cloned()
             .collect::<Vec<_>>();
 
         if files.is_empty() {
             return Err(Error::InvalidMessage);
         }
 
-        let mut attachments = vec![];
-        let mut total_thumbnail_size = 0;
-        for file in files {
-            let file = match location {
-                Location::Constellation => {
-                    let path = file.display().to_string();
-                    match constellation
-                        .root_directory()
-                        .get_item_by_path(&path)
-                        .and_then(|item| item.get_file())
-                        .ok()
-                    {
-                        Some(f) => f,
-                        None => continue,
+        let store = self.clone();
+
+        let stream = async_stream::stream! {
+            let mut in_stack = vec![];
+
+            let mut attachments = vec![];
+            let mut total_thumbnail_size = 0;
+
+            let mut receivers_count = 0;
+            let receivers_completed = Arc::new(AtomicUsize::new(0));
+            let (mut s_tx, s_rx) = futures::channel::mpsc::unbounded::<(Progression, Option<warp::constellation::file::File>)>();
+            for file in files {
+                match location {
+                    Location::Constellation => {
+                        let path = file.display().to_string();
+                        match constellation
+                            .root_directory()
+                            .get_item_by_path(&path)
+                            .and_then(|item| item.get_file())
+                            .ok()
+                        {
+                            Some(f) => {
+                                s_tx.send((Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f))).await.ok();
+                            },
+                            None => continue,
+                        }
                     }
-                }
-                Location::Disk => {
-                    let mut filename = match file.file_name() {
-                        Some(file) => file.to_string_lossy().to_string(),
-                        None => continue,
-                    };
+                    Location::Disk => {
+                        let mut filename = match file.file_name() {
+                            Some(file) => file.to_string_lossy().to_string(),
+                            None => continue,
+                        };
 
-                    let original = filename.clone();
+                        let original = filename.clone();
 
-                    let current_directory = constellation.current_directory()?;
-
-                    let mut interval = 0;
-                    let skip;
-                    loop {
-                        if current_directory.has_item(&filename) {
-                            if interval >= 20 {
-                                skip = true;
-                                break;
+                        let current_directory = match constellation.current_directory() {
+                            Ok(directory) => directory,
+                            Err(e) => {
+                                yield AttachmentKind::Pending(Err(e));
+                                return;
                             }
-                            interval += 1;
-                            let file = PathBuf::from(&original);
-                            let file_stem =
-                                file.file_stem().and_then(OsStr::to_str).map(str::to_string);
-                            let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
+                        };
 
-                            filename = match (file_stem, ext) {
-                                (Some(filename), Some(ext)) => {
-                                    format!("{filename} ({interval}).{ext}")
+                        let mut interval = 0;
+                        let skip;
+                        loop {
+                            if in_stack.contains(&filename) || current_directory.has_item(&filename) {
+                                if interval > 2000 {
+                                    skip = true;
+                                    break;
                                 }
-                                _ => format!("{original} ({interval})"),
-                            };
-                            continue;
-                        }
-                        skip = false;
-                        break;
-                    }
+                                interval += 1;
+                                let file = PathBuf::from(&original);
+                                let file_stem =
+                                    file.file_stem().and_then(OsStr::to_str).map(str::to_string);
+                                let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
 
-                    if skip {
-                        continue;
-                    }
-
-                    let file = tokio::fs::File::open(&file).await?;
-
-                    let size = file.metadata().await?.len() as usize;
-
-                    let stream = ReaderStream::new(file)
-                        .filter_map(|x| async { x.ok() })
-                        .map(|x| x.into());
-
-                    let mut progress = match constellation
-                        .put_stream(&filename, Some(size), stream.boxed())
-                        .await
-                    {
-                        Ok(stream) => stream,
-                        Err(e) => {
-                            error!("Error uploading {filename}: {e}");
-                            continue;
-                        }
-                    };
-
-                    let mut complete = false;
-
-                    while let Some(progress) = progress.next().await {
-                        if let Progression::ProgressComplete { .. } = progress {
-                            complete = true;
+                                filename = match (file_stem, ext) {
+                                    (Some(filename), Some(ext)) => {
+                                        format!("{filename} ({interval}).{ext}")
+                                    }
+                                    _ => format!("{original} ({interval})"),
+                                };
+                                continue;
+                            }
+                            skip = false;
                             break;
                         }
-                    }
 
-                    if !complete {
-                        continue;
-                    }
+                        if skip {
+                            s_tx.send((Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None)).await.ok();
+                            continue;
+                        }
 
-                    //Note: If this fails this there might be a possible race condition
-                    match current_directory
-                        .get_item(&filename)
-                        .and_then(|item| item.get_file())
+                        let file = file.display().to_string();
+
+                        in_stack.push(filename.clone());
+
+                        let mut progress = match constellation.put(&filename, &file).await {
+                            Ok(stream) => stream,
+                            Err(e) => {
+                                error!("Error uploading {filename}: {e}");
+                                s_tx.send((Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None)).await.ok();
+                                continue;
+                            }
+                        };
+
+                        receivers_count += 1;
+                        tokio::spawn({
+                            let tx = s_tx.clone();
+                            let current_directory = current_directory.clone();
+                            let filename = filename.to_string();
+                            let counter = receivers_completed.clone();
+                            async move {
+                                while let Some(progress) = progress.next().await {
+                                    match progress {
+                                        progress @ Progression::CurrentProgress { .. } => {
+                                            let _ = tx.unbounded_send((progress, None)).ok();
+                                        },
+                                        progress @ Progression::ProgressComplete { .. } => {
+                                            let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
+                                            let _ = tx.unbounded_send((progress, file)).ok();
+                                            counter.fetch_add(1, Ordering::SeqCst);
+                                            break;
+                                        },
+                                        progress @ Progression::ProgressFailed { .. } => {
+                                            let _ = tx.unbounded_send((progress, None)).ok();
+                                            counter.fetch_add(1, Ordering::SeqCst);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                };
+            }
+
+            for await (progress, file) in s_rx {
+                yield AttachmentKind::AttachedProgress(progress);
+                if let Some(file) = file {
+                    // We reconstruct it to avoid out any metadata that was apart of the `File` structure that we dont want to share
+                    let new_file = warp::constellation::file::File::new(&file.name());
+
+                    let thumbnail = file.thumbnail();
+
+                    if total_thumbnail_size < 3 * 1024 * 1024
+                        && !thumbnail.is_empty()
+                        && thumbnail.len() <= 1024 * 1024
                     {
-                        Ok(file) => file,
-                        Err(_) => continue,
+                        new_file.set_thumbnail(&thumbnail);
+                        total_thumbnail_size += thumbnail.len();
                     }
+                    new_file.set_size(file.size());
+                    new_file.set_hash(file.hash());
+                    new_file.set_reference(&file.reference().unwrap_or_default());
+                    attachments.push(new_file);
+                    if receivers_completed.load(Ordering::SeqCst) == receivers_count {
+                        break;
+                    }
+                }
+            }
+
+            s_tx.close_channel();
+            drop(s_tx);
+
+            let final_results = {
+                let mut store = store.clone();
+                async move {
+                    let own_did = &*store.did;
+                    let mut message = Message::default();
+                    message.set_message_type(MessageType::Attachment);
+                    message.set_conversation_id(conversation.id());
+                    message.set_sender(own_did.clone());
+                    message.set_attachment(attachments);
+                    message.set_value(messages.clone());
+                    message.set_replied(message_id);
+                    let construct = vec![
+                        message.id().into_bytes().to_vec(),
+                        message.conversation_id().into_bytes().to_vec(),
+                        own_did.to_string().as_bytes().to_vec(),
+                        message
+                            .value()
+                            .iter()
+                            .map(|s| s.as_bytes())
+                            .collect::<Vec<_>>()
+                            .concat(),
+                    ]
+                    .concat();
+
+                    let signature = super::sign_serde(own_did, &construct)?;
+                    message.set_signature(Some(signature));
+
+                    let event = MessagingEvents::New { message };
+                    let (one_tx, one_rx) = oneshot::channel();
+                    tx.send((event.clone(), Some(one_tx)))
+                        .await
+                        .map_err(anyhow::Error::from)?;
+                    one_rx.await.map_err(anyhow::Error::from)??;
+                    store.publish(conversation_id, None, event, true).await
                 }
             };
 
-            // We reconstruct it to avoid out any possible metadata that was apart of the `File` structure
-            let new_file = warp::constellation::file::File::new(&file.name());
+            yield AttachmentKind::Pending(final_results.await)
+        };
 
-            let thumbnail = file.thumbnail();
-
-            if total_thumbnail_size < 3 * 1024 * 1024 && !thumbnail.is_empty() && thumbnail.len() <= 1024 * 1024 {
-                new_file.set_thumbnail(&thumbnail);
-                total_thumbnail_size += thumbnail.len();
-            }
-            new_file.set_size(file.size());
-            new_file.set_hash(file.hash());
-            new_file.set_reference(&file.reference().unwrap_or_default());
-            attachments.push(new_file);
-        }
-
-        let own_did = &*self.did.clone();
-
-        let mut message = Message::default();
-        message.set_message_type(MessageType::Attachment);
-        message.set_conversation_id(conversation.id());
-        message.set_sender(own_did.clone());
-        message.set_attachment(attachments);
-        message.set_value(messages.clone());
-        message.set_replied(message_id);
-
-        let construct = vec![
-            message.id().into_bytes().to_vec(),
-            message.conversation_id().into_bytes().to_vec(),
-            own_did.to_string().as_bytes().to_vec(),
-            message
-                .value()
-                .iter()
-                .map(|s| s.as_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        ]
-        .concat();
-
-        let signature = super::sign_serde(own_did, &construct)?;
-        message.set_signature(Some(signature));
-
-        let event = MessagingEvents::New { message };
-
-        let (one_tx, one_rx) = oneshot::channel();
-        tx.send((event.clone(), Some(one_tx)))
-            .await
-            .map_err(anyhow::Error::from)?;
-        one_rx.await.map_err(anyhow::Error::from)??;
-
-        self.publish(conversation_id, None, event, true).await
+        Ok(AttachmentEventStream(stream.boxed()))
     }
 
     pub async fn download(
