@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, StreamTrait};
 use std::sync::Arc;
 use tokio::{
@@ -41,7 +41,11 @@ impl SinkTrack for OpusSink {
         // number of late samples allowed (for RTP)
         let max_late = 480;
         let sample_rate = codec.clock_rate;
-        let channels = opus::Channels::Mono;
+        let channels = match codec.channels {
+            1 => opus::Channels::Mono,
+            2 => opus::Channels::Stereo,
+            x @ _ => bail!("invalid number of channels: {x}"),
+        };
 
         let decoder = opus::Decoder::new(sample_rate, channels)?;
         let (producer, mut consumer) = mpsc::unbounded_channel::<f32>();

@@ -170,7 +170,7 @@ fn create_source_track(
     let channels = match codec.channels {
         1 => opus::Channels::Mono,
         2 => opus::Channels::Stereo,
-        _ => bail!("invalid number of channels"),
+        x @ _ => bail!("invalid number of channels: {x}"),
     };
 
     // create the ssrc for the RTP packets. ssrc serves to uniquely identify the sender
@@ -184,10 +184,9 @@ fn create_source_track(
     let seq = Box::new(rtp::sequence::new_random_sequencer());
 
     let mut packetizer = rtp::packetizer::new_packetizer(
-        // i16 is 2 bytes
-        // frame size is number of i16 samles
+        // frame size is number of samles
         // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
-        frame_size * 2 + 12,
+        (frame_size * config.sample_format().sample_size()) + 12,
         // payload type means nothing
         // https://en.wikipedia.org/wiki/RTP_payload_formats
         // todo: use an enum for this
