@@ -245,6 +245,12 @@ impl WebRtc {
     }
 }
 
+impl Drop for WebRtc {
+    fn drop(&mut self) {
+        self.offer_handler.abort();
+    }
+}
+
 async fn handle_call_initiation(
     own_id: Arc<DID>,
     mut stream: SubscriptionStream,
@@ -682,10 +688,14 @@ impl Blink for WebRtc {
     // ------ Media controls ------
 
     async fn mute_self(&mut self) -> Result<(), Error> {
-        todo!()
+        host_media::mute_self()
+            .await
+            .map_err(|e| warp::error::Error::OtherWithContext(e.to_string()))
     }
     async fn unmute_self(&mut self) -> Result<(), Error> {
-        todo!()
+        host_media::unmute_self()
+            .await
+            .map_err(|e| warp::error::Error::OtherWithContext(e.to_string()))
     }
     async fn enable_camera(&mut self) -> Result<(), Error> {
         todo!()
