@@ -481,7 +481,7 @@ impl MessageStore {
                                             let raw_key = match keystore.get_latest(&did, &did) {
                                                 Ok(key) => key,
                                                 Err(Error::PublicKeyInvalid) => {
-                                                    let key = generate(64);
+                                                    let key = generate::<64>().into();
                                                     if let Err(e) =
                                                         keystore.insert(&did, &did, &key)
                                                     {
@@ -1513,7 +1513,7 @@ impl MessageStore {
                 );
 
                 let mut keystore = Keystore::new(conversation_id);
-                keystore.insert(did, did, warp::crypto::generate(64))?;
+                keystore.insert(did, did, warp::crypto::generate::<64>())?;
 
                 //Although we verify internally, this is just as a precaution
                 convo.verify()?;
@@ -1980,7 +1980,7 @@ impl MessageStore {
 
         self.conversation_cid.write().await.insert(convo_id, cid);
         let mut keystore = Keystore::new(conversation.id());
-        keystore.insert(own_did, own_did, warp::crypto::generate(64))?;
+        keystore.insert(own_did, own_did, warp::crypto::generate::<64>())?;
         self.set_conversation_keystore(convo_id, &keystore).await?;
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
