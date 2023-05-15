@@ -186,7 +186,7 @@ fn create_source_track(
     let sample_size_bytes = 4;
 
     let mut packetizer = rtp::packetizer::new_packetizer(
-        // frame size is number of samles
+        // frame size is number of samples
         // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
         (frame_size * sample_size_bytes) + 12,
         // payload type means nothing
