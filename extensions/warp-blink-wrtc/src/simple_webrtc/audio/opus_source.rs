@@ -182,11 +182,13 @@ fn create_source_track(
     let mut framer = OpusFramer::init(frame_size, sample_rate, channels)?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
+    // all samples are converted to f32
+    let sample_size_bytes = 4;
 
     let mut packetizer = rtp::packetizer::new_packetizer(
         // frame size is number of samles
         // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
-        (frame_size * config.sample_format().sample_size()) + 12,
+        (frame_size * sample_size_bytes) + 12,
         // payload type means nothing
         // https://en.wikipedia.org/wiki/RTP_payload_formats
         // todo: use an enum for this
