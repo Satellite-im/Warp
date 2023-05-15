@@ -1,5 +1,9 @@
 use anyhow::bail;
 use clap::Parser;
+use cpal::{
+    traits::{DeviceTrait, HostTrait},
+    SupportedStreamConfig,
+};
 use futures::StreamExt;
 
 use once_cell::sync::Lazy;
@@ -77,6 +81,10 @@ enum Cli {
     /// set the default number of audio channels (1 or 2)
     /// the specified number of channels will be used when the host initiates a call.
     SetAudioChannels { channels: u16 },
+    /// show the supported CPAL input stream configs
+    SupportedInputConfigs,
+    /// show the supported CPAL output stream configs
+    SupportedOutputConfigs,
 }
 
 async fn handle_command(
@@ -146,6 +154,19 @@ async fn handle_command(
                 .build();
             codecs.audio = audio;
         }
+        Cli::SupportedInputConfigs => {
+            let host = cpal::default_host();
+            let dev = host
+                .default_input_device()
+                .ok_or(anyhow::anyhow!("no input device"))?;
+            let mut configs = dev.supported_input_configs()?;
+            while let Some(config) = configs.next() {
+                println!("{config:#?}");
+            }
+        }
+        Cli::SupportedOutputConfigs => {
+            todo!()
+        }
     }
     Ok(())
 }
@@ -170,7 +191,7 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    logger::init_with_level(log::LevelFilter::Debug)?;
+    logger::init_with_level(log::LevelFilter::Trace)?;
     fdlimit::raise_fd_limit();
 
     let random_name: String = rand::thread_rng()

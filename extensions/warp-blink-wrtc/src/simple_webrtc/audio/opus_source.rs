@@ -25,7 +25,7 @@ macro_rules! get_input_stream {
                 &$config.into(),
                 move |data: &[$sample_t], _: &cpal::InputCallbackInfo| {
                     for sample in data {
-                        let converted = *sample as f32;
+                        let converted = f32::from(*sample);
                         if let Some(bytes) = $framer.frame(converted) {
                             if let Err(e) = $producer.send(bytes) {
                                 log::error!("SourceTrack failed to send sample: {}", e);
@@ -250,12 +250,12 @@ fn create_source_track(
         SampleFormat::I16 => get_input_stream!(i16, config, input_device, framer, producer),
         SampleFormat::U16 => get_input_stream!(u16, config, input_device, framer, producer),
         SampleFormat::I8 => get_input_stream!(i8, config, input_device, framer, producer),
-        SampleFormat::I32 => get_input_stream!(i32, config, input_device, framer, producer),
-        SampleFormat::I64 => get_input_stream!(i64, config, input_device, framer, producer),
+        SampleFormat::I32 => bail!("cannot convert from i32 to f32"), //get_input_stream!(i32, config, input_device, framer, producer),
+        SampleFormat::I64 => bail!("cannot convert from i64 to f32"), //get_input_stream!(i64, config, input_device, framer, producer),
         SampleFormat::U8 => get_input_stream!(u8, config, input_device, framer, producer),
-        SampleFormat::U32 => get_input_stream!(u32, config, input_device, framer, producer),
-        SampleFormat::U64 => get_input_stream!(u64, config, input_device, framer, producer),
-        SampleFormat::F64 => get_input_stream!(f64, config, input_device, framer, producer),
+        SampleFormat::U32 => bail!("cannot convert from u32 to f32"), //get_input_stream!(u32, config, input_device, framer, producer),
+        SampleFormat::U64 => bail!("cannot convert from u64 to f32"), //get_input_stream!(u64, config, input_device, framer, producer),
+        SampleFormat::F64 => bail!("cannot convert from f64 to f32"), //get_input_stream!(f64, config, input_device, framer, producer),
         x => bail!("invalid sample format: {x:?}"),
     };
 
