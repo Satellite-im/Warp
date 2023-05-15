@@ -499,8 +499,9 @@ impl Constellation for IpfsFileSystem {
                 let file = file.clone();
                 async move {
                     match store.get(ticket).await {
-                        Ok((_extension_type, thumbnail)) => {
+                        Ok((extension_type, thumbnail)) => {
                             file.set_thumbnail(&thumbnail);
+                            file.set_file_type(extension_type.into());
                             //We export again so the thumbnail can be apart of the index
                             if let Err(_e) = fs.export_index().await {}
                         }

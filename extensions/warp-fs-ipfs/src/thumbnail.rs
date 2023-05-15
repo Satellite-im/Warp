@@ -131,12 +131,11 @@ impl TryFrom<ThumbnailExtensionType> for MediaTypeBuf {
     }
 }
 
-impl TryFrom<ThumbnailExtensionType> for FileType {
-    type Error = Error;
-    fn try_from(ext: ThumbnailExtensionType) -> Result<Self, Self::Error> {
+impl From<ThumbnailExtensionType> for FileType {
+    fn from(ext: ThumbnailExtensionType) -> Self {
         match ext.try_into() {
-            Ok(media) => Ok(FileType::Mime(media)),
-            Err(_) => Ok(FileType::Generic),
+            Ok(media) => FileType::Mime(media),
+            Err(_) => FileType::Generic,
         }
     }
 }
