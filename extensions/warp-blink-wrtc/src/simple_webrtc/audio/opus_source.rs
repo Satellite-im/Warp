@@ -166,11 +166,15 @@ fn create_source_track(
 
     // number of samples to send in a RTP packet
     let frame_size = 120;
+    // all samples are converted to f32
+    let sample_size_bytes = 4;
+    // if clock rate represents the sampling frequency, then
+    // this variable determines the bandwidth
     let sample_rate = codec.clock_rate;
     let channels = match codec.channels {
         1 => opus::Channels::Mono,
         2 => opus::Channels::Stereo,
-        x @ _ => bail!("invalid number of channels: {x}"),
+        x => bail!("invalid number of channels: {x}"),
     };
 
     // create the ssrc for the RTP packets. ssrc serves to uniquely identify the sender
@@ -182,8 +186,6 @@ fn create_source_track(
     let mut framer = OpusFramer::init(frame_size, sample_rate, channels)?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
-    // all samples are converted to f32
-    let sample_size_bytes = 4;
 
     let mut packetizer = rtp::packetizer::new_packetizer(
         // frame size is number of samples

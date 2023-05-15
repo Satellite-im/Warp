@@ -88,7 +88,7 @@ pub async fn create_audio_source_track(
     Ok(())
 }
 
-pub async fn remove_audio_source_track(_source_id: MediaSourceId) -> anyhow::Result<()> {
+pub async fn remove_audio_source_track() -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     unsafe {
         AUDIO_SOURCE_TRACK.take();
@@ -211,14 +211,5 @@ pub async fn unmute_self() -> anyhow::Result<()> {
         }
     }
 
-    Ok(())
-}
-
-pub async fn hangup() -> anyhow::Result<()> {
-    let _lock = SINGLETON_MUTEX.lock().await;
-    unsafe {
-        AUDIO_SOURCE_TRACK.take();
-        AUDIO_SINK_TRACKS.clear();
-    }
     Ok(())
 }

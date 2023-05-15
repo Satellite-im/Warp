@@ -44,7 +44,7 @@ impl SinkTrack for OpusSink {
         let channels = match codec.channels {
             1 => opus::Channels::Mono,
             2 => opus::Channels::Stereo,
-            x @ _ => bail!("invalid number of channels: {x}"),
+            x => bail!("invalid number of channels: {x}"),
         };
 
         let decoder = opus::Decoder::new(sample_rate, channels)?;

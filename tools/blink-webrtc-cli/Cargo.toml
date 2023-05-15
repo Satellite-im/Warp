@@ -23,4 +23,5 @@ rand = "0.8.5"
 anyhow.workspace = true
 serde.workspace = true
 futures.workspace = true
+once_cell.workspace = true
 

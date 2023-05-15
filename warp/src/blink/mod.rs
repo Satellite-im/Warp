@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 use mime_types::*;
 use uuid::Uuid;
 
+mod codecs;
+pub use codecs::*;
+
 use crate::{
     crypto::DID,
     error::{self, Error},
@@ -40,7 +43,13 @@ pub trait Blink {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
-    async fn offer_call(&mut self, participants: Vec<DID>) -> Result<(), Error>;
+    async fn offer_call(
+        &mut self,
+        participants: Vec<DID>,
+        audio_codec: AudioCodec,
+        video_codec: VideoCodec,
+        screenshare_codec: VideoCodec,
+    ) -> Result<(), Error>;
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error>;
     /// notify a sender/group that you will not join a call
@@ -107,15 +116,19 @@ pub struct CallInfo {
     participants: Vec<DID>,
     // for call wide broadcasts
     group_key: Vec<u8>,
+    audio_codec: AudioCodec,
+    video_codec: VideoCodec,
 }
 
 impl CallInfo {
-    pub fn new(participants: Vec<DID>) -> Self {
+    pub fn new(participants: Vec<DID>, audio_codec: AudioCodec, video_codec: VideoCodec) -> Self {
         let group_key = Aes256Gcm::generate_key(&mut OsRng).as_slice().into();
         Self {
             id: Uuid::new_v4(),
             participants,
             group_key,
+            audio_codec,
+            video_codec,
         }
     }
 
@@ -129,6 +142,10 @@ impl CallInfo {
 
     pub fn group_key(&self) -> Vec<u8> {
         self.group_key.clone()
+    }
+
+    pub fn audio_codec(&self) -> AudioCodec {
+        self.audio_codec.clone()
     }
 }
 
@@ -147,19 +164,12 @@ impl core::ops::DerefMut for BlinkEventStream {
     }
 }
 
-/// Specifies the codec and sample rate
-#[derive(Copy, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct MediaCodec {
-    mime: MimeType,
-    clock_rate: u32,
-    /// either 1 or 2
-    channels: u8,
-}
-
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Serialize, Deserialize, Display, Copy, Clone, PartialEq, Eq)]
 /// Known WebRTC MIME types
 pub enum MimeType {
+    #[display(fmt = "Invalid")]
+    Invalid,
     // https://en.wikipedia.org/wiki/Advanced_Video_Coding
     // the most popular video compression standard
     // requires paying patent licencing royalties to MPEG LA

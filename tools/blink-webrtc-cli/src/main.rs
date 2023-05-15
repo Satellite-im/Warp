@@ -2,27 +2,50 @@ use anyhow::bail;
 use clap::Parser;
 use futures::StreamExt;
 
-
+use once_cell::sync::Lazy;
+use tokio::sync::RwLock;
 use uuid::Uuid;
-use warp::blink::{Blink, BlinkEventKind, BlinkEventStream};
+use warp::blink::{
+    AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
+    MimeType, VideoCodec,
+};
 
 use warp_blink_wrtc::WebRtc;
 
-use std::path::{Path};
+use std::path::Path;
 
 use std::str::FromStr;
 
-
 use warp::crypto::DID;
-use warp::multipass::identity::{Identity};
+use warp::multipass::identity::Identity;
 use warp::multipass::MultiPass;
-
 
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{MpIpfsConfig, UpdateEvents};
 
-
 mod logger;
+
+struct Codecs {
+    audio: AudioCodec,
+    video: VideoCodec,
+    screen_share: VideoCodec,
+}
+
+static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
+    let audio = AudioCodecBuiler::new()
+        .mime(MimeType::OPUS)
+        .sample_rate(AudioSampleRate::Medium)
+        .channels(1)
+        .build();
+
+    let video = VideoCodec::default();
+    let screen_share = VideoCodec::default();
+    RwLock::new(Codecs {
+        audio,
+        video,
+        screen_share,
+    })
+});
 
 /// test warp-blink-webrtc via command line
 #[derive(Parser, Debug, Eq, PartialEq)]
@@ -47,6 +70,12 @@ enum Cli {
     ConnectMicrophone { device_name: String },
     /// specify which speaker to use for output
     ConnectSpeaker { device_name: String },
+    /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
+    /// the specified sample rate will be used when the host initiates a call.
+    SetAudioRate { rate: String },
+    /// set the default number of audio channels (1 or 2)
+    /// the specified number of channels will be used when the host initiates a call.
+    SetAudioChannels { channels: u16 },
 }
 
 async fn handle_command(
@@ -60,7 +89,15 @@ async fn handle_command(
         }
         Cli::Dial { id } => {
             let did = DID::from_str(&id)?;
-            blink.offer_call(vec![did]).await?;
+            let codecs = CODECS.read().await;
+            blink
+                .offer_call(
+                    vec![did],
+                    codecs.audio.clone(),
+                    codecs.video.clone(),
+                    codecs.screen_share.clone(),
+                )
+                .await?;
         }
         Cli::Answer { id } => {
             let call_id = Uuid::from_str(&id)?;
@@ -90,6 +127,23 @@ async fn handle_command(
         }
         Cli::ConnectSpeaker { device_name } => {
             blink.select_speaker(&device_name).await?;
+        }
+        Cli::SetAudioRate { rate } => {
+            let mut codecs = CODECS.write().await;
+            let audio = AudioCodecBuiler::from(codecs.audio.clone())
+                .sample_rate(rate.try_into()?)
+                .build();
+            codecs.audio = audio;
+        }
+        Cli::SetAudioChannels { channels } => {
+            if !(1..=2).contains(&channels) {
+                bail!("invalid number of channels");
+            }
+            let mut codecs = CODECS.write().await;
+            let audio = AudioCodecBuiler::from(codecs.audio.clone())
+                .channels(channels)
+                .build();
+            codecs.audio = audio;
         }
     }
     Ok(())
