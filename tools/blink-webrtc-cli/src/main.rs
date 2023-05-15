@@ -1,26 +1,26 @@
 use anyhow::bail;
 use clap::Parser;
 use futures::StreamExt;
-use rand::distributions::Alphanumeric;
-use rand::Rng;
+
+
 use uuid::Uuid;
 use warp::blink::{Blink, BlinkEventKind, BlinkEventStream};
-use warp::logging::tracing::log::Level;
+
 use warp_blink_wrtc::WebRtc;
 
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 
 use std::str::FromStr;
-use std::time::Duration;
+
 
 use warp::crypto::DID;
-use warp::multipass::identity::{Identifier, Identity, IdentityStatus, IdentityUpdate};
+use warp::multipass::identity::{Identity};
 use warp::multipass::MultiPass;
-use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, RwLock};
+
+
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::{Discovery, MpIpfsConfig, UpdateEvents};
-use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
+use warp_mp_ipfs::config::{MpIpfsConfig, UpdateEvents};
+
 
 mod logger;
 
@@ -102,7 +102,7 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
             BlinkEventKind::IncomingCall {
                 call_id,
                 sender,
-                participants,
+                participants: _,
             } => {
                 println!("incoming call. id is: {call_id}. sender is: {sender}");
             }
@@ -118,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     logger::init_with_level(log::LevelFilter::Debug)?;
     fdlimit::raise_fd_limit();
 
-    let warp_dir = format!("/tmp/blink-test");
+    let warp_dir = "/tmp/blink-test".to_string();
     std::fs::create_dir_all(&warp_dir)?;
     let path = Path::new(&warp_dir);
     let tesseract_dir = path.join("tesseract.json");

@@ -48,7 +48,7 @@ use tokio::{
 use uuid::Uuid;
 use warp::{
     blink::{Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
-    crypto::{digest::KeyInit, Fingerprint, KeyMaterial, DID},
+    crypto::{Fingerprint, DID},
     error::Error,
     multipass::MultiPass,
 };
@@ -386,31 +386,29 @@ async fn handle_webrtc(
                                 data.webrtc.hang_up(&sender).await;
                                 // todo: is a disconnect signal needed here? perhaps a retry
                                 todo!()
-                            } else {
-                                if !host_media::has_audio_source().await {
-                                    // todo: specify a default codec
-                                    let codec = RTCRtpCodecCapability {
-                                        mime_type: MimeType::OPUS.to_string(),
-                                        clock_rate: 48000,
-                                        channels: opus::Channels::Mono as u16,
-                                        ..Default::default()
+                            } else if !host_media::has_audio_source().await {
+                                // todo: specify a default codec
+                                let codec = RTCRtpCodecCapability {
+                                    mime_type: MimeType::OPUS.to_string(),
+                                    clock_rate: 48000,
+                                    channels: opus::Channels::Mono as u16,
+                                    ..Default::default()
+                                };
+                                let track = match data
+                                    .webrtc
+                                    .add_media_source(host_media::AUDIO_SOURCE_ID.into(), codec.clone())
+                                    .await {
+                                        Ok(r) => r,
+                                        Err(e) => {
+                                            log::error!("failed to add media source: {e}");
+                                            continue;
+                                        }
                                     };
-                                    let track = match data
-                                        .webrtc
-                                        .add_media_source(host_media::AUDIO_SOURCE_ID.into(), codec.clone())
-                                        .await {
-                                            Ok(r) => r,
-                                            Err(e) => {
-                                                log::error!("failed to add media source: {e}");
-                                                continue;
-                                            }
-                                        };
-                                    if let Err(e) = host_media::create_audio_source_track(track, codec).await {
-                                        log::error!("failed to create audio source track: {e}");
-                                        data.webrtc.hang_up(&sender).await;
-                                        // todo: how to leave the call...may need to send a signal
-                                        todo!()
-                                    }
+                                if let Err(e) = host_media::create_audio_source_track(track, codec).await {
+                                    log::error!("failed to create audio source track: {e}");
+                                    data.webrtc.hang_up(&sender).await;
+                                    // todo: how to leave the call...may need to send a signal
+                                    todo!()
                                 }
                             }
                         }

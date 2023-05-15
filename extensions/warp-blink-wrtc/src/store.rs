@@ -4,12 +4,18 @@ use ipfs::{libp2p, Ipfs};
 use rust_ipfs as ipfs;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use warp::crypto::did_key::{Generate, ECDH};
-use warp::crypto::zeroize::Zeroizing;
-use warp::crypto::{DIDKey, KeyMaterial};
-use warp::error::Error;
+
 type Result<T> = std::result::Result<T, Error>;
-use warp::crypto::{cipher::Cipher, Ed25519KeyPair, DID};
+
+use warp::{
+    crypto::{
+        cipher::Cipher,
+        did_key::{Generate, ECDH},
+        zeroize::Zeroizing,
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+    },
+    error::Error,
+};
 
 pub trait PeerIdExt {
     fn to_did(&self) -> std::result::Result<DID, anyhow::Error>;
@@ -99,9 +105,11 @@ fn ecdh_decrypt<K: AsRef<[u8]>>(own_did: &DID, sender: &DID, data: K) -> Result<
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<rust_ipfs::libp2p::identity::PublicKey> {
-    let pub_key =
-        rust_ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?;
-    Ok(rust_ipfs::libp2p::identity::PublicKey::Ed25519(pub_key))
+    let kp = rust_ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(
+        &public_key.public_key_bytes(),
+    )
+    .map_err(anyhow::Error::from)?;
+    rust_ipfs::libp2p::identity::PublicKey::try_from(kp).map_err(anyhow::Error::from)
 }
 
 fn libp2p_pub_to_did(public_key: &rust_ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {

@@ -38,11 +38,11 @@ macro_rules! get_input_stream {
             )
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "failed to build input stream: {e}, {}, {}",
-                    file!(),
-                    line!()
+                    "failed to build input stream for type_name: {} | file: {} | error: {e}",
+                    std::any::type_name::<$sample_t>(),
+                    file!()
                 )
-            })?;
+            })?
     };
 }
 
@@ -200,7 +200,7 @@ fn create_source_track(
     );
 
     // todo: when the input device changes, this needs to change too.
-    let track2 = track.clone();
+    let track2 = track;
     let join_handle = tokio::spawn(async move {
         while let Some(bytes) = consumer.recv().await {
             // todo: figure out how many samples were actually created
@@ -253,7 +253,7 @@ fn create_source_track(
         SampleFormat::U32 => get_input_stream!(u32, config, input_device, framer, producer),
         SampleFormat::U64 => get_input_stream!(u64, config, input_device, framer, producer),
         SampleFormat::F64 => get_input_stream!(f64, config, input_device, framer, producer),
-        x @ _ => bail!("invalid sample format: {x:?}"),
+        x => bail!("invalid sample format: {x:?}"),
     };
 
     Ok((input_stream, join_handle))
