@@ -136,7 +136,7 @@ impl VideoCodecBuilder {
 
 impl Default for VideoCodec {
     fn default() -> Self {
-        todo!()
+        Self {}
     }
 }
 
