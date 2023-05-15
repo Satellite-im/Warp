@@ -250,6 +250,14 @@ impl File {
     pub fn set_hash(&self, hash: Hash) {
         *self.hash.write() = hash;
     }
+
+    pub fn set_file_type(&self, file_type: FileType) {
+        *self.file_type.write() = file_type;
+    }
+
+    pub fn file_type(&self) -> FileType {
+        self.file_type.read().clone()
+    }
 }
 
 impl File {
