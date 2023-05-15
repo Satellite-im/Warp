@@ -382,15 +382,14 @@ async fn handle_webrtc(
                         }
                     }
                     PeerSignal::Dial(sdp) => {
-                        // if sender is part of ongoing call, start the call
-                        let audio_codec = ac.call.audio_codec();
-                        let codec = RTCRtpCodecCapability {
-                            mime_type: audio_codec.mime_type(),
-                            clock_rate: audio_codec.sample_rate(),
-                            channels: audio_codec.channels(),
-                            ..Default::default()
-                        };
                         if !host_media::has_audio_source().await {
+                            let audio_codec = ac.call.audio_codec();
+                            let codec = RTCRtpCodecCapability {
+                                mime_type: audio_codec.mime_type(),
+                                clock_rate: audio_codec.sample_rate(),
+                                channels: audio_codec.channels(),
+                                ..Default::default()
+                            };
                             let track = match data
                                 .webrtc
                                 .add_media_source(host_media::AUDIO_SOURCE_ID.into(), codec.clone())

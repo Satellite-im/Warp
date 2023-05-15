@@ -3,6 +3,7 @@ use clap::Parser;
 use futures::StreamExt;
 
 use once_cell::sync::Lazy;
+use rand::{distributions::Alphanumeric, Rng};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use warp::blink::{
@@ -172,7 +173,13 @@ async fn main() -> anyhow::Result<()> {
     logger::init_with_level(log::LevelFilter::Debug)?;
     fdlimit::raise_fd_limit();
 
-    let warp_dir = "/tmp/blink-test".to_string();
+    let random_name: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(7)
+        .map(char::from)
+        .collect();
+
+    let warp_dir = format!("/tmp/{random_name}");
     std::fs::create_dir_all(&warp_dir)?;
     let path = Path::new(&warp_dir);
     let tesseract_dir = path.join("tesseract.json");
@@ -195,9 +202,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map(|mp| Box::new(mp) as Box<dyn MultiPass>)?;
 
-    multipass
-        .create_identity(Some("warp-username"), None)
-        .await?;
+    multipass.create_identity(Some(&random_name), None).await?;
     let own_identity = loop {
         match multipass.get_own_identity().await {
             Ok(ident) => break ident,
