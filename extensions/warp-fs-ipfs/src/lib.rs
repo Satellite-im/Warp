@@ -401,9 +401,11 @@ impl Constellation for IpfsFileSystem {
 
         let ticket = self.thumbnail_store.insert(&path, width, height).await?;
 
-        // Placeholder to fnish thumbnail generation in the background
-        // Will be false for now
-        let background = false;
+        let background = self
+            .config
+            .as_ref()
+            .map(|f| f.thumbnail_task)
+            .unwrap_or_default();
 
         let name = name.to_string();
         let fs: IpfsFileSystem = self.clone();
