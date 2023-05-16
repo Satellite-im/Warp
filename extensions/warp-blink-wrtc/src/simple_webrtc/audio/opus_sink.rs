@@ -129,9 +129,9 @@ async fn decode_media_stream<T>(
 where
     T: Depacketizer,
 {
-    let mut decoder_output_buf = [0_f32; 4096];
+    let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
-    let mut b = [0u8; 4096];
+    let mut b = [0u8; 2880 * 4];
     loop {
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {

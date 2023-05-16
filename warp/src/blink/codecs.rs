@@ -30,8 +30,8 @@ impl AudioSampleRate {
     // keeps the timeframe (over which samples are encoded) relatively equal for different sample rates
     pub fn frame_size(&self) -> usize {
         match self {
-            AudioSampleRate::Low => 2880,
-            AudioSampleRate::Medium => 1920,
+            AudioSampleRate::Low => 240,
+            AudioSampleRate::Medium => 480,
             AudioSampleRate::High => 960,
         }
     }
