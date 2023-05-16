@@ -56,6 +56,9 @@ impl From<&str> for ExtensionType {
             "webm" => Self::WEBM,
             "mkv" => Self::MKV,
             "pdf" => Self::PDF,
+            "txt" => Self::TXT,
+            "docx" => Self::DOCX,
+            "doc" => Self::DOC,
             _ => Self::Other,
         }
     }
