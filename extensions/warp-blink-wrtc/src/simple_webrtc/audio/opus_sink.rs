@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
-    SampleFormat,
+    SampleFormat, SampleRate, SupportedStreamConfig,
 };
 use std::sync::Arc;
 use tokio::{
@@ -16,43 +16,6 @@ use webrtc::{
 };
 
 use super::SinkTrack;
-
-macro_rules! get_output_stream {
-    ($sample_t:ty, $config:ident, $output_device:ident, $consumer:ident) => {
-        $output_device
-            .build_output_stream(
-                &$config.into(),
-                move |data: &mut [$sample_t], _: &cpal::OutputCallbackInfo| {
-                    let mut output_fell_behind = false;
-                    for sample in data {
-                        *sample = match $consumer.try_recv() {
-                            Ok(s) => s as $sample_t,
-                            Err(TryRecvError::Empty) => {
-                                output_fell_behind = true;
-                                0 as $sample_t
-                            }
-                            Err(e) => {
-                                log::error!("channel closed: {}", e);
-                                0 as $sample_t
-                            }
-                        }
-                    }
-                    if output_fell_behind {
-                        log::trace!("output stream fell behind: try increasing latency");
-                    }
-                },
-                err_fn,
-                None,
-            )
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "failed to build input stream for type_name: {} | file: {} | error: {e}",
-                    std::any::type_name::<$sample_t>(),
-                    file!()
-                )
-            })?
-    };
-}
 
 pub struct OpusSink {
     // save this for changing the output device
@@ -78,9 +41,12 @@ impl SinkTrack for OpusSink {
         track: Arc<TrackRemote>,
         codec: RTCRtpCodecCapability,
     ) -> Result<Self> {
-        let config = output_device.default_input_config().map_err(|e| {
-            anyhow::anyhow!("failed to get output config: {e}, {}, {}", file!(), line!())
-        })?;
+        let config = SupportedStreamConfig::new(
+            codec.channels,
+            SampleRate(codec.clock_rate),
+            cpal::SupportedBufferSize::Range { min: 1, max: 4096 },
+            SampleFormat::F32,
+        );
 
         // number of late samples allowed (for RTP)
         let max_late = 480;
@@ -103,7 +69,7 @@ impl SinkTrack for OpusSink {
             log::debug!("stopping decode_media_stream thread");
         });
 
-        /*let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+        let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut input_fell_behind = false;
             for sample in data {
                 *sample = match consumer.try_recv() {
@@ -121,22 +87,9 @@ impl SinkTrack for OpusSink {
             if input_fell_behind {
                 log::trace!("input stream fell behind: try increasing latency");
             }
-        };*/
-        let output_stream: cpal::Stream = match config.sample_format() {
-            SampleFormat::F32 => get_output_stream!(f32, config, output_device, consumer),
-            SampleFormat::I16 => get_output_stream!(i16, config, output_device, consumer),
-            SampleFormat::U16 => get_output_stream!(u16, config, output_device, consumer),
-            SampleFormat::I8 => get_output_stream!(i8, config, output_device, consumer),
-            SampleFormat::I32 => get_output_stream!(i32, config, output_device, consumer),
-            SampleFormat::I64 => get_output_stream!(i64, config, output_device, consumer),
-            SampleFormat::U8 => get_output_stream!(u8, config, output_device, consumer),
-            SampleFormat::U32 => get_output_stream!(u32, config, output_device, consumer),
-            SampleFormat::U64 => get_output_stream!(u64, config, output_device, consumer),
-            SampleFormat::F64 => get_output_stream!(f64, config, output_device, consumer),
-            x => bail!("invalid sample format: {x:?}"),
         };
-        // let output_stream =
-        //    output_device.build_output_stream(&config.into(), output_data_fn, err_fn, None)?;
+        let output_stream =
+            output_device.build_output_stream(&config.into(), output_data_fn, err_fn, None)?;
 
         Ok(Self {
             stream: output_stream,
