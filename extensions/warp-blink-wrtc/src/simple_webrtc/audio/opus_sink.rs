@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
-    SampleFormat, SampleRate, SupportedStreamConfig,
+    SampleRate,
 };
 use std::sync::Arc;
 use tokio::{
@@ -41,15 +41,11 @@ impl SinkTrack for OpusSink {
         track: Arc<TrackRemote>,
         codec: RTCRtpCodecCapability,
     ) -> Result<Self> {
-        let config = SupportedStreamConfig::new(
-            codec.channels,
-            SampleRate(codec.clock_rate),
-            cpal::SupportedBufferSize::Range {
-                min: 4,
-                max: 1024 * 100,
-            },
-            SampleFormat::F32,
-        );
+        let config = cpal::StreamConfig {
+            channels: codec.channels,
+            sample_rate: SampleRate(codec.clock_rate),
+            buffer_size: cpal::BufferSize::Fixed(4096),
+        };
 
         // number of late samples allowed (for RTP)
         let max_late = 512;

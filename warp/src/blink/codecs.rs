@@ -22,8 +22,17 @@ impl AudioSampleRate {
     pub fn to_u32(&self) -> u32 {
         match self {
             AudioSampleRate::Low => 8000,
-            AudioSampleRate::Medium => 44100,
-            AudioSampleRate::High => 96000,
+            AudioSampleRate::Medium => 24000,
+            AudioSampleRate::High => 48000,
+        }
+    }
+
+    // keeps the timeframe (over which samples are encoded) relatively equal for different sample rates
+    pub fn frame_size(&self) -> usize {
+        match self {
+            AudioSampleRate::Low => 2880,
+            AudioSampleRate::Medium => 1920,
+            AudioSampleRate::High => 960,
         }
     }
 }
@@ -89,11 +98,12 @@ impl AudioCodec {
     pub fn mime_type(&self) -> String {
         self.mime.to_string()
     }
-
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate.to_u32()
     }
-
+    pub fn frame_size(&self) -> usize {
+        self.sample_rate.frame_size()
+    }
     pub fn channels(&self) -> u16 {
         self.channels
     }

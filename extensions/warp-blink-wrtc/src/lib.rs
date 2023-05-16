@@ -400,7 +400,7 @@ async fn handle_webrtc(
                                         continue;
                                     }
                                 };
-                            if let Err(e) = host_media::create_audio_source_track(track, codec).await {
+                            if let Err(e) = host_media::create_audio_source_track(track, audio_codec).await {
                                 log::error!("failed to create audio source track: {e}");
                                 data.webrtc.hang_up(&sender).await;
                                 // todo: how to leave the call...may need to send a signal
@@ -544,7 +544,7 @@ impl Blink for WebRtc {
         self.leave_call_internal(&mut data).await?;
 
         // ensure there is an audio source track
-        let audio_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
+        let _audio_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
             mime_type: audio_codec.mime_type(),
             clock_rate: audio_codec.sample_rate(),
             channels: audio_codec.channels(),
@@ -552,7 +552,7 @@ impl Blink for WebRtc {
         };
         let track = data
             .webrtc
-            .add_media_source(host_media::AUDIO_SOURCE_ID.into(), audio_codec.clone())
+            .add_media_source(host_media::AUDIO_SOURCE_ID.into(), _audio_codec.clone())
             .await?;
         host_media::create_audio_source_track(track, audio_codec).await?;
 

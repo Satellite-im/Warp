@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::Arc;
-use warp::blink::MimeType;
+use warp::blink::{self, MimeType};
 use webrtc::{
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
     track::{track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote},
@@ -17,7 +17,7 @@ pub trait SourceTrack {
     fn init(
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
-        codec: RTCRtpCodecCapability,
+        codec: blink::AudioCodec,
     ) -> Result<Self>
     where
         Self: Sized;
@@ -46,12 +46,12 @@ pub trait SinkTrack {
 pub fn create_source_track(
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
-    codec: RTCRtpCodecCapability,
+    codec: blink::AudioCodec,
 ) -> Result<Box<dyn SourceTrack>> {
-    match MimeType::try_from(codec.mime_type.as_str())? {
+    match MimeType::try_from(codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSource::init(input_device, track, codec)?)),
         _ => {
-            bail!("unhandled mime type: {}", &codec.mime_type);
+            bail!("unhandled mime type: {}", &codec.mime_type());
         }
     }
 }

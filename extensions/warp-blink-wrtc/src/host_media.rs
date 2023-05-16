@@ -8,6 +8,7 @@ use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use tokio::sync::{Mutex, RwLock};
+use warp::blink;
 use warp::crypto::DID;
 use webrtc::track::track_remote::TrackRemote;
 use webrtc::{
@@ -64,7 +65,7 @@ pub async fn has_audio_source() -> bool {
 // use AUDIO_SOURCE_ID
 pub async fn create_audio_source_track(
     track: Arc<TrackLocalStaticRTP>,
-    codec: RTCRtpCodecCapability,
+    codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     let audio_input = AUDIO_INPUT_DEVICE.read().await;

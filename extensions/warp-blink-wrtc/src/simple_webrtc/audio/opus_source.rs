@@ -2,16 +2,16 @@ use anyhow::{bail, Result};
 use bytes::Bytes;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
-    SampleFormat, SampleRate, SupportedStreamConfig,
+    SampleRate,
 };
 
 use rand::Rng;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinHandle};
+use warp::blink;
 
 use webrtc::{
     rtp::{self, packetizer::Packetizer},
-    rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
     track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
@@ -20,7 +20,7 @@ use super::SourceTrack;
 pub struct OpusSource {
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     track: Arc<TrackLocalStaticRTP>,
-    codec: RTCRtpCodecCapability,
+    codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     // used to cancel the current packetizer when the input device is changed.
@@ -31,7 +31,7 @@ impl SourceTrack for OpusSource {
     fn init(
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
-        codec: RTCRtpCodecCapability,
+        codec: blink::AudioCodec,
     ) -> Result<Self>
     where
         Self: Sized,
@@ -87,8 +87,11 @@ impl OpusFramer {
         let mut buf = Vec::new();
         buf.reserve(frame_size);
         let mut opus_out = Vec::new();
-        opus_out.resize(frame_size, 0);
-        let encoder = opus::Encoder::new(sample_rate, channels, opus::Application::Voip)?;
+        opus_out.resize(frame_size * 4, 0);
+        let encoder =
+            opus::Encoder::new(sample_rate, channels, opus::Application::Voip).map_err(|e| {
+                anyhow::anyhow!("{e}: sample_rate: {sample_rate}, channels: {channels:?}")
+            })?;
 
         Ok(Self {
             encoder,
@@ -128,28 +131,22 @@ fn err_fn(err: cpal::StreamError) {
 
 fn create_source_track(
     track: Arc<TrackLocalStaticRTP>,
-    codec: RTCRtpCodecCapability,
+    codec: blink::AudioCodec,
     input_device: &cpal::Device,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
-    let config = SupportedStreamConfig::new(
-        codec.channels,
-        SampleRate(codec.clock_rate),
-        cpal::SupportedBufferSize::Range {
-            min: 4,
-            max: 1024 * 100,
-        },
-        SampleFormat::F32,
-    );
-
-    // make a frame size last for 20ms
-    let samples_per_frame = (codec.clock_rate / 50) as usize;
+    let config = cpal::StreamConfig {
+        channels: codec.channels(),
+        sample_rate: SampleRate(codec.sample_rate()),
+        buffer_size: cpal::BufferSize::Fixed(2880 * 8),
+    };
 
     // all samples are converted to f32
     let sample_size_bytes = 4;
+
     // if clock rate represents the sampling frequency, then
     // this variable determines the bandwidth
-    let sample_rate = codec.clock_rate;
-    let channels = match codec.channels {
+    let sample_rate = codec.sample_rate();
+    let channels = match codec.channels() {
         1 => opus::Channels::Mono,
         2 => opus::Channels::Stereo,
         x => bail!("invalid number of channels: {x}"),
@@ -161,14 +158,14 @@ fn create_source_track(
 
     let (producer, mut consumer) = mpsc::unbounded_channel::<Bytes>();
 
-    let mut framer = OpusFramer::init(samples_per_frame, sample_rate, channels)?;
+    let mut framer = OpusFramer::init(codec.frame_size(), sample_rate, channels)?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
 
     let mut packetizer = rtp::packetizer::new_packetizer(
         // frame size is number of samples
         // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
-        (512) + 12,
+        (1024) + 12,
         // payload type means nothing
         // https://en.wikipedia.org/wiki/RTP_payload_formats
         // todo: use an enum for this
@@ -221,4 +218,60 @@ fn create_source_track(
         })?;
 
     Ok((input_stream, join_handle))
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn opus_encoder1() {
+        let r = opus::Encoder::new(441000, opus::Channels::Mono, opus::Application::Voip);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn opus_encoder2() {
+        let r = opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn opus_encoder3() {
+        let r = opus::Encoder::new(24000, opus::Channels::Mono, opus::Application::Voip);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn opus_encoder4() {
+        let r = opus::Encoder::new(8000, opus::Channels::Mono, opus::Application::Voip);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn opus_packetizer1() {
+        // from the libopus encode_float ffi documentation:
+        //    Number of samples per channel in the"]
+        //    input signal."]
+        //    This must be an Opus frame size for"]
+        //    the encoder's sampling rate."]
+        //    For example, at 48 kHz the permitted"]
+        //    values are 120, 240, 480, 960, 1920,"]
+        //    and 2880."]
+        //    Passing in a duration of less than"]
+        //    10 ms (480 samples at 48 kHz) will"]
+        //    prevent the encoder from using the LPC"]
+        //    or hybrid modes."]
+
+        let mut encoder =
+            opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let buff_size = 960;
+        let mut buf1: Vec<f32> = Vec::new();
+        buf1.resize(buff_size, 0_f32);
+
+        let mut buf2: Vec<u8> = Vec::new();
+        buf2.resize(buff_size * 4, 0);
+
+        encoder
+            .encode_float(buf1.as_slice(), buf2.as_mut_slice())
+            .unwrap();
+    }
 }
