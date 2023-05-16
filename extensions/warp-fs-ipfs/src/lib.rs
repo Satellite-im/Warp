@@ -1,5 +1,6 @@
 pub mod config;
 pub mod thumbnail;
+pub(crate) mod utils;
 
 use config::FsIpfsConfig;
 use futures::stream::{self, BoxStream};
@@ -15,6 +16,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use thumbnail::ThumbnailGenerator;
 use tokio_util::io::ReaderStream;
+use utils::ExtensionType;
+use warp::constellation::file::FileType;
 use warp::constellation::{
     ConstellationDataType, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
     ConstellationProgressStream, Progression,
@@ -478,7 +481,7 @@ impl Constellation for IpfsFileSystem {
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
-
+            file.set_file_type(to_file_type(&name));
 
             if let Ok(Err(_e)) = tokio::task::spawn_blocking({
                 let f = file.clone();
@@ -494,8 +497,6 @@ impl Constellation for IpfsFileSystem {
                 return;
             }
 
-            if let Err(_e) = fs.export_index().await {}
-
             let task = {
                 let fs = fs.clone();
                 let store = fs.thumbnail_store.clone();
@@ -506,7 +507,9 @@ impl Constellation for IpfsFileSystem {
                             file.set_thumbnail(&thumbnail);
                             file.set_file_type(extension_type.into());
                             //We export again so the thumbnail can be apart of the index
-                            if let Err(_e) = fs.export_index().await {}
+                            if background {
+                                if let Err(_e) = fs.export_index().await {}
+                            }
                         }
                         Err(_e) => {}
                     }
@@ -515,6 +518,7 @@ impl Constellation for IpfsFileSystem {
 
             if !background {
                 task.await;
+                if let Err(_e) = fs.export_index().await {}
             } else {
                 tokio::spawn(task);
             }
@@ -638,6 +642,7 @@ impl Constellation for IpfsFileSystem {
         let file = warp::constellation::file::File::new(name);
         file.set_size(total_written);
         file.set_reference(&format!("{ipfs_path}"));
+        file.set_file_type(to_file_type(name));
         file.hash_mut().hash_from_slice(buffer)?;
 
         match self.thumbnail_store.get(ticket).await {
@@ -809,6 +814,7 @@ impl Constellation for IpfsFileSystem {
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
+            file.set_file_type(to_file_type(&name));
             // file.hash_mut().hash_from_slice(buffer)?;
             if let Err(e) = current_directory.add_item(file) {
                 yield Progression::ProgressFailed {
@@ -1133,4 +1139,15 @@ fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> R
     let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
 
     Ok(data)
+}
+
+pub(crate) fn to_file_type(name: &str) -> FileType {
+    let name = PathBuf::from(name.trim());
+    let extension = name
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(ExtensionType::from)
+        .unwrap_or(ExtensionType::Other);
+
+    extension.into()
 }
