@@ -134,12 +134,16 @@ fn create_source_track(
     let config = SupportedStreamConfig::new(
         codec.channels,
         SampleRate(codec.clock_rate),
-        cpal::SupportedBufferSize::Range { min: 1, max: 4096 },
+        cpal::SupportedBufferSize::Range {
+            min: 4,
+            max: 1024 * 100,
+        },
         SampleFormat::F32,
     );
 
-    // number of samples to send in a RTP packet
-    let frame_size = 120;
+    // make a frame size last for 20ms
+    let samples_per_frame = (codec.clock_rate / 50) as usize;
+
     // all samples are converted to f32
     let sample_size_bytes = 4;
     // if clock rate represents the sampling frequency, then
@@ -157,14 +161,14 @@ fn create_source_track(
 
     let (producer, mut consumer) = mpsc::unbounded_channel::<Bytes>();
 
-    let mut framer = OpusFramer::init(frame_size, sample_rate, channels)?;
+    let mut framer = OpusFramer::init(samples_per_frame, sample_rate, channels)?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
 
     let mut packetizer = rtp::packetizer::new_packetizer(
         // frame size is number of samples
         // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
-        (frame_size * sample_size_bytes) + 12,
+        (512) + 12,
         // payload type means nothing
         // https://en.wikipedia.org/wiki/RTP_payload_formats
         // todo: use an enum for this
@@ -180,8 +184,8 @@ fn create_source_track(
     let track2 = track;
     let join_handle = tokio::spawn(async move {
         while let Some(bytes) = consumer.recv().await {
-            // todo: figure out how many samples were actually created
-            match packetizer.packetize(&bytes, frame_size as u32).await {
+            let num_samples = bytes.len() / sample_size_bytes;
+            match packetizer.packetize(&bytes, num_samples as u32).await {
                 Ok(packets) => {
                     for packet in &packets {
                         if let Err(e) = track2.write_rtp(packet).await {

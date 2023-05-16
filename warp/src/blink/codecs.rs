@@ -22,7 +22,7 @@ impl AudioSampleRate {
     pub fn to_u32(&self) -> u32 {
         match self {
             AudioSampleRate::Low => 8000,
-            AudioSampleRate::Medium => 48000,
+            AudioSampleRate::Medium => 44100,
             AudioSampleRate::High => 96000,
         }
     }

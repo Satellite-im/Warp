@@ -85,6 +85,10 @@ enum Cli {
     SupportedInputConfigs,
     /// show the supported CPAL output stream configs
     SupportedOutputConfigs,
+    /// show the default input config
+    DefaultInputConfig,
+    /// show the default output config
+    DefaultOutputConfig,
 }
 
 async fn handle_command(
@@ -165,7 +169,30 @@ async fn handle_command(
             }
         }
         Cli::SupportedOutputConfigs => {
-            todo!()
+            let host = cpal::default_host();
+            let dev = host
+                .default_output_device()
+                .ok_or(anyhow::anyhow!("no input device"))?;
+            let mut configs = dev.supported_output_configs()?;
+            while let Some(config) = configs.next() {
+                println!("{config:#?}");
+            }
+        }
+        Cli::DefaultInputConfig => {
+            let host = cpal::default_host();
+            let dev = host
+                .default_input_device()
+                .ok_or(anyhow::anyhow!("no input device"))?;
+            let config = dev.default_input_config()?;
+            println!("{config:#?}");
+        }
+        Cli::DefaultOutputConfig => {
+            let host = cpal::default_host();
+            let dev = host
+                .default_output_device()
+                .ok_or(anyhow::anyhow!("no input device"))?;
+            let config = dev.default_output_config()?;
+            println!("{config:#?}");
         }
     }
     Ok(())

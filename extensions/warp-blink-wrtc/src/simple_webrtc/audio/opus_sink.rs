@@ -44,12 +44,15 @@ impl SinkTrack for OpusSink {
         let config = SupportedStreamConfig::new(
             codec.channels,
             SampleRate(codec.clock_rate),
-            cpal::SupportedBufferSize::Range { min: 1, max: 4096 },
+            cpal::SupportedBufferSize::Range {
+                min: 4,
+                max: 1024 * 100,
+            },
             SampleFormat::F32,
         );
 
         // number of late samples allowed (for RTP)
-        let max_late = 480;
+        let max_late = 512;
         let sample_rate = codec.clock_rate;
         let channels = match codec.channels {
             1 => opus::Channels::Mono,
