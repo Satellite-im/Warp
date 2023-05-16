@@ -172,6 +172,7 @@ async fn main() -> anyhow::Result<()> {
                         "Description",
                         "Creation",
                         "Modified",
+                        "Thumbnail",
                         "Reference",
                     ]);
                     table.add_row(vec![
@@ -181,6 +182,7 @@ async fn main() -> anyhow::Result<()> {
                         file.description(),
                         file.creation().date_naive().to_string(),
                         file.modified().date_naive().to_string(),
+                        (!file.thumbnail().is_empty()).to_string(),
                         file.reference().unwrap_or_else(|| String::from("N/A")),
                     ]);
 
@@ -201,6 +203,8 @@ async fn main() -> anyhow::Result<()> {
                 "Description",
                 "Creation",
                 "Modified",
+                "Thumbnail",
+                "File Type",
                 "Reference",
             ]);
             for item in list.iter() {
@@ -212,6 +216,13 @@ async fn main() -> anyhow::Result<()> {
                     item.description(),
                     item.creation().date_naive().to_string(),
                     item.modified().date_naive().to_string(),
+                    (!item.thumbnail().is_empty()).to_string(),
+                    if item.is_file() {
+                        let ty = item.get_file()?.file_type();
+                        ty.to_string()
+                    } else {
+                        String::new()
+                    },
                     if item.is_file() {
                         item.get_file()?
                             .reference()

@@ -1,4 +1,5 @@
 #![allow(clippy::result_large_err)]
+use mediatype;
 use crate::error::Error;
 use crate::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
@@ -11,25 +12,21 @@ use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+
 /// `FileType` describes all supported file types.
 /// This will be useful for applying icons to the tree later on
 /// if we don't have a supported file type, we can just default to generic.
 ///
 /// TODO: Use mime to define the filetype
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
 #[serde(rename_all = "lowercase")]
-#[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FileType {
     #[display(fmt = "generic")]
     #[default]
     Generic,
-    #[display(fmt = "image/png")]
-    ImagePng,
-    #[display(fmt = "archive")]
-    Archive,
-    #[display(fmt = "other")]
-    Other,
+    #[display(fmt = "{}", _0)]
+    Mime(mediatype::MediaTypeBuf)
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
@@ -48,7 +45,7 @@ pub struct File {
     /// Thumbnail of the `File`
     /// Note: This should be set if the file is an image, unless
     ///       one plans to add a generic thumbnail for the file
-    thumbnail: Arc<RwLock<String>>,
+    thumbnail: Arc<RwLock<Vec<u8>>>,
 
     /// Favorite File
     favorite: Arc<RwLock<bool>>,
@@ -170,14 +167,14 @@ impl File {
 
     /// Set the thumbnail to the file
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_thumbnail(&self, data: &str) {
-        *self.thumbnail.write() = data.to_string();
+    pub fn set_thumbnail(&self, data: &[u8]) {
+        *self.thumbnail.write() = data.to_vec();
         *self.modified.write() = Utc::now()
     }
 
     /// Get the thumbnail from the file
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn thumbnail(&self) -> String {
+    pub fn thumbnail(&self) -> Vec<u8> {
         self.thumbnail.read().clone()
     }
 
@@ -252,6 +249,14 @@ impl File {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_hash(&self, hash: Hash) {
         *self.hash.write() = hash;
+    }
+
+    pub fn set_file_type(&self, file_type: FileType) {
+        *self.file_type.write() = file_type;
+    }
+
+    pub fn file_type(&self) -> FileType {
+        self.file_type.read().clone()
     }
 }
 
