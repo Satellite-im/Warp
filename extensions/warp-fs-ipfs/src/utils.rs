@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use image::ImageFormat;
 use mediatype::MediaTypeBuf;
-use warp::{error::Error, constellation::file::FileType};
+use warp::{constellation::file::FileType, error::Error};
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, PartialEq, Eq, derive_more::Display)]

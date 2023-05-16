@@ -47,12 +47,8 @@ impl Default for ThumbnailId {
 #[derive(Default, Clone)]
 #[allow(clippy::type_complexity)]
 pub struct ThumbnailGenerator {
-    task: Arc<
-        Mutex<BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, Vec<u8>), Error>>>>,
-    >,
+    task: Arc<Mutex<BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, Vec<u8>), Error>>>>>,
 }
-
-
 
 impl ThumbnailGenerator {
     pub async fn insert<P: AsRef<Path>>(

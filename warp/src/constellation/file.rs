@@ -1,9 +1,9 @@
 #![allow(clippy::result_large_err)]
-use mediatype;
 use crate::error::Error;
 use crate::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
 use derive_more::Display;
+use mediatype;
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek};
@@ -11,7 +11,6 @@ use uuid::Uuid;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-
 
 /// `FileType` describes all supported file types.
 /// This will be useful for applying icons to the tree later on
@@ -26,7 +25,7 @@ pub enum FileType {
     #[default]
     Generic,
     #[display(fmt = "{}", _0)]
-    Mime(mediatype::MediaTypeBuf)
+    Mime(mediatype::MediaTypeBuf),
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).

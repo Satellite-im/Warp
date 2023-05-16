@@ -172,7 +172,6 @@ pub fn generate<const N: usize>() -> [u8; N] {
     buf
 }
 
-
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use std::{
