@@ -60,7 +60,7 @@ async fn account_persistent<P: AsRef<Path>>(
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
 
-    let tesseract = Tesseract::open_or_create(path.join("tdatastore"))?;
+    let tesseract = Tesseract::open_or_create(path, "tdatastore")?;
 
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;

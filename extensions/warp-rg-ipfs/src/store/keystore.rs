@@ -173,9 +173,9 @@ mod test {
 
         assert_ne!(keypair, recipient);
 
-        let key = generate(32);
+        let key = generate::<32>();
 
-        keystore.insert(&keypair, &recipient, &key)?;
+        keystore.insert(&keypair, &recipient, key)?;
 
         let stored_key = keystore.get_latest(&keypair, &recipient)?;
 
@@ -192,11 +192,11 @@ mod test {
 
         assert_ne!(keypair, recipient);
 
-        let key_1 = generate(32);
-        let key_2 = generate(32);
+        let key_1 = generate::<32>();
+        let key_2 = generate::<32>();
 
-        keystore.insert(&keypair, &recipient, &key_1)?;
-        keystore.insert(&keypair, &recipient, &key_2)?;
+        keystore.insert(&keypair, &recipient, key_1)?;
+        keystore.insert(&keypair, &recipient, key_2)?;
 
         let latest_key = keystore.get_latest(&keypair, &recipient)?;
 
@@ -214,7 +214,7 @@ mod test {
         let recipients = (0..100).map(|_| DID::default()).collect::<Vec<_>>();
 
         for recipient in recipients.iter() {
-            for key in (0..100).map(|_| generate(32)) {
+            for key in (0..100).map(|_| generate::<32>()) {
                 keystore.insert(&keypair, recipient, key)?;
             }
         }
