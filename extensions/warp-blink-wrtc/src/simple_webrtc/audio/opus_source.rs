@@ -354,4 +354,37 @@ mod test {
             .encode(buf1.as_slice(), buf2.as_mut_slice())
             .unwrap();
     }
+
+    #[test]
+    fn opus_params1() {
+        let mut encoder =
+            opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let bitrate = encoder.get_bitrate().unwrap();
+        let bandwidth = encoder.get_bandwidth().unwrap();
+        let sample_rate = encoder.get_sample_rate().unwrap();
+
+        println!("bitrate: {bitrate:?}, bandwidth: {bandwidth:?}, sample_rate: {sample_rate}");
+    }
+
+    #[test]
+    fn opus_params2() {
+        let mut encoder =
+            opus::Encoder::new(24000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let bitrate = encoder.get_bitrate().unwrap();
+        let bandwidth = encoder.get_bandwidth().unwrap();
+        let sample_rate = encoder.get_sample_rate().unwrap();
+
+        println!("bitrate: {bitrate:?}, bandwidth: {bandwidth:?}, sample_rate: {sample_rate}");
+    }
+
+    #[test]
+    fn opus_params3() {
+        let mut encoder =
+            opus::Encoder::new(8000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let bitrate = encoder.get_bitrate().unwrap();
+        let bandwidth = encoder.get_bandwidth().unwrap();
+        let sample_rate = encoder.get_sample_rate().unwrap();
+
+        println!("bitrate: {bitrate:?}, bandwidth: {bandwidth:?}, sample_rate: {sample_rate}");
+    }
 }
