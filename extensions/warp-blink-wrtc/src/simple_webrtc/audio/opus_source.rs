@@ -290,4 +290,20 @@ mod test {
             .encode_float(buf1.as_slice(), buf2.as_mut_slice())
             .unwrap();
     }
+
+    #[test]
+    fn opus_packetizer3() {
+        let mut encoder =
+            opus::Encoder::new(8000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let buff_size = 480;
+        let mut buf1: Vec<f32> = Vec::new();
+        buf1.resize(buff_size, 0_f32);
+
+        let mut buf2: Vec<u8> = Vec::new();
+        buf2.resize(buff_size * 4, 0);
+
+        encoder
+            .encode_float(buf1.as_slice(), buf2.as_mut_slice())
+            .unwrap();
+    }
 }
