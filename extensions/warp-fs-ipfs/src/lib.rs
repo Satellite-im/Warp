@@ -149,7 +149,6 @@ impl IpfsFileSystem {
         Ok(())
     }
 
-    #[allow(clippy::clone_on_copy)]
     pub async fn export_index(&self) -> Result<()> {
         let ipfs = self.ipfs()?;
         let index = self.export(ConstellationDataType::Json)?;
@@ -186,7 +185,7 @@ impl IpfsFileSystem {
             .cid()
             .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
 
-        let last_cid = self.index_cid.read().clone();
+        let last_cid = { *self.index_cid.read() };
 
         *self.index_cid.write() = Some(*cid);
 
