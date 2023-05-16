@@ -39,7 +39,7 @@ struct Codecs {
 static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
     let audio = AudioCodecBuiler::new()
         .mime(MimeType::OPUS)
-        .sample_rate(AudioSampleRate::High)
+        .sample_rate(AudioSampleRate::Low)
         .channels(1)
         .build();
 

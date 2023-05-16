@@ -137,7 +137,7 @@ fn create_source_track(
     let config = cpal::StreamConfig {
         channels: codec.channels(),
         sample_rate: SampleRate(codec.sample_rate()),
-        buffer_size: cpal::BufferSize::Fixed(2880 * 8),
+        buffer_size: cpal::BufferSize::Default, //Fixed(4096 * 50),
     };
 
     // all samples are converted to f32
@@ -304,6 +304,54 @@ mod test {
 
         encoder
             .encode_float(buf1.as_slice(), buf2.as_mut_slice())
+            .unwrap();
+    }
+
+    #[test]
+    fn opus_packetizer4() {
+        let mut encoder =
+            opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let buff_size = 120;
+        let mut buf1: Vec<f32> = Vec::new();
+        buf1.resize(buff_size, 0_f32);
+
+        let mut buf2: Vec<u8> = Vec::new();
+        buf2.resize(buff_size * 4, 0);
+
+        encoder
+            .encode_float(buf1.as_slice(), buf2.as_mut_slice())
+            .unwrap();
+    }
+
+    #[test]
+    fn opus_packetizer5() {
+        let mut encoder =
+            opus::Encoder::new(24000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let buff_size = 120;
+        let mut buf1: Vec<f32> = Vec::new();
+        buf1.resize(buff_size, 0_f32);
+
+        let mut buf2: Vec<u8> = Vec::new();
+        buf2.resize(buff_size * 4, 0);
+
+        encoder
+            .encode_float(buf1.as_slice(), buf2.as_mut_slice())
+            .unwrap();
+    }
+
+    #[test]
+    fn opus_packetizer6() {
+        let mut encoder =
+            opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let buff_size = 120;
+        let mut buf1: Vec<i16> = Vec::new();
+        buf1.resize(buff_size, 0);
+
+        let mut buf2: Vec<u8> = Vec::new();
+        buf2.resize(buff_size * 2, 0);
+
+        encoder
+            .encode(buf1.as_slice(), buf2.as_mut_slice())
             .unwrap();
     }
 }

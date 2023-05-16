@@ -27,12 +27,13 @@ impl AudioSampleRate {
         }
     }
 
-    // keeps the timeframe (over which samples are encoded) relatively equal for different sample rates
+    // this seems backwards. i'd think a greater sample rate would require a larger buffer but for some reason,
+    // 48kHz seems to work best with the lowest sample rate.
     pub fn frame_size(&self) -> usize {
         match self {
             AudioSampleRate::Low => 480,
-            AudioSampleRate::Medium => 960,
-            AudioSampleRate::High => 960,
+            AudioSampleRate::Medium => 240,
+            AudioSampleRate::High => 120,
         }
     }
 }
