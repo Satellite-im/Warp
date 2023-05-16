@@ -204,6 +204,7 @@ async fn main() -> anyhow::Result<()> {
                 "Creation",
                 "Modified",
                 "Thumbnail",
+                "File Type",
                 "Reference",
             ]);
             for item in list.iter() {
@@ -216,6 +217,12 @@ async fn main() -> anyhow::Result<()> {
                     item.creation().date_naive().to_string(),
                     item.modified().date_naive().to_string(),
                     (!item.thumbnail().is_empty()).to_string(),
+                    if item.is_file() {
+                        let ty = item.get_file()?.file_type();
+                        ty.to_string()
+                    } else {
+                        String::new()
+                    },
                     if item.is_file() {
                         item.get_file()?
                             .reference()
