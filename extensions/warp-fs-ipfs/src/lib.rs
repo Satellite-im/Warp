@@ -387,6 +387,12 @@ impl Constellation for IpfsFileSystem {
             });
         }
 
+        let current_directory = self.current_directory()?;
+
+        if current_directory.get_item_by_path(name).is_ok() {
+            return Err(Error::FileExist);
+        }
+
         let (width, height) = self
             .config
             .as_ref()
@@ -394,11 +400,6 @@ impl Constellation for IpfsFileSystem {
             .unwrap_or((128, 128));
 
         let ticket = self.thumbnail_store.insert(&path, width, height).await?;
-        let current_directory = self.current_directory()?;
-
-        if current_directory.get_item_by_path(name).is_ok() {
-            return Err(Error::FileExist);
-        }
 
         // Placeholder to fnish thumbnail generation in the background
         // Will be false for now
@@ -588,6 +589,17 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileExist);
         }
 
+        let (width, height) = self
+            .config
+            .as_ref()
+            .map(|c| c.thumbnail_size)
+            .unwrap_or((128, 128));
+
+        let ticket = self
+            .thumbnail_store
+            .insert_buffer(&name, buffer, width, height)
+            .await?;
+
         let reader = ReaderStream::new(Cursor::new(buffer))
             .map(|result| result.map(|x| x.into()))
             .boxed();
@@ -621,18 +633,21 @@ impl Constellation for IpfsFileSystem {
 
         let ipfs_path = returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
-        let cid = ipfs_path
-            .root()
-            .cid()
-            .ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
-        ipfs.insert_pin(cid, true).await?;
-
         let file = warp::constellation::file::File::new(name);
         file.set_size(total_written);
         file.set_reference(&format!("{ipfs_path}"));
         file.hash_mut().hash_from_slice(buffer)?;
+
+        match self.thumbnail_store.get(ticket).await {
+            Ok((extension_type, thumbnail)) => {
+                file.set_thumbnail(&thumbnail);
+                file.set_file_type(extension_type.into());
+            }
+            Err(_e) => {}
+        }
+
         self.current_directory()?.add_item(file)?;
+
         if let Err(_e) = self.export_index().await {}
         let _ = self
             .broadcast

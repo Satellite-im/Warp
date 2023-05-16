@@ -4,7 +4,7 @@ use std::{
     fmt::Display,
     hash::Hash,
     io::{self, ErrorKind},
-    path::Path,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -13,6 +13,7 @@ use std::{
     time::Instant,
 };
 
+use image::io::Reader as ImageReader;
 use image::ImageFormat;
 use mediatype::MediaTypeBuf;
 use tokio::sync::Mutex;
@@ -169,6 +170,62 @@ impl ThumbnailGenerator {
                     "image" => tokio::task::spawn_blocking(move || {
                         let format: ImageFormat = extension.try_into()?;
                         let image = image::open(own_path).map_err(anyhow::Error::from)?;
+                        let thumbnail = image.thumbnail(width, height);
+                        let mut t_buffer = std::io::Cursor::new(vec![]);
+                        thumbnail
+                            .write_to(&mut t_buffer, format)
+                            .map_err(anyhow::Error::from)?;
+                        Ok::<_, Error>((extension, t_buffer.into_inner()))
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)?,
+                    _ => Err(Error::Unimplemented),
+                },
+                _ => Err(Error::Other),
+            };
+
+            let stop = instance.elapsed();
+
+            log::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
+            result
+        });
+
+        self.task.lock().await.insert(id, task);
+
+        Ok(id)
+    }
+
+    pub async fn insert_buffer<S: AsRef<str>>(
+        &self,
+        name: S,
+        buffer: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<ThumbnailId, Error> {
+        let name = PathBuf::from(name.as_ref());
+
+        let buffer = std::io::Cursor::new(buffer.to_vec());
+
+        let id = ThumbnailId::default();
+
+        let task = tokio::spawn(async move {
+            let instance = Instant::now();
+
+            let extension = name
+                .extension()
+                .and_then(OsStr::to_str)
+                .map(ThumbnailExtensionType::from)
+                .unwrap_or(ThumbnailExtensionType::Other);
+
+            let result = match extension.try_into() {
+                Ok(FileType::Mime(media)) => match media.ty().as_str() {
+                    "image" => tokio::task::spawn_blocking(move || {
+                        let format: ImageFormat = extension.try_into()?;
+                        let image = ImageReader::new(buffer)
+                            .with_guessed_format()?
+                            .decode()
+                            .map_err(anyhow::Error::from)?;
+
                         let thumbnail = image.thumbnail(width, height);
                         let mut t_buffer = std::io::Cursor::new(vec![]);
                         thumbnail
