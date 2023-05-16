@@ -117,16 +117,23 @@ impl Tesseract {
     /// ```no_run
     /// use warp::tesseract::Tesseract;
     ///
-    /// let tesseract = Tesseract::open_or_create("test_file").unwrap();
+    /// let tesseract = Tesseract::open_or_create("/path/to/directory", "test_file").unwrap();
     /// ```
-    pub fn open_or_create<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn open_or_create<P: AsRef<Path>, S: AsRef<str>>(path: P, file: S) -> Result<Self> {
+        let path = path.as_ref();
+
+        if !path.is_dir() {
+            std::fs::create_dir_all(path)?;
+        }
+
+        let path = path.join(file.as_ref());
+
         match Self::from_file(&path) {
             Ok(tesseract) => Ok(tesseract),
             Err(Error::IoError(e)) if e.kind() == ErrorKind::NotFound => {
                 let tesseract = Tesseract::default();
                 tesseract.check.store(true, Ordering::Relaxed);
-                let file =
-                    std::fs::canonicalize(&path).unwrap_or_else(|_| path.as_ref().to_path_buf());
+                let file = std::fs::canonicalize(&path).unwrap_or(path);
                 tesseract.set_file(file);
                 tesseract.set_autosave();
                 Ok(tesseract)
