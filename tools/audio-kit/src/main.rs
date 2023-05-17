@@ -1,5 +1,3 @@
-use std::{mem, slice, time::Duration};
-
 use anyhow::bail;
 use bytes::Bytes;
 use clap::Parser;
@@ -9,7 +7,9 @@ use cpal::{
 };
 use log::LevelFilter;
 use once_cell::sync::Lazy;
+use ringbuf::HeapRb;
 use simple_logger::SimpleLogger;
+use std::{mem, slice, time::Duration};
 use tokio::sync::Mutex;
 
 /// Test CPAL and OPUS
@@ -39,6 +39,8 @@ enum Cli {
     Play,
     /// print the current config
     ShowConfig,
+    /// test feeding the input and output streams together
+    Feedback,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -61,7 +63,6 @@ struct StaticArgs {
 
 struct EncodedSamples {
     data: Vec<u8>,
-    packet_sizes: Vec<usize>,
     encoder_idx: usize,
 }
 
@@ -79,7 +80,6 @@ struct DecodedI16 {
 /// because that's probably too slow.
 static mut ENCODED_SAMPLES: EncodedSamples = EncodedSamples {
     data: vec![],
-    packet_sizes: vec![],
     encoder_idx: 0,
 };
 
@@ -181,13 +181,103 @@ async fn handle_command(cli: Cli) -> anyhow::Result<()> {
             SampleTypes::Signed => todo!(),
         },
         Cli::ShowConfig => println!("{:#?}", sm),
+        Cli::Feedback => feedback(sm.clone()).await?,
     }
+    Ok(())
+}
+
+// taken from here: https://github.com/RustAudio/cpal/blob/master/examples/feedback.rs
+async fn feedback(args: StaticArgs) -> anyhow::Result<()> {
+    let host = cpal::default_host();
+    let latency = 1000.0;
+
+    // Find devices.
+    let input_device = host.default_input_device().unwrap();
+
+    let output_device = host.default_output_device().unwrap();
+
+    println!("Using input device: \"{}\"", input_device.name()?);
+    println!("Using output device: \"{}\"", output_device.name()?);
+
+    // We'll try and use the same configuration between streams to keep it simple.
+    let config: cpal::StreamConfig = cpal::StreamConfig {
+        channels: 1,
+        sample_rate: SampleRate(args.sample_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
+
+    // Create a delay in case the input and output devices aren't synced.
+    let latency_frames = (latency / 1_000.0) * config.sample_rate.0 as f32;
+    let latency_samples = latency_frames as usize * config.channels as usize;
+
+    // The buffer to share samples
+    let ring = HeapRb::<f32>::new(latency_samples * 2);
+    let (mut producer, mut consumer) = ring.split();
+
+    // Fill the samples with 0.0 equal to the length of the delay.
+    for _ in 0..latency_samples {
+        // The ring buffer has twice as much space as necessary to add latency here,
+        // so this should never fail
+        producer.push(0.0).unwrap();
+    }
+
+    let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
+        let mut output_fell_behind = false;
+        for &sample in data {
+            if producer.push(sample).is_err() {
+                output_fell_behind = true;
+            }
+        }
+        if output_fell_behind {
+            eprintln!("output stream fell behind: try increasing latency");
+        }
+    };
+
+    let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+        let mut input_fell_behind = false;
+        for sample in data {
+            *sample = match consumer.pop() {
+                Some(s) => s,
+                None => {
+                    input_fell_behind = true;
+                    0.0
+                }
+            };
+        }
+        if input_fell_behind {
+            eprintln!("input stream fell behind: try increasing latency");
+        }
+    };
+
+    // Build streams.
+    println!(
+        "Attempting to build both streams with f32 samples and `{:?}`.",
+        config
+    );
+    let input_stream = input_device.build_input_stream(&config, input_data_fn, err_fn, None)?;
+    let output_stream = output_device.build_output_stream(&config, output_data_fn, err_fn, None)?;
+    println!("Successfully built streams.");
+
+    // Play the streams.
+    println!(
+        "Starting the input and output streams with `{}` milliseconds of latency.",
+        latency
+    );
+    input_stream.play()?;
+    output_stream.play()?;
+
+    // Run for 3 seconds before closing.
+    println!("Playing for 3 seconds... ");
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    drop(input_stream);
+    drop(output_stream);
+    println!("Done!");
     Ok(())
 }
 
 async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
     let duration_secs = 5;
-    let total_samples = args.sample_rate as usize * 4 * (duration_secs + 1);
+    let total_samples = args.sample_rate as usize * (duration_secs + 1);
     let mut decoded_samples: Vec<f32> = Vec::new();
     decoded_samples.resize(total_samples, 0_f32);
 
@@ -199,10 +289,11 @@ async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
 
     println!("decoding audio samples");
     let mut decoder = opus::Decoder::new(args.sample_rate, opus::Channels::Mono)?;
+    let packet_size = args.frame_size * 4;
     let mut input_idx = 0;
     let mut output_idx = 0;
     unsafe {
-        for packet_size in ENCODED_SAMPLES.packet_sizes.iter() {
+        while input_idx < ENCODED_SAMPLES.data.len() {
             match decoder.decode_float(
                 &ENCODED_SAMPLES.data.as_slice()[input_idx..input_idx + packet_size],
                 &mut decoded_samples.as_mut_slice()[output_idx..output_idx + args.frame_size],
@@ -247,11 +338,10 @@ async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
 
 async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
     let duration_secs = 5;
-    let total_samples = args.sample_rate as usize * 4 * (duration_secs + 1);
+    let total_bytes = args.sample_rate as usize * 4 * (duration_secs + 1);
     unsafe {
-        ENCODED_SAMPLES.data.resize(total_samples, 0);
+        ENCODED_SAMPLES.data.resize(total_bytes, 0);
         ENCODED_SAMPLES.encoder_idx = 0;
-        ENCODED_SAMPLES.packet_sizes.clear();
     }
     let config = cpal::StreamConfig {
         channels: 1,
@@ -264,7 +354,7 @@ async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
     // batch audio samples into a Packetizer, encode them via packetize(), and write the bytes to a global variable.
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| unsafe {
         // if there isn't space for a new frame, then stop
-        if ENCODED_SAMPLES.encoder_idx >= total_samples - args.frame_size {
+        if ENCODED_SAMPLES.encoder_idx >= total_bytes - (args.frame_size * 4) {
             log::error!("ran out of space for samples");
             return;
         }
@@ -280,7 +370,6 @@ async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
             };
             if let Some(size) = r {
                 ENCODED_SAMPLES.encoder_idx += size;
-                ENCODED_SAMPLES.packet_sizes.push(size);
             }
         }
     };
