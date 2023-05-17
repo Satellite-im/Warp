@@ -31,6 +31,9 @@ pub async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
                 if let Some(mut f) = audio_file.as_ref() {
                     match f.read(&mut buf) {
                         Ok(size) => {
+                            if size == 0 {
+                                return;
+                            }
                             assert_eq!(size, 4);
                         }
                         Err(e) => {

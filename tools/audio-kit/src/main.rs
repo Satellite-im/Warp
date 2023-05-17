@@ -7,7 +7,7 @@ use cpal::{
 use log::LevelFilter;
 use once_cell::sync::Lazy;
 use play::play_f32;
-use record::record_f32;
+use record::*;
 use simple_logger::SimpleLogger;
 use std::{path::Path, time::Duration};
 use tokio::sync::Mutex;
@@ -42,6 +42,8 @@ enum Cli {
     Application { application: i32 },
     /// records 10 seconds of audio
     Record,
+    /// records audio but encodes and decods it before writing it to a file.
+    RecordEncode,
     /// plays the most recently recorded audio
     Play,
     /// print the current config
@@ -151,7 +153,11 @@ async fn handle_command(cli: Cli) -> anyhow::Result<()> {
             };
         }
         Cli::Record => match sm.sample_type {
-            SampleTypes::Float => record_f32(sm.clone()).await?,
+            SampleTypes::Float => record_f32_noencode(sm.clone()).await?,
+            SampleTypes::Signed => todo!(),
+        },
+        Cli::RecordEncode => match sm.sample_type {
+            SampleTypes::Float => record_f32_encode(sm.clone()).await?,
             SampleTypes::Signed => todo!(),
         },
         Cli::Play => match sm.sample_type {
