@@ -59,11 +59,34 @@ struct StaticArgs {
 
 struct EncodedSamples {
     data: Vec<u8>,
+    packet_sizes: Vec<usize>,
+    encoder_idx: usize,
+}
+
+struct DecodedF32 {
+    data: Vec<f32>,
     idx: usize,
 }
+
+struct DecodedI16 {
+    data: Vec<i16>,
+    idx: usize,
+}
+
 /// this will be used for audio processing. not going to put this in a mutex or send all the audio samples through a channel
 /// because that's probably too slow.
 static mut ENCODED_SAMPLES: EncodedSamples = EncodedSamples {
+    data: vec![],
+    packet_sizes: vec![],
+    encoder_idx: 0,
+};
+
+static mut DECODED_SAMPLES_F32: DecodedF32 = DecodedF32 {
+    data: vec![],
+    idx: 0,
+};
+
+static mut DECODED_SAMPLES_I16: DecodedI16 = DecodedI16 {
     data: vec![],
     idx: 0,
 };
@@ -78,6 +101,30 @@ static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
         application: opus::Application::Voip,
     })
 });
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    println!("starting REPL");
+    println!("enter --help to see available commands");
+
+    let mut iter = std::io::stdin().lines();
+    while let Some(Ok(line)) = iter.next() {
+        let mut v = vec![""];
+        v.extend(line.split_ascii_whitespace());
+        let cli = match Cli::try_parse_from(v) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("{e}");
+                continue;
+            }
+        };
+        if let Err(e) = handle_command(cli).await {
+            println!("command failed: {e}");
+        }
+    }
+
+    Ok(())
+}
 
 async fn handle_command(cli: Cli) -> anyhow::Result<()> {
     let mut sm = STATIC_MEM.lock().await;
@@ -118,10 +165,76 @@ async fn handle_command(cli: Cli) -> anyhow::Result<()> {
                 _ => bail!("invalid application"),
             };
         }
-        Cli::Record => record_f32(sm.clone()).await?,
-        Cli::Play => {}
+        Cli::Record => match sm.sample_type {
+            SampleTypes::Float => record_f32(sm.clone()).await?,
+            SampleTypes::Signed => todo!(),
+        },
+        Cli::Play => match sm.sample_type {
+            SampleTypes::Float => play_f32(sm.clone()).await?,
+            SampleTypes::Signed => todo!(),
+        },
         Cli::ShowConfig => println!("{:#?}", sm),
     }
+    Ok(())
+}
+
+async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
+    let duration_secs = 5;
+    let total_samples = args.sample_rate as usize * 4 * (duration_secs + 1);
+    let mut decoded_samples: Vec<f32> = Vec::new();
+    decoded_samples.resize(total_samples, 0_f32);
+
+    let config = cpal::StreamConfig {
+        channels: 1,
+        sample_rate: SampleRate(args.sample_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
+
+    println!("decoding audio samples");
+    let mut decoder = opus::Decoder::new(args.sample_rate, opus::Channels::Mono)?;
+    let mut input_idx = 0;
+    let mut output_idx = 0;
+    unsafe {
+        for packet_size in ENCODED_SAMPLES.packet_sizes.iter() {
+            match decoder.decode_float(
+                &ENCODED_SAMPLES.data.as_slice()[input_idx..input_idx + packet_size],
+                &mut decoded_samples.as_mut_slice()[output_idx..output_idx + args.frame_size],
+                false,
+            ) {
+                Ok(decoded_size) => {
+                    input_idx += packet_size;
+                    output_idx += decoded_size;
+                    assert!(decoded_size == args.frame_size);
+                }
+                Err(e) => {
+                    log::error!("failed to decode opus packet: {e}");
+                }
+            }
+        }
+
+        DECODED_SAMPLES_F32.data = decoded_samples;
+        DECODED_SAMPLES_F32.idx = 0;
+    }
+    println!("finished decoding audio samples");
+
+    let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+        for sample in data {
+            unsafe {
+                if DECODED_SAMPLES_F32.idx < DECODED_SAMPLES_F32.data.len() {
+                    *sample = DECODED_SAMPLES_F32.data[DECODED_SAMPLES_F32.idx];
+                    DECODED_SAMPLES_F32.idx += 1;
+                }
+            }
+        }
+    };
+    let output_stream = cpal::default_host()
+        .default_output_device()
+        .ok_or(anyhow::anyhow!("no output device"))?
+        .build_output_stream(&config.into(), output_data_fn, err_fn, None)?;
+
+    output_stream.play()?;
+    tokio::time::sleep(Duration::from_secs(duration_secs as u64)).await;
+    println!("finished playing audio");
     Ok(())
 }
 
@@ -130,7 +243,8 @@ async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
     let total_samples = args.sample_rate as usize * 4 * (duration_secs + 1);
     unsafe {
         ENCODED_SAMPLES.data.resize(total_samples, 0);
-        ENCODED_SAMPLES.idx = 0;
+        ENCODED_SAMPLES.encoder_idx = 0;
+        ENCODED_SAMPLES.packet_sizes.clear();
     }
     let config = cpal::StreamConfig {
         channels: 1,
@@ -143,12 +257,12 @@ async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
     // batch audio samples into a Packetizer, encode them via packetize(), and write the bytes to a global variable.
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| unsafe {
         // if there isn't space for a new frame, then stop
-        if ENCODED_SAMPLES.idx >= total_samples - args.frame_size {
+        if ENCODED_SAMPLES.encoder_idx >= total_samples - args.frame_size {
             log::error!("ran out of space for samples");
             return;
         }
         let mut encoded: &mut [u8] =
-            &mut ENCODED_SAMPLES.data.as_mut_slice()[ENCODED_SAMPLES.idx..];
+            &mut ENCODED_SAMPLES.data.as_mut_slice()[ENCODED_SAMPLES.encoder_idx..];
         for sample in data {
             let r = match packetizer.packetize_f32(*sample, &mut encoded) {
                 Ok(r) => r,
@@ -158,7 +272,8 @@ async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
                 }
             };
             if let Some(size) = r {
-                ENCODED_SAMPLES.idx += size;
+                ENCODED_SAMPLES.encoder_idx += size;
+                ENCODED_SAMPLES.packet_sizes.push(size);
             }
         }
     };
@@ -177,31 +292,7 @@ async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
     input_stream.play()?;
     tokio::time::sleep(Duration::from_secs(duration_secs as u64)).await;
     input_stream.pause()?;
-
-    Ok(())
-}
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    println!("starting REPL");
-    println!("enter --help to see available commands");
-
-    let mut iter = std::io::stdin().lines();
-    while let Some(Ok(line)) = iter.next() {
-        let mut v = vec![""];
-        v.extend(line.split_ascii_whitespace());
-        let cli = match Cli::try_parse_from(v) {
-            Ok(r) => r,
-            Err(e) => {
-                println!("{e}");
-                continue;
-            }
-        };
-        if let Err(e) = handle_command(cli).await {
-            println!("command failed: {e}");
-        }
-    }
-
+    println!("finished recording audio");
     Ok(())
 }
 
