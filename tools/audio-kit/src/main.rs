@@ -7,7 +7,9 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     SampleRate,
 };
+use log::LevelFilter;
 use once_cell::sync::Lazy;
+use simple_logger::SimpleLogger;
 use tokio::sync::Mutex;
 
 /// Test CPAL and OPUS
@@ -104,6 +106,11 @@ static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    SimpleLogger::new()
+        .with_level(LevelFilter::Debug)
+        .init()
+        .unwrap();
+
     println!("starting REPL");
     println!("enter --help to see available commands");
 
