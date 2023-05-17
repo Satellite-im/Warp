@@ -6,14 +6,18 @@ use cpal::{
 };
 use log::LevelFilter;
 use once_cell::sync::Lazy;
+use play::play_f32;
+use record::record_f32;
 use simple_logger::SimpleLogger;
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 use tokio::sync::Mutex;
 
 use crate::packetizer::OpusPacketizer;
 
 mod feedback;
 mod packetizer;
+mod play;
+mod record;
 
 /// Test CPAL and OPUS
 #[derive(Parser, Debug, Clone)]
@@ -62,40 +66,10 @@ pub struct StaticArgs {
     frame_size: usize,
     bandwidth: opus::Bandwidth,
     application: opus::Application,
+    audio_duration_secs: usize,
 }
 
-struct EncodedSamples {
-    data: Vec<u8>,
-    encoder_idx: usize,
-}
-
-struct DecodedF32 {
-    data: Vec<f32>,
-    idx: usize,
-}
-
-struct DecodedI16 {
-    data: Vec<i16>,
-    idx: usize,
-}
-
-/// this will be used for audio processing. not going to put this in a mutex or send all the audio samples through a channel
-/// because that's probably too slow.
-static mut ENCODED_SAMPLES: EncodedSamples = EncodedSamples {
-    data: vec![],
-    encoder_idx: 0,
-};
-
-static mut DECODED_SAMPLES_F32: DecodedF32 = DecodedF32 {
-    data: vec![],
-    idx: 0,
-};
-
-static mut DECODED_SAMPLES_I16: DecodedI16 = DecodedI16 {
-    data: vec![],
-    idx: 0,
-};
-
+pub const AUDIO_FILE_NAME: &str = "/tmp/audio.bin";
 static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
     Mutex::new(StaticArgs {
         sample_type: SampleTypes::Float,
@@ -104,6 +78,7 @@ static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
         frame_size: 480,
         bandwidth: opus::Bandwidth::Narrowband,
         application: opus::Application::Voip,
+        audio_duration_secs: 5,
     })
 });
 
@@ -186,123 +161,6 @@ async fn handle_command(cli: Cli) -> anyhow::Result<()> {
         Cli::ShowConfig => println!("{:#?}", sm),
         Cli::Feedback => feedback::feedback(sm.clone()).await?,
     }
-    Ok(())
-}
-
-async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
-    let duration_secs = 5;
-    let total_samples = args.sample_rate as usize * (duration_secs + 1);
-    let mut decoded_samples: Vec<f32> = Vec::new();
-    decoded_samples.resize(total_samples, 0_f32);
-
-    let config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: SampleRate(args.sample_rate),
-        buffer_size: cpal::BufferSize::Default,
-    };
-
-    println!("decoding audio samples");
-    let mut decoder = opus::Decoder::new(args.sample_rate, opus::Channels::Mono)?;
-    let packet_size = args.frame_size * 4;
-    let mut input_idx = 0;
-    let mut output_idx = 0;
-    unsafe {
-        while input_idx < ENCODED_SAMPLES.data.len() {
-            match decoder.decode_float(
-                &ENCODED_SAMPLES.data.as_slice()[input_idx..input_idx + packet_size],
-                &mut decoded_samples.as_mut_slice()[output_idx..output_idx + args.frame_size],
-                false,
-            ) {
-                Ok(decoded_size) => {
-                    input_idx += packet_size;
-                    output_idx += decoded_size;
-                    assert!(decoded_size == args.frame_size);
-                }
-                Err(e) => {
-                    log::error!("failed to decode opus packet: {e}");
-                }
-            }
-        }
-
-        DECODED_SAMPLES_F32.data = decoded_samples;
-        DECODED_SAMPLES_F32.idx = 0;
-    }
-    println!("finished decoding audio samples");
-
-    let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-        for sample in data {
-            unsafe {
-                if DECODED_SAMPLES_F32.idx < DECODED_SAMPLES_F32.data.len() {
-                    *sample = DECODED_SAMPLES_F32.data[DECODED_SAMPLES_F32.idx];
-                    DECODED_SAMPLES_F32.idx += 1;
-                }
-            }
-        }
-    };
-    let output_stream = cpal::default_host()
-        .default_output_device()
-        .ok_or(anyhow::anyhow!("no output device"))?
-        .build_output_stream(&config.into(), output_data_fn, err_fn, None)?;
-
-    output_stream.play()?;
-    tokio::time::sleep(Duration::from_secs(duration_secs as u64)).await;
-    println!("finished playing audio");
-    Ok(())
-}
-
-async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
-    let duration_secs = 5;
-    let total_bytes = args.sample_rate as usize * 4 * (duration_secs + 1);
-    unsafe {
-        ENCODED_SAMPLES.data.resize(total_bytes, 0);
-        ENCODED_SAMPLES.encoder_idx = 0;
-    }
-    let config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: SampleRate(args.sample_rate),
-        buffer_size: cpal::BufferSize::Default,
-    };
-    let mut packetizer =
-        OpusPacketizer::init(args.frame_size, args.sample_rate, opus::Channels::Mono)?;
-
-    // batch audio samples into a Packetizer, encode them via packetize(), and write the bytes to a global variable.
-    let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| unsafe {
-        // if there isn't space for a new frame, then stop
-        if ENCODED_SAMPLES.encoder_idx >= total_bytes - (args.frame_size * 4) {
-            log::error!("ran out of space for samples");
-            return;
-        }
-        let mut encoded: &mut [u8] =
-            &mut ENCODED_SAMPLES.data.as_mut_slice()[ENCODED_SAMPLES.encoder_idx..];
-        for sample in data {
-            let r = match packetizer.packetize_f32(*sample, &mut encoded) {
-                Ok(r) => r,
-                Err(e) => {
-                    log::error!("failed to packetize: {e}");
-                    continue;
-                }
-            };
-            if let Some(size) = r {
-                ENCODED_SAMPLES.encoder_idx += size;
-            }
-        }
-    };
-    let input_stream = cpal::default_host()
-        .default_input_device()
-        .ok_or(anyhow::anyhow!("no input device"))?
-        .build_input_stream(&config.into(), input_data_fn, err_fn, None)
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "failed to build input stream: {e}, {}, {}",
-                file!(),
-                line!()
-            )
-        })?;
-
-    input_stream.play()?;
-    tokio::time::sleep(Duration::from_secs(duration_secs as u64)).await;
-    input_stream.pause()?;
-    println!("finished recording audio");
     Ok(())
 }
 
