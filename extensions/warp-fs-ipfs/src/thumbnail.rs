@@ -80,9 +80,17 @@ impl ThumbnailGenerator {
                         let format: ImageFormat = extension.try_into()?;
                         let image = image::open(own_path).map_err(anyhow::Error::from)?;
                         let thumbnail = image.thumbnail(width, height);
+                        
                         let mut t_buffer = std::io::Cursor::new(vec![]);
+
+
+                        let output_format = match format {
+                            ImageFormat::WebP if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
+                            _ => format 
+                        };
+
                         thumbnail
-                            .write_to(&mut t_buffer, format)
+                            .write_to(&mut t_buffer, output_format)
                             .map_err(anyhow::Error::from)?;
                         Ok::<_, Error>((extension, t_buffer.into_inner()))
                     })
@@ -137,8 +145,12 @@ impl ThumbnailGenerator {
 
                         let thumbnail = image.thumbnail(width, height);
                         let mut t_buffer = std::io::Cursor::new(vec![]);
+                        let output_format = match format {
+                            ImageFormat::WebP if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
+                            _ => format 
+                        };
                         thumbnail
-                            .write_to(&mut t_buffer, format)
+                            .write_to(&mut t_buffer, output_format)
                             .map_err(anyhow::Error::from)?;
                         Ok::<_, Error>((extension, t_buffer.into_inner()))
                     })
