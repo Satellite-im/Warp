@@ -199,7 +199,7 @@ impl OpusPacketizer {
         if self.num_samples == self.frame_size {
             let p: *const f32 = self.raw_bytes.as_ptr() as _;
             let bs: &[f32] =
-                unsafe { slice::from_raw_parts(p, mem::size_of::<i16>() * self.num_samples) };
+                unsafe { slice::from_raw_parts(p, mem::size_of::<f32>() * self.num_samples) };
             match self.encoder.encode_float(bs, out) {
                 Ok(size) => {
                     self.raw_bytes.clear();
