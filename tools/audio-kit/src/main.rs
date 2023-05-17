@@ -75,8 +75,8 @@ static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
         sample_type: SampleTypes::Float,
         bit_rate: opus::Bitrate::Max,
         sample_rate: 8000,
-        frame_size: 480,
-        bandwidth: opus::Bandwidth::Narrowband,
+        frame_size: 120,
+        bandwidth: opus::Bandwidth::Fullband,
         application: opus::Application::Voip,
         audio_duration_secs: 5,
     })
