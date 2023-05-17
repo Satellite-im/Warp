@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, mem, slice, time::Duration};
+use std::{fs::File, io::Read, time::Duration};
 
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -26,18 +26,23 @@ pub async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
 
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
         for sample in data {
-            let mut buf: [f32; 1] = [0.0; 1];
-            let mut p: *const u8 = buf.as_ptr() as _;
-            let mut bp: &[u8] = unsafe { slice::from_raw_parts(p, mem::size_of::<f32>() * 1) };
+            let mut buf: [u8; 4] = [0; 4];
             unsafe {
-                if let Some(f) = audio_file.as_ref() {
-                    if let Err(e) = f.read(bp) {
-                        log::error!("failed to read from file: {e}");
+                if let Some(mut f) = audio_file.as_ref() {
+                    match f.read(&mut buf) {
+                        Ok(size) => {
+                            assert_eq!(size, 4);
+                        }
+                        Err(e) => {
+                            log::error!("failed to read from file: {e}");
+                        }
                     }
                 }
             }
-
-            *sample = buf[0];
+            let p: *const f32 = buf.as_ptr() as _;
+            unsafe {
+                *sample = *p;
+            }
         }
     };
     let output_stream = cpal::default_host()
