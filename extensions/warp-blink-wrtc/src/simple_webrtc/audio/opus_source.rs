@@ -5,6 +5,7 @@ use cpal::{
     SampleRate,
 };
 
+use opus::Bitrate;
 use rand::Rng;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -88,10 +89,12 @@ impl OpusFramer {
         buf.reserve(frame_size);
         let mut opus_out = Vec::new();
         opus_out.resize(frame_size * 4, 0);
-        let encoder =
-            opus::Encoder::new(sample_rate, channels, opus::Application::Voip).map_err(|e| {
+        let mut encoder = opus::Encoder::new(sample_rate, channels, opus::Application::Voip)
+            .map_err(|e| {
                 anyhow::anyhow!("{e}: sample_rate: {sample_rate}, channels: {channels:?}")
             })?;
+        // todo: abstract this
+        encoder.set_bitrate(Bitrate::Bits(16000))?;
 
         Ok(Self {
             encoder,
