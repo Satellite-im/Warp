@@ -603,7 +603,7 @@ impl Constellation for IpfsFileSystem {
         let ticket = self
             .thumbnail_store
             .insert_buffer(&name, buffer, width, height)
-            .await?;
+            .await;
 
         let reader = ReaderStream::new(Cursor::new(buffer))
             .map(|result| result.map(|x| x.into()))
@@ -1038,7 +1038,7 @@ impl Constellation for IpfsFileSystem {
         let id = self
             .thumbnail_store
             .insert_buffer(file.name(), &buffer, width, height)
-            .await?;
+            .await;
 
         if let Ok((_extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
             file.set_thumbnail(&thumbnail);

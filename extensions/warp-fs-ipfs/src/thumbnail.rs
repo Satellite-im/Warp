@@ -116,7 +116,7 @@ impl ThumbnailGenerator {
         buffer: &[u8],
         width: u32,
         height: u32,
-    ) -> Result<ThumbnailId, Error> {
+    ) -> ThumbnailId {
         let name = PathBuf::from(name.as_ref());
 
         let buffer = std::io::Cursor::new(buffer.to_vec());
@@ -167,7 +167,7 @@ impl ThumbnailGenerator {
 
         self.task.lock().await.insert(id, task);
 
-        Ok(id)
+        id
     }
 
     pub async fn cancel(&self, id: ThumbnailId) {
