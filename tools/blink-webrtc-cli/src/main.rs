@@ -52,9 +52,15 @@ static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
     })
 });
 
+#[derive(Parser, Debug, Eq, PartialEq)]
+struct Args {
+    /// the warp directory to use
+    path: String,
+}
+
 /// test warp-blink-webrtc via command line
 #[derive(Parser, Debug, Eq, PartialEq)]
-enum Cli {
+enum Repl {
     /// show your DID
     ShowDid,
     /// given a DID, initiate a call
@@ -94,13 +100,13 @@ enum Cli {
 async fn handle_command(
     blink: &mut Box<dyn Blink>,
     own_id: &Identity,
-    cmd: Cli,
+    cmd: Repl,
 ) -> anyhow::Result<()> {
     match cmd {
-        Cli::ShowDid => {
+        Repl::ShowDid => {
             println!("own identity: {}", own_id.did_key());
         }
-        Cli::Dial { id } => {
+        Repl::Dial { id } => {
             let did = DID::from_str(&id)?;
             let codecs = CODECS.read().await;
             blink
@@ -112,43 +118,43 @@ async fn handle_command(
                 )
                 .await?;
         }
-        Cli::Answer { id } => {
+        Repl::Answer { id } => {
             let call_id = Uuid::from_str(&id)?;
             blink.answer_call(call_id).await?;
         }
-        Cli::Hangup => {
+        Repl::Hangup => {
             blink.leave_call().await?;
         }
-        Cli::MuteSelf => {
+        Repl::MuteSelf => {
             blink.mute_self().await?;
         }
-        Cli::UnmuteSelf => {
+        Repl::UnmuteSelf => {
             blink.unmute_self().await?;
         }
-        Cli::ShowSelectedDevices => {
+        Repl::ShowSelectedDevices => {
             println!("microphone: {:?}", blink.get_current_microphone().await);
             println!("speaker: {:?}", blink.get_current_speaker().await);
         }
-        Cli::ShowAvailableDevices => {
+        Repl::ShowAvailableDevices => {
             let microphones = blink.get_available_microphones().await?;
             let speakers = blink.get_available_speakers().await?;
             println!("available microphones: {microphones:#?}");
             println!("available speakers: {speakers:#?}");
         }
-        Cli::ConnectMicrophone { device_name } => {
+        Repl::ConnectMicrophone { device_name } => {
             blink.select_microphone(&device_name).await?;
         }
-        Cli::ConnectSpeaker { device_name } => {
+        Repl::ConnectSpeaker { device_name } => {
             blink.select_speaker(&device_name).await?;
         }
-        Cli::SetAudioRate { rate } => {
+        Repl::SetAudioRate { rate } => {
             let mut codecs = CODECS.write().await;
             let audio = AudioCodecBuiler::from(codecs.audio.clone())
                 .sample_rate(rate.try_into()?)
                 .build();
             codecs.audio = audio;
         }
-        Cli::SetAudioChannels { channels } => {
+        Repl::SetAudioChannels { channels } => {
             if !(1..=2).contains(&channels) {
                 bail!("invalid number of channels");
             }
@@ -158,7 +164,7 @@ async fn handle_command(
                 .build();
             codecs.audio = audio;
         }
-        Cli::SupportedInputConfigs => {
+        Repl::SupportedInputConfigs => {
             let host = cpal::default_host();
             let dev = host
                 .default_input_device()
@@ -168,7 +174,7 @@ async fn handle_command(
                 println!("{config:#?}");
             }
         }
-        Cli::SupportedOutputConfigs => {
+        Repl::SupportedOutputConfigs => {
             let host = cpal::default_host();
             let dev = host
                 .default_output_device()
@@ -178,7 +184,7 @@ async fn handle_command(
                 println!("{config:#?}");
             }
         }
-        Cli::DefaultInputConfig => {
+        Repl::DefaultInputConfig => {
             let host = cpal::default_host();
             let dev = host
                 .default_input_device()
@@ -186,7 +192,7 @@ async fn handle_command(
             let config = dev.default_input_config()?;
             println!("{config:#?}");
         }
-        Cli::DefaultOutputConfig => {
+        Repl::DefaultOutputConfig => {
             let host = cpal::default_host();
             let dev = host
                 .default_output_device()
@@ -221,21 +227,21 @@ async fn main() -> anyhow::Result<()> {
     logger::init_with_level(log::LevelFilter::Trace)?;
     fdlimit::raise_fd_limit();
 
-    let random_name: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(7)
-        .map(char::from)
-        .collect();
+    let args = Args::parse();
 
-    let warp_dir = format!("/tmp/{random_name}");
-    std::fs::create_dir_all(&warp_dir)?;
-    let path = Path::new(&warp_dir);
-    let tesseract_dir = path.join("tesseract.json");
-    let multipass_dir = path.join("multipass");
-    std::fs::create_dir_all(&multipass_dir)?;
+    let warp_path = Path::new(&args.path);
+    let tesseract_dir = warp_path.join("tesseract.json");
+    let multipass_dir = warp_path.join("multipass");
+    let (tesseract, new_account) = if !warp_path.is_dir() {
+        std::fs::create_dir_all(warp_path)?;
+        std::fs::create_dir_all(&multipass_dir)?;
+        let tesseract = Tesseract::default();
+        tesseract.set_file(tesseract_dir);
+        (tesseract, true)
+    } else {
+        (Tesseract::from_file(tesseract_dir)?, false)
+    };
 
-    let tesseract = Tesseract::default();
-    tesseract.set_file(tesseract_dir);
     tesseract.set_autosave();
     tesseract.unlock("abcdefghik".as_bytes())?;
 
@@ -250,7 +256,15 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map(|mp| Box::new(mp) as Box<dyn MultiPass>)?;
 
-    multipass.create_identity(Some(&random_name), None).await?;
+    if new_account {
+        let random_name: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(7)
+            .map(char::from)
+            .collect();
+        multipass.create_identity(Some(&random_name), None).await?;
+    }
+
     let own_identity = loop {
         match multipass.get_own_identity().await {
             Ok(ident) => break ident,
@@ -282,7 +296,7 @@ async fn main() -> anyhow::Result<()> {
     while let Some(Ok(line)) = iter.next() {
         let mut v = vec![""];
         v.extend(line.split_ascii_whitespace());
-        let cli = match Cli::try_parse_from(v) {
+        let cli = match Repl::try_parse_from(v) {
             Ok(r) => r,
             Err(e) => {
                 println!("{e}");

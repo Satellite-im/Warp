@@ -40,9 +40,9 @@ enum Cli {
     Bandwidth { bandwidth: i32 },
     /// sets the opus::Application. values are 2048 (Voip) and 2049 (Audio)
     Application { application: i32 },
-    /// records 10 seconds of audio
+    /// records 10 seconds of audio and writes it to a file
     Record,
-    /// records audio but encodes and decods it before writing it to a file.
+    /// records audio but encodes and decodes it before writing it to a file.
     RecordEncode,
     /// plays the most recently recorded audio
     Play,
