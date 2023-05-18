@@ -395,13 +395,16 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileExist);
         }
 
-        let (width, height) = self
+        let ((width, height), exact) = self
             .config
             .as_ref()
-            .map(|c| c.thumbnail_size)
-            .unwrap_or((128, 128));
+            .map(|c| (c.thumbnail_size, c.thumbnail_exact_format))
+            .unwrap_or(((128, 128), true));
 
-        let ticket = self.thumbnail_store.insert(&path, width, height).await?;
+        let ticket = self
+            .thumbnail_store
+            .insert(&path, width, height, exact)
+            .await?;
 
         let background = self
             .config
@@ -594,15 +597,15 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileExist);
         }
 
-        let (width, height) = self
+        let ((width, height), exact) = self
             .config
             .as_ref()
-            .map(|c| c.thumbnail_size)
-            .unwrap_or((128, 128));
+            .map(|c| (c.thumbnail_size, c.thumbnail_exact_format))
+            .unwrap_or(((128, 128), true));
 
         let ticket = self
             .thumbnail_store
-            .insert_buffer(&name, buffer, width, height)
+            .insert_buffer(&name, buffer, width, height, exact)
             .await;
 
         let reader = ReaderStream::new(Cursor::new(buffer))
@@ -1026,10 +1029,10 @@ impl Constellation for IpfsFileSystem {
             buffer.extend(bytes);
         }
 
-        let Some((width, height)) = self
+        let Some(((width, height), exact)) = self
             .config
             .as_ref()
-            .map(|c| c.thumbnail_size) else {
+            .map(|c| (c.thumbnail_size, c.thumbnail_exact_format)) else {
                 // No need to error since logic after only deals with thumbnail generation
                 return Ok(());
             };
@@ -1037,7 +1040,7 @@ impl Constellation for IpfsFileSystem {
         // Generate the thumbnail for the file
         let id = self
             .thumbnail_store
-            .insert_buffer(file.name(), &buffer, width, height)
+            .insert_buffer(file.name(), &buffer, width, height, exact)
             .await;
 
         if let Ok((_extension_type, thumbnail)) = self.thumbnail_store.get(id).await {

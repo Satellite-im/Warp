@@ -56,6 +56,7 @@ impl ThumbnailGenerator {
         path: P,
         width: u32,
         height: u32,
+        output_exact: bool,
     ) -> Result<ThumbnailId, Error> {
         let path = path.as_ref();
         if !path.is_file() {
@@ -84,7 +85,8 @@ impl ThumbnailGenerator {
                         let mut t_buffer = std::io::Cursor::new(vec![]);
                         let output_format = match format {
                             ImageFormat::WebP if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
-                            _ => format,
+                            _ if output_exact => format,
+                            _ => ImageFormat::Jpeg
                         };
 
                         thumbnail
@@ -116,6 +118,7 @@ impl ThumbnailGenerator {
         buffer: &[u8],
         width: u32,
         height: u32,
+        output_exact: bool,
     ) -> ThumbnailId {
         let name = PathBuf::from(name.as_ref());
 
@@ -145,7 +148,8 @@ impl ThumbnailGenerator {
                         let mut t_buffer = std::io::Cursor::new(vec![]);
                         let output_format = match format {
                             ImageFormat::WebP if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
-                            _ => format,
+                            _ if output_exact => format,
+                            _ => ImageFormat::Jpeg,
                         };
                         thumbnail
                             .write_to(&mut t_buffer, output_format)
