@@ -24,7 +24,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 
-image.workspace = true
+image = { workspace = true }
 derive_more.workspace = true
 mediatype.workspace = true
 
@@ -45,3 +45,4 @@ cbindgen = "0.23"
 
 [features]
 build-header = []
+webp = ["image/webp-encoder"]
