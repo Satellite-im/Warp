@@ -32,8 +32,8 @@ impl AudioSampleRate {
     pub fn frame_size(&self) -> usize {
         match self {
             AudioSampleRate::Low => 480,
-            AudioSampleRate::Medium => 960,
-            AudioSampleRate::High => 1920,
+            AudioSampleRate::Medium => 480,
+            AudioSampleRate::High => 480,
         }
     }
 }
