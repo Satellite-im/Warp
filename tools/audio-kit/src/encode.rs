@@ -8,8 +8,10 @@ use anyhow::bail;
 
 use crate::{packetizer::OpusPacketizer, StaticArgs};
 
+// allows specifying a different sample rate for the decoder. Opus is supposed to support this.
 pub async fn encode_f32(
     args: StaticArgs,
+    decoded_sample_rate: u32,
     input_file_name: String,
     output_file_name: String,
 ) -> anyhow::Result<()> {
@@ -20,7 +22,7 @@ pub async fn encode_f32(
 
     let mut packetizer =
         OpusPacketizer::init(args.frame_size, args.sample_rate, opus::Channels::Mono)?;
-    let mut decoder = opus::Decoder::new(args.sample_rate, opus::Channels::Mono)?;
+    let mut decoder = opus::Decoder::new(decoded_sample_rate, opus::Channels::Mono)?;
 
     let mut input_file = File::open(&input_file_name)?;
     let mut output_file = File::create(&output_file_name)?;

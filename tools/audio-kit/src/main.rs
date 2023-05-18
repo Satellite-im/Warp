@@ -43,6 +43,12 @@ enum Cli {
         input_file_name: String,
         output_file_name: String,
     },
+    /// tests encoding/decoding with specified decoding parameters
+    CustomEncode {
+        decoded_sample_rate: u32,
+        input_file_name: String,
+        output_file_name: String,
+    },
     /// plays the given file
     Play { file_name: String },
     /// print the current config
@@ -175,10 +181,29 @@ async fn handle_command(cli: Cli) -> anyhow::Result<()> {
             // todo
             match sm.sample_type {
                 SampleTypes::Float => {
-                    encode_f32(sm.clone(), input_file_name, output_file_name).await?
+                    encode_f32(
+                        sm.clone(),
+                        sm.sample_rate,
+                        input_file_name,
+                        output_file_name,
+                    )
+                    .await?
                 }
                 SampleTypes::Signed => todo!(),
             }
+        }
+        Cli::CustomEncode {
+            decoded_sample_rate,
+            input_file_name,
+            output_file_name,
+        } => {
+            encode_f32(
+                sm.clone(),
+                decoded_sample_rate,
+                input_file_name,
+                output_file_name,
+            )
+            .await?;
         }
         Cli::Play { file_name } => {
             unsafe {
