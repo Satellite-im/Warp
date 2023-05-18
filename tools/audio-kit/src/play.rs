@@ -9,18 +9,19 @@ use crate::{err_fn, StaticArgs, AUDIO_FILE_NAME};
 
 static mut audio_file: Option<File> = None;
 
-pub async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
+pub async fn play_f32(args: StaticArgs, sample_rate: Option<u32>) -> anyhow::Result<()> {
     unsafe {
         audio_file = Some(File::open(AUDIO_FILE_NAME.as_str())?);
     }
+    let sample_rate = sample_rate.unwrap_or(args.sample_rate);
     let duration_secs = args.audio_duration_secs;
-    let total_samples = args.sample_rate as usize * (duration_secs + 1);
+    let total_samples = sample_rate as usize * (duration_secs + 1);
     let mut decoded_samples: Vec<f32> = Vec::new();
     decoded_samples.resize(total_samples, 0_f32);
 
     let config = cpal::StreamConfig {
         channels: 1,
-        sample_rate: SampleRate(args.sample_rate),
+        sample_rate: SampleRate(sample_rate),
         buffer_size: cpal::BufferSize::Default,
     };
 
