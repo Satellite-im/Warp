@@ -84,7 +84,7 @@ impl SinkTrack for OpusSink {
                 }
             }
             if input_fell_behind {
-                log::trace!("input stream fell behind: try increasing latency");
+                log::trace!("output stream fell behind: try increasing latency");
             }
         };
         let output_stream =
