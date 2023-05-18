@@ -8,7 +8,6 @@ pub struct OpusPacketizer {
     num_samples: usize,
     raw_bytes: Vec<u8>,
     // number of samples in a frame
-    // todo: is this true? or is it the number of bytes...
     frame_size: usize,
 }
 
@@ -34,12 +33,14 @@ impl OpusPacketizer {
     }
 
     pub fn packetize_i16(&mut self, sample: i16, out: &mut [u8]) -> anyhow::Result<Option<usize>> {
-        // opus::Encoder::encode is using raw pointers under the hood.
+        // cast the sample as a u8 array and save it
         let p: *const i16 = &sample;
         let bp: *const u8 = p as *const _;
         let bs: &[u8] = unsafe { slice::from_raw_parts(bp, mem::size_of::<i16>()) };
         self.raw_bytes.extend_from_slice(bs);
         self.num_samples += 1;
+
+        // if a frame is complete, cast the u8 array as an i16 array
         if self.num_samples == self.frame_size {
             let p: *const i16 = self.raw_bytes.as_ptr() as _;
             let bs: &[i16] =
@@ -58,12 +59,14 @@ impl OpusPacketizer {
     }
 
     pub fn packetize_f32(&mut self, sample: f32, out: &mut [u8]) -> anyhow::Result<Option<usize>> {
-        // opus::Encoder::encode is using raw pointers under the hood.
+        // cast the sample as a u8 array and save it
         let p: *const f32 = &sample;
         let bp: *const u8 = p as *const _;
         let bs: &[u8] = unsafe { slice::from_raw_parts(bp, mem::size_of::<f32>()) };
         self.raw_bytes.extend_from_slice(bs);
         self.num_samples += 1;
+
+        // if a frame is complete, cast the u8 array as an f32 array
         if self.num_samples == self.frame_size {
             let p: *const f32 = self.raw_bytes.as_ptr() as _;
             let bs: &[f32] =
@@ -76,6 +79,8 @@ impl OpusPacketizer {
                 }
                 Err(e) => anyhow::bail!("failed to encode: {e}"),
             }
+        } else if self.num_samples > self.frame_size {
+            panic!("should never happen");
         } else {
             return Ok(None);
         }

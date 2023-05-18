@@ -77,7 +77,7 @@ static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
         sample_type: SampleTypes::Float,
         bit_rate: opus::Bitrate::Max,
         sample_rate: 8000,
-        frame_size: 120,
+        frame_size: 240,
         bandwidth: opus::Bandwidth::Fullband,
         application: opus::Application::Voip,
         audio_duration_secs: 5,
@@ -128,6 +128,12 @@ async fn handle_command(cli: Cli) -> anyhow::Result<()> {
             }
             sm.sample_rate = rate;
         }
+        /// based on OPUS RFC, OPUS encodes frames based on duration - 2.5, 5, 10, 20, 40, or 60ms.
+        /// This means that for a given sample rate, not all frame sizes are acceptable.
+        /// sample rate of 8000 with a frame size of:  480 - 60ms; 240 - 30ms
+        /// sample rate of 16000 with a frame size of: 960 - 60ms
+        /// sample rate of 24000 with a frame size of: 480 - 20ms; 240 - 10ms
+        /// sample rate of 48000 with a frame size of: 120: 2.5ms; 240: 5ms; 480: 10ms; 960: 10ms; 1920: 20ms;
         Cli::FrameSize { frame_size } => {
             if !vec![120, 240, 480, 960, 1920, 2880].contains(&frame_size) {
                 bail!("invalid frame size");
