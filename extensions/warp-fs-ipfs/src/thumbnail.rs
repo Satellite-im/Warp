@@ -83,10 +83,10 @@ impl ThumbnailGenerator {
                         let thumbnail = image.thumbnail(width, height);
 
                         let mut t_buffer = std::io::Cursor::new(vec![]);
-                        let output_format = match format {
-                            ImageFormat::WebP if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
-                            _ if output_exact => format,
-                            _ => ImageFormat::Jpeg
+                        let output_format = match (output_exact, format) {
+                            (false, _) => ImageFormat::Jpeg,
+                            (true, ImageFormat::WebP) if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
+                            (true, format) => format,
                         };
 
                         thumbnail
@@ -146,10 +146,10 @@ impl ThumbnailGenerator {
 
                         let thumbnail = image.thumbnail(width, height);
                         let mut t_buffer = std::io::Cursor::new(vec![]);
-                        let output_format = match format {
-                            ImageFormat::WebP if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
-                            _ if output_exact => format,
-                            _ => ImageFormat::Jpeg,
+                        let output_format = match (output_exact, format) {
+                            (false, _) => ImageFormat::Jpeg,
+                            (true, ImageFormat::WebP) if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
+                            (true, format) => format,
                         };
                         thumbnail
                             .write_to(&mut t_buffer, output_format)
