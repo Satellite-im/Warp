@@ -85,7 +85,9 @@ impl ThumbnailGenerator {
                         let mut t_buffer = std::io::Cursor::new(vec![]);
                         let output_format = match (output_exact, format) {
                             (false, _) => ImageFormat::Jpeg,
-                            (true, ImageFormat::WebP) if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
+                            (true, ImageFormat::WebP) if cfg!(not(feature = "webp")) => {
+                                ImageFormat::Jpeg
+                            }
                             (true, format) => format,
                         };
 
@@ -148,7 +150,9 @@ impl ThumbnailGenerator {
                         let mut t_buffer = std::io::Cursor::new(vec![]);
                         let output_format = match (output_exact, format) {
                             (false, _) => ImageFormat::Jpeg,
-                            (true, ImageFormat::WebP) if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
+                            (true, ImageFormat::WebP) if cfg!(not(feature = "webp")) => {
+                                ImageFormat::Jpeg
+                            }
                             (true, format) => format,
                         };
                         thumbnail

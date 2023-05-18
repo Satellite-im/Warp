@@ -42,6 +42,17 @@ pub enum ItemInner {
     Directory(Directory),
 }
 
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub enum FormatType {
+    #[display(fmt = "generic")]
+    #[default]
+    Generic,
+    #[display(fmt = "{}", _0)]
+    Mime(mediatype::MediaTypeBuf),
+}
+
 /// The type that `Item` represents
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
@@ -204,6 +215,14 @@ impl Item {
         match &self.0 {
             ItemInner::File(file) => file.size(),
             ItemInner::Directory(directory) => directory.get_items().iter().map(Item::size).sum(),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn thumbnail_format(&self) -> FormatType {
+        match &self.0 {
+            ItemInner::File(file) => file.thumbnail_format(),
+            ItemInner::Directory(directory) => directory.thumbnail_format(),
         }
     }
 

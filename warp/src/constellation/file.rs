@@ -12,6 +12,8 @@ use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+use super::item::FormatType;
+
 /// `FileType` describes all supported file types.
 /// This will be useful for applying icons to the tree later on
 /// if we don't have a supported file type, we can just default to generic.
@@ -45,6 +47,9 @@ pub struct File {
     /// Note: This should be set if the file is an image, unless
     ///       one plans to add a generic thumbnail for the file
     thumbnail: Arc<RwLock<Vec<u8>>>,
+
+    /// Format of the thumbnail
+    thumbnail_format: Arc<RwLock<FormatType>>,
 
     /// Favorite File
     favorite: Arc<RwLock<bool>>,
@@ -91,6 +96,7 @@ impl Default for File {
             description: Default::default(),
             size: Default::default(),
             thumbnail: Default::default(),
+            thumbnail_format: Default::default(),
             favorite: Default::default(),
             creation: Arc::new(RwLock::new(timestamp)),
             modified: Arc::new(RwLock::new(timestamp)),
@@ -162,6 +168,19 @@ impl File {
     pub fn set_description(&self, desc: &str) {
         *self.description.write() = desc.to_string();
         *self.modified.write() = Utc::now()
+    }
+
+    /// Set thumbnail format
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_thumbnail_format(&self, format: FormatType) {
+        *self.thumbnail_format.write() = format;
+        *self.modified.write() = Utc::now()
+    }
+
+    /// Get the thumbnail format
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn thumbnail_format(&self) -> FormatType {
+        self.thumbnail_format.read().clone()
     }
 
     /// Set the thumbnail to the file

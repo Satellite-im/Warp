@@ -650,7 +650,7 @@ impl Constellation for IpfsFileSystem {
         match self.thumbnail_store.get(ticket).await {
             Ok((extension_type, thumbnail)) => {
                 file.set_thumbnail(&thumbnail);
-                file.set_file_type(extension_type.into());
+                file.set_thumbnail_format(extension_type.into())
             }
             Err(_e) => {}
         }
@@ -1043,8 +1043,9 @@ impl Constellation for IpfsFileSystem {
             .insert_buffer(file.name(), &buffer, width, height, exact)
             .await;
 
-        if let Ok((_extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
+        if let Ok((extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
             file.set_thumbnail(&thumbnail);
+            file.set_thumbnail_format(extension_type.into())
         }
 
         Ok(())

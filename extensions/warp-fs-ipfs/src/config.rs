@@ -137,7 +137,7 @@ impl Default for FsIpfsConfig {
             thumbnail_size: (128, 128),
             chunking: None,
             thumbnail_task: false,
-            thumbnail_exact_format: true
+            thumbnail_exact_format: true,
         }
     }
 }
