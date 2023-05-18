@@ -58,5 +58,6 @@ pub async fn encode_f32(
     }
 
     output_file.sync_all()?;
+    println!("done encoding/decoding");
     Ok(())
 }

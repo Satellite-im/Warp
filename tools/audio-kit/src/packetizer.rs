@@ -1,12 +1,10 @@
-use std::{mem, slice};
-
 // opus::Encoder has separate functions for i16 and f32
 // want to use the same struct for both functions. will do some unsafe stuff to accomplish this.
 pub struct OpusPacketizer {
     // encodes groups of samples (frames)
     encoder: opus::Encoder,
-    num_samples: usize,
-    raw_bytes: Vec<u8>,
+    float_samples: Vec<f32>,
+    int_samples: Vec<i16>,
     // number of samples in a frame
     frame_size: usize,
 }
@@ -17,8 +15,6 @@ impl OpusPacketizer {
         sample_rate: u32,
         channels: opus::Channels,
     ) -> anyhow::Result<Self> {
-        let mut buf = Vec::new();
-        buf.reserve(frame_size * 4);
         let encoder =
             opus::Encoder::new(sample_rate, channels, opus::Application::Voip).map_err(|e| {
                 anyhow::anyhow!("{e}: sample_rate: {sample_rate}, channels: {channels:?}")
@@ -26,29 +22,18 @@ impl OpusPacketizer {
 
         Ok(Self {
             encoder,
-            num_samples: 0,
-            raw_bytes: buf,
+            float_samples: vec![],
+            int_samples: vec![],
             frame_size,
         })
     }
 
     pub fn packetize_i16(&mut self, sample: i16, out: &mut [u8]) -> anyhow::Result<Option<usize>> {
-        // cast the sample as a u8 array and save it
-        let p: *const i16 = &sample;
-        let bp: *const u8 = p as *const _;
-        let bs: &[u8] = unsafe { slice::from_raw_parts(bp, mem::size_of::<i16>()) };
-        self.raw_bytes.extend_from_slice(bs);
-        self.num_samples += 1;
-
-        // if a frame is complete, cast the u8 array as an i16 array
-        if self.num_samples == self.frame_size {
-            let p: *const i16 = self.raw_bytes.as_ptr() as _;
-            let bs: &[i16] =
-                unsafe { slice::from_raw_parts(p, mem::size_of::<i16>() * self.num_samples) };
-            match self.encoder.encode(bs, out) {
+        self.int_samples.push(sample);
+        if self.int_samples.len() == self.frame_size {
+            match self.encoder.encode(self.int_samples.as_slice(), out) {
                 Ok(size) => {
-                    self.raw_bytes.clear();
-                    self.num_samples = 0;
+                    self.int_samples.clear();
                     return Ok(Some(size));
                 }
                 Err(e) => anyhow::bail!("failed to encode: {e}"),
@@ -59,28 +44,18 @@ impl OpusPacketizer {
     }
 
     pub fn packetize_f32(&mut self, sample: f32, out: &mut [u8]) -> anyhow::Result<Option<usize>> {
-        // cast the sample as a u8 array and save it
-        let p: *const f32 = &sample;
-        let bp: *const u8 = p as *const _;
-        let bs: &[u8] = unsafe { slice::from_raw_parts(bp, mem::size_of::<f32>()) };
-        self.raw_bytes.extend_from_slice(bs);
-        self.num_samples += 1;
-
-        // if a frame is complete, cast the u8 array as an f32 array
-        if self.num_samples == self.frame_size {
-            let p: *const f32 = self.raw_bytes.as_ptr() as _;
-            let bs: &[f32] =
-                unsafe { slice::from_raw_parts(p, mem::size_of::<f32>() * self.num_samples) };
-            match self.encoder.encode_float(bs, out) {
+        self.float_samples.push(sample);
+        if self.float_samples.len() == self.frame_size {
+            match self
+                .encoder
+                .encode_float(&self.float_samples.as_slice(), out)
+            {
                 Ok(size) => {
-                    self.raw_bytes.clear();
-                    self.num_samples = 0;
+                    self.float_samples.clear();
                     return Ok(Some(size));
                 }
                 Err(e) => anyhow::bail!("failed to encode: {e}"),
             }
-        } else if self.num_samples > self.frame_size {
-            panic!("should never happen");
         } else {
             return Ok(None);
         }
