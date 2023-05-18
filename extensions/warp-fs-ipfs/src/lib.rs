@@ -1006,6 +1006,7 @@ impl Constellation for IpfsFileSystem {
         let file = directory
             .get_item_by_path(path)
             .and_then(|item| item.get_file())?;
+
         let reference = file.reference().ok_or(Error::FileNotFound)?;
 
         let stream = ipfs
@@ -1015,12 +1016,32 @@ impl Constellation for IpfsFileSystem {
 
         pin_mut!(stream);
 
+        let mut buffer = vec![];
         while let Some(data) = stream.next().await {
             //This is to make sure there isnt any errors while traversing the links
             //however we do not need to deal with the data itself as the will store
             //it in the blockstore after being found or blocks being exchanged from peer
             //TODO: Should check first chunk and timeout if it exceeds a specific length
-            let _ = data.map_err(anyhow::Error::from)?;
+            let bytes = data.map_err(anyhow::Error::from)?;
+            buffer.extend(bytes);
+        }
+
+        let Some((width, height)) = self
+            .config
+            .as_ref()
+            .map(|c| c.thumbnail_size) else {
+                // No need to error since logic after only deals with thumbnail generation
+                return Ok(());
+            };
+
+        // Generate the thumbnail for the file
+        let id = self
+            .thumbnail_store
+            .insert_buffer(file.name(), &buffer, width, height)
+            .await?;
+
+        if let Ok((_extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
+            file.set_thumbnail(&thumbnail);
         }
 
         Ok(())

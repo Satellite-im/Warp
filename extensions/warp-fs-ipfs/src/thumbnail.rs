@@ -82,8 +82,6 @@ impl ThumbnailGenerator {
                         let thumbnail = image.thumbnail(width, height);
                         
                         let mut t_buffer = std::io::Cursor::new(vec![]);
-
-
                         let output_format = match format {
                             ImageFormat::WebP if cfg!(not(feature = "webp")) => ImageFormat::Jpeg,
                             _ => format 
