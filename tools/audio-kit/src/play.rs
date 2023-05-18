@@ -11,7 +11,7 @@ static mut audio_file: Option<File> = None;
 
 pub async fn play_f32(args: StaticArgs) -> anyhow::Result<()> {
     unsafe {
-        audio_file = Some(File::open(AUDIO_FILE_NAME)?);
+        audio_file = Some(File::open(AUDIO_FILE_NAME.as_str())?);
     }
     let duration_secs = args.audio_duration_secs;
     let total_samples = args.sample_rate as usize * (duration_secs + 1);

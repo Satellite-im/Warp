@@ -1,19 +1,15 @@
 use anyhow::bail;
 use clap::Parser;
-use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait},
-    SampleRate,
-};
+
+use encode::*;
 use log::LevelFilter;
 use once_cell::sync::Lazy;
-use play::play_f32;
+use play::*;
 use record::*;
 use simple_logger::SimpleLogger;
-use std::{path::Path, time::Duration};
 use tokio::sync::Mutex;
 
-use crate::packetizer::OpusPacketizer;
-
+mod encode;
 mod feedback;
 mod packetizer;
 mod play;
@@ -41,11 +37,14 @@ enum Cli {
     /// sets the opus::Application. values are 2048 (Voip) and 2049 (Audio)
     Application { application: i32 },
     /// records 10 seconds of audio and writes it to a file
-    Record,
-    /// records audio but encodes and decodes it before writing it to a file.
-    RecordEncode,
-    /// plays the most recently recorded audio
-    Play,
+    Record { file_name: String },
+    /// encode and decode the given file, saving the output to a new file
+    Encode {
+        input_file_name: String,
+        output_file_name: String,
+    },
+    /// plays the given file
+    Play { file_name: String },
     /// print the current config
     ShowConfig,
     /// test feeding the input and output streams together
@@ -71,7 +70,9 @@ pub struct StaticArgs {
     audio_duration_secs: usize,
 }
 
-pub const AUDIO_FILE_NAME: &str = "/tmp/audio.bin";
+// CPAL callbacks have a static lifetime. in play.rs and record.rs, a global variable is used to share data between callbacks.
+// that variable is a file, named by AUDIO_FILE_NAME.
+static mut AUDIO_FILE_NAME: Lazy<String> = Lazy::new(|| String::from("/tmp/audio.bin"));
 static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
     Mutex::new(StaticArgs {
         sample_type: SampleTypes::Float,
@@ -128,12 +129,12 @@ async fn handle_command(cli: Cli) -> anyhow::Result<()> {
             }
             sm.sample_rate = rate;
         }
-        /// based on OPUS RFC, OPUS encodes frames based on duration - 2.5, 5, 10, 20, 40, or 60ms.
-        /// This means that for a given sample rate, not all frame sizes are acceptable.
-        /// sample rate of 8000 with a frame size of:  480 - 60ms; 240 - 30ms
-        /// sample rate of 16000 with a frame size of: 960 - 60ms
-        /// sample rate of 24000 with a frame size of: 480 - 20ms; 240 - 10ms
-        /// sample rate of 48000 with a frame size of: 120: 2.5ms; 240: 5ms; 480: 10ms; 960: 10ms; 1920: 20ms;
+        // based on OPUS RFC, OPUS encodes frames based on duration - 2.5, 5, 10, 20, 40, or 60ms.
+        // This means that for a given sample rate, not all frame sizes are acceptable.
+        // sample rate of 8000 with a frame size of:  480 - 60ms; 240 - 30ms
+        // sample rate of 16000 with a frame size of: 960 - 60ms
+        // sample rate of 24000 with a frame size of: 480 - 20ms; 240 - 10ms
+        // sample rate of 48000 with a frame size of: 120: 2.5ms; 240: 5ms; 480: 10ms; 960: 10ms; 1920: 20ms;
         Cli::FrameSize { frame_size } => {
             if !vec![120, 240, 480, 960, 1920, 2880].contains(&frame_size) {
                 bail!("invalid frame size");
@@ -158,18 +159,36 @@ async fn handle_command(cli: Cli) -> anyhow::Result<()> {
                 _ => bail!("invalid application"),
             };
         }
-        Cli::Record => match sm.sample_type {
-            SampleTypes::Float => record_f32_noencode(sm.clone()).await?,
-            SampleTypes::Signed => todo!(),
-        },
-        Cli::RecordEncode => match sm.sample_type {
-            SampleTypes::Float => record_f32_encode(sm.clone()).await?,
-            SampleTypes::Signed => todo!(),
-        },
-        Cli::Play => match sm.sample_type {
-            SampleTypes::Float => play_f32(sm.clone()).await?,
-            SampleTypes::Signed => todo!(),
-        },
+        Cli::Record { file_name } => {
+            unsafe {
+                *AUDIO_FILE_NAME = file_name;
+            }
+            match sm.sample_type {
+                SampleTypes::Float => record_f32(sm.clone()).await?,
+                SampleTypes::Signed => todo!(),
+            }
+        }
+        Cli::Encode {
+            input_file_name,
+            output_file_name,
+        } => {
+            // todo
+            match sm.sample_type {
+                SampleTypes::Float => {
+                    encode_f32(sm.clone(), input_file_name, output_file_name).await?
+                }
+                SampleTypes::Signed => todo!(),
+            }
+        }
+        Cli::Play { file_name } => {
+            unsafe {
+                *AUDIO_FILE_NAME = file_name;
+            }
+            match sm.sample_type {
+                SampleTypes::Float => play_f32(sm.clone()).await?,
+                SampleTypes::Signed => todo!(),
+            }
+        }
         Cli::ShowConfig => println!("{:#?}", sm),
         Cli::Feedback => feedback::feedback(sm.clone()).await?,
     }
