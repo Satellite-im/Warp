@@ -507,7 +507,7 @@ impl Constellation for IpfsFileSystem {
                     match store.get(ticket).await {
                         Ok((extension_type, thumbnail)) => {
                             file.set_thumbnail(&thumbnail);
-                            file.set_file_type(extension_type.into());
+                            file.set_thumbnail_format(extension_type.into());
                             //We export again so the thumbnail can be apart of the index
                             if background {
                                 if let Err(_e) = fs.export_index().await {}
