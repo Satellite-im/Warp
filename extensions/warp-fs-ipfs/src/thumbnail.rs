@@ -94,7 +94,7 @@ impl ThumbnailGenerator {
                         thumbnail
                             .write_to(&mut t_buffer, output_format)
                             .map_err(anyhow::Error::from)?;
-                        Ok::<_, Error>((extension, t_buffer.into_inner()))
+                        Ok::<_, Error>((ExtensionType::try_from(output_format)?, t_buffer.into_inner()))
                     })
                     .await
                     .map_err(anyhow::Error::from)?,
@@ -158,7 +158,7 @@ impl ThumbnailGenerator {
                         thumbnail
                             .write_to(&mut t_buffer, output_format)
                             .map_err(anyhow::Error::from)?;
-                        Ok::<_, Error>((extension, t_buffer.into_inner()))
+                        Ok::<_, Error>((ExtensionType::try_from(output_format)?, t_buffer.into_inner()))
                     })
                     .await
                     .map_err(anyhow::Error::from)?,

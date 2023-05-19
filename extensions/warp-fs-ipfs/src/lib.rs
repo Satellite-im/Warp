@@ -1021,10 +1021,6 @@ impl Constellation for IpfsFileSystem {
 
         let mut buffer = vec![];
         while let Some(data) = stream.next().await {
-            //This is to make sure there isnt any errors while traversing the links
-            //however we do not need to deal with the data itself as the will store
-            //it in the blockstore after being found or blocks being exchanged from peer
-            //TODO: Should check first chunk and timeout if it exceeds a specific length
             let bytes = data.map_err(anyhow::Error::from)?;
             buffer.extend(bytes);
         }
@@ -1047,6 +1043,8 @@ impl Constellation for IpfsFileSystem {
             file.set_thumbnail(&thumbnail);
             file.set_thumbnail_format(extension_type.into())
         }
+
+        let _ = self.export_index().await;
 
         Ok(())
     }

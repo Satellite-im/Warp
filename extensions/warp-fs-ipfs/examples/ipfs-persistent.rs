@@ -48,6 +48,9 @@ enum Command {
     FileInfo {
         remote: String,
     },
+    SyncRef {
+        remote: String,
+    },
     FileReference {
         remote: String,
     },
@@ -216,7 +219,7 @@ async fn main() -> anyhow::Result<()> {
                     item.description(),
                     item.creation().date_naive().to_string(),
                     item.modified().date_naive().to_string(),
-                    (!item.thumbnail().is_empty()).to_string(),
+                    item.thumbnail_format().to_string(),
                     if item.is_file() {
                         let ty = item.get_file()?.file_type();
                         ty.to_string()
@@ -234,6 +237,10 @@ async fn main() -> anyhow::Result<()> {
             }
             println!("{table}");
         }
+        Command::SyncRef { remote } => match filesystem.sync_ref(&remote).await {
+            Ok(_) => {},
+            Err(e) => println!("Error: {e}"),
+        },
         Command::FileReference { remote } => {
             match filesystem
                 .current_directory()?
