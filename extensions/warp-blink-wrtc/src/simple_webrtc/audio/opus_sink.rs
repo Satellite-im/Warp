@@ -3,11 +3,9 @@ use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
 };
-use std::sync::Arc;
-use tokio::{
-    sync::mpsc::{self, error::TryRecvError},
-    task::JoinHandle,
-};
+use ringbuf::HeapRb;
+use std::{mem::MaybeUninit, sync::Arc};
+use tokio::task::JoinHandle;
 
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
@@ -57,7 +55,9 @@ impl SinkTrack for OpusSink {
         };
 
         let decoder = opus::Decoder::new(sample_rate, channels)?;
-        let (producer, mut consumer) = mpsc::unbounded_channel::<f32>();
+        let ring = HeapRb::<f32>::new(sample_rate as usize * 2);
+        let (producer, mut consumer) = ring.split();
+
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
         let sample_builder = SampleBuilder::new(max_late, depacketizer, sample_rate);
         let track2 = track.clone();
@@ -71,20 +71,16 @@ impl SinkTrack for OpusSink {
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut input_fell_behind = false;
             for sample in data {
-                *sample = match consumer.try_recv() {
-                    Ok(s) => s,
-                    Err(TryRecvError::Empty) => {
+                *sample = match consumer.pop() {
+                    Some(s) => s,
+                    None => {
                         input_fell_behind = true;
-                        0_f32
-                    }
-                    Err(e) => {
-                        log::error!("channel closed: {}", e);
                         0_f32
                     }
                 }
             }
             if input_fell_behind {
-                log::trace!("output stream fell behind: try increasing latency");
+                //log::trace!("output stream fell behind: try increasing latency");
             }
         };
         let output_stream =
@@ -123,7 +119,7 @@ impl SinkTrack for OpusSink {
 async fn decode_media_stream<T>(
     track: Arc<TrackRemote>,
     mut sample_builder: SampleBuilder<T>,
-    producer: mpsc::UnboundedSender<f32>,
+    mut producer: ringbuf::Producer<f32, Arc<ringbuf::SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
     mut decoder: opus::Decoder,
 ) -> Result<()>
 where
@@ -164,7 +160,7 @@ where
                         Ok(siz) => {
                             let to_send = decoder_output_buf.iter().take(siz);
                             for audio_sample in to_send {
-                                if let Err(e) = producer.send(*audio_sample) {
+                                if let Err(e) = producer.push(*audio_sample) {
                                     log::error!("failed to send sample: {}", e);
                                 }
                             }
