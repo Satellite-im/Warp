@@ -1,6 +1,6 @@
 #![allow(clippy::result_large_err)]
 use super::file::File;
-use super::item::Item;
+use super::item::{FormatType, Item};
 use crate::error::Error;
 use crate::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
@@ -37,6 +37,9 @@ pub struct Directory {
 
     /// Thumbnail of the `Directory`
     thumbnail: Arc<RwLock<Vec<u8>>>,
+
+    /// Format of the thumbnail
+    thumbnail_format: Arc<RwLock<FormatType>>,
 
     /// Favorite Directory
     favorite: Arc<RwLock<bool>>,
@@ -76,6 +79,7 @@ impl Default for Directory {
             name: Arc::new(RwLock::new(String::from("un-named directory"))),
             description: Default::default(),
             thumbnail: Default::default(),
+            thumbnail_format: Default::default(),
             favorite: Default::default(),
             creation: Arc::new(RwLock::new(timestamp)),
             modified: Arc::new(RwLock::new(timestamp)),
@@ -517,6 +521,16 @@ impl Directory {
             name = &name[..256];
         }
         *self.name.write() = name.to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_thumbnail_format(&self, format: FormatType) {
+        *self.thumbnail_format.write() = format;
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn thumbnail_format(&self) -> FormatType {
+        self.thumbnail_format.read().clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]

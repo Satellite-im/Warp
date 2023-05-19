@@ -2,10 +2,13 @@ use std::str::FromStr;
 
 use image::ImageFormat;
 use mediatype::MediaTypeBuf;
-use warp::{constellation::file::FileType, error::Error};
+use warp::{
+    constellation::{file::FileType, item::FormatType},
+    error::Error,
+};
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Copy, PartialEq, Eq, derive_more::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Display)]
 pub enum ExtensionType {
     #[display(fmt = "image/png")]
     PNG,
@@ -79,6 +82,21 @@ impl TryFrom<ExtensionType> for ImageFormat {
     }
 }
 
+impl TryFrom<ImageFormat> for ExtensionType {
+    type Error = Error;
+    fn try_from(value: ImageFormat) -> Result<Self, Self::Error> {
+        match value {
+            ImageFormat::Jpeg => Ok(ExtensionType::JPG),
+            ImageFormat::Png => Ok(ExtensionType::PNG),
+            ImageFormat::Gif => Ok(ExtensionType::GIF),
+            ImageFormat::Ico => Ok(ExtensionType::ICO),
+            ImageFormat::Bmp => Ok(ExtensionType::BMP),
+            ImageFormat::WebP => Ok(ExtensionType::WEBP),
+            _ => Err(Error::Unimplemented),
+        }
+    }
+}
+
 impl TryFrom<ExtensionType> for MediaTypeBuf {
     type Error = Error;
     fn try_from(ext: ExtensionType) -> Result<Self, Self::Error> {
@@ -93,6 +111,15 @@ impl From<ExtensionType> for FileType {
         match ext.try_into() {
             Ok(media) => FileType::Mime(media),
             Err(_) => FileType::Generic,
+        }
+    }
+}
+
+impl From<ExtensionType> for FormatType {
+    fn from(ext: ExtensionType) -> Self {
+        match ext.try_into() {
+            Ok(media) => Self::Mime(media),
+            Err(_) => Self::Generic,
         }
     }
 }

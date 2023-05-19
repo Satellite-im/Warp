@@ -507,7 +507,7 @@ impl Constellation for IpfsFileSystem {
                     match store.get(ticket).await {
                         Ok((extension_type, thumbnail)) => {
                             file.set_thumbnail(&thumbnail);
-                            file.set_file_type(extension_type.into());
+                            file.set_thumbnail_format(extension_type.into());
                             //We export again so the thumbnail can be apart of the index
                             if background {
                                 if let Err(_e) = fs.export_index().await {}
@@ -650,7 +650,7 @@ impl Constellation for IpfsFileSystem {
         match self.thumbnail_store.get(ticket).await {
             Ok((extension_type, thumbnail)) => {
                 file.set_thumbnail(&thumbnail);
-                file.set_file_type(extension_type.into());
+                file.set_thumbnail_format(extension_type.into())
             }
             Err(_e) => {}
         }
@@ -1021,10 +1021,6 @@ impl Constellation for IpfsFileSystem {
 
         let mut buffer = vec![];
         while let Some(data) = stream.next().await {
-            //This is to make sure there isnt any errors while traversing the links
-            //however we do not need to deal with the data itself as the will store
-            //it in the blockstore after being found or blocks being exchanged from peer
-            //TODO: Should check first chunk and timeout if it exceeds a specific length
             let bytes = data.map_err(anyhow::Error::from)?;
             buffer.extend(bytes);
         }
@@ -1043,9 +1039,12 @@ impl Constellation for IpfsFileSystem {
             .insert_buffer(file.name(), &buffer, width, height, exact)
             .await;
 
-        if let Ok((_extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
+        if let Ok((extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
             file.set_thumbnail(&thumbnail);
+            file.set_thumbnail_format(extension_type.into())
         }
+
+        let _ = self.export_index().await;
 
         Ok(())
     }
