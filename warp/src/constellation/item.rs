@@ -305,6 +305,14 @@ impl Item {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn set_thumbnail_format(&self, format: FormatType) {
+        match &self.0 {
+            ItemInner::File(file) => file.set_thumbnail_format(format),
+            ItemInner::Directory(directory) => directory.set_thumbnail_format(format),
+        }
+    }
+
     /// Set size of `Item` if its a `File`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_size(&self, size: usize) -> Result<(), Error> {
