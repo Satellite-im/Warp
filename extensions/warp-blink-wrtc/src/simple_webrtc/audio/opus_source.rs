@@ -143,9 +143,6 @@ fn create_source_track(
         buffer_size: cpal::BufferSize::Default, //Fixed(4096 * 50),
     };
 
-    // all samples are converted to f32
-    let sample_size_bytes = 4;
-
     // if clock rate represents the sampling frequency, then
     // this variable determines the bandwidth
     let sample_rate = codec.sample_rate();
@@ -184,9 +181,10 @@ fn create_source_track(
     let track2 = track;
     let join_handle = tokio::spawn(async move {
         while let Some(bytes) = consumer.recv().await {
-            //todo: this is wrong. the size of the opus packet is likely affected by the bitrate and any compression (idk if it does that)
-            let num_samples = bytes.len() / sample_size_bytes;
-            match packetizer.packetize(&bytes, num_samples as u32).await {
+            match packetizer
+                .packetize(&bytes, codec.frame_size() as u32)
+                .await
+            {
                 Ok(packets) => {
                     for packet in &packets {
                         if let Err(e) = track2.write_rtp(packet).await {
