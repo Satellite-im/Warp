@@ -84,24 +84,25 @@ pub async fn encode_f32_rtp(
                 .map_err(|e| anyhow::anyhow!("failed to packetize opus packet: {e}"))?;
 
             for packet in rtp_packets {
-                rtp_sample_builder.push(packet)
-            }
+                rtp_sample_builder.push(packet);
 
-            while let Some(opus_packet) = rtp_sample_builder.pop() {
-                let decoded_len =
-                    decoder.decode_float(opus_packet.data.as_ref(), &mut decoded, false)?;
-                if decoded_len > 0 {
-                    // cast the f32 array as a u8 array and write it to the file
-                    let p: *const f32 = decoded.as_ptr();
-                    let bp: *const u8 = p as _;
-                    let bs: &[u8] =
-                        unsafe { slice::from_raw_parts(bp, mem::size_of::<f32>() * decoded_len) };
-                    match output_file.write(bs) {
-                        Ok(num_written) => {
-                            assert_eq!(num_written, mem::size_of::<f32>() * decoded_len)
-                        }
-                        Err(e) => {
-                            log::error!("failed to write bytes to file: {e}");
+                while let Some(opus_packet) = rtp_sample_builder.pop() {
+                    let decoded_len =
+                        decoder.decode_float(opus_packet.data.as_ref(), &mut decoded, false)?;
+                    if decoded_len > 0 {
+                        // cast the f32 array as a u8 array and write it to the file
+                        let p: *const f32 = decoded.as_ptr();
+                        let bp: *const u8 = p as _;
+                        let bs: &[u8] = unsafe {
+                            slice::from_raw_parts(bp, mem::size_of::<f32>() * decoded_len)
+                        };
+                        match output_file.write(bs) {
+                            Ok(num_written) => {
+                                assert_eq!(num_written, mem::size_of::<f32>() * decoded_len)
+                            }
+                            Err(e) => {
+                                log::error!("failed to write bytes to file: {e}");
+                            }
                         }
                     }
                 }
