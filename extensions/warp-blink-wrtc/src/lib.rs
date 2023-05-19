@@ -645,6 +645,16 @@ impl Blink for WebRtc {
             "input device not found".into(),
         ))
     }
+    async fn select_default_microphone(&mut self) -> Result<(), Error> {
+        let host = cpal::default_host();
+        let device = host
+            .default_input_device()
+            .ok_or(Error::OtherWithContext(String::from(
+                "no default input device",
+            )))?;
+        host_media::change_audio_input(device).await?;
+        Ok(())
+    }
     async fn get_available_speakers(&self) -> Result<Vec<String>, Error> {
         let data = STATIC_DATA.lock().await;
         let device_iter = match data.cpal_host.output_devices() {
@@ -681,10 +691,24 @@ impl Blink for WebRtc {
             "output device not found".into(),
         ))
     }
+    async fn select_default_speaker(&mut self) -> Result<(), Error> {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .ok_or(Error::OtherWithContext(String::from(
+                "no default input device",
+            )))?;
+        host_media::change_audio_output(device).await?;
+        Ok(())
+    }
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {
         todo!()
     }
     async fn select_camera(&mut self, _device_name: &str) -> Result<(), Error> {
+        todo!()
+    }
+
+    async fn select_default_camera(&mut self) -> Result<(), Error> {
         todo!()
     }
 

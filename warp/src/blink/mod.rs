@@ -62,11 +62,14 @@ pub trait Blink {
     async fn get_available_microphones(&self) -> Result<Vec<String>, Error>;
     async fn get_current_microphone(&self) -> Option<String>;
     async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error>;
+    async fn select_default_microphone(&mut self) -> Result<(), Error>;
     async fn get_available_speakers(&self) -> Result<Vec<String>, Error>;
     async fn get_current_speaker(&self) -> Option<String>;
     async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error>;
+    async fn select_default_speaker(&mut self) -> Result<(), Error>;
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error>;
     async fn select_camera(&mut self, device_name: &str) -> Result<(), Error>;
+    async fn select_default_camera(&mut self) -> Result<(), Error>;
 
     // ------ Media controls ------
 
