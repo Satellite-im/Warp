@@ -202,7 +202,7 @@ fn create_source_track(
                     }
                 }
             }
-            std::thread::sleep(Duration::from_millis(5));
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
     });
 

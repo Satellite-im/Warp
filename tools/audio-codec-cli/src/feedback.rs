@@ -88,7 +88,7 @@ pub async fn feedback(args: StaticArgs) -> anyhow::Result<()> {
 
     // Run for 3 seconds before closing.
     println!("Playing for 3 seconds... ");
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     drop(input_stream);
     drop(output_stream);
     println!("Done!");
