@@ -7,8 +7,9 @@ use cpal::{
 
 use opus::Bitrate;
 use rand::Rng;
-use std::sync::Arc;
-use tokio::{sync::mpsc, task::JoinHandle};
+use ringbuf::HeapRb;
+use std::{sync::Arc, time::Duration};
+use tokio::task::JoinHandle;
 use warp::blink;
 
 use webrtc::{
@@ -156,7 +157,8 @@ fn create_source_track(
     let mut rng = rand::thread_rng();
     let ssrc: u32 = rng.gen();
 
-    let (producer, mut consumer) = mpsc::unbounded_channel::<Bytes>();
+    let ring = HeapRb::<f32>::new(codec.sample_rate() as usize * 2);
+    let (mut producer, mut consumer) = ring.split();
 
     let mut framer = OpusFramer::init(codec.frame_size(), sample_rate, channels)?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
@@ -180,33 +182,33 @@ fn create_source_track(
     // todo: when the input device changes, this needs to change too.
     let track2 = track;
     let join_handle = tokio::spawn(async move {
-        while let Some(bytes) = consumer.recv().await {
-            match packetizer
-                .packetize(&bytes, codec.frame_size() as u32)
-                .await
-            {
-                Ok(packets) => {
-                    for packet in &packets {
-                        if let Err(e) = track2.write_rtp(packet).await {
-                            log::error!("failed to send RTP packet: {}", e);
+        loop {
+            while let Some(sample) = consumer.pop() {
+                if let Some(bytes) = framer.frame(sample) {
+                    match packetizer
+                        .packetize(&bytes, codec.frame_size() as u32)
+                        .await
+                    {
+                        Ok(packets) => {
+                            for packet in &packets {
+                                if let Err(e) = track2.write_rtp(packet).await {
+                                    log::error!("failed to send RTP packet: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("failed to packetize for opus: {}", e);
                         }
                     }
                 }
-                Err(e) => {
-                    log::error!("failed to packetize for opus: {}", e);
-                }
             }
+            std::thread::sleep(Duration::from_millis(5));
         }
-        log::debug!("SourceTrack packetizer thread quitting");
     });
 
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         for sample in data {
-            if let Some(bytes) = framer.frame(*sample) {
-                if let Err(e) = producer.send(bytes) {
-                    log::error!("SourceTrack failed to send sample: {}", e);
-                }
-            }
+            let _ = producer.push(*sample);
         }
     };
     let input_stream = input_device
