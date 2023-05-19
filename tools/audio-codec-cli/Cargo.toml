@@ -1,5 +1,5 @@
 [package]
-name = "audio-kit"
+name = "audio-codec-cli"
 version = "0.1.0"
 edition = "2021"
 
