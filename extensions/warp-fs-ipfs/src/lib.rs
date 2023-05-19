@@ -1,4 +1,7 @@
 pub mod config;
+pub mod thumbnail;
+pub(crate) mod utils;
+
 use config::FsIpfsConfig;
 use futures::stream::{self, BoxStream};
 use futures::{pin_mut, StreamExt};
@@ -11,7 +14,10 @@ use std::ffi::OsStr;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
+use thumbnail::ThumbnailGenerator;
 use tokio_util::io::ReaderStream;
+use utils::ExtensionType;
+use warp::constellation::file::FileType;
 use warp::constellation::{
     ConstellationDataType, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
     ConstellationProgressStream, Progression,
@@ -37,6 +43,7 @@ use warp::{Extension, SingleHandle};
 type Result<T> = std::result::Result<T, Error>;
 
 #[allow(clippy::type_complexity)]
+#[derive(Clone)]
 pub struct IpfsFileSystem {
     index: Directory,
     path: Arc<RwLock<PathBuf>>,
@@ -47,22 +54,7 @@ pub struct IpfsFileSystem {
     account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-}
-
-impl Clone for IpfsFileSystem {
-    fn clone(&self) -> Self {
-        Self {
-            index: self.index.clone(),
-            path: self.path.clone(),
-            modified: self.modified,
-            config: self.config.clone(),
-            ipfs: self.ipfs.clone(),
-            index_cid: self.index_cid.clone(),
-            account: self.account.clone(),
-            broadcast: self.broadcast.clone(),
-            cache: self.cache.clone(),
-        }
-    }
+    thumbnail_store: ThumbnailGenerator,
 }
 
 impl IpfsFileSystem {
@@ -82,6 +74,7 @@ impl IpfsFileSystem {
             ipfs: Default::default(),
             broadcast: tx,
             cache: None,
+            thumbnail_store: ThumbnailGenerator::default(),
         };
 
         *filesystem.account.write().await = Some(account);
@@ -156,7 +149,6 @@ impl IpfsFileSystem {
         Ok(())
     }
 
-    #[allow(clippy::clone_on_copy)]
     pub async fn export_index(&self) -> Result<()> {
         let ipfs = self.ipfs()?;
         let index = self.export(ConstellationDataType::Json)?;
@@ -193,7 +185,7 @@ impl IpfsFileSystem {
             .cid()
             .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
 
-        let last_cid = self.index_cid.read().clone();
+        let last_cid = { *self.index_cid.read() };
 
         *self.index_cid.write() = Some(*cid);
 
@@ -403,8 +395,25 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileExist);
         }
 
+        let ((width, height), exact) = self
+            .config
+            .as_ref()
+            .map(|c| (c.thumbnail_size, c.thumbnail_exact_format))
+            .unwrap_or(((128, 128), true));
+
+        let ticket = self
+            .thumbnail_store
+            .insert(&path, width, height, exact)
+            .await?;
+
+        let background = self
+            .config
+            .as_ref()
+            .map(|f| f.thumbnail_task)
+            .unwrap_or_default();
+
         let name = name.to_string();
-        let fs = self.clone();
+        let fs: IpfsFileSystem = self.clone();
         let progress_stream = async_stream::stream! {
 
             let mut last_written = 0;
@@ -474,13 +483,14 @@ impl Constellation for IpfsFileSystem {
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
-            let f = file.clone();
+            file.set_file_type(to_file_type(&name));
 
-            if let Ok(Err(_e)) = tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
-            .await {}
+            if let Ok(Err(_e)) = tokio::task::spawn_blocking({
+                let f = file.clone();
+                move || f.hash_mut().hash_from_file(&path)
+            }).await {}
 
-
-            if let Err(e) = current_directory.add_item(file) {
+            if let Err(e) = current_directory.add_item(file.clone()) {
                 yield Progression::ProgressFailed {
                     name,
                     last_size: Some(last_written),
@@ -488,7 +498,33 @@ impl Constellation for IpfsFileSystem {
                 };
                 return;
             }
-            if let Err(_e) = fs.export_index().await {}
+
+            let task = {
+                let fs = fs.clone();
+                let store = fs.thumbnail_store.clone();
+                let file = file.clone();
+                async move {
+                    match store.get(ticket).await {
+                        Ok((extension_type, thumbnail)) => {
+                            file.set_thumbnail(&thumbnail);
+                            file.set_thumbnail_format(extension_type.into());
+                            //We export again so the thumbnail can be apart of the index
+                            if background {
+                                if let Err(_e) = fs.export_index().await {}
+                            }
+                        }
+                        Err(_e) => {}
+                    }
+                }
+            };
+
+            if !background {
+                task.await;
+                if let Err(_e) = fs.export_index().await {}
+            } else {
+                tokio::spawn(task);
+            }
+
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
@@ -561,6 +597,17 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileExist);
         }
 
+        let ((width, height), exact) = self
+            .config
+            .as_ref()
+            .map(|c| (c.thumbnail_size, c.thumbnail_exact_format))
+            .unwrap_or(((128, 128), true));
+
+        let ticket = self
+            .thumbnail_store
+            .insert_buffer(&name, buffer, width, height, exact)
+            .await;
+
         let reader = ReaderStream::new(Cursor::new(buffer))
             .map(|result| result.map(|x| x.into()))
             .boxed();
@@ -594,18 +641,22 @@ impl Constellation for IpfsFileSystem {
 
         let ipfs_path = returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
-        let cid = ipfs_path
-            .root()
-            .cid()
-            .ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
-        ipfs.insert_pin(cid, true).await?;
-
         let file = warp::constellation::file::File::new(name);
         file.set_size(total_written);
         file.set_reference(&format!("{ipfs_path}"));
+        file.set_file_type(to_file_type(name));
         file.hash_mut().hash_from_slice(buffer)?;
+
+        match self.thumbnail_store.get(ticket).await {
+            Ok((extension_type, thumbnail)) => {
+                file.set_thumbnail(&thumbnail);
+                file.set_thumbnail_format(extension_type.into())
+            }
+            Err(_e) => {}
+        }
+
         self.current_directory()?.add_item(file)?;
+
         if let Err(_e) = self.export_index().await {}
         let _ = self
             .broadcast
@@ -765,6 +816,7 @@ impl Constellation for IpfsFileSystem {
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
+            file.set_file_type(to_file_type(&name));
             // file.hash_mut().hash_from_slice(buffer)?;
             if let Err(e) = current_directory.add_item(file) {
                 yield Progression::ProgressFailed {
@@ -957,6 +1009,7 @@ impl Constellation for IpfsFileSystem {
         let file = directory
             .get_item_by_path(path)
             .and_then(|item| item.get_file())?;
+
         let reference = file.reference().ok_or(Error::FileNotFound)?;
 
         let stream = ipfs
@@ -966,13 +1019,32 @@ impl Constellation for IpfsFileSystem {
 
         pin_mut!(stream);
 
+        let mut buffer = vec![];
         while let Some(data) = stream.next().await {
-            //This is to make sure there isnt any errors while traversing the links
-            //however we do not need to deal with the data itself as the will store
-            //it in the blockstore after being found or blocks being exchanged from peer
-            //TODO: Should check first chunk and timeout if it exceeds a specific length
-            let _ = data.map_err(anyhow::Error::from)?;
+            let bytes = data.map_err(anyhow::Error::from)?;
+            buffer.extend(bytes);
         }
+
+        let Some(((width, height), exact)) = self
+            .config
+            .as_ref()
+            .map(|c| (c.thumbnail_size, c.thumbnail_exact_format)) else {
+                // No need to error since logic after only deals with thumbnail generation
+                return Ok(());
+            };
+
+        // Generate the thumbnail for the file
+        let id = self
+            .thumbnail_store
+            .insert_buffer(file.name(), &buffer, width, height, exact)
+            .await;
+
+        if let Ok((extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
+            file.set_thumbnail(&thumbnail);
+            file.set_thumbnail_format(extension_type.into())
+        }
+
+        let _ = self.export_index().await;
 
         Ok(())
     }
@@ -1089,4 +1161,15 @@ fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> R
     let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
 
     Ok(data)
+}
+
+pub(crate) fn to_file_type(name: &str) -> FileType {
+    let name = PathBuf::from(name.trim());
+    let extension = name
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(ExtensionType::from)
+        .unwrap_or(ExtensionType::Other);
+
+    extension.into()
 }

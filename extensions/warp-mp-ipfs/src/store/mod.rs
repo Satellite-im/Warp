@@ -273,7 +273,7 @@ pub async fn discover_peer(
 
 #[cfg(test)]
 mod test {
-    use rust_ipfs::{Keypair};
+    use rust_ipfs::Keypair;
     use warp::crypto::DID;
 
     use crate::store::did_to_libp2p_pub;

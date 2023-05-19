@@ -48,6 +48,9 @@ enum Command {
     FileInfo {
         remote: String,
     },
+    SyncRef {
+        remote: String,
+    },
     FileReference {
         remote: String,
     },
@@ -60,7 +63,7 @@ async fn account_persistent<P: AsRef<Path>>(
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
 
-    let tesseract = Tesseract::open_or_create(path.join("tdatastore"))?;
+    let tesseract = Tesseract::open_or_create(path, "tdatastore")?;
 
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
@@ -172,6 +175,7 @@ async fn main() -> anyhow::Result<()> {
                         "Description",
                         "Creation",
                         "Modified",
+                        "Thumbnail",
                         "Reference",
                     ]);
                     table.add_row(vec![
@@ -181,6 +185,7 @@ async fn main() -> anyhow::Result<()> {
                         file.description(),
                         file.creation().date_naive().to_string(),
                         file.modified().date_naive().to_string(),
+                        (!file.thumbnail().is_empty()).to_string(),
                         file.reference().unwrap_or_else(|| String::from("N/A")),
                     ]);
 
@@ -201,6 +206,8 @@ async fn main() -> anyhow::Result<()> {
                 "Description",
                 "Creation",
                 "Modified",
+                "Thumbnail",
+                "File Type",
                 "Reference",
             ]);
             for item in list.iter() {
@@ -212,6 +219,13 @@ async fn main() -> anyhow::Result<()> {
                     item.description(),
                     item.creation().date_naive().to_string(),
                     item.modified().date_naive().to_string(),
+                    item.thumbnail_format().to_string(),
+                    if item.is_file() {
+                        let ty = item.get_file()?.file_type();
+                        ty.to_string()
+                    } else {
+                        String::new()
+                    },
                     if item.is_file() {
                         item.get_file()?
                             .reference()
@@ -223,6 +237,10 @@ async fn main() -> anyhow::Result<()> {
             }
             println!("{table}");
         }
+        Command::SyncRef { remote } => match filesystem.sync_ref(&remote).await {
+            Ok(_) => {},
+            Err(e) => println!("Error: {e}"),
+        },
         Command::FileReference { remote } => {
             match filesystem
                 .current_directory()?

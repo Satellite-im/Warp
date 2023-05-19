@@ -18,8 +18,8 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
-    Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions, MessageStream,
-    MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
+    AttachmentKind, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
+    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -838,21 +838,16 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Message edited")?;
                         },
                         Some("/attach") => {
-                            let file = match cmd_line.next() {
-                                Some(file) => PathBuf::from(file),
-                                None => {
-                                    writeln!(stdout, "/attach <path> [message]")?;
-                                    continue
-                                }
-                            };
-
-                            let mut messages = vec![];
+                            let mut files = vec![];
 
                             for item in cmd_line.by_ref() {
-                                messages.push(item.to_string());
+                                files.push(PathBuf::from(item));
                             }
 
-                            let message = vec![messages.join(" ").to_string()];
+                            if files.is_empty() {
+                                writeln!(stdout, "/attach <paths>")?;
+                                continue
+                            }
 
                             let conversation_id = topic.read().clone();
                             tokio::spawn({
@@ -860,10 +855,29 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    if let Err(e) = chat.attach(conversation_id, None, Default::default(), vec![file], message).await {
-                                        writeln!(stdout, "Error: {e}")?;
-                                    } else {
-                                        writeln!(stdout, "File sent")?
+                                    let mut stream = match chat.attach(conversation_id, None, Default::default(), files, vec![]).await {
+                                        Ok(stream) => stream,
+                                        Err(e) => {
+                                            writeln!(stdout, "> Error: {e}")?;
+                                            return Err::<_, anyhow::Error>(anyhow::Error::from(e));
+                                        },
+                                    };
+                                    while let Some(event) = stream.next().await {
+                                        match event {
+                                            AttachmentKind::AttachedProgress(Progression::CurrentProgress { .. }) => {},
+                                            AttachmentKind::AttachedProgress(Progression::ProgressComplete { name, .. }) => {
+                                                writeln!(stdout, "> {name} is uploaded")?;
+                                            },
+                                            AttachmentKind::AttachedProgress(Progression::ProgressFailed { name, error, .. }) => {
+                                                writeln!(stdout, "> {name} failed to upload: {}", error.unwrap_or_default())?;
+                                            },
+                                            AttachmentKind::Pending(Ok(_)) => {
+                                                writeln!(stdout, "> File sent")?;
+                                            },
+                                            AttachmentKind::Pending(Err(e)) => {
+                                                writeln!(stdout, "> Error: {e}")?;
+                                            },
+                                        }
                                     }
                                     Ok::<_, anyhow::Error>(())
                                 }
@@ -1212,24 +1226,24 @@ async fn message_event_handle(
                                     }
                                 }
 
-                                let attachment = message.attachments().first().cloned().unwrap(); //Assume for now
+                                for attachment in message.attachments() {
+                                    if message.sender() == identity.did_key() {
+                                        writeln!(stdout, ">> File {} attached", attachment.name())?;
+                                    } else {
+                                        writeln!(
+                                            stdout,
+                                            ">> File {} been attached with size {} bytes",
+                                            attachment.name(),
+                                            attachment.size()
+                                        )?;
 
-                                if message.sender() == identity.did_key() {
-                                    writeln!(stdout, ">> File {} attached", attachment.name())?;
-                                } else {
-                                    writeln!(
-                                        stdout,
-                                        ">> File {} been attached with size {} bytes",
-                                        attachment.name(),
-                                        attachment.size()
-                                    )?;
-
-                                    writeln!(
-                                        stdout,
-                                        ">> Do `/download {} {} <path>` to download",
-                                        message.id(),
-                                        attachment.name(),
-                                    )?;
+                                        writeln!(
+                                            stdout,
+                                            ">> Do `/download {} {} <path>` to download",
+                                            message.id(),
+                                            attachment.name(),
+                                        )?;
+                                    }
                                 }
                             }
                             MessageType::Event => {}

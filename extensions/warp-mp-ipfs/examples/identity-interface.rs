@@ -68,7 +68,7 @@ async fn account(
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = match path.as_ref() {
-        Some(path) => Tesseract::open_or_create(path.join("tdatastore"))?,
+        Some(path) => Tesseract::open_or_create(path, "tdatastore")?,
         None => Tesseract::default(),
     };
 

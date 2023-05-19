@@ -117,16 +117,23 @@ impl Tesseract {
     /// ```no_run
     /// use warp::tesseract::Tesseract;
     ///
-    /// let tesseract = Tesseract::open_or_create("test_file").unwrap();
+    /// let tesseract = Tesseract::open_or_create("/path/to/directory", "test_file").unwrap();
     /// ```
-    pub fn open_or_create<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn open_or_create<P: AsRef<Path>, S: AsRef<str>>(path: P, file: S) -> Result<Self> {
+        let path = path.as_ref();
+
+        if !path.is_dir() {
+            std::fs::create_dir_all(path)?;
+        }
+
+        let path = path.join(file.as_ref());
+
         match Self::from_file(&path) {
             Ok(tesseract) => Ok(tesseract),
             Err(Error::IoError(e)) if e.kind() == ErrorKind::NotFound => {
                 let tesseract = Tesseract::default();
                 tesseract.check.store(true, Ordering::Relaxed);
-                let file =
-                    std::fs::canonicalize(&path).unwrap_or_else(|_| path.as_ref().to_path_buf());
+                let file = std::fs::canonicalize(&path).unwrap_or(path);
                 tesseract.set_file(file);
                 tesseract.set_autosave();
                 Ok(tesseract)
@@ -272,7 +279,7 @@ impl Tesseract {
     ///
     /// ```
     /// let map = std::collections::HashMap::from([(String::from("API"), String::from("MYKEY"))]);
-    /// let key = warp::crypto::generate(32);
+    /// let key = warp::crypto::generate::<32>();
     /// let tesseract = warp::tesseract::Tesseract::import(&key, map).unwrap();
     ///
     /// assert_eq!(tesseract.exist("API"), true);
@@ -293,7 +300,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  
     ///  let map = tesseract.export().unwrap();
@@ -420,7 +427,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     /// ```
@@ -441,7 +448,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     ///  assert_eq!(tesseract.exist("NOT_API"), false);
@@ -457,7 +464,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert!(tesseract.exist("API"));
     ///  let val = tesseract.retrieve("API").unwrap();
@@ -551,7 +558,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     ///  tesseract.delete("API").unwrap();
@@ -573,7 +580,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  tesseract.clear();
     ///  assert_eq!(tesseract.exist("API"), false);
@@ -592,7 +599,7 @@ impl Tesseract {
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
     ///  assert!(!tesseract.is_unlock());
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  assert!(tesseract.is_unlock());
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  tesseract.lock();
@@ -618,7 +625,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  assert!(tesseract.is_unlock());
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -646,7 +653,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  assert!(tesseract.is_unlock());
     ///  tesseract.lock();
     ///  assert!(!tesseract.is_unlock());
@@ -759,7 +766,7 @@ mod test {
     #[test]
     pub fn test_default() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
-        let key = generate(32);
+        let key = generate::<32>();
         tesseract.unlock(&key)?;
         assert!(tesseract.is_unlock());
         tesseract.set("API", "MYKEY")?;
@@ -851,7 +858,7 @@ mod test {
     #[test]
     pub fn tesseract_eq() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
-        let key = generate(32);
+        let key = generate::<32>();
         tesseract.unlock(&key)?;
         assert!(tesseract.is_unlock());
         tesseract.set("API", "MYKEY")?;
@@ -866,7 +873,7 @@ mod test {
     pub fn tesseract_event() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
         let mut stream = tesseract.subscribe();
-        let key = generate(32);
+        let key = generate::<32>();
 
         tesseract.unlock(&key)?;
         let event = futures::executor::block_on(stream.next());
