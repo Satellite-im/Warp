@@ -54,6 +54,12 @@ enum Cli {
         input_file_name: String,
         output_file_name: String,
     },
+    // additionally pass the opus packets through the RTP packetizer/depacketizer
+    CustomEncodeRtp {
+        decoded_sample_rate: u32,
+        input_file_name: String,
+        output_file_name: String,
+    },
     /// plays the given file.
     /// if a sample rate is specified, it will override
     /// the rate specified by the config.
@@ -84,6 +90,7 @@ pub struct StaticArgs {
     bandwidth: opus::Bandwidth,
     application: opus::Application,
     audio_duration_secs: usize,
+    rtp_mtu: usize,
 }
 
 // CPAL callbacks have a static lifetime. in play.rs and record.rs, a global variable is used to share data between callbacks.
@@ -98,6 +105,7 @@ static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
         bandwidth: opus::Bandwidth::Fullband,
         application: opus::Application::Voip,
         audio_duration_secs: 5,
+        rtp_mtu: 1024,
     })
 });
 
@@ -219,6 +227,19 @@ Frame size (in samples) vs duration for various sampling rates:
                 output_file_name,
             )
             .await?;
+        }
+        Cli::CustomEncodeRtp {
+            decoded_sample_rate,
+            input_file_name,
+            output_file_name,
+        } => {
+            encode_f32_rtp(
+                sm.clone(),
+                decoded_sample_rate,
+                input_file_name,
+                output_file_name,
+            )
+            .await?
         }
         Cli::Play {
             file_name,

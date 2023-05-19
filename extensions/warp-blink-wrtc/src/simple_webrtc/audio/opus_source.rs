@@ -184,6 +184,7 @@ fn create_source_track(
     let track2 = track;
     let join_handle = tokio::spawn(async move {
         while let Some(bytes) = consumer.recv().await {
+            //todo: this is wrong. the size of the opus packet is likely affected by the bitrate and any compression (idk if it does that)
             let num_samples = bytes.len() / sample_size_bytes;
             match packetizer.packetize(&bytes, num_samples as u32).await {
                 Ok(packets) => {
