@@ -24,6 +24,10 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 
+image = { workspace = true }
+derive_more.workspace = true
+mediatype.workspace = true
+
 [dev-dependencies]
 warp-mp-ipfs = { path = "../warp-mp-ipfs" }
 fdlimit = "0.2"
@@ -41,3 +45,4 @@ cbindgen = "0.23"
 
 [features]
 build-header = []
+webp = ["image/webp-encoder"]

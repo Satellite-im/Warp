@@ -42,6 +42,17 @@ pub enum ItemInner {
     Directory(Directory),
 }
 
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub enum FormatType {
+    #[display(fmt = "generic")]
+    #[default]
+    Generic,
+    #[display(fmt = "{}", _0)]
+    Mime(mediatype::MediaTypeBuf),
+}
+
 /// The type that `Item` represents
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
@@ -208,7 +219,15 @@ impl Item {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn thumbnail(&self) -> String {
+    pub fn thumbnail_format(&self) -> FormatType {
+        match &self.0 {
+            ItemInner::File(file) => file.thumbnail_format(),
+            ItemInner::Directory(directory) => directory.thumbnail_format(),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn thumbnail(&self) -> Vec<u8> {
         match &self.0 {
             ItemInner::File(file) => file.thumbnail(),
             ItemInner::Directory(directory) => directory.thumbnail(),
@@ -279,10 +298,18 @@ impl Item {
 
     /// Set thumbnail of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_thumbnail(&self, data: &str) {
+    pub fn set_thumbnail(&self, data: &[u8]) {
         match &self.0 {
             ItemInner::File(file) => file.set_thumbnail(data),
             ItemInner::Directory(directory) => directory.set_thumbnail(data),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn set_thumbnail_format(&self, format: FormatType) {
+        match &self.0 {
+            ItemInner::File(file) => file.set_thumbnail_format(format),
+            ItemInner::Directory(directory) => directory.set_thumbnail_format(format),
         }
     }
 
@@ -487,7 +514,7 @@ pub mod ffi {
         }
 
         let thumbnail = CStr::from_ptr(data).to_string_lossy().to_string();
-        Item::set_thumbnail(&*item, &thumbnail)
+        Item::set_thumbnail(&*item, thumbnail.as_bytes())
     }
 
     #[allow(clippy::missing_safety_doc)]

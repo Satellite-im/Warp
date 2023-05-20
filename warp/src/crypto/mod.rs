@@ -166,11 +166,10 @@ impl From<ed25519_dalek::SecretKey> for DID {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub fn generate(limit: usize) -> Vec<u8> {
-    let mut buf = vec![0u8; limit];
+pub fn generate<const N: usize>() -> [u8; N] {
+    let mut buf = [0u8; N];
     getrandom::getrandom(&mut buf).unwrap();
-    buf.to_vec()
+    buf
 }
 
 #[cfg(not(target_arch = "wasm32"))]

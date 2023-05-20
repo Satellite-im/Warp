@@ -1,7 +1,7 @@
 pub mod group;
 
 use crate::constellation::file::File;
-use crate::constellation::ConstellationProgressStream;
+use crate::constellation::{ConstellationProgressStream, Progression};
 use crate::crypto::DID;
 use crate::error::Error;
 use crate::{Extension, SingleHandle};
@@ -119,6 +119,28 @@ pub enum MessageEvent {
     /// Event that represents typing
     Typing,
     //TODO: Custom events?
+}
+
+#[derive(Debug, FFIFree)]
+pub enum AttachmentKind {
+    AttachedProgress(Progression),
+    Pending(Result<(), Error>),
+}
+
+#[derive(FFIFree)]
+pub struct AttachmentEventStream(pub BoxStream<'static, AttachmentKind>);
+
+impl core::ops::Deref for AttachmentEventStream {
+    type Target = BoxStream<'static, AttachmentKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for AttachmentEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 #[derive(FFIFree)]
@@ -916,7 +938,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Location,
         _: Vec<PathBuf>,
         _: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<AttachmentEventStream, Error> {
         Err(Error::Unimplemented)
     }
 
