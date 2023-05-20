@@ -9,7 +9,7 @@ pub mod store;
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use rand::RngCore;
-use rust_ipfs::{Keypair, PublicKey};
+use rust_ipfs::Keypair;
 use sha2::{Digest, Sha256, Sha512};
 use x25519_dalek::StaticSecret;
 
@@ -130,7 +130,6 @@ pub(crate) fn ecdh_decrypt(
 pub(crate) trait Signer {
     fn sign(&self, _: &Keypair) -> anyhow::Result<Vec<u8>>;
 }
-
 
 impl<B: AsRef<[u8]>> Signer for B {
     fn sign(&self, keypair: &Keypair) -> anyhow::Result<Vec<u8>> {
