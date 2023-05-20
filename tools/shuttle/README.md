@@ -44,7 +44,13 @@ This service will be helpful because within warp (or at least its ipfs component
 
 ### Wire format 
 
-**Note: Data should be serialized with a binary serializer such as bincode, protobuf, etc. This would allow utilizing zero-copy more effectively so we can reduce allocation** 
+**Note: Data should be serialized with a binary serializer such as bincode, protobuf, etc. that will allow utilizing zero-copy**
+**Recommended Serializers:**
+- bincode
+- protobuf (prost, quick-protobuf)
+- cbor (serde-cbor)
+- postcard
+- rkyv
 
 #### General payload format (using rust struct)
 
@@ -118,21 +124,21 @@ struct Response<'a> {
 User A wants to send a request to User B, however user B is offline or unreachable and therefore would send a request to agent S
 
 1. A connects to S
-    i. A prepares a `Request` with identifier `Identifier::Store`, namespace `friend-request`, with their request encoded in `Payload`. `Payload` would include sender being A public key, recipient being B public key, metadata `null` (or possibly store some form of identifier like the public keys of both recipients along with a tag. eg "aPublicKey:bPublicKey:request"), data being the encrypted request between A and B. A signs `Payload`.
-    ii. A signs `Request` and transmits it to S
+i. A prepares a `Request` with identifier `Identifier::Store`, namespace `friend-request`, with their request encoded in `Payload`. `Payload` would include sender being A public key, recipient being B public key, metadata `null` (or possibly store some form of identifier like the public keys of both recipients along with a tag. eg "aPublicKey:bPublicKey:request"), data being the encrypted request between A and B. A signs `Payload`.
+ii. A signs `Request` and transmits it to S
 2. S receive `Request` from A
-    i. Check the size of the data to ensure it does not exceed data limit
-    ii. Validates signature against the `Request` and `Payload`
-    iii. Store `Payload` into storage under `Request` namespace 
-    iv. Index metadata, if any
-    v. Respond to A request with `Status::Confirmed`
+i. Check the size of the data to ensure it does not exceed data limit
+ii. Validates signature against the `Request` and `Payload`
+iii. Store `Payload` into storage under `Request` namespace 
+iv. Index metadata, if any
+v. Respond to A request with `Status::Confirmed`
 3. B comes online and connects to S
-    i. Sends a signed `Request` with `Identifier::Find` under namespace `friend-request`.
-    ii. S requests and validate `Request` and query its store for any data intended for B
-    iii. S responds with the payload to B
-    iv. B receives `Payload` and sends a `Response` confirming receiving data, allowing S to delete the payload.
-    v. Validate and decrypt `Payload` and process the request accordingly
-4. If A is online, B and respond directly to A. If A is offline, repeat process above
+i. Sends a signed `Request` with `Identifier::Find` under namespace `friend-request`.
+ii. S requests and validate `Request` and query its store for any data intended for B
+iii. S responds with the payload to B
+iv. B receives `Payload` and sends a `Response` confirming receiving data, allowing S to delete the payload.
+v. Validate and decrypt `Payload` and process the request accordingly
+4. If A is online, B can respond directly to A. If A is offline, repeat process above
 
 
 **NOTE: Shuttle is a WIP project and subject to change.**
