@@ -1,30 +1,25 @@
 use std::borrow::Cow;
 
-use rust_ipfs::PublicKey;
+use rust_ipfs::{PublicKey, Keypair};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::sha256_iter;
+use crate::{sha256_iter, Signer};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum Status {
-    Ok,
-    Confirmed,
-    Unauthorized,
-    NotFound,
-    Error,
+    Ok = 1u8,
+    Confirmed = 2,
+    Unauthorized = 3,
+    NotFound = 4,
+    Error = 255,
 }
 
 impl From<Status> for u8 {
     fn from(value: Status) -> Self {
-        match value {
-            Status::Ok => 1,
-            Status::Confirmed => 2,
-            Status::Unauthorized => 3,
-            Status::NotFound => 4,
-            Status::Error => 255,
-        }
+        value as _
     }
 }
 
@@ -92,6 +87,31 @@ impl<'a> Response<'a> {
     }
 }
 
+pub fn construct_response<'a>(
+    sender: &Keypair,
+    id: Uuid,
+    data: Option<&'a [u8]>,
+    status: Status,
+) -> anyhow::Result<Response<'a>> {
+    let signature = {
+        let hash = crate::sha256_iter(
+            [
+                Some(id.as_bytes().as_slice()),
+                data,
+                Some(vec![status.into()].as_slice()),
+            ]
+            .into_iter(),
+        );
+        hash.sign(sender)?
+    };
+
+    Ok(Response::new(
+        id,
+        status,
+        data.map(|data| data.into()),
+        signature.into(),
+    ))
+}
 #[cfg(test)]
 mod test {
 
@@ -100,37 +120,11 @@ mod test {
 
     use super::{Response, Status};
 
-    fn construct_response<'a>(
-        sender: &Keypair,
-        id: Uuid,
-        data: &'a [u8],
-        status: Status,
-    ) -> anyhow::Result<Response<'a>> {
-        let signature = {
-            let hash = crate::sha256_iter(
-                [
-                    Some(id.as_bytes().as_slice()),
-                    Some(data),
-                    Some(vec![status.into()].as_slice()),
-                ]
-                .into_iter(),
-            );
-            sender.sign(&hash)?
-        };
-
-        Ok(Response::new(
-            id,
-            status,
-            Some(data.into()),
-            signature.into(),
-        ))
-    }
-
     #[test]
     fn response_serialization_deserialization() -> anyhow::Result<()> {
         let alice = Keypair::generate_ed25519();
 
-        let response = construct_response(&alice, Uuid::new_v4(), b"dummy-response", Status::Ok)?;
+        let response = super::construct_response(&alice, Uuid::new_v4(), Some(b"dummy-response"), Status::Ok)?;
         let bytes = response.to_bytes()?;
 
         let response = Response::from_bytes(&bytes)?;

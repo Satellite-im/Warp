@@ -9,6 +9,7 @@ pub mod store;
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use rand::RngCore;
+use rust_ipfs::{Keypair, PublicKey};
 use sha2::{Digest, Sha256, Sha512};
 use x25519_dalek::StaticSecret;
 
@@ -49,7 +50,7 @@ fn sha256_hash(data: &[u8], salt: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
-fn sha256_iter<'a>(iter: impl Iterator<Item = Option<&'a [u8]>>) -> Vec<u8> {
+fn sha256_iter(iter: impl Iterator<Item = Option<impl AsRef<[u8]>>>) -> Vec<u8> {
     let mut hasher = Sha256::new();
     for data in iter.flatten() {
         hasher.update(data);
@@ -124,6 +125,18 @@ pub(crate) fn ecdh_decrypt(
     let shared_key = xpriv.diffie_hellman(&xpub);
 
     decrypt(data.as_ref(), shared_key.as_bytes())
+}
+
+pub(crate) trait Signer {
+    fn sign(&self, _: &Keypair) -> anyhow::Result<Vec<u8>>;
+}
+
+
+impl<B: AsRef<[u8]>> Signer for B {
+    fn sign(&self, keypair: &Keypair) -> anyhow::Result<Vec<u8>> {
+        let signature = keypair.sign(self.as_ref())?;
+        Ok(signature)
+    }
 }
 
 #[cfg(test)]

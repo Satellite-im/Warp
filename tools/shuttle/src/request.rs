@@ -1,18 +1,19 @@
 use std::borrow::Cow;
 
-use rust_ipfs::PublicKey;
+use rust_ipfs::{Keypair, PublicKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{payload::Payload, sha256_iter};
+use crate::{payload::Payload, sha256_iter, Signer};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum Identifier {
-    Store,
-    Replace,
-    Find,
-    Delete,
+    Store = 1u8,
+    Replace = 2,
+    Find = 3,
+    Delete = 4,
 }
 
 impl TryFrom<u8> for Identifier {
@@ -30,12 +31,7 @@ impl TryFrom<u8> for Identifier {
 
 impl From<Identifier> for u8 {
     fn from(value: Identifier) -> Self {
-        match value {
-            Identifier::Store => 1,
-            Identifier::Replace => 2,
-            Identifier::Find => 3,
-            Identifier::Delete => 4,
-        }
+        value as _
     }
 }
 
@@ -109,7 +105,7 @@ impl<'a> Request<'a> {
     }
 
     pub fn verify(&self, publickey: &PublicKey) -> Result<bool, anyhow::Error> {
-        let identifier_byte = vec![u8::from(self.identifier)];
+        let identifier_byte = vec![self.identifier as _];
         let hash = sha256_iter(
             [
                 Some(identifier_byte.as_slice()),
@@ -125,76 +121,52 @@ impl<'a> Request<'a> {
     }
 }
 
+pub fn construct_request<'a>(
+    sender: &Keypair,
+    identifier: Identifier,
+    namespace: &'a [u8],
+    key: Option<&'a [u8]>,
+    payload: Payload<'a>,
+) -> anyhow::Result<Request<'a>> {
+    let signature = {
+        let identifier_byte = vec![u8::from(identifier)];
+        let hash = crate::sha256_iter(
+            [
+                Some(identifier_byte.as_slice()),
+                Some(namespace),
+                key,
+                payload.to_bytes().ok().as_deref(),
+            ]
+            .into_iter(),
+        );
+        hash.sign(sender)?
+    };
+
+    Ok(Request::new(
+        identifier,
+        namespace.into(),
+        key.map(Cow::Borrowed),
+        Some(payload),
+        signature.into(),
+    ))
+}
 #[cfg(test)]
 mod test {
-    use std::borrow::Cow;
-
-    use rust_ipfs::{Keypair, PublicKey};
-
-    use crate::{ecdh_encrypt, payload::Payload};
-
+    use rust_ipfs::Keypair;
     use super::{Identifier, Request};
 
-    fn construct_payload<'a>(
-        sender: &Keypair,
-        receiver: &PublicKey,
-        message: &[u8],
-    ) -> anyhow::Result<Payload<'a>> {
-        let sender_pk = sender.public();
-        let sender_pk_bytes = sender_pk.encode_protobuf();
-        let receiver_pk_bytes = receiver.encode_protobuf();
-        let data = ecdh_encrypt(sender, Some(receiver), message)?;
-        let signature = sender.sign(&data)?;
-        Ok(Payload::new(
-            sender_pk_bytes.into(),
-            receiver_pk_bytes.into(),
-            vec![].into(),
-            data.into(),
-            signature.into(),
-        ))
-    }
-
-    fn construct_request<'a>(
-        sender: &Keypair,
-        identifier: Identifier,
-        namespace: &'a [u8],
-        key: Option<&'a [u8]>,
-        payload: Payload<'a>,
-    ) -> anyhow::Result<Request<'a>> {
-        let signature = {
-            let identifier_byte = vec![u8::from(identifier)];
-            let hash = crate::sha256_iter(
-                [
-                    Some(identifier_byte.as_slice()),
-                    Some(namespace),
-                    key,
-                    payload.to_bytes().ok().as_deref(),
-                ]
-                .into_iter(),
-            );
-            sender.sign(&hash)?
-        };
-
-        Ok(Request::new(
-            identifier,
-            namespace.into(),
-            key.map(Cow::Borrowed),
-            Some(payload),
-            signature.into(),
-        ))
-    }
 
     #[test]
     fn request_serialization_deserialization() -> anyhow::Result<()> {
         let alice = Keypair::generate_ed25519();
         let bob = Keypair::generate_ed25519();
 
-        let payload = construct_payload(&alice, &bob.public(), b"blob")?;
+        let payload = crate::payload::construct_payload(&alice, &bob.public(), b"blob")?;
 
         let identifier = Identifier::Store;
         let namespace = b"test::request_serialization_deserialization".to_vec();
 
-        let request = construct_request(&alice, identifier, &namespace, None, payload)?;
+        let request = super::construct_request(&alice, identifier, &namespace, None, payload)?;
 
         assert!(request.verify(&alice.public())?);
 

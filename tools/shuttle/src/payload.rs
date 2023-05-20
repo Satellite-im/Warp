@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
-use rust_ipfs::PublicKey;
+use rust_ipfs::{PublicKey, Keypair};
 use serde::{Deserialize, Serialize};
+
+use crate::Signer;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Payload<'a> {
@@ -70,6 +72,26 @@ impl<'a> Payload<'a> {
         let bytes = bincode::serialize(&self)?;
         Ok(bytes)
     }
+}
+
+pub fn construct_payload<'a>(
+    sender: &Keypair,
+    receiver: &PublicKey,
+    message: &[u8],
+) -> anyhow::Result<Payload<'a>> {
+    let sender_pk = sender.public();
+    let sender_pk_bytes = sender_pk.encode_protobuf();
+    let receiver_pk_bytes = receiver.encode_protobuf();
+    let data = crate::ecdh_encrypt(sender, Some(receiver), message)?;
+    let hash = crate::sha256_iter([Some(&data)].into_iter());
+    let signature = hash.sign(sender)?;
+    Ok(Payload::new(
+        sender_pk_bytes.into(),
+        receiver_pk_bytes.into(),
+        vec![].into(),
+        data.into(),
+        signature.into(),
+    ))
 }
 
 #[cfg(test)]
