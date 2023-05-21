@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::{stream, StreamExt};
 use rust_ipfs::{libp2p::gossipsub::Message, unixfs::AddOption, Ipfs, Keypair, PeerId};
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
     ecdh_decrypt,
@@ -15,6 +15,7 @@ use crate::{
 #[allow(dead_code)]
 pub struct ShuttleServer {
     ipfs: Ipfs,
+    tasks: Arc<Vec<JoinHandle<anyhow::Result<()>>>>,
 }
 
 impl ShuttleServer {
@@ -62,7 +63,9 @@ impl ShuttleServer {
                 Ok::<_, anyhow::Error>(())
             }
         });
-        Self { ipfs }
+
+        let tasks = Arc::new(vec![_request_task, _response_task]);
+        Self { ipfs, tasks }
     }
 }
 

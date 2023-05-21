@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::{collections::HashSet, sync::Arc};
 
 use crate::agent::{Agent, AgentStatus};
-use crate::payload::Payload;
+use crate::payload::{construct_payload, Payload};
 use crate::request::{Identifier, Request};
 use crate::response::{Response, Status};
 use crate::{ecdh_decrypt, ecdh_encrypt, MAX_TRANSMIT_SIZE};
 use futures::channel::oneshot;
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use rust_ipfs::libp2p::gossipsub::Message;
 use rust_ipfs::{Ipfs, Keypair, PeerId, PublicKey};
 use serde::de::DeserializeOwned;
@@ -135,11 +135,35 @@ impl ShuttleClient {
 impl ShuttleClient {
     pub async fn store<S: Serialize, N: AsRef<[u8]>, P: Into<PublicKey>>(
         &self,
-        _agent: Option<PeerId>,
-        _recipient: P,
-        _namespace: N,
-        _data: S,
+        recipient: P,
+        namespace: N,
+        data: S,
     ) -> Result<(), anyhow::Error> {
+        anyhow::ensure!(self.agents.read().await.len() > 0);
+        let keypair = self.ipfs.keypair()?;
+
+        let recipient = recipient.into();
+        let namespace = namespace.as_ref();
+        let data = bincode::serialize(&data)?;
+        let payload = construct_payload(keypair, &recipient, &data)?;
+        let (tx, rx) = oneshot::channel();
+
+        let command = ClientCommand::Store {
+            namespace: namespace.into(),
+            payload,
+            response: tx,
+        };
+
+        self.tx.clone().send(command).await?;
+        
+
+        let result = rx.await??;
+
+        match result {
+            ResponseType::ResponseOwned(_, _) => {},
+            ResponseType::Status(_) => {},
+            ResponseType::StatusWithData(_, _) => {}
+        }
         Ok(())
     }
 
