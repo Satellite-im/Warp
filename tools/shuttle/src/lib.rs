@@ -8,8 +8,9 @@ pub mod store;
 
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 use curve25519_dalek::edwards::CompressedEdwardsY;
+use libipld::Multihash;
 use rand::RngCore;
-use rust_ipfs::Keypair;
+use rust_ipfs::{Keypair, PublicKey, PeerId};
 use sha2::{Digest, Sha256, Sha512};
 use x25519_dalek::StaticSecret;
 
@@ -135,6 +136,21 @@ impl<B: AsRef<[u8]>> Signer for B {
     fn sign(&self, keypair: &Keypair) -> anyhow::Result<Vec<u8>> {
         let signature = keypair.sign(self.as_ref())?;
         Ok(signature)
+    }
+}
+
+pub(crate) trait PeerIdExt {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
+}
+
+impl PeerIdExt for PeerId {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error> {
+        let multihash: Multihash = (*self).into();
+        if multihash.code() != 0 {
+            anyhow::bail!("PeerId does not contain inline public key");
+        }
+        let public_key = PublicKey::try_decode_protobuf(multihash.digest())?;
+        Ok(public_key)
     }
 }
 
