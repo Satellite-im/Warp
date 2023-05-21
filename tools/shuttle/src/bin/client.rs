@@ -1,6 +1,6 @@
 use rust_ipfs::{
-    p2p::{IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode, UpgradeVersion},
-    UninitializedIpfs, Keypair,
+    p2p::{PubsubConfig, TransportConfig, UpdateMode, UpgradeVersion},
+    UninitializedIpfs,
 };
 use shuttle::client::ShuttleClient;
 
@@ -27,8 +27,8 @@ async fn main() -> anyhow::Result<()> {
         .start()
         .await?;
 
-    let client = ShuttleClient::new(ipfs);
-    
+    let _client = ShuttleClient::new(ipfs);
+
     //TODO:
     Ok(())
 }

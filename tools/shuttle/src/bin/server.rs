@@ -2,7 +2,7 @@ use rust_ipfs::{
     p2p::{IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode, UpgradeVersion},
     UninitializedIpfs,
 };
-use shuttle::{server::ShuttleServer, store::memory::MemoryStore};
+// use shuttle::server::ShuttleServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .start()
         .await?;
-    
+
     // let memory_store = MemoryStore::default();
     // let _service = ShuttleServer::new(ipfs.clone(), memory_store);
 
