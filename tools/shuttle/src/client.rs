@@ -8,7 +8,8 @@ use crate::response::{Response, Status};
 use crate::{ecdh_decrypt, ecdh_encrypt, MAX_TRANSMIT_SIZE};
 use futures::channel::oneshot;
 use futures::StreamExt;
-use rust_ipfs::{Ipfs, PeerId, PublicKey};
+use rust_ipfs::libp2p::gossipsub::Message;
+use rust_ipfs::{Ipfs, Keypair, PeerId, PublicKey};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -85,83 +86,10 @@ impl ShuttleClient {
                     tokio::select! {
                         biased;
                         Some(command) = rx.next() => {
-                            match command {
-                                ClientCommand::Store { namespace, payload, response } => {
-
-                                    let agents = Vec::from_iter(agents.read().await.clone());
-                                    if agents.is_empty() {
-                                        let _ = response.send(Err(anyhow::anyhow!("No agents available")));
-                                        continue;
-                                    }
-
-                                    let Ok(bytes) = payload.to_bytes() else {
-                                        continue;
-                                    };
-
-                                    if bytes.len() > MAX_TRANSMIT_SIZE {
-                                        let _ = response.send(Err(anyhow::anyhow!("Payload exceeds max transmission size")));
-                                        continue;
-                                    }
-
-                                    let Ok(signature) = keypair.sign(&bytes) else {
-                                        continue;
-                                    };
-
-                                    let request = Request::new(Identifier::Store, namespace.into(), None, Some(payload), signature.into());
-
-                                    let request_id = request.id();
-
-                                    let Ok(request_bytes) = request.to_bytes() else {
-                                        continue;
-                                    };
-
-                                    // TODO: Prioritize agents
-                                    for agent in agents {
-
-                                        //TODO: Check agent status
-                                        //TODO: Check and confirm agent is subscribed to topic
-
-                                        let Ok(bytes) = ecdh_encrypt(keypair, Some(agent.public_key()), &request_bytes) else {
-                                            continue;
-                                        };
-
-                                        if ipfs.pubsub_publish(format!("/shuttle/request/{}", agent.peer_id()), bytes).await.is_err() {
-                                            continue;
-                                        };
-
-                                    }
-
-                                    awaiting_response.insert(request_id, response);
-
-                                },
-                                ClientCommand::Find { .. } => {},
-                                ClientCommand::Delete { .. } => {},
-                            }
+                            if let Err(_e) = process_command(&ipfs, keypair, agents.clone(), &mut awaiting_response, command).await {}
                         },
                         Some(response) = response.next() => {
-
-                            if response.data.len() > MAX_TRANSMIT_SIZE {
-                                continue;
-                            }
-
-                            let Some(publickey) = agents.read().await.iter().find(|a| response.source == Some(a.peer_id())).map(|a| a.public_key().clone()) else {
-                                continue;
-                            };
-
-                            let Ok(resp_bytes) = ecdh_decrypt(keypair, Some(&publickey), &response.data) else {
-                                continue;
-                            };
-
-                            let resp = match Response::from_bytes(&resp_bytes) {
-                                Ok(res) => res,
-                                Err(_e) => {
-                                    continue;
-                                }
-                            };
-
-                            if let Some(channel) = awaiting_response.remove(&resp.id()) {
-                                let _ = channel.send(Ok(ResponseType::ResponseOwned(response.source, resp_bytes)));
-                            }
+                            if let Err(_e) = process_message(keypair, response, agents.clone(), &mut awaiting_response).await {}
                         }
                     }
                 }
@@ -242,4 +170,90 @@ impl ShuttleClient {
         }
         Ok(agents)
     }
+}
+
+async fn process_command(
+    ipfs: &Ipfs,
+    keypair: &Keypair,
+    agents: Arc<RwLock<HashSet<Agent>>>,
+    responses: &mut HashMap<Uuid, futures::channel::oneshot::Sender<anyhow::Result<ResponseType>>>,
+    event: ClientCommand<'_>,
+) -> anyhow::Result<()> {
+    match event {
+        ClientCommand::Store {
+            namespace,
+            payload,
+            response,
+        } => {
+            let agents = Vec::from_iter(agents.read().await.clone());
+            if agents.is_empty() {
+                anyhow::bail!("No agents available");
+            }
+
+            let bytes = payload.to_bytes()?;
+
+            if bytes.len() > MAX_TRANSMIT_SIZE {
+                anyhow::bail!("Payload exceeds max transmission size");
+            }
+
+            let signature = keypair.sign(&bytes)?;
+
+            let request = Request::new(
+                Identifier::Store,
+                namespace.into(),
+                None,
+                Some(payload),
+                signature.into(),
+            );
+
+            let request_id = request.id();
+
+            let request_bytes = request.to_bytes()?;
+            // TODO: Prioritize agents
+            for agent in agents {
+                //TODO: Check agent status
+                //TODO: Check and confirm agent is subscribed to topic
+
+                let bytes = ecdh_encrypt(keypair, Some(agent.public_key()), &request_bytes)?;
+
+                ipfs.pubsub_publish(format!("/shuttle/request/{}", agent.peer_id()), bytes)
+                    .await?;
+            }
+
+            responses.insert(request_id, response);
+        }
+        ClientCommand::Find { .. } => {}
+        ClientCommand::Delete { .. } => {}
+    }
+
+    Ok(())
+}
+
+async fn process_message(
+    keypair: &Keypair,
+    message: Message,
+    agents: Arc<RwLock<HashSet<Agent>>>,
+    responses: &mut HashMap<Uuid, futures::channel::oneshot::Sender<anyhow::Result<ResponseType>>>,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        message.data.len() < MAX_TRANSMIT_SIZE,
+        "Message exceeded max transit size"
+    );
+
+    let Some(publickey) = agents.read().await.iter().find(|a| message.source == Some(a.peer_id())).map(|a| a.public_key().clone()) else {
+        anyhow::bail!("Unable to find responding agent");
+    };
+
+    let resp_bytes = ecdh_decrypt(keypair, Some(&publickey), &message.data)?;
+
+    let resp = Response::from_bytes(&resp_bytes)?;
+
+    if let Err(e) = resp.verify(&keypair.public()) {
+        if let Some(channel) = responses.remove(&resp.id()) {
+            let _ = channel.send(Err(e));
+        }
+    } else if let Some(channel) = responses.remove(&resp.id()) {
+        let _ = channel.send(Ok(ResponseType::ResponseOwned(message.source, resp_bytes)));
+    }
+    Ok(())
 }
