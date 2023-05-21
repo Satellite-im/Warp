@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use crate::agent::{Agent, AgentStatus};
 use crate::payload::{construct_payload, Payload};
-use crate::request::{Identifier, Request};
+use crate::request::{Identifier, Request, construct_request};
 use crate::response::{Response, Status};
 use crate::{ecdh_decrypt, ecdh_encrypt, MAX_TRANSMIT_SIZE};
 use futures::channel::oneshot;
@@ -211,16 +211,18 @@ async fn process_command(
         } => {
             let agents = Vec::from_iter(agents.read().await.clone());
             if agents.is_empty() {
+                let _ = response.send(Err(anyhow::anyhow!("No agents available")));
                 anyhow::bail!("No agents available");
             }
 
             let bytes = payload.to_bytes()?;
 
             if bytes.len() > MAX_TRANSMIT_SIZE {
+                let _ = response.send(Err(anyhow::anyhow!("Payload exceeds max transmission size")));
                 anyhow::bail!("Payload exceeds max transmission size");
             }
 
-            let signature = keypair.sign(&bytes)?;
+            let request = construct_request(keypair, Identifier::Store, &namespace, None, payload)?;
 
             let request = Request::new(
                 Identifier::Store,
