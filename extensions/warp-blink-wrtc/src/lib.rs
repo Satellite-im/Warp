@@ -429,7 +429,6 @@ async fn handle_webrtc(
                 }
             },
             opt = webrtc_event_stream.next() => {
-                let mut data = STATIC_DATA.lock().await;
                 match opt {
                     Some(event) => {
                         if let EmittedEvents::Ice{ .. } = event {
@@ -438,7 +437,7 @@ async fn handle_webrtc(
                         } else {
                             log::debug!("webrtc event: {event}");
                         }
-
+                        let mut data = STATIC_DATA.lock().await;
                         let active_call = match data.active_call.as_mut() {
                             Some(ac) => ac,
                             None => {
@@ -457,10 +456,18 @@ async fn handle_webrtc(
                                 active_call.connected_participants.insert(peer, PeerState::Connected);
                             }
                             EmittedEvents::ConnectionClosed { peer } => {
-                                active_call.connected_participants.insert(peer, PeerState::Closed);
-                                if !active_call.connected_participants.iter().any(|(_k, v)| *v != PeerState::Closed) {
-                                    log::info!("all participants have successfully been disconnected");
+                                // sometimes this event triggers without Disconnected being triggered.
+                                // need to hang_up here as well.
+                                active_call.connected_participants.insert(peer.clone(), PeerState::Closed);
+                                let all_closed = !active_call.connected_participants.iter().any(|(_k, v)| *v != PeerState::Closed);
+                                if all_closed {
                                     active_call.call_state = CallState::Closed;
+                                }
+                                // have to use data after active_call or there will be 2 mutable borrows, which isn't allowed
+                                data.webrtc.hang_up(&peer).await;
+                                // this log should appear after the logs emitted by hang_up
+                                if all_closed {
+                                    log::info!("all participants have successfully been disconnected");
                                 }
                             }
                             EmittedEvents::Disconnected { peer }
