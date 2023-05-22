@@ -28,9 +28,14 @@ pub async fn encode_f32_rtp(
     let mut encoded = [0; MAX_FRAME_SIZE * 4];
     let mut decoded = [0_f32; MAX_FRAME_SIZE];
 
+    let encoder_channels = match args.channels {
+        1 => opus::Channels::Mono,
+        _ => opus::Channels::Stereo,
+    };
+
     let mut opus_packetizer =
-        OpusPacketizer::init(args.frame_size, args.sample_rate, opus::Channels::Mono)?;
-    let mut decoder = opus::Decoder::new(decoded_sample_rate, opus::Channels::Mono)?;
+        OpusPacketizer::init(args.frame_size, args.sample_rate, encoder_channels)?;
+    let mut decoder = opus::Decoder::new(decoded_sample_rate, encoder_channels)?;
 
     let mut input_file = File::open(&input_file_name)?;
     let mut output_file = File::create(&output_file_name)?;
@@ -118,6 +123,7 @@ pub async fn encode_f32_rtp(
 // allows specifying a different sample rate for the decoder. Opus is supposed to support this.
 pub async fn encode_f32(
     args: StaticArgs,
+    decoded_channels: u16,
     decoded_sample_rate: u32,
     input_file_name: String,
     output_file_name: String,
@@ -127,9 +133,18 @@ pub async fn encode_f32(
     let mut encoded = [0; MAX_FRAME_SIZE * 4];
     let mut decoded = [0_f32; MAX_FRAME_SIZE];
 
-    let mut packetizer =
-        OpusPacketizer::init(args.frame_size, args.sample_rate, opus::Channels::Mono)?;
-    let mut decoder = opus::Decoder::new(decoded_sample_rate, opus::Channels::Mono)?;
+    let encoder_channels = match args.channels {
+        1 => opus::Channels::Mono,
+        _ => opus::Channels::Stereo,
+    };
+
+    let decoder_channels = match decoded_channels {
+        1 => opus::Channels::Mono,
+        _ => opus::Channels::Stereo,
+    };
+
+    let mut packetizer = OpusPacketizer::init(args.frame_size, args.sample_rate, encoder_channels)?;
+    let mut decoder = opus::Decoder::new(decoded_sample_rate, decoder_channels)?;
 
     let mut input_file = File::open(&input_file_name)?;
     let mut output_file = File::create(&output_file_name)?;

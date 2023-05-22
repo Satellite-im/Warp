@@ -17,7 +17,7 @@ pub async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
         AUDIO_FILE = Some(File::create(AUDIO_FILE_NAME.as_str())?);
     }
     let config = cpal::StreamConfig {
-        channels: 1,
+        channels: args.channels,
         sample_rate: SampleRate(args.sample_rate),
         buffer_size: cpal::BufferSize::Default,
     };

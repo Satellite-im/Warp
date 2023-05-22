@@ -28,6 +28,8 @@ enum Cli {
     /// sets the number of bits per second in the opus encoder.
     /// accepted values range from 500 to 512000 bits per second
     BitRate { rate: i32 },
+    /// encode the audio using 1 or 2 channels
+    Channels { channels: u16 },
     /// sets the sampling frequency of the input signal.
     /// accepted values are 8000, 12000, 16000, 24000, and 48000
     SampleRate { rate: u32 },
@@ -50,6 +52,13 @@ enum Cli {
     /// WARNING! when you play the file, be sure to set the sample-rate to the one used
     /// to decode the file.
     CustomEncode {
+        decoded_sample_rate: u32,
+        input_file_name: String,
+        output_file_name: String,
+    },
+    /// decode with the given number of channels and sample rate
+    CustomEncodeChannels {
+        decoded_channels: u16,
         decoded_sample_rate: u32,
         input_file_name: String,
         output_file_name: String,
@@ -86,6 +95,7 @@ pub struct StaticArgs {
     sample_type: SampleTypes,
     bit_rate: opus::Bitrate,
     sample_rate: u32,
+    channels: u16,
     frame_size: usize,
     bandwidth: opus::Bandwidth,
     application: opus::Application,
@@ -100,6 +110,7 @@ static STATIC_MEM: Lazy<Mutex<StaticArgs>> = Lazy::new(|| {
     Mutex::new(StaticArgs {
         sample_type: SampleTypes::Float,
         bit_rate: opus::Bitrate::Max,
+        channels: 1,
         sample_rate: 48000,
         frame_size: 480,
         bandwidth: opus::Bandwidth::Fullband,
@@ -158,6 +169,9 @@ Frame size (in samples) vs duration for various sampling rates:
         Cli::BitRate { rate } => {
             sm.bit_rate = opus::Bitrate::Bits(rate);
         }
+        Cli::Channels { channels } => {
+            sm.channels = channels;
+        }
         Cli::SampleRate { rate } => {
             if !vec![8000, 12000, 16000, 24000, 48000].contains(&rate) {
                 bail!("invalid sample rate")
@@ -206,6 +220,7 @@ Frame size (in samples) vs duration for various sampling rates:
                 SampleTypes::Float => {
                     encode_f32(
                         sm.clone(),
+                        sm.channels,
                         sm.sample_rate,
                         input_file_name,
                         output_file_name,
@@ -222,6 +237,22 @@ Frame size (in samples) vs duration for various sampling rates:
         } => {
             encode_f32(
                 sm.clone(),
+                sm.channels,
+                decoded_sample_rate,
+                input_file_name,
+                output_file_name,
+            )
+            .await?;
+        }
+        Cli::CustomEncodeChannels {
+            decoded_channels,
+            decoded_sample_rate,
+            input_file_name,
+            output_file_name,
+        } => {
+            encode_f32(
+                sm.clone(),
+                decoded_channels,
                 decoded_sample_rate,
                 input_file_name,
                 output_file_name,
