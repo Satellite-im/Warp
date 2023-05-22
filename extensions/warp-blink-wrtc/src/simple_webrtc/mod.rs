@@ -337,7 +337,7 @@ impl Controller {
     /// initializes state to WaitingForSdp
     async fn connect(&mut self, peer_id: &DID) -> Result<Peer> {
         if self.peers.contains_key(peer_id) {
-            bail!("peer already connected.");
+            bail!("peer already connected: {}", peer_id);
         }
 
         let api = match self.api.as_ref() {

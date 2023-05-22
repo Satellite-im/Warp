@@ -468,6 +468,9 @@ async fn handle_webrtc(
                                 // this log should appear after the logs emitted by hang_up
                                 if all_closed {
                                     log::info!("all participants have successfully been disconnected");
+                                    if let Err(e) = data.webrtc.deinit().await {
+                                        log::error!("webrtc deinit failed: {e}");
+                                    }
                                 }
                             }
                             EmittedEvents::Disconnected { peer }
