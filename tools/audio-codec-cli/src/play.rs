@@ -20,7 +20,7 @@ pub async fn play_f32(args: StaticArgs, sample_rate: Option<u32>) -> anyhow::Res
     decoded_samples.resize(total_samples, 0_f32);
 
     let config = cpal::StreamConfig {
-        channels: 1,
+        channels: args.channels,
         sample_rate: SampleRate(sample_rate),
         buffer_size: cpal::BufferSize::Default,
     };
