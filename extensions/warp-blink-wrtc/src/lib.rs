@@ -242,24 +242,6 @@ impl WebRtc {
 
         Ok(())
     }
-
-    async fn leave_call_internal(&mut self, data: &mut StaticData) -> anyhow::Result<()> {
-        if let Some(ac) = data.active_call.as_ref() {
-            let call_id = ac.call.id();
-            let topic = ipfs_routes::call_signal_route(&call_id);
-            let signal = CallSignal::Leave { call_id };
-
-            if let Err(e) = send_signal_aes(&self.ipfs, &ac.call.group_key(), signal, topic).await {
-                log::error!("failed to send signal: {e}");
-            }
-
-            let r = data.webrtc.deinit().await;
-            host_media::reset().await;
-            r
-        } else {
-            Ok(())
-        }
-    }
 }
 
 impl Drop for WebRtc {
@@ -350,6 +332,7 @@ async fn handle_webrtc(
                 };
                 match signal {
                     CallSignal::Join { call_id } => {
+                        log::debug!("received signal: Join");
                         if active_call.call_state != CallState::Ready {
                             log::error!("someone tried to join call with state: {:?}", active_call.call_state);
                         }
@@ -366,6 +349,7 @@ async fn handle_webrtc(
 
                     }
                     CallSignal::Leave { call_id } => {
+                        log::debug!("received signal: Leave");
                         if active_call.call_state == CallState::Closed {
                             log::error!("participant tried to leave a call which was already closed");
                             continue;
@@ -430,16 +414,17 @@ async fn handle_webrtc(
                         }
                     }
                     PeerSignal::Sdp(sdp) => {
+                        log::debug!("received signal: SDP");
                         if let Err(e) = data.webrtc.recv_sdp(&sender, sdp).await {
                             log::error!("failed to recv_sdp: {}", e);
                         }
                     }
                     PeerSignal::Dial(sdp) => {
+                        log::debug!("received signal: Dial");
                         // emits the SDP Event, which is sent to the peer via the SDP signal
                         if let Err(e) = data.webrtc.accept_call(&sender, sdp).await {
                             log::error!("failed to accept_call: {}", e);
                         }
-
                     }
                 }
             },
@@ -652,9 +637,26 @@ impl Blink for WebRtc {
             } else {
                 ac.call_state = CallState::Closing;
             }
+
+            let call_id = ac.call.id();
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Leave { call_id };
+
+            if let Err(e) = send_signal_aes(&self.ipfs, &ac.call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
+            } else {
+                log::debug!("sent signal to leave call");
+            }
+
+            let r = data.webrtc.deinit().await;
+            host_media::reset().await;
+            let _ = r?;
+            Ok(())
+        } else {
+            Err(Error::OtherWithContext(
+                "tried to leave nonexistent call".into(),
+            ))
         }
-        self.leave_call_internal(&mut data).await?;
-        Ok(())
     }
 
     // ------ Select input/output devices ------

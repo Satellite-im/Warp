@@ -40,7 +40,6 @@ pub async fn send_signal_ecdh<T: Serialize + Display>(
     signal: T,
     topic: String,
 ) -> anyhow::Result<()> {
-    log::debug!("sending signal: {signal}");
     let serialized = serde_cbor::to_vec(&signal)?;
     let encrypted = ecdh_encrypt(own_did, dest, serialized)?;
     ipfs.pubsub_publish(topic, encrypted).await?;
@@ -54,7 +53,6 @@ pub async fn send_signal_aes<T: Serialize + Display>(
     signal: T,
     topic: String,
 ) -> anyhow::Result<()> {
-    log::debug!("sending signal: {signal}");
     let serialized = serde_cbor::to_vec(&signal)?;
     let msg = Cipher::direct_encrypt(&serialized, key)?;
     ipfs.pubsub_publish(topic, msg).await?;
@@ -68,7 +66,6 @@ pub fn decode_gossipsub_msg_ecdh<T: DeserializeOwned + Display>(
 ) -> anyhow::Result<T> {
     let bytes = ecdh_decrypt(own_did, sender, &msg.data)?;
     let data: T = serde_cbor::from_slice(&bytes)?;
-    log::debug!("received signal: {data}");
     Ok(data)
 }
 
@@ -78,7 +75,6 @@ pub fn decode_gossipsub_msg_aes<T: DeserializeOwned + Display>(
 ) -> anyhow::Result<T> {
     let decrypted = Cipher::direct_decrypt(&msg.data, key)?;
     let data: T = serde_cbor::from_slice(&decrypted)?;
-    log::debug!("received signal: {data}");
     Ok(data)
 }
 
