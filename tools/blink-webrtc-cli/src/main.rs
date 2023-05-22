@@ -5,7 +5,7 @@ use futures::StreamExt;
 
 use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 use warp::blink::{
     AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
@@ -32,6 +32,8 @@ struct Codecs {
     video: VideoCodec,
     screen_share: VideoCodec,
 }
+
+static OFFERED_CALL: Lazy<Mutex<Option<Uuid>>> = Lazy::new(|| Mutex::new(None));
 
 static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
     let audio = AudioCodecBuiler::new()
@@ -63,7 +65,8 @@ enum Repl {
     /// given a DID, initiate a call
     Dial { id: String },
     /// given a Uuid, answer a call
-    Answer { id: String },
+    /// if no argument is given, the most recent call will be answered
+    Answer { id: Option<String> },
     /// end the current call
     Hangup,
     /// mute self
@@ -116,7 +119,14 @@ async fn handle_command(
                 .await?;
         }
         Repl::Answer { id } => {
-            let call_id = Uuid::from_str(&id)?;
+            let mut lock = OFFERED_CALL.lock().await;
+            let call_id = match id {
+                Some(r) => Uuid::from_str(&r)?,
+                None => match lock.take() {
+                    Some(id) => id.clone(),
+                    None => bail!("no call to answer!"),
+                },
+            };
             blink.answer_call(call_id).await?;
         }
         Repl::Hangup => {
@@ -211,7 +221,9 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
                 sender,
                 participants: _,
             } => {
+                let mut lock = OFFERED_CALL.lock().await;
                 println!("incoming call. id is: {call_id}. sender is: {sender}");
+                lock.replace(call_id);
             }
             _ => {}
         }
