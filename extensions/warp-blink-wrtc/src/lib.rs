@@ -102,6 +102,21 @@ pub struct WebRtc {
     webrtc_handler: Option<JoinHandle<()>>,
 }
 
+impl Drop for WebRtc {
+    fn drop(&mut self) {
+        if let Some(handle) = self.webrtc_handler.take() {
+            handle.abort();
+        }
+        self.offer_handler.abort();
+
+        // not sure if this will even work.
+        tokio::spawn(async {
+            let mut lock = STATIC_DATA.lock().await;
+            let _ = lock.webrtc.deinit().await;
+        });
+    }
+}
+
 static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
     let (ui_event_ch, _rx) = broadcast::channel(1024);
     let webrtc = simple_webrtc::Controller::new().expect("failed to create webrtc controller");
@@ -245,12 +260,6 @@ impl WebRtc {
 
         self.webrtc_handler.replace(webrtc_handle);
         Ok(())
-    }
-}
-
-impl Drop for WebRtc {
-    fn drop(&mut self) {
-        self.offer_handler.abort();
     }
 }
 
