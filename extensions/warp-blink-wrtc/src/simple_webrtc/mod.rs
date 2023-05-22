@@ -417,7 +417,12 @@ impl Controller {
                     &dest,
                     connection_state
                 );
-                if connection_state == RTCIceConnectionState::Failed {
+                if matches!(
+                    connection_state,
+                    RTCIceConnectionState::Failed
+                        | RTCIceConnectionState::Disconnected
+                        | RTCIceConnectionState::Closed
+                ) {
                     if let Err(e) = tx.send(EmittedEvents::Disconnected { peer: dest.clone() }) {
                         log::error!("failed to send disconnect event for peer {}: {}", &dest, e);
                     }
