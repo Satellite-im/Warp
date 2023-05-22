@@ -60,7 +60,8 @@ use crate::{
 #[derive(Clone)]
 struct ActiveCall {
     call: CallInfo,
-    participants: HashMap<DID, PeerState>,
+    connected_participants: HashMap<DID, PeerState>,
+    call_state: CallState,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -70,13 +71,20 @@ pub enum PeerState {
     Connected,
     Closed,
 }
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum CallState {
+    Ready,
+    Closing,
+    Closed,
+}
 
 // used when a call is accepted
 impl From<CallInfo> for ActiveCall {
     fn from(value: CallInfo) -> Self {
         Self {
             call: value,
-            participants: HashMap::new(),
+            connected_participants: HashMap::new(),
+            call_state: CallState::Ready,
         }
     }
 }
@@ -326,14 +334,14 @@ async fn handle_webrtc(
                     }
                 };
                 let mut data = STATIC_DATA.lock().await;
-                let ac = match data.active_call.as_ref() {
+                let active_call = match data.active_call.as_mut() {
                     Some(r) => r,
                     None => {
                         log::error!("received call signal without an active call");
                         continue;
                     }
                 };
-                let signal: CallSignal = match decode_gossipsub_msg_aes(&ac.call.group_key(), &msg) {
+                let signal: CallSignal = match decode_gossipsub_msg_aes(&active_call.call.group_key(), &msg) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("failed to decode msg from call signaling stream: {e}");
@@ -342,9 +350,10 @@ async fn handle_webrtc(
                 };
                 match signal {
                     CallSignal::Join { call_id } => {
-                        if let Some(ac) = data.active_call.as_mut() {
-                            ac.participants.insert(sender.clone(), PeerState::Initializing);
+                        if active_call.call_state != CallState::Ready {
+                            log::error!("someone tried to join call with state: {:?}", active_call.call_state);
                         }
+                        active_call.connected_participants.insert(sender.clone(), PeerState::Initializing);
                         // todo: properly hang up on error.
                         // emits CallInitiated Event, which returns the local sdp. will be sent to the peer with the dial signal
                         if let Err(e) = data.webrtc.dial(&sender).await {
@@ -357,8 +366,17 @@ async fn handle_webrtc(
 
                     }
                     CallSignal::Leave { call_id } => {
-                        if let Some(ac) = data.active_call.as_mut() {
-                            ac.participants.remove(&sender);
+                        if active_call.call_state == CallState::Closed {
+                            log::error!("participant tried to leave a call which was already closed");
+                            continue;
+                        }
+                        if active_call.call.id() != call_id {
+                            log::error!("participant tried to leave call which wasn't active");
+                            continue;
+                        }
+                        if !active_call.call.participants().contains(&sender) {
+                            log::error!("participant tried to leave call who wasn't part of the call");
+                            continue;
                         }
                         data.webrtc.hang_up(&sender).await;
                         if let Err(e) = ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
@@ -387,14 +405,20 @@ async fn handle_webrtc(
                     },
                 };
                 let mut data = STATIC_DATA.lock().await;
-                let ac = match data.active_call.as_ref() {
+                let active_call = match data.active_call.as_ref() {
                     Some(r) => r,
                     None => {
                         log::error!("received a peer_signal when there is no active call");
                         continue;
                     }
                 };
-                if !ac.call.participants().contains(&sender) {
+
+                if active_call.call_state != CallState::Ready {
+                    log::warn!("received a signal for a call which is being closed");
+                    continue;
+                }
+
+                if !active_call.call.participants().contains(&sender) {
                     log::error!("received a signal from a peer who isn't part of the call");
                     continue;
                 }
@@ -423,7 +447,13 @@ async fn handle_webrtc(
                 let mut data = STATIC_DATA.lock().await;
                 match opt {
                     Some(event) => {
-                        log::debug!("webrtc event: {event}");
+                        if let EmittedEvents::Ice{ .. } = event {
+                            // don't log this event. it is too noisy.
+                            // would use matches! but the enum's fields don't implement PartialEq
+                        } else {
+                            log::debug!("webrtc event: {event}");
+                        }
+
                         let active_call = match data.active_call.as_mut() {
                             Some(ac) => ac,
                             None => {
@@ -439,18 +469,19 @@ async fn handle_webrtc(
                                 }
                             }
                             EmittedEvents::Connected { peer } => {
-                                active_call.participants.insert(peer, PeerState::Connected);
+                                active_call.connected_participants.insert(peer, PeerState::Connected);
                             }
                             EmittedEvents::ConnectionClosed { peer } => {
-                                active_call.participants.insert(peer, PeerState::Closed);
-                                if !active_call.participants.iter().any(|(_k, v)| *v != PeerState::Closed) {
+                                active_call.connected_participants.insert(peer, PeerState::Closed);
+                                if !active_call.connected_participants.iter().any(|(_k, v)| *v != PeerState::Closed) {
                                     log::info!("all participants have successfully been disconnected");
+                                    active_call.call_state = CallState::Closed;
                                 }
                             }
                             EmittedEvents::Disconnected { peer }
                             | EmittedEvents::ConnectionFailed { peer } => {
                                 // todo: could need to retry
-                                active_call.participants.insert(peer.clone(), PeerState::Disconnected);
+                                active_call.connected_participants.insert(peer.clone(), PeerState::Disconnected);
                                 if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
@@ -548,11 +579,7 @@ impl Blink for WebRtc {
     ) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
         if let Some(ac) = data.active_call.as_ref() {
-            if ac
-                .participants
-                .iter()
-                .any(|(_k, v)| *v != PeerState::Closed)
-            {
+            if ac.call_state != CallState::Closed {
                 return Err(Error::OtherWithContext("previous call not finished".into()));
             }
         }
@@ -580,11 +607,7 @@ impl Blink for WebRtc {
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
         if let Some(ac) = data.active_call.as_ref() {
-            if ac
-                .participants
-                .iter()
-                .any(|(_k, v)| *v != PeerState::Closed)
-            {
+            if ac.call_state != CallState::Closed {
                 return Err(Error::OtherWithContext("previous call not finished".into()));
             }
         }
@@ -622,6 +645,14 @@ impl Blink for WebRtc {
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
+        if let Some(ac) = data.active_call.as_mut() {
+            if ac.call_state != CallState::Ready {
+                log::warn!("leave_call called on call which is already being closed");
+                return Ok(());
+            } else {
+                ac.call_state = CallState::Closing;
+            }
+        }
         self.leave_call_internal(&mut data).await?;
         Ok(())
     }

@@ -127,10 +127,10 @@ impl Controller {
     /// Rust doesn't have async drop, so this function should be called when the user is
     /// done with Controller. it will clean up all threads
     pub async fn deinit(&mut self) -> Result<()> {
-        let peer_ids: Vec<DID> = self.peers.keys().cloned().collect();
-        for peer_id in peer_ids {
-            // close the peer connection
-            self.hang_up(&peer_id).await;
+        for (_id, peer) in self.peers.drain() {
+            if let Err(e) = peer.connection.close().await {
+                log::error!("failed to close peer connection: {e}");
+            }
         }
         // remove RTP tracks
         self.media_sources.clear();
@@ -213,20 +213,7 @@ impl Controller {
     /// Terminates a connection
     /// the controlling application should send a HangUp signal to the remote side
     pub async fn hang_up(&mut self, peer_id: &DID) {
-        // not sure if it's necessary to remove all tracks. calling close() might be good enough
-        if let Some(mut peer) = self.peers.remove(peer_id) {
-            for (source_id, rtp_sender) in peer.rtp_senders.drain() {
-                // remove_track internally calls rtp_sender.stop(), which will stop the associated
-                // thread
-                if let Err(e) = peer.connection.remove_track(&rtp_sender.sender).await {
-                    log::error!(
-                        "failed to remove rtp_sender for source {} from peer {} on disconnect: {:?}",
-                        &source_id,
-                        &peer_id,
-                        e
-                    );
-                }
-            }
+        if let Some(peer) = self.peers.remove(peer_id) {
             if let Err(e) = peer.connection.close().await {
                 log::error!("failed to close peer connection: {e}");
             }
