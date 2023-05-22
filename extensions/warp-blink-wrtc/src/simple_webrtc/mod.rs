@@ -79,7 +79,6 @@ pub struct Controller {
 /// stores a PeerConnection for updating SDP and ICE candidates, adding and removing tracks
 /// also stores associated media streams
 pub struct Peer {
-    pub state: PeerState,
     pub id: DID,
     pub connection: Arc<RTCPeerConnection>,
     /// webrtc has a remove_track function which requires passing a RTCRtpSender
@@ -99,13 +98,6 @@ impl Drop for RtcRtpManager {
     fn drop(&mut self) {
         self.handle.abort();
     }
-}
-
-pub enum PeerState {
-    Disconnected,
-    WaitingForSdp,
-    WaitingForIce,
-    Connected,
 }
 
 pub type MediaSourceId = String;
@@ -169,11 +161,15 @@ impl Controller {
     /// which contains the SDP object
     /// continues with the following signals: Sdp, CallTerminated, CallRejected
     pub async fn dial(&mut self, peer_id: &DID) -> Result<()> {
-        let pc = self.connect(peer_id).await?;
-        let local_sdp = pc.create_offer(None).await?;
+        let peer = self.connect(peer_id).await?;
+        let local_sdp = peer.connection.create_offer(None).await?;
         // Sets the LocalDescription, and starts our UDP listeners
         // Note: this will start the gathering of ICE candidates
-        pc.set_local_description(local_sdp.clone()).await?;
+        peer.connection
+            .set_local_description(local_sdp.clone())
+            .await?;
+
+        self.peers.insert(peer.id.clone(), peer);
 
         self.event_ch.send(EmittedEvents::CallInitiated {
             dest: peer_id.clone(),
@@ -188,26 +184,27 @@ impl Controller {
         peer_id: &DID,
         remote_sdp: RTCSessionDescription,
     ) -> Result<()> {
-        let pc = self
+        let peer = self
             .connect(peer_id)
             .await
             .map_err(|e| anyhow::anyhow!(format!("{e}: {}:{}", file!(), line!())))?;
-        pc.set_remote_description(remote_sdp)
+        peer.connection
+            .set_remote_description(remote_sdp)
             .await
             .map_err(|e| anyhow::anyhow!(format!("{e}: {}:{}", file!(), line!())))?;
 
-        let answer = pc
+        let answer = peer
+            .connection
             .create_answer(None)
             .await
             .map_err(|e| anyhow::anyhow!(format!("{e}: {}:{}", file!(), line!())))?;
-        pc.set_local_description(answer.clone())
+        peer.connection
+            .set_local_description(answer.clone())
             .await
             .map_err(|e| anyhow::anyhow!(format!("{e}: {}:{}", file!(), line!())))?;
 
-        if let Some(p) = self.peers.get_mut(peer_id) {
-            p.state = PeerState::WaitingForIce;
-        } else {
-            bail!("peer not found");
+        if self.peers.insert(peer_id.clone(), peer).is_some() {
+            log::warn!("overwriting peer connection");
         }
 
         self.event_ch.send(EmittedEvents::Sdp {
@@ -220,9 +217,9 @@ impl Controller {
     /// Terminates a connection
     /// the controlling application should send a HangUp signal to the remote side
     pub async fn hang_up(&mut self, peer_id: &DID) {
-        // not sure if it's necessary to remove all tracks
-        if let Some(peer) = self.peers.remove(peer_id) {
-            for (source_id, rtp_sender) in &peer.rtp_senders {
+        // not sure if it's necessary to remove all tracks. calling close() might be good enough
+        if let Some(mut peer) = self.peers.remove(peer_id) {
+            for (source_id, rtp_sender) in peer.rtp_senders.drain() {
                 // remove_track internally calls rtp_sender.stop(), which will stop the associated
                 // thread
                 if let Err(e) = peer.connection.remove_track(&rtp_sender.sender).await {
@@ -233,6 +230,9 @@ impl Controller {
                         e
                     );
                 }
+            }
+            if let Err(e) = peer.connection.close().await {
+                log::error!("failed to close peer connection: {e}");
             }
         } else {
             log::warn!("attempted to remove nonexistent peer");
@@ -352,8 +352,10 @@ impl Controller {
     /// adds a connection. called by dial and accept_call
     /// inserts the connection into self.peers
     /// initializes state to WaitingForSdp
-    async fn connect(&mut self, peer_id: &DID) -> Result<Arc<RTCPeerConnection>> {
-        // todo: ensure id is not in self.connections
+    async fn connect(&mut self, peer_id: &DID) -> Result<Peer> {
+        if self.peers.contains_key(peer_id) {
+            bail!("peer already connected.");
+        }
 
         let api = match self.api.as_ref() {
             Some(r) => r,
@@ -371,21 +373,11 @@ impl Controller {
 
         // Create and store a new RTCPeerConnection
         let peer_connection = Arc::new(api.new_peer_connection(config).await?);
-        if self
-            .peers
-            .insert(
-                peer_id.clone(),
-                Peer {
-                    state: PeerState::WaitingForSdp,
-                    id: peer_id.clone(),
-                    connection: peer_connection.clone(),
-                    rtp_senders: HashMap::new(),
-                },
-            )
-            .is_some()
-        {
-            log::warn!("overwriting peer connection");
-        }
+        let mut peer = Peer {
+            id: peer_id.clone(),
+            connection: peer_connection,
+            rtp_senders: HashMap::new(),
+        };
 
         // configure callbacks
 
@@ -393,40 +385,58 @@ impl Controller {
         // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
         let tx = self.event_ch.clone();
         let dest = peer_id.clone();
-        peer_connection.on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
-            if let Some(candidate) = c {
-                if let Err(e) = tx.send(EmittedEvents::Ice {
-                    dest: dest.clone(),
-                    candidate: Box::new(candidate),
-                }) {
-                    log::error!("failed to send ice candidate to peer {}: {}", &dest, e);
+        peer.connection
+            .on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
+                if let Some(candidate) = c {
+                    if let Err(e) = tx.send(EmittedEvents::Ice {
+                        dest: dest.clone(),
+                        candidate: Box::new(candidate),
+                    }) {
+                        log::error!("failed to send ice candidate to peer {}: {}", &dest, e);
+                    }
                 }
-            }
-            Box::pin(async {})
-        }));
+                Box::pin(async {})
+            }));
 
         // Set the handler for ICE connection state
         // This will notify you when the peer has connected/disconnected
         // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
         let tx = self.event_ch.clone();
         let dest = peer_id.clone();
-        peer_connection.on_ice_connection_state_change(Box::new(
+        peer.connection.on_ice_connection_state_change(Box::new(
             move |connection_state: RTCIceConnectionState| {
                 log::info!(
                     "Connection State for peer {} has changed {}",
                     &dest,
                     connection_state
                 );
-                if matches!(
-                    connection_state,
+                match connection_state {
                     RTCIceConnectionState::Failed
-                        | RTCIceConnectionState::Disconnected
-                        | RTCIceConnectionState::Closed
-                ) {
-                    if let Err(e) = tx.send(EmittedEvents::Disconnected { peer: dest.clone() }) {
-                        log::error!("failed to send disconnect event for peer {}: {}", &dest, e);
+                    | RTCIceConnectionState::Disconnected
+                    | RTCIceConnectionState::Closed => {
+                        if let Err(e) =
+                            tx.send(EmittedEvents::IceDisconnected { peer: dest.clone() })
+                        {
+                            log::error!(
+                                "failed to send disconnect event for peer {}: {}",
+                                &dest,
+                                e
+                            );
+                        }
                     }
+                    RTCIceConnectionState::Completed => {
+                        if let Err(e) = tx.send(EmittedEvents::IceConnected { peer: dest.clone() })
+                        {
+                            log::error!(
+                                "failed to send IceConnected event for peer {}: {}",
+                                &dest,
+                                e
+                            );
+                        }
+                    }
+                    _ => {}
                 }
+
                 Box::pin(async {})
             },
         ));
@@ -435,7 +445,7 @@ impl Controller {
         // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
         let tx = self.event_ch.clone();
         let dest = peer_id.clone();
-        peer_connection.on_track(Box::new(
+        peer.connection.on_track(Box::new(
             move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
                 if let Some(track) = track {
                     if let Err(e) = tx.send(EmittedEvents::TrackAdded {
@@ -450,9 +460,8 @@ impl Controller {
         ));
 
         // attach all media sources to the peer
-        let mut rtp_senders = HashMap::new();
         for (source_id, track) in &self.media_sources {
-            match peer_connection.add_track(track.clone()).await {
+            match peer.connection.add_track(track.clone()).await {
                 Ok(rtp_sender) => {
                     // Read incoming RTCP packets
                     // Before these packets are returned they are processed by interceptors. For things
@@ -467,7 +476,7 @@ impl Controller {
                         sender: rtp_sender,
                         handle,
                     };
-                    rtp_senders.insert(source_id.clone(), x);
+                    peer.rtp_senders.insert(source_id.clone(), x);
                 }
                 Err(e) => {
                     log::error!(
@@ -479,16 +488,7 @@ impl Controller {
                 }
             }
         }
-        match self.peers.get_mut(peer_id) {
-            Some(p) => p.rtp_senders = rtp_senders,
-            None => {
-                log::error!(
-                    "failed to set rtp senders when connecting to peer {}",
-                    &peer_id
-                );
-            }
-        }
-        Ok(peer_connection)
+        Ok(peer)
     }
 }
 

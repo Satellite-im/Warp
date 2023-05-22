@@ -30,6 +30,12 @@ pub enum EmittedEvents {
         dest: DID,
         candidate: Box<RTCIceCandidate>,
     },
+    /// emitted when ICE indicates a connection is established
+    #[display(fmt = "IceConnected")]
+    IceConnected { peer: DID },
+    /// emitted when ICE indicates a connection is broken
+    #[display(fmt = "Disconnected")]
+    IceDisconnected { peer: DID },
     /// emitted in response to accept_call. the sdp should be sent to dest
     #[display(fmt = "Sdp")]
     Sdp {
@@ -42,9 +48,7 @@ pub enum EmittedEvents {
         dest: DID,
         sdp: Box<RTCSessionDescription>,
     },
-    /// for now let the peer re-join the call manually if they get disconnected
-    #[display(fmt = "Disconnected")]
-    Disconnected { peer: DID },
+
     /// a peer added a track. The calling application is responsible for reading from the track
     /// and processing the output
     #[display(fmt = "TrackAdded")]

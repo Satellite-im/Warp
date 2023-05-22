@@ -23,12 +23,7 @@ mod simple_webrtc;
 mod store;
 
 use async_trait::async_trait;
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
 use anyhow::Context;
@@ -65,7 +60,14 @@ use crate::{
 #[derive(Clone)]
 struct ActiveCall {
     call: CallInfo,
-    connected_participants: HashSet<DID>,
+    participants: HashMap<DID, PeerState>,
+}
+
+#[derive(Clone)]
+pub enum PeerState {
+    Disconnected,
+    Initializing,
+    Connected,
 }
 
 // used when a call is accepted
@@ -73,13 +75,13 @@ impl From<CallInfo> for ActiveCall {
     fn from(value: CallInfo) -> Self {
         Self {
             call: value,
-            connected_participants: HashSet::new(),
+            participants: HashMap::new(),
         }
     }
 }
 
 pub struct WebRtc {
-    account: Box<dyn MultiPass>,
+    _account: Box<dyn MultiPass>,
     ipfs: Ipfs,
     id: Arc<DID>,
     // a tx channel which emits events to drive the UI
@@ -165,7 +167,7 @@ impl WebRtc {
         });
 
         let webrtc = Self {
-            account,
+            _account: account,
             ipfs,
             id: own_id,
             ui_event_ch,
@@ -343,7 +345,7 @@ async fn handle_webrtc(
                 match signal {
                     CallSignal::Join { call_id } => {
                         if let Some(ac) = data.active_call.as_mut() {
-                            ac.connected_participants.insert(sender.clone());
+                            ac.participants.insert(sender.clone(), PeerState::Initializing);
                         }
                         // emits CallInitiated Event, which returns the local sdp. will be sent to the peer with the dial signal
                         if let Err(e) = data.webrtc.dial(&sender).await {
@@ -357,7 +359,7 @@ async fn handle_webrtc(
                     }
                     CallSignal::Leave { call_id } => {
                         if let Some(ac) = data.active_call.as_mut() {
-                            ac.connected_participants.remove(&sender);
+                            ac.participants.remove(&sender);
                         }
                         data.webrtc.hang_up(&sender).await;
                         if let Err(e) = ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
@@ -449,7 +451,7 @@ async fn handle_webrtc(
                 match opt {
                     Some(event) => {
                         log::debug!("webrtc event: {event}");
-                        let active_call = match data.active_call.as_ref() {
+                        let active_call = match data.active_call.as_mut() {
                             Some(ac) => ac,
                             None => {
                                 log::error!("event emitted but no active call");
@@ -463,7 +465,12 @@ async fn handle_webrtc(
                                     log::error!("failed to send media_track command: {e}");
                                 }
                             }
-                            EmittedEvents::Disconnected { peer } => {
+                            EmittedEvents::IceConnected { peer } => {
+                                active_call.participants.insert(peer, PeerState::Connected);
+                            }
+                            EmittedEvents::IceDisconnected { peer } => {
+                                // todo: could need to retry
+                                active_call.participants.insert(peer.clone(), PeerState::Disconnected);
                                 if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
