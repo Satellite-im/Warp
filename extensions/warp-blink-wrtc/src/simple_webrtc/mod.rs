@@ -135,6 +135,10 @@ impl Controller {
         // remove RTP tracks
         self.media_sources.clear();
         if self.peers.is_empty() {
+            // make sure this thing gets dropped
+            self.api.take();
+            let new_api = create_api()?;
+            self.api = Some(new_api);
             Ok(())
         } else {
             bail!("peers is not empty after deinit")
