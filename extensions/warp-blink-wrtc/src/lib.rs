@@ -228,11 +228,12 @@ impl WebRtc {
                 log::error!("failed to send signal: {e}");
             }
 
-            data.webrtc.deinit().await?;
+            let r = data.webrtc.deinit().await;
             host_media::reset().await;
+            r
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 }
 
@@ -274,7 +275,9 @@ async fn handle_call_initiation(
 
                 let mut data = STATIC_DATA.lock().await;
                 data.pending_calls.insert(call_info.id(), call_info);
-                ch.send(evt);
+                if let Err(e) = ch.send(evt) {
+                    log::error!("failed to send IncomingCall Event: {e}");
+                }
             }
         }
     }
@@ -327,14 +330,19 @@ async fn handle_webrtc(
                         }
                         // emits CallInitiated Event, which returns the local sdp. will be sent to the peer with the dial signal
                         data.webrtc.dial(&sender).await;
-                        ch.send(BlinkEventKind::ParticipantJoined { call_id, peer_id: sender });
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantJoined { call_id, peer_id: sender }) {
+                            log::error!("failed to send ParticipantJoined Event: {e}");
+                        }
 
                     }
                     CallSignal::Leave { call_id } => {
                         if let Some(ac) = data.active_call.as_mut() {
                             ac.connected_participants.remove(&sender);
                         }
-                        ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender });
+                        data.webrtc.hang_up(&sender).await;
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
+                            log::error!("failed to send ParticipantLeft Event: {e}");
+                        }
                     },
                 }
             },
@@ -411,9 +419,6 @@ async fn handle_webrtc(
                         // emits the SDP Event, which is sent to the peer via the SDP signal
                         if let Err(e) = data.webrtc.accept_call(&sender, sdp).await {
                             log::error!("failed to accept_call: {}", e);
-                            data.webrtc.hang_up(&sender).await;
-                            // todo: is a disconnect signal needed here? perhaps a retry
-                            todo!()
                         }
 
                     }

@@ -126,7 +126,11 @@ impl Controller {
             self.hang_up(&peer_id).await;
         }
 
-        Ok(())
+        if self.peers.is_empty() {
+            Ok(())
+        } else {
+            bail!("peers is not empty after deinit")
+        }
     }
     pub fn get_event_stream(&self) -> anyhow::Result<impl Stream<Item = EmittedEvents>> {
         let mut rx = self.event_ch.subscribe();
@@ -197,7 +201,7 @@ impl Controller {
     /// the controlling application should send a HangUp signal to the remote side
     pub async fn hang_up(&mut self, peer_id: &DID) {
         // not sure if it's necessary to remove all tracks
-        if let Some(peer) = self.peers.get_mut(peer_id) {
+        if let Some(peer) = self.peers.remove(peer_id) {
             for (source_id, rtp_sender) in &peer.rtp_senders {
                 // remove_track internally calls rtp_sender.stop(), which will stop the associated
                 // thread
@@ -210,10 +214,8 @@ impl Controller {
                     );
                 }
             }
-        }
-        match self.peers.remove(peer_id) {
-            Some(peer) => drop(peer),
-            None => log::warn!("attempted to remove nonexistent peer"),
+        } else {
+            log::warn!("attempted to remove nonexistent peer");
         }
     }
 
