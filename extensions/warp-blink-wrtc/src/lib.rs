@@ -73,7 +73,10 @@ pub enum PeerState {
 }
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum CallState {
-    Ready,
+    // the call was offered but no one joined and there is no peer connection
+    Uninitialized,
+    // at least one peer has connected
+    Started,
     Closing,
     Closed,
 }
@@ -84,7 +87,7 @@ impl From<CallInfo> for ActiveCall {
         Self {
             call: value,
             connected_participants: HashMap::new(),
-            call_state: CallState::Ready,
+            call_state: CallState::Uninitialized,
         }
     }
 }
@@ -346,8 +349,12 @@ async fn handle_webrtc(
                 match signal {
                     CallSignal::Join { call_id } => {
                         log::debug!("received signal: Join");
-                        if active_call.call_state != CallState::Ready {
-                            log::error!("someone tried to join call with state: {:?}", active_call.call_state);
+                        match active_call.call_state.clone() {
+                            CallState::Uninitialized => active_call.call_state = CallState::Started,
+                            x @ _ => if x != CallState::Started {
+                                     log::error!("someone tried to join call with state: {:?}", active_call.call_state);
+                                    continue;
+                            }
                         }
                         active_call.connected_participants.insert(sender.clone(), PeerState::Initializing);
                         // todo: properly hang up on error.
@@ -402,7 +409,7 @@ async fn handle_webrtc(
                     },
                 };
                 let mut data = STATIC_DATA.lock().await;
-                let active_call = match data.active_call.as_ref() {
+                let active_call = match data.active_call.as_mut() {
                     Some(r) => r,
                     None => {
                         log::error!("received a peer_signal when there is no active call");
@@ -410,7 +417,7 @@ async fn handle_webrtc(
                     }
                 };
 
-                if active_call.call_state != CallState::Ready {
+                if matches!(active_call.call_state, CallState::Closing | CallState::Closed) {
                     log::warn!("received a signal for a call which is being closed");
                     continue;
                 }
@@ -422,17 +429,28 @@ async fn handle_webrtc(
 
                 match signal {
                     PeerSignal::Ice(ice) => {
+                        if active_call.call_state != CallState::Started {
+                            log::error!("ice received for uninitialized call");
+                            continue;
+                        }
                         if let Err(e) = data.webrtc.recv_ice(&sender, ice).await {
                             log::error!("failed to recv_ice {}", e);
                         }
                     }
                     PeerSignal::Sdp(sdp) => {
+                        if active_call.call_state != CallState::Started {
+                            log::error!("sdp received for uninitialized call");
+                            continue;
+                        }
                         log::debug!("received signal: SDP");
                         if let Err(e) = data.webrtc.recv_sdp(&sender, sdp).await {
                             log::error!("failed to recv_sdp: {}", e);
                         }
                     }
                     PeerSignal::Dial(sdp) => {
+                        if active_call.call_state == CallState::Uninitialized {
+                            active_call.call_state = CallState::Started;
+                        }
                         log::debug!("received signal: Dial");
                         // emits the SDP Event, which is sent to the peer via the SDP signal
                         if let Err(e) = data.webrtc.accept_call(&sender, sdp).await {
@@ -657,12 +675,16 @@ impl Blink for WebRtc {
         let mut data = STATIC_DATA.lock().await;
         if let Some(ac) = data.active_call.as_mut() {
             match ac.call_state.clone() {
-                CallState::Ready => {
+                CallState::Started => {
                     ac.call_state = CallState::Closing;
                 }
                 CallState::Closed => {
                     log::info!("call already closed");
                     return Ok(());
+                }
+                CallState::Uninitialized => {
+                    log::info!("cancelling call");
+                    ac.call_state = CallState::Closed;
                 }
                 CallState::Closing => {
                     log::warn!("leave_call when call_state is: {:?}", ac.call_state);
