@@ -212,7 +212,7 @@ fn create_source_track(
         }
     };
     let input_stream = input_device
-        .build_input_stream(&config.into(), input_data_fn, err_fn, None)
+        .build_input_stream(&config, input_data_fn, err_fn, None)
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to build input stream: {e}, {}, {}",

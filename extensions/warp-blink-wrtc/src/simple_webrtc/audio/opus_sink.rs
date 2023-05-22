@@ -84,7 +84,7 @@ impl SinkTrack for OpusSink {
             }
         };
         let output_stream =
-            output_device.build_output_stream(&config.into(), output_data_fn, err_fn, None)?;
+            output_device.build_output_stream(&config, output_data_fn, err_fn, None)?;
 
         Ok(Self {
             stream: output_stream,

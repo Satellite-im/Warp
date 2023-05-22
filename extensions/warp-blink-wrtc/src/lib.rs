@@ -31,7 +31,7 @@ use std::{
 };
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
-use anyhow::{bail, Context};
+use anyhow::{Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 use once_cell::sync::Lazy;

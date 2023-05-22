@@ -27,7 +27,7 @@ pub async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
         for sample in data {
             let arr = [*sample];
             let p: *const u8 = arr.as_ptr() as _;
-            let bs: &[u8] = unsafe { slice::from_raw_parts(p, mem::size_of::<f32>() * 1) };
+            let bs: &[u8] = unsafe { slice::from_raw_parts(p, mem::size_of::<f32>()) };
             unsafe {
                 if let Some(mut f) = AUDIO_FILE.as_ref() {
                     if let Err(e) = f.write(bs) {
@@ -40,7 +40,7 @@ pub async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
     let input_stream = cpal::default_host()
         .default_input_device()
         .ok_or(anyhow::anyhow!("no input device"))?
-        .build_input_stream(&config.into(), input_data_fn, err_fn, None)
+        .build_input_stream(&config, input_data_fn, err_fn, None)
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to build input stream: {e}, {}, {}",

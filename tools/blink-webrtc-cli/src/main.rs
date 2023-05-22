@@ -2,7 +2,6 @@ use anyhow::bail;
 use clap::Parser;
 use cpal::{
     traits::{DeviceTrait, HostTrait},
-    SupportedStreamConfig,
 };
 use futures::StreamExt;
 
@@ -169,8 +168,8 @@ async fn handle_command(
             let dev = host
                 .default_input_device()
                 .ok_or(anyhow::anyhow!("no input device"))?;
-            let mut configs = dev.supported_input_configs()?;
-            while let Some(config) = configs.next() {
+            let configs = dev.supported_input_configs()?;
+            for config in configs {
                 println!("{config:#?}");
             }
         }
@@ -179,8 +178,8 @@ async fn handle_command(
             let dev = host
                 .default_output_device()
                 .ok_or(anyhow::anyhow!("no input device"))?;
-            let mut configs = dev.supported_output_configs()?;
-            while let Some(config) = configs.next() {
+            let configs = dev.supported_output_configs()?;
+            for config in configs {
                 println!("{config:#?}");
             }
         }

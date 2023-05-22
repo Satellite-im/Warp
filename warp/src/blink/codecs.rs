@@ -52,6 +52,7 @@ impl TryFrom<String> for AudioSampleRate {
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default)]
 pub struct VideoCodec {
     //todo
 }
@@ -145,14 +146,10 @@ impl VideoCodecBuilder {
 
 // impl VideoCodec {}
 
-impl Default for VideoCodec {
-    fn default() -> Self {
-        Self {}
-    }
-}
+
 
 impl std::fmt::Display for VideoCodec {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         todo!()
     }
 }

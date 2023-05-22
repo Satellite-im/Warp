@@ -12,11 +12,10 @@ use warp::blink;
 use warp::crypto::DID;
 use webrtc::track::track_remote::TrackRemote;
 use webrtc::{
-    rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
     track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
 };
 
-use crate::simple_webrtc::{self, audio, MediaSourceId};
+use crate::simple_webrtc::{self, audio};
 
 static SINGLETON_MUTEX: Lazy<Mutex<DummyStruct>> = Lazy::new(|| Mutex::new(DummyStruct {}));
 struct DummyStruct {}

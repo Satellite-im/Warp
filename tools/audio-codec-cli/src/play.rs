@@ -52,7 +52,7 @@ pub async fn play_f32(args: StaticArgs, sample_rate: Option<u32>) -> anyhow::Res
     let output_stream = cpal::default_host()
         .default_output_device()
         .ok_or(anyhow::anyhow!("no output device"))?
-        .build_output_stream(&config.into(), output_data_fn, err_fn, None)?;
+        .build_output_stream(&config, output_data_fn, err_fn, None)?;
 
     output_stream.play()?;
     tokio::time::sleep(Duration::from_secs(duration_secs as u64)).await;

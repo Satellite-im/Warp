@@ -34,12 +34,12 @@ impl OpusPacketizer {
             match self.encoder.encode(self.int_samples.as_slice(), out) {
                 Ok(size) => {
                     self.int_samples.clear();
-                    return Ok(Some(size));
+                    Ok(Some(size))
                 }
                 Err(e) => anyhow::bail!("failed to encode: {e}"),
             }
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
@@ -48,16 +48,16 @@ impl OpusPacketizer {
         if self.float_samples.len() == self.frame_size {
             match self
                 .encoder
-                .encode_float(&self.float_samples.as_slice(), out)
+                .encode_float(self.float_samples.as_slice(), out)
             {
                 Ok(size) => {
                     self.float_samples.clear();
-                    return Ok(Some(size));
+                    Ok(Some(size))
                 }
                 Err(e) => anyhow::bail!("failed to encode: {e}"),
             }
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 }
