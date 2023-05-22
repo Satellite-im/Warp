@@ -223,6 +223,11 @@ impl WebRtc {
                 .context("failed to get webrtc event stream")?,
         ));
 
+        if let Some(handle) = self.webrtc_handler.take() {
+            // just to be safe
+            handle.abort();
+        }
+
         let ui_event_ch = self.ui_event_ch.clone();
         let own_id = self.id.clone();
         let ipfs2 = self.ipfs.clone();
@@ -239,7 +244,6 @@ impl WebRtc {
         });
 
         self.webrtc_handler.replace(webrtc_handle);
-
         Ok(())
     }
 }
@@ -471,6 +475,8 @@ async fn handle_webrtc(
                                     if let Err(e) = data.webrtc.deinit().await {
                                         log::error!("webrtc deinit failed: {e}");
                                     }
+                                    // terminate the task on purpose.
+                                    return;
                                 }
                             }
                             EmittedEvents::Disconnected { peer }
