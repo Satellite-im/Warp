@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use uuid::Uuid;
+use warp::blink::MimeType;
 use warp::crypto::DID;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
@@ -32,6 +33,7 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecParameters, RTPCodecType};
 
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
@@ -457,10 +459,99 @@ impl Controller {
     }
 }
 
+// todo: try setting useinbandfec=0 instead of 1
 // todo: add support for more codecs. perhaps make it configurable
 fn create_api() -> Result<webrtc::api::API> {
     let mut media = MediaEngine::default();
-    media.register_default_codecs()?;
+    media.register_codec(
+        RTCRtpCodecParameters {
+            capability: RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: 48000,
+                channels: 1,
+                sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: 111,
+            ..Default::default()
+        },
+        RTPCodecType::Audio,
+    )?;
+
+    media.register_codec(
+        RTCRtpCodecParameters {
+            capability: RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: 48000,
+                channels: 2,
+                sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: 111,
+            ..Default::default()
+        },
+        RTPCodecType::Audio,
+    )?;
+
+    media.register_codec(
+        RTCRtpCodecParameters {
+            capability: RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: 24000,
+                channels: 1,
+                sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: 112,
+            ..Default::default()
+        },
+        RTPCodecType::Audio,
+    )?;
+
+    media.register_codec(
+        RTCRtpCodecParameters {
+            capability: RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: 24000,
+                channels: 2,
+                sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: 113,
+            ..Default::default()
+        },
+        RTPCodecType::Audio,
+    )?;
+
+    media.register_codec(
+        RTCRtpCodecParameters {
+            capability: RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: 8000,
+                channels: 1,
+                sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: 114,
+            ..Default::default()
+        },
+        RTPCodecType::Audio,
+    )?;
+
+    media.register_codec(
+        RTCRtpCodecParameters {
+            capability: RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: 8000,
+                channels: 2,
+                sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: 115,
+            ..Default::default()
+        },
+        RTPCodecType::Audio,
+    )?;
 
     // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
     // This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
