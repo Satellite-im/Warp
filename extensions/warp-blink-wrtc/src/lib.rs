@@ -127,6 +127,7 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
     Mutex::new(StaticData {
         webrtc,
         ui_event_ch,
+        own_id: DID::default(),
         cpal_host: cpal::default_host(),
         active_call: None,
         pending_calls: HashMap::new(),
@@ -135,6 +136,7 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
 
 struct StaticData {
     webrtc: simple_webrtc::Controller,
+    own_id: DID,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     active_call: Option<ActiveCall>,
     pending_calls: HashMap<Uuid, CallInfo>,
@@ -145,7 +147,7 @@ struct StaticData {
 impl WebRtc {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
         log::trace!("initializing WebRTC");
-        let _data = STATIC_DATA.lock().await;
+        let mut data = STATIC_DATA.lock().await;
         let identity = loop {
             if let Ok(identity) = account.get_own_identity().await {
                 break identity;
@@ -153,6 +155,7 @@ impl WebRtc {
             tokio::time::sleep(Duration::from_millis(100)).await
         };
         let did = identity.did_key();
+        data.own_id = did.clone();
 
         let ipfs_handle = match account.handle() {
             Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
@@ -479,6 +482,10 @@ async fn handle_webrtc(
                         let call_id = active_call.call.id();
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
+                                if peer == data.own_id {
+                                    log::warn!("got TrackAdded event for own id");
+                                    continue;
+                                }
                                 if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
