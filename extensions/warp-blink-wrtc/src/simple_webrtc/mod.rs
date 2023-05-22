@@ -70,7 +70,7 @@ use self::events::EmittedEvents;
 ///
 
 pub struct Controller {
-    api: webrtc::api::API,
+    api: Option<webrtc::api::API>,
     peers: HashMap<DID, Peer>,
     event_ch: broadcast::Sender<EmittedEvents>,
     media_sources: HashMap<MediaSourceId, Arc<TrackLocalStaticRTP>>,
@@ -87,7 +87,18 @@ pub struct Peer {
     /// only receives a TrackWriter
     /// in the future, the RTCRtpSender can be used to have finer control over the stream.
     /// it can do things like pause the stream, without disconnecting it.
-    pub rtp_senders: HashMap<MediaSourceId, Arc<RTCRtpSender>>,
+    pub rtp_senders: HashMap<MediaSourceId, RtcRtpManager>,
+}
+
+pub struct RtcRtpManager {
+    sender: Arc<RTCRtpSender>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for RtcRtpManager {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
 }
 
 pub enum PeerState {
@@ -114,7 +125,7 @@ impl Controller {
         // todo: verify size
         let (event_ch, _rx) = broadcast::channel(1024);
         Ok(Self {
-            api: create_api()?,
+            api: Some(create_api()?),
             peers: HashMap::new(),
             event_ch,
             media_sources: HashMap::new(),
@@ -146,6 +157,13 @@ impl Controller {
             }
         };
         Ok(Box::pin(stream))
+    }
+    // attempts to reset the WebRTC API prior to starting a call.
+    pub async fn init_call(&mut self) -> Result<()> {
+        self.api.take();
+        self.peers.clear();
+        self.api = Some(create_api()?);
+        Ok(())
     }
     /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,
     /// which contains the SDP object
@@ -207,7 +225,7 @@ impl Controller {
             for (source_id, rtp_sender) in &peer.rtp_senders {
                 // remove_track internally calls rtp_sender.stop(), which will stop the associated
                 // thread
-                if let Err(e) = peer.connection.remove_track(rtp_sender).await {
+                if let Err(e) = peer.connection.remove_track(&rtp_sender.sender).await {
                     log::error!(
                         "failed to remove rtp_sender for source {} from peer {} on disconnect: {:?}",
                         &source_id,
@@ -241,22 +259,23 @@ impl Controller {
             match peer.connection.add_track(track.clone()).await {
                 Ok(rtp_sender) => {
                     // returns None if the value was newly inserted.
-                    if peer
-                        .rtp_senders
-                        .insert(source_id.clone(), rtp_sender.clone())
-                        .is_some()
-                    {
+                    if peer.rtp_senders.contains_key(&source_id) {
                         log::error!("duplicate rtp_sender");
                     } else {
                         // Read incoming RTCP packets
                         // Before these packets are returned they are processed by interceptors. For things
                         // like NACK this needs to be called.
-                        tokio::spawn(async move {
+                        let sender2 = rtp_sender.clone();
+                        let handle = tokio::spawn(async move {
                             let mut rtcp_buf = vec![0u8; 1500];
-                            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+                            while let Ok((_, _)) = sender2.read(&mut rtcp_buf).await {}
                             log::debug!("terminating rtp_sender thread from add_media_source");
-                            Result::<()>::Ok(())
                         });
+                        let x = RtcRtpManager {
+                            sender: rtp_sender,
+                            handle,
+                        };
+                        peer.rtp_senders.insert(source_id.clone(), x);
                     }
                 }
                 Err(e) => {
@@ -279,7 +298,7 @@ impl Controller {
         for (peer_id, peer) in &mut self.peers {
             // if source_id isn't found, it will be logged by the next statement
             if let Some(rtp_sender) = peer.rtp_senders.get(&source_id) {
-                if let Err(e) = peer.connection.remove_track(rtp_sender).await {
+                if let Err(e) = peer.connection.remove_track(&rtp_sender.sender).await {
                     log::error!(
                         "failed to remove track {} for peer {}: {:?}",
                         &source_id,
@@ -336,6 +355,11 @@ impl Controller {
     async fn connect(&mut self, peer_id: &DID) -> Result<Arc<RTCPeerConnection>> {
         // todo: ensure id is not in self.connections
 
+        let api = match self.api.as_ref() {
+            Some(r) => r,
+            None => bail!("webrtc API not creatd yet!"),
+        };
+
         // create ICE gatherer
         let config = RTCConfiguration {
             ice_servers: vec![RTCIceServer {
@@ -346,7 +370,7 @@ impl Controller {
         };
 
         // Create and store a new RTCPeerConnection
-        let peer_connection = Arc::new(self.api.new_peer_connection(config).await?);
+        let peer_connection = Arc::new(api.new_peer_connection(config).await?);
         if self
             .peers
             .insert(
@@ -425,16 +449,20 @@ impl Controller {
         for (source_id, track) in &self.media_sources {
             match peer_connection.add_track(track.clone()).await {
                 Ok(rtp_sender) => {
-                    rtp_senders.insert(source_id.clone(), rtp_sender.clone());
                     // Read incoming RTCP packets
                     // Before these packets are returned they are processed by interceptors. For things
                     // like NACK this needs to be called.
-                    tokio::spawn(async move {
+                    let sender2 = rtp_sender.clone();
+                    let handle = tokio::spawn(async move {
                         let mut rtcp_buf = vec![0u8; 1500];
-                        while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+                        while let Ok((_, _)) = sender2.read(&mut rtcp_buf).await {}
                         log::debug!("terminating rtp_sender thread from `connect`");
-                        Result::<()>::Ok(())
                     });
+                    let x = RtcRtpManager {
+                        sender: rtp_sender,
+                        handle,
+                    };
+                    rtp_senders.insert(source_id.clone(), x);
                 }
                 Err(e) => {
                     log::error!(

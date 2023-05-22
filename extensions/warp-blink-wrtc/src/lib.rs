@@ -215,6 +215,7 @@ impl WebRtc {
         });
 
         self.webrtc_handler.replace(webrtc_handle);
+
         Ok(())
     }
 
