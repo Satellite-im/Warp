@@ -31,7 +31,7 @@ use std::{
 };
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 use once_cell::sync::Lazy;
@@ -178,7 +178,23 @@ impl WebRtc {
     }
 
     async fn init_call(&mut self, data: &mut StaticData, call: CallInfo) -> anyhow::Result<()> {
+        self.leave_call_internal(data).await?;
         data.active_call.replace(call.clone().into());
+        data.webrtc.init_call().await?;
+
+        let audio_codec = call.audio_codec();
+        // ensure there is an audio source track
+        let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
+            mime_type: audio_codec.mime_type(),
+            clock_rate: audio_codec.sample_rate(),
+            channels: audio_codec.channels(),
+            ..Default::default()
+        };
+        let track = data
+            .webrtc
+            .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
+            .await?;
+        host_media::create_audio_source_track(track, audio_codec).await?;
 
         // next, create event streams and pass them to a task
         let call_broadcast_stream = self
@@ -545,23 +561,6 @@ impl Blink for WebRtc {
         };
         let mut data = STATIC_DATA.lock().await;
         let call_info = CallInfo::new(participants.clone(), audio_codec.clone(), video_codec);
-        let ac = ActiveCall::from(call_info.clone());
-
-        self.leave_call_internal(&mut data).await?;
-
-        // ensure there is an audio source track
-        let _audio_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-            mime_type: audio_codec.mime_type(),
-            clock_rate: audio_codec.sample_rate(),
-            channels: audio_codec.channels(),
-            ..Default::default()
-        };
-        let track = data
-            .webrtc
-            .add_media_source(host_media::AUDIO_SOURCE_ID.into(), _audio_codec.clone())
-            .await?;
-        host_media::create_audio_source_track(track, audio_codec).await?;
-
         self.init_call(&mut data, call_info.clone()).await?;
         for dest in participants {
             if dest == *self.id {
@@ -569,7 +568,7 @@ impl Blink for WebRtc {
             }
             let topic = ipfs_routes::call_initiation_route(&dest);
             let signal = InitiationSignal::Offer {
-                call_info: ac.call.clone(),
+                call_info: call_info.clone(),
             };
 
             if let Err(e) = send_signal_ecdh(&self.ipfs, &self.id, &dest, signal, topic).await {
@@ -581,7 +580,6 @@ impl Blink for WebRtc {
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
-        self.leave_call_internal(&mut data).await?;
         if let Some(call) = data.pending_calls.remove(&call_id) {
             self.init_call(&mut data, call.clone()).await?;
             let call_id = call.id();
@@ -590,8 +588,12 @@ impl Blink for WebRtc {
             if let Err(e) = send_signal_aes(&self.ipfs, &call.group_key(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
+            Ok(())
+        } else {
+            Err(Error::OtherWithContext(
+                "could not answer call: not found".into(),
+            ))
         }
-        Ok(())
     }
     /// use the Leave signal as a courtesy, to let the group know not to expect you to join.
     async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error> {
@@ -602,8 +604,12 @@ impl Blink for WebRtc {
             if let Err(e) = send_signal_aes(&self.ipfs, &call.group_key(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
+            Ok(())
+        } else {
+            Err(Error::OtherWithContext(
+                "could not reject call: not found".into(),
+            ))
         }
-        Ok(())
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
