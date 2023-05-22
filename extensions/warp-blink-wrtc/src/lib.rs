@@ -182,7 +182,6 @@ impl WebRtc {
     async fn init_call(&mut self, data: &mut StaticData, call: CallInfo) -> anyhow::Result<()> {
         self.leave_call_internal(data).await?;
         data.active_call.replace(call.clone().into());
-        data.webrtc.init_call().await?;
 
         let audio_codec = call.audio_codec();
         // ensure there is an audio source track
@@ -412,32 +411,6 @@ async fn handle_webrtc(
                         }
                     }
                     PeerSignal::Dial(sdp) => {
-                        if !host_media::has_audio_source().await {
-                            let audio_codec = ac.call.audio_codec();
-                            let codec = RTCRtpCodecCapability {
-                                mime_type: audio_codec.mime_type(),
-                                clock_rate: audio_codec.sample_rate(),
-                                channels: audio_codec.channels(),
-                                ..Default::default()
-                            };
-                            let track = match data
-                                .webrtc
-                                .add_media_source(host_media::AUDIO_SOURCE_ID.into(), codec.clone())
-                                .await {
-                                    Ok(r) => r,
-                                    Err(e) => {
-                                        log::error!("failed to add media source: {e}");
-                                        continue;
-                                    }
-                                };
-                            if let Err(e) = host_media::create_audio_source_track(track, audio_codec).await {
-                                log::error!("failed to create audio source track: {e}");
-                                data.webrtc.hang_up(&sender).await;
-                                // todo: how to leave the call...may need to send a signal
-                                todo!()
-                            }
-                        }
-
                         // emits the SDP Event, which is sent to the peer via the SDP signal
                         if let Err(e) = data.webrtc.accept_call(&sender, sdp).await {
                             log::error!("failed to accept_call: {}", e);
@@ -624,7 +597,6 @@ impl Blink for WebRtc {
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
-        // todo: host_media::remove_source_track(host_media::AUDIO_SOURCE_ID).await?;
         self.leave_call_internal(&mut data).await?;
         Ok(())
     }

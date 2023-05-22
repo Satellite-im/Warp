@@ -130,7 +130,7 @@ impl Controller {
         for peer_id in peer_ids {
             self.hang_up(&peer_id).await;
         }
-
+        self.media_sources.clear();
         if self.peers.is_empty() {
             Ok(())
         } else {
@@ -150,13 +150,7 @@ impl Controller {
         };
         Ok(Box::pin(stream))
     }
-    // attempts to reset the WebRTC API prior to starting a call.
-    pub async fn init_call(&mut self) -> Result<()> {
-        self.api.take();
-        self.peers.clear();
-        self.api = Some(create_api()?);
-        Ok(())
-    }
+
     /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,
     /// which contains the SDP object
     /// continues with the following signals: Sdp, CallTerminated, CallRejected
