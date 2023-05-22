@@ -641,12 +641,19 @@ impl Blink for WebRtc {
     async fn leave_call(&mut self) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
         if let Some(ac) = data.active_call.as_mut() {
-            if ac.call_state != CallState::Ready {
-                log::warn!("leave_call called on call which is already being closed");
-                return Ok(());
-            } else {
-                ac.call_state = CallState::Closing;
-            }
+            match ac.call_state.clone() {
+                CallState::Ready => {
+                    ac.call_state = CallState::Closing;
+                }
+                CallState::Closed => {
+                    log::info!("call already closed");
+                    return Ok(());
+                }
+                CallState::Closing => {
+                    log::warn!("leave_call when call_state is: {:?}", ac.call_state);
+                    return Ok(());
+                }
+            };
 
             let call_id = ac.call.id();
             let topic = ipfs_routes::call_signal_route(&call_id);
