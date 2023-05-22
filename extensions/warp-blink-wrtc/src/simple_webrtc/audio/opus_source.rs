@@ -29,6 +29,12 @@ pub struct OpusSource {
     packetizer_handle: JoinHandle<()>,
 }
 
+impl Drop for OpusSource {
+    fn drop(&mut self) {
+        self.packetizer_handle.abort();
+    }
+}
+
 impl SourceTrack for OpusSource {
     fn init(
         input_device: &cpal::Device,
