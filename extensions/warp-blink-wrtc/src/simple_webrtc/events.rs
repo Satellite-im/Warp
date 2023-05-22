@@ -30,12 +30,14 @@ pub enum EmittedEvents {
         dest: DID,
         candidate: Box<RTCIceCandidate>,
     },
-    /// emitted when ICE indicates a connection is established
-    #[display(fmt = "IceConnected")]
-    IceConnected { peer: DID },
-    /// emitted when ICE indicates a connection is broken
+    #[display(fmt = "Connected")]
+    Connected { peer: DID },
     #[display(fmt = "Disconnected")]
-    IceDisconnected { peer: DID },
+    Disconnected { peer: DID },
+    #[display(fmt = "ConnectionFailed")]
+    ConnectionFailed { peer: DID },
+    #[display(fmt = "ConnectionClosed")]
+    ConnectionClosed { peer: DID },
     /// emitted in response to accept_call. the sdp should be sent to dest
     #[display(fmt = "Sdp")]
     Sdp {

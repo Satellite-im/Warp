@@ -63,11 +63,12 @@ struct ActiveCall {
     participants: HashMap<DID, PeerState>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum PeerState {
     Disconnected,
     Initializing,
     Connected,
+    Closed,
 }
 
 // used when a call is accepted
@@ -180,9 +181,7 @@ impl WebRtc {
     }
 
     async fn init_call(&mut self, data: &mut StaticData, call: CallInfo) -> anyhow::Result<()> {
-        self.leave_call_internal(data).await?;
         data.active_call.replace(call.clone().into());
-
         let audio_codec = call.audio_codec();
         // ensure there is an audio source track
         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
@@ -237,7 +236,7 @@ impl WebRtc {
     }
 
     async fn leave_call_internal(&mut self, data: &mut StaticData) -> anyhow::Result<()> {
-        if let Some(ac) = data.active_call.take() {
+        if let Some(ac) = data.active_call.as_ref() {
             let call_id = ac.call.id();
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Leave { call_id };
@@ -346,6 +345,7 @@ async fn handle_webrtc(
                         if let Some(ac) = data.active_call.as_mut() {
                             ac.participants.insert(sender.clone(), PeerState::Initializing);
                         }
+                        // todo: properly hang up on error.
                         // emits CallInitiated Event, which returns the local sdp. will be sent to the peer with the dial signal
                         if let Err(e) = data.webrtc.dial(&sender).await {
                             log::error!("failed to dial peer: {e}");
@@ -438,10 +438,17 @@ async fn handle_webrtc(
                                     log::error!("failed to send media_track command: {e}");
                                 }
                             }
-                            EmittedEvents::IceConnected { peer } => {
+                            EmittedEvents::Connected { peer } => {
                                 active_call.participants.insert(peer, PeerState::Connected);
                             }
-                            EmittedEvents::IceDisconnected { peer } => {
+                            EmittedEvents::ConnectionClosed { peer } => {
+                                active_call.participants.insert(peer, PeerState::Closed);
+                                if !active_call.participants.iter().any(|(_k, v)| *v != PeerState::Closed) {
+                                    log::info!("all participants have successfully been disconnected");
+                                }
+                            }
+                            EmittedEvents::Disconnected { peer }
+                            | EmittedEvents::ConnectionFailed { peer } => {
                                 // todo: could need to retry
                                 active_call.participants.insert(peer.clone(), PeerState::Disconnected);
                                 if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
@@ -539,10 +546,19 @@ impl Blink for WebRtc {
         video_codec: blink::VideoCodec,
         _screenshare_codec: blink::VideoCodec,
     ) -> Result<(), Error> {
+        let mut data = STATIC_DATA.lock().await;
+        if let Some(ac) = data.active_call.as_ref() {
+            if ac
+                .participants
+                .iter()
+                .any(|(_k, v)| *v != PeerState::Closed)
+            {
+                return Err(Error::OtherWithContext("previous call not finished".into()));
+            }
+        }
         if !participants.contains(&self.id) {
             participants.push(DID::from_str(&self.id.fingerprint())?);
         };
-        let mut data = STATIC_DATA.lock().await;
         let call_info = CallInfo::new(participants.clone(), audio_codec.clone(), video_codec);
         self.init_call(&mut data, call_info.clone()).await?;
         for dest in participants {
@@ -563,6 +579,15 @@ impl Blink for WebRtc {
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
+        if let Some(ac) = data.active_call.as_ref() {
+            if ac
+                .participants
+                .iter()
+                .any(|(_k, v)| *v != PeerState::Closed)
+            {
+                return Err(Error::OtherWithContext("previous call not finished".into()));
+            }
+        }
         if let Some(call) = data.pending_calls.remove(&call_id) {
             self.init_call(&mut data, call.clone()).await?;
             let call_id = call.id();

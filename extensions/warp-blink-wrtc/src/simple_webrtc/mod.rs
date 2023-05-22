@@ -32,6 +32,7 @@ use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecParameters, RTPCodecType};
 
@@ -128,8 +129,10 @@ impl Controller {
     pub async fn deinit(&mut self) -> Result<()> {
         let peer_ids: Vec<DID> = self.peers.keys().cloned().collect();
         for peer_id in peer_ids {
+            // close the peer connection
             self.hang_up(&peer_id).await;
         }
+        // remove RTP tracks
         self.media_sources.clear();
         if self.peers.is_empty() {
             Ok(())
@@ -164,7 +167,6 @@ impl Controller {
             .await?;
 
         self.peers.insert(peer.id.clone(), peer);
-
         self.event_ch.send(EmittedEvents::CallInitiated {
             dest: peer_id.clone(),
             sdp: Box::new(local_sdp),
@@ -375,8 +377,62 @@ impl Controller {
 
         // configure callbacks
 
-        // send discovered ice candidates (for self) to remote peer
-        // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
+        let tx = self.event_ch.clone();
+        let dest = peer_id.clone();
+        peer.connection.on_peer_connection_state_change(Box::new(
+            move |c: RTCPeerConnectionState| {
+                log::info!(
+                    "WebRTC connection state for peer {} has changed {}",
+                    &dest,
+                    c
+                );
+                match c {
+                    RTCPeerConnectionState::Unspecified => {}
+                    RTCPeerConnectionState::New => {}
+                    RTCPeerConnectionState::Connecting => {}
+                    RTCPeerConnectionState::Connected => {
+                        if let Err(e) = tx.send(EmittedEvents::Connected { peer: dest.clone() }) {
+                            log::error!("failed to send Connected event for peer {}: {}", &dest, e);
+                        }
+                    }
+                    RTCPeerConnectionState::Disconnected => {
+                        if let Err(e) = tx.send(EmittedEvents::Disconnected { peer: dest.clone() })
+                        {
+                            log::error!(
+                                "failed to send disconnect event for peer {}: {}",
+                                &dest,
+                                e
+                            );
+                        }
+                    }
+                    RTCPeerConnectionState::Failed => {
+                        if let Err(e) =
+                            tx.send(EmittedEvents::ConnectionFailed { peer: dest.clone() })
+                        {
+                            log::error!(
+                                "failed to send ConnectionFailed event for peer {}: {}",
+                                &dest,
+                                e
+                            );
+                        }
+                    }
+                    RTCPeerConnectionState::Closed => {
+                        if let Err(e) =
+                            tx.send(EmittedEvents::ConnectionClosed { peer: dest.clone() })
+                        {
+                            log::error!(
+                                "failed to send ConnectionClosed event for peer {}: {}",
+                                &dest,
+                                e
+                            );
+                        }
+                    }
+                }
+
+                Box::pin(async {})
+            },
+        ));
+
         let tx = self.event_ch.clone();
         let dest = peer_id.clone();
         peer.connection
@@ -395,41 +451,14 @@ impl Controller {
         // Set the handler for ICE connection state
         // This will notify you when the peer has connected/disconnected
         // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
-        let tx = self.event_ch.clone();
         let dest = peer_id.clone();
         peer.connection.on_ice_connection_state_change(Box::new(
             move |connection_state: RTCIceConnectionState| {
                 log::info!(
-                    "Connection State for peer {} has changed {}",
+                    "ICE connection state for peer {} has changed {}",
                     &dest,
                     connection_state
                 );
-                match connection_state {
-                    RTCIceConnectionState::Failed
-                    | RTCIceConnectionState::Disconnected
-                    | RTCIceConnectionState::Closed => {
-                        if let Err(e) =
-                            tx.send(EmittedEvents::IceDisconnected { peer: dest.clone() })
-                        {
-                            log::error!(
-                                "failed to send disconnect event for peer {}: {}",
-                                &dest,
-                                e
-                            );
-                        }
-                    }
-                    RTCIceConnectionState::Completed => {
-                        if let Err(e) = tx.send(EmittedEvents::IceConnected { peer: dest.clone() })
-                        {
-                            log::error!(
-                                "failed to send IceConnected event for peer {}: {}",
-                                &dest,
-                                e
-                            );
-                        }
-                    }
-                    _ => {}
-                }
 
                 Box::pin(async {})
             },
