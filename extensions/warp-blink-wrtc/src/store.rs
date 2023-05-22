@@ -104,7 +104,7 @@ fn ecdh_decrypt<K: AsRef<[u8]>>(own_did: &DID, sender: &DID, data: K) -> Result<
     Ok(data)
 }
 
-fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<rust_ipfs::libp2p::identity::PublicKey> {
+fn _did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<rust_ipfs::libp2p::identity::PublicKey> {
     let kp = rust_ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(
         &public_key.public_key_bytes(),
     )

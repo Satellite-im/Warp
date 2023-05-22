@@ -1,8 +1,6 @@
 use anyhow::bail;
 use clap::Parser;
-use cpal::{
-    traits::{DeviceTrait, HostTrait},
-};
+use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 
 use once_cell::sync::Lazy;
@@ -206,6 +204,7 @@ async fn handle_command(
 async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
         println!("BlinkEvent: {evt}");
+        #[allow(clippy::single_match)]
         match evt {
             BlinkEventKind::IncomingCall {
                 call_id,

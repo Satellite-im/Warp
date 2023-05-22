@@ -7,11 +7,11 @@ use cpal::{
 
 use crate::{err_fn, StaticArgs, AUDIO_FILE_NAME};
 
-static mut audio_file: Option<File> = None;
+static mut AUDIO_FILE: Option<File> = None;
 
 pub async fn play_f32(args: StaticArgs, sample_rate: Option<u32>) -> anyhow::Result<()> {
     unsafe {
-        audio_file = Some(File::open(AUDIO_FILE_NAME.as_str())?);
+        AUDIO_FILE = Some(File::open(AUDIO_FILE_NAME.as_str())?);
     }
     let sample_rate = sample_rate.unwrap_or(args.sample_rate);
     let duration_secs = args.audio_duration_secs;
@@ -29,7 +29,7 @@ pub async fn play_f32(args: StaticArgs, sample_rate: Option<u32>) -> anyhow::Res
         for sample in data {
             let mut buf: [u8; 4] = [0; 4];
             unsafe {
-                if let Some(mut f) = audio_file.as_ref() {
+                if let Some(mut f) = AUDIO_FILE.as_ref() {
                     match f.read(&mut buf) {
                         Ok(size) => {
                             if size == 0 {

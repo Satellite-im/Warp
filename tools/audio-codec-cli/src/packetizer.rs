@@ -4,7 +4,7 @@ pub struct OpusPacketizer {
     // encodes groups of samples (frames)
     encoder: opus::Encoder,
     float_samples: Vec<f32>,
-    int_samples: Vec<i16>,
+    _int_samples: Vec<i16>,
     // number of samples in a frame
     frame_size: usize,
 }
@@ -23,17 +23,17 @@ impl OpusPacketizer {
         Ok(Self {
             encoder,
             float_samples: vec![],
-            int_samples: vec![],
+            _int_samples: vec![],
             frame_size,
         })
     }
 
-    pub fn packetize_i16(&mut self, sample: i16, out: &mut [u8]) -> anyhow::Result<Option<usize>> {
-        self.int_samples.push(sample);
-        if self.int_samples.len() == self.frame_size {
-            match self.encoder.encode(self.int_samples.as_slice(), out) {
+    pub fn _packetize_i16(&mut self, sample: i16, out: &mut [u8]) -> anyhow::Result<Option<usize>> {
+        self._int_samples.push(sample);
+        if self._int_samples.len() == self.frame_size {
+            match self.encoder.encode(self._int_samples.as_slice(), out) {
                 Ok(size) => {
-                    self.int_samples.clear();
+                    self._int_samples.clear();
                     Ok(Some(size))
                 }
                 Err(e) => anyhow::bail!("failed to encode: {e}"),

@@ -31,7 +31,7 @@ use std::{
 };
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
-use anyhow::{Context};
+use anyhow::Context;
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 use once_cell::sync::Lazy;
@@ -346,7 +346,10 @@ async fn handle_webrtc(
                             ac.connected_participants.insert(sender.clone());
                         }
                         // emits CallInitiated Event, which returns the local sdp. will be sent to the peer with the dial signal
-                        data.webrtc.dial(&sender).await;
+                        if let Err(e) = data.webrtc.dial(&sender).await {
+                            log::error!("failed to dial peer: {e}");
+                            continue;
+                        }
                         if let Err(e) = ch.send(BlinkEventKind::ParticipantJoined { call_id, peer_id: sender }) {
                             log::error!("failed to send ParticipantJoined Event: {e}");
                         }

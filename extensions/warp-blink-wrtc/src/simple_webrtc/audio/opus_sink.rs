@@ -116,6 +116,7 @@ impl SinkTrack for OpusSink {
     }
 }
 
+#[allow(clippy::type_complexity)]
 async fn decode_media_stream<T>(
     track: Arc<TrackRemote>,
     mut sample_builder: SampleBuilder<T>,
