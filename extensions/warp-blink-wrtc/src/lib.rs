@@ -138,7 +138,7 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
     });
 
     let default_sink_codec = default_output.and_then(|x| {
-        x.default_input_config().ok().map(|x| blink::AudioCodec {
+        x.default_output_config().ok().map(|x| blink::AudioCodec {
             mime: MimeType::OPUS.into(),
             sample_rate: blink::AudioSampleRate::try_from(x.sample_rate().0)
                 .unwrap_or(blink::AudioSampleRate::High),

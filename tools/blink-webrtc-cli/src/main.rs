@@ -309,7 +309,7 @@ async fn main() -> anyhow::Result<()> {
         println!("no audio sink codec. setting a default one now");
         let default_sink_codec = default_output
             .and_then(|x| {
-                x.default_input_config().ok().map(|x| AudioCodec {
+                x.default_output_config().ok().map(|x| AudioCodec {
                     mime: MimeType::OPUS.into(),
                     sample_rate: AudioSampleRate::try_from(x.sample_rate().0)
                         .unwrap_or(AudioSampleRate::High),
