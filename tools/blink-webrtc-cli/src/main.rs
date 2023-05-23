@@ -302,45 +302,6 @@ async fn main() -> anyhow::Result<()> {
     println!("enter --help to see available commands");
     println!("your DID is {}", own_identity.did_key());
 
-    let cpal_host = cpal::default_host();
-    let default_input = cpal_host.default_input_device();
-    let default_output = cpal_host.default_output_device();
-    if blink.get_audio_sink_codec().await.is_none() {
-        println!("no audio sink codec. setting a default one now");
-        let default_sink_codec = default_output
-            .and_then(|x| {
-                x.default_output_config().ok().map(|x| AudioCodec {
-                    mime: MimeType::OPUS.into(),
-                    sample_rate: AudioSampleRate::try_from(x.sample_rate().0)
-                        .unwrap_or(AudioSampleRate::High),
-                    channels: x.channels(),
-                })
-            })
-            .expect("no audio sink codec");
-        blink
-            .set_audio_sink_codec(default_sink_codec)
-            .await
-            .expect("invalid audio sink codec");
-    }
-
-    if blink.get_audio_source_codec().await.is_none() {
-        println!("no audio source codec. setting a default one now");
-        let default_source_codec = default_input
-            .and_then(|x| {
-                x.default_input_config().ok().map(|x| AudioCodec {
-                    mime: MimeType::OPUS.into(),
-                    sample_rate: AudioSampleRate::try_from(x.sample_rate().0)
-                        .unwrap_or(AudioSampleRate::High),
-                    channels: x.channels(),
-                })
-            })
-            .expect("no audio source codec");
-        blink
-            .set_audio_source_codec(default_source_codec)
-            .await
-            .expect("invalid audio source codec");
-    }
-
     let mut iter = std::io::stdin().lines();
     while let Some(Ok(line)) = iter.next() {
         let mut v = vec![""];

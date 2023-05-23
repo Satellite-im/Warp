@@ -125,26 +125,40 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
     let webrtc = simple_webrtc::Controller::new().expect("failed to create webrtc controller");
 
     let cpal_host = cpal::default_host();
-    let default_input = cpal_host.default_input_device();
-    let default_output = cpal_host.default_output_device();
 
-    let default_source_codec = default_input.and_then(|x| {
-        x.default_input_config().ok().map(|x| blink::AudioCodec {
-            mime: MimeType::OPUS.into(),
-            sample_rate: blink::AudioSampleRate::try_from(x.sample_rate().0)
-                .unwrap_or(blink::AudioSampleRate::High),
-            channels: x.channels(),
-        })
-    });
+    // default to 1 channel input and 2 channel output.
+    // check SupportedStreamConfigs. if those channels aren't supported, use the default.
+    let mut source_codec = blink::AudioCodec {
+        mime: MimeType::OPUS,
+        sample_rate: blink::AudioSampleRate::High,
+        channels: 1,
+    };
 
-    let default_sink_codec = default_output.and_then(|x| {
-        x.default_output_config().ok().map(|x| blink::AudioCodec {
-            mime: MimeType::OPUS.into(),
-            sample_rate: blink::AudioSampleRate::try_from(x.sample_rate().0)
-                .unwrap_or(blink::AudioSampleRate::High),
-            channels: x.channels(),
-        })
-    });
+    let mut sink_codec = blink::AudioCodec {
+        mime: MimeType::OPUS,
+        sample_rate: blink::AudioSampleRate::High,
+        channels: 2,
+    };
+
+    if let Some(input_device) = cpal_host.default_input_device() {
+        if let Ok(mut configs) = input_device.supported_input_configs() {
+            if !configs.any(|c| c.channels() == source_codec.channels()) {
+                if let Ok(default_config) = input_device.default_input_config() {
+                    source_codec.channels = default_config.channels();
+                }
+            }
+        }
+    }
+
+    if let Some(output_device) = cpal_host.default_output_device() {
+        if let Ok(mut configs) = output_device.supported_output_configs() {
+            if !configs.any(|c| c.channels() == source_codec.channels()) {
+                if let Ok(default_config) = output_device.default_output_config() {
+                    sink_codec.channels = default_config.channels();
+                }
+            }
+        }
+    }
 
     Mutex::new(StaticData {
         webrtc,
@@ -153,8 +167,9 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
         cpal_host: cpal::default_host(),
         active_call: None,
         pending_calls: HashMap::new(),
-        audio_source_codec: default_source_codec,
-        audio_sink_codec: default_sink_codec,
+        // todo: validate the source and sink codecs and set them to None if invalid
+        audio_source_codec: Some(source_codec),
+        audio_sink_codec: Some(sink_codec),
     })
 });
 
