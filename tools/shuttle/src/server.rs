@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 use std::sync::Arc;
 
 use futures::{stream, StreamExt};
@@ -5,10 +6,9 @@ use rust_ipfs::{libp2p::gossipsub::Message, unixfs::AddOption, Ipfs, Keypair, Pe
 use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
-    ecdh_decrypt,
+    ecdh_decrypt, ecdh_encrypt,
     request::{Identifier, Request},
-    response::{Response, Status},
-    sha256_iter,
+    response::{construct_response, Response, Status},
     store::Store,
     PeerIdExt, MAX_TRANSMIT_SIZE,
 };
@@ -192,42 +192,39 @@ async fn process_request_message<S: Store>(
                         .await?;
                 }
             }
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, anyhow::Error>(None)
         }
     };
     //Now that the request is validated, pass the request off into its own task
     tokio::spawn({
         let ipfs = ipfs.clone();
         async move {
-            if let Err(e) = task.await {
-                let keypair = ipfs.keypair().expect("Keypair exist");
-                let status = Status::Error;
-                let error = e.to_string();
-                let construct = sha256_iter(
-                    [
-                        Some(request_id.as_bytes().as_slice()),
-                        Some(&[status.into()]),
-                        Some(error.as_bytes()),
-                    ]
-                    .into_iter(),
-                );
-                let signature = keypair.sign(&construct)?;
-                let response = Response::new(
-                    request_id,
-                    status,
-                    Some(error.as_bytes().into()),
-                    signature.into(),
-                );
-                let bytes = response.to_bytes()?;
-                if ipfs
-                    .pubsub_publish(format!("/shuttle/response/{sender}"), bytes)
-                    .await
-                    .is_err()
-                {
-                    //Handle error?
-                    //Note: Possible errors would be duplication or no peer is subscribed. We should at least check to make sure the intended peer is subscribed
+            let keypair = ipfs.keypair().expect("Keypair exist");
+
+            let data;
+
+            let status = match task.await {
+                Ok(da) => {
+                    let status = Status::Ok;
+                    data = da;
+                    status
                 }
-            }
+                Err(e) => {
+                    let status = Status::Error;
+                    let err = e.to_string();
+                    data = Some(err.as_bytes().to_vec());
+                    status
+                }
+            };
+
+            let response = construct_response(keypair, request_id, data.as_deref(), status)?;
+
+            let bytes = response.to_bytes()?;
+
+            let data = ecdh_encrypt(keypair, Some(&publickey), &bytes)?;
+
+            ipfs.pubsub_publish(format!("/shuttle/response/{sender}"), data)
+                .await?;
 
             Ok::<_, anyhow::Error>(())
         }

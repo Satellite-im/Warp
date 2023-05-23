@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use rust_ipfs::{PublicKey, Keypair};
+use rust_ipfs::{Keypair, PublicKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -124,7 +124,8 @@ mod test {
     fn response_serialization_deserialization() -> anyhow::Result<()> {
         let alice = Keypair::generate_ed25519();
 
-        let response = super::construct_response(&alice, Uuid::new_v4(), Some(b"dummy-response"), Status::Ok)?;
+        let response =
+            super::construct_response(&alice, Uuid::new_v4(), Some(b"dummy-response"), Status::Ok)?;
         let bytes = response.to_bytes()?;
 
         let response = Response::from_bytes(&bytes)?;

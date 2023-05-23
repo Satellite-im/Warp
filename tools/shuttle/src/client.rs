@@ -1,9 +1,10 @@
+#![allow(clippy::type_complexity)]
 use std::collections::HashMap;
 use std::{collections::HashSet, sync::Arc};
 
 use crate::agent::{Agent, AgentStatus};
 use crate::payload::{construct_payload, Payload};
-use crate::request::{Identifier, Request, construct_request};
+use crate::request::{construct_request, Identifier};
 use crate::response::{Response, Status};
 use crate::{ecdh_decrypt, ecdh_encrypt, MAX_TRANSMIT_SIZE};
 use futures::channel::oneshot;
@@ -20,28 +21,16 @@ pub enum ClientCommand<'a> {
     Store {
         namespace: Vec<u8>,
         payload: Payload<'a>,
-        response: oneshot::Sender<anyhow::Result<ResponseType>>,
+        response: oneshot::Sender<anyhow::Result<(PublicKey, Vec<u8>)>>,
     },
     Find {
         namespace: Vec<u8>,
-        response: oneshot::Sender<anyhow::Result<ResponseType>>,
+        response: oneshot::Sender<anyhow::Result<(PublicKey, Vec<u8>)>>,
     },
     Delete {
         namespace: Vec<u8>,
-        response: oneshot::Sender<anyhow::Result<Status>>,
+        response: oneshot::Sender<anyhow::Result<(PublicKey, Vec<u8>)>>,
     },
-}
-
-pub enum ResponseType {
-    ResponseOwned(Option<PeerId>, Vec<u8>),
-    Status(Status),
-    StatusWithData(Status, Vec<u8>),
-}
-
-impl From<Status> for ResponseType {
-    fn from(value: Status) -> Self {
-        ResponseType::Status(value)
-    }
 }
 
 #[allow(dead_code)]
@@ -78,7 +67,7 @@ impl ShuttleClient {
 
                 let mut awaiting_response: HashMap<
                     Uuid,
-                    futures::channel::oneshot::Sender<anyhow::Result<ResponseType>>,
+                    futures::channel::oneshot::Sender<anyhow::Result<(PublicKey, Vec<u8>)>>,
                 > = HashMap::new();
                 futures::pin_mut!(response);
 
@@ -86,10 +75,12 @@ impl ShuttleClient {
                     tokio::select! {
                         biased;
                         Some(command) = rx.next() => {
-                            if let Err(_e) = process_command(&ipfs, keypair, agents.clone(), &mut awaiting_response, command).await {}
+                            if let Err(_e) = process_command(&ipfs, keypair, agents.clone(), &mut awaiting_response, command).await {
+                            }
                         },
                         Some(response) = response.next() => {
-                            if let Err(_e) = process_message(keypair, response, agents.clone(), &mut awaiting_response).await {}
+                            if let Err(_e) = process_message(keypair, response, agents.clone(), &mut awaiting_response).await {
+                            }
                         }
                     }
                 }
@@ -155,15 +146,21 @@ impl ShuttleClient {
         };
 
         self.tx.clone().send(command).await?;
-        
 
-        let result = rx.await??;
+        let (agent, response_bytes) = rx.await??;
 
-        match result {
-            ResponseType::ResponseOwned(_, _) => {},
-            ResponseType::Status(_) => {},
-            ResponseType::StatusWithData(_, _) => {}
+        let response = Response::from_bytes(&response_bytes)?;
+
+        if !response.verify(&agent)? {
+            anyhow::bail!("Response cannot be verified");
         }
+
+        match response.status() {
+            Status::Confirmed | Status::Ok => {},
+            Status::Error => anyhow::bail!("Error while storing data"),
+            _ => anyhow::bail!("Unreachable errors"),
+        };
+
         Ok(())
     }
 
@@ -196,12 +193,15 @@ impl ShuttleClient {
     }
 }
 
-async fn process_command(
+async fn process_command<'a>(
     ipfs: &Ipfs,
     keypair: &Keypair,
     agents: Arc<RwLock<HashSet<Agent>>>,
-    responses: &mut HashMap<Uuid, futures::channel::oneshot::Sender<anyhow::Result<ResponseType>>>,
-    event: ClientCommand<'_>,
+    responses: &mut HashMap<
+        Uuid,
+        futures::channel::oneshot::Sender<anyhow::Result<(PublicKey, Vec<u8>)>>,
+    >,
+    event: ClientCommand<'a>,
 ) -> anyhow::Result<()> {
     match event {
         ClientCommand::Store {
@@ -218,19 +218,13 @@ async fn process_command(
             let bytes = payload.to_bytes()?;
 
             if bytes.len() > MAX_TRANSMIT_SIZE {
-                let _ = response.send(Err(anyhow::anyhow!("Payload exceeds max transmission size")));
+                let _ = response.send(Err(anyhow::anyhow!(
+                    "Payload exceeds max transmission size"
+                )));
                 anyhow::bail!("Payload exceeds max transmission size");
             }
 
             let request = construct_request(keypair, Identifier::Store, &namespace, None, payload)?;
-
-            let request = Request::new(
-                Identifier::Store,
-                namespace.into(),
-                None,
-                Some(payload),
-                signature.into(),
-            );
 
             let request_id = request.id();
 
@@ -255,11 +249,14 @@ async fn process_command(
     Ok(())
 }
 
-async fn process_message(
+async fn process_message<'a>(
     keypair: &Keypair,
     message: Message,
     agents: Arc<RwLock<HashSet<Agent>>>,
-    responses: &mut HashMap<Uuid, futures::channel::oneshot::Sender<anyhow::Result<ResponseType>>>,
+    responses: &mut HashMap<
+        Uuid,
+        futures::channel::oneshot::Sender<anyhow::Result<(PublicKey, Vec<u8>)>>,
+    >,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         message.data.len() < MAX_TRANSMIT_SIZE,
@@ -279,7 +276,7 @@ async fn process_message(
             let _ = channel.send(Err(e));
         }
     } else if let Some(channel) = responses.remove(&resp.id()) {
-        let _ = channel.send(Ok(ResponseType::ResponseOwned(message.source, resp_bytes)));
+        let _ = channel.send(Ok((publickey, resp_bytes)));
     }
     Ok(())
 }

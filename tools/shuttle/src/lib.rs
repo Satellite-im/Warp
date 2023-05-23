@@ -139,7 +139,7 @@ impl<B: AsRef<[u8]>> Signer for B {
     }
 }
 
-pub(crate) trait PeerIdExt {
+pub trait PeerIdExt {
     fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
 }
 
