@@ -74,6 +74,7 @@ impl ChannelMixer {
                     ChannelMixerOutput::None
                 }
             }
+            // todo: verify this...
             ChannelMixerConfig::Split => ChannelMixerOutput::Split(sample),
         }
     }

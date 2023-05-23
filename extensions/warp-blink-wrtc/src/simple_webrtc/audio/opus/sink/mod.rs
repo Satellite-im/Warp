@@ -47,16 +47,16 @@ impl SinkTrack for OpusSink {
         let resampler_config = if webrtc_codec.sample_rate() == sink_codec.sample_rate() {
             ResamplerConfig::None
         } else if webrtc_codec.sample_rate() > sink_codec.sample_rate() {
-            ResamplerConfig::UpSample(webrtc_codec.sample_rate() / sink_codec.sample_rate())
+            ResamplerConfig::DownSample(webrtc_codec.sample_rate() / sink_codec.sample_rate())
         } else {
-            ResamplerConfig::DownSample(sink_codec.sample_rate() / webrtc_codec.sample_rate())
+            ResamplerConfig::UpSample(sink_codec.sample_rate() / webrtc_codec.sample_rate())
         };
 
         let resampler = Resampler::new(resampler_config);
 
         let channel_mixer_config = if webrtc_codec.channels() == sink_codec.channels() {
             ChannelMixerConfig::None
-        } else if webrtc_codec.channels() < sink_codec.channels() {
+        } else if webrtc_codec.channels() > sink_codec.channels() {
             ChannelMixerConfig::Merge
         } else {
             ChannelMixerConfig::Split

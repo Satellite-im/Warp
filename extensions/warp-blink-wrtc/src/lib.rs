@@ -150,6 +150,7 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
         }
     }
 
+    // todo: perhaps remove this. it's probable that devices can convert from 1 channel to 2.
     if let Some(output_device) = cpal_host.default_output_device() {
         if let Ok(mut configs) = output_device.supported_output_configs() {
             if !configs.any(|c| c.channels() == sink_codec.channels()) {

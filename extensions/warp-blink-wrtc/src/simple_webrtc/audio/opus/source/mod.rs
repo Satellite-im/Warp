@@ -113,7 +113,7 @@ fn create_source_track(
     let mut framer = Framer::init(
         source_codec.frame_size(),
         webrtc_codec.clone(),
-        source_codec.clone(),
+        source_codec,
     )?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
@@ -140,7 +140,7 @@ fn create_source_track(
             while let Some(sample) = consumer.pop() {
                 if let Some(bytes) = framer.frame(sample) {
                     match packetizer
-                        .packetize(&bytes, source_codec.frame_size() as u32)
+                        .packetize(&bytes, webrtc_codec.frame_size() as u32)
                         .await
                     {
                         Ok(packets) => {
