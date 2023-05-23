@@ -905,17 +905,25 @@ impl Blink for WebRtc {
         todo!()
     }
 
-    async fn get_audio_source_codec(&self) -> AudioCodec {
-        todo!()
+    async fn get_audio_source_codec(&self) -> Option<AudioCodec> {
+        let data = STATIC_DATA.lock().await;
+        data.audio_source_codec.clone()
     }
-    async fn set_audio_source_codec(&mut self, _codec: AudioCodec) -> Result<(), Error> {
-        todo!()
+    async fn set_audio_source_codec(&mut self, codec: AudioCodec) -> Result<(), Error> {
+        let mut data = STATIC_DATA.lock().await;
+        data.audio_source_codec.replace(codec);
+        // todo: validate the codec
+        Ok(())
     }
-    async fn get_audio_sink_codec(&self) -> AudioCodec {
-        todo!()
+    async fn get_audio_sink_codec(&self) -> Option<AudioCodec> {
+        let data = STATIC_DATA.lock().await;
+        data.audio_sink_codec.clone()
     }
-    async fn set_audio_sink_codec(&mut self, _codec: AudioCodec) -> Result<(), Error> {
-        todo!()
+    async fn set_audio_sink_codec(&mut self, codec: AudioCodec) -> Result<(), Error> {
+        let mut data = STATIC_DATA.lock().await;
+        data.audio_sink_codec.replace(codec);
+        // todo: validate the codec
+        Ok(())
     }
 
     // ------ Utility Functions ------
