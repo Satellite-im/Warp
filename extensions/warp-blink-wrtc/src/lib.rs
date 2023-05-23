@@ -152,7 +152,7 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
 
     if let Some(output_device) = cpal_host.default_output_device() {
         if let Ok(mut configs) = output_device.supported_output_configs() {
-            if !configs.any(|c| c.channels() == source_codec.channels()) {
+            if !configs.any(|c| c.channels() == sink_codec.channels()) {
                 if let Ok(default_config) = output_device.default_output_config() {
                     sink_codec.channels = default_config.channels();
                 }
