@@ -35,7 +35,7 @@ struct Codecs {
 
 static OFFERED_CALL: Lazy<Mutex<Option<Uuid>>> = Lazy::new(|| Mutex::new(None));
 
-static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
+static _CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
     let audio = AudioCodecBuiler::new()
         .mime(MimeType::OPUS)
         .sample_rate(AudioSampleRate::High)
@@ -108,15 +108,7 @@ async fn handle_command(
         }
         Repl::Dial { id } => {
             let did = DID::from_str(&id)?;
-            let codecs = CODECS.read().await;
-            blink
-                .offer_call(
-                    vec![did],
-                    codecs.audio.clone(),
-                    codecs.video.clone(),
-                    codecs.screen_share.clone(),
-                )
-                .await?;
+            blink.offer_call(vec![did]).await?;
         }
         Repl::Answer { id } => {
             let mut lock = OFFERED_CALL.lock().await;
@@ -155,7 +147,7 @@ async fn handle_command(
             blink.select_speaker(&device_name).await?;
         }
         Repl::SetAudioRate { rate } => {
-            let mut codecs = CODECS.write().await;
+            let mut codecs = _CODECS.write().await;
             let audio = AudioCodecBuiler::from(codecs.audio.clone())
                 .sample_rate(rate.try_into()?)
                 .build();
@@ -165,7 +157,7 @@ async fn handle_command(
             if !(1..=2).contains(&channels) {
                 bail!("invalid number of channels");
             }
-            let mut codecs = CODECS.write().await;
+            let mut codecs = _CODECS.write().await;
             let audio = AudioCodecBuiler::from(codecs.audio.clone())
                 .channels(channels)
                 .build();
@@ -197,7 +189,11 @@ async fn handle_command(
                 .default_input_device()
                 .ok_or(anyhow::anyhow!("no input device"))?;
             let config = dev.default_input_config()?;
-            println!("{config:#?}");
+            println!("default input config: {config:#?}");
+            println!(
+                "default source_codec: {:#?}",
+                blink.get_audio_source_codec().await
+            );
         }
         Repl::DefaultOutputConfig => {
             let host = cpal::default_host();
@@ -205,7 +201,11 @@ async fn handle_command(
                 .default_output_device()
                 .ok_or(anyhow::anyhow!("no input device"))?;
             let config = dev.default_output_config()?;
-            println!("{config:#?}");
+            println!("default output {config:#?}");
+            println!(
+                "default sink_codec: {:#?}",
+                blink.get_audio_sink_codec().await
+            );
         }
     }
     Ok(())

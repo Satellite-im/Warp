@@ -43,13 +43,7 @@ pub trait Blink {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
-    async fn offer_call(
-        &mut self,
-        participants: Vec<DID>,
-        audio_codec: AudioCodec,
-        video_codec: VideoCodec,
-        screenshare_codec: VideoCodec,
-    ) -> Result<(), Error>;
+    async fn offer_call(&mut self, participants: Vec<DID>) -> Result<(), Error>;
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error>;
     /// notify a sender/group that you will not join a call
@@ -79,6 +73,11 @@ pub trait Blink {
     async fn disable_camera(&mut self) -> Result<(), Error>;
     async fn record_call(&mut self, output_file: &str) -> Result<(), Error>;
     async fn stop_recording(&mut self) -> Result<(), Error>;
+
+    async fn get_audio_source_codec(&self) -> AudioCodec;
+    async fn set_audio_source_codec(&mut self, codec: AudioCodec) -> Result<(), Error>;
+    async fn get_audio_sink_codec(&self) -> AudioCodec;
+    async fn set_audio_sink_codec(&mut self, codec: AudioCodec) -> Result<(), Error>;
 
     // ------ Utility Functions ------
 
@@ -119,19 +118,15 @@ pub struct CallInfo {
     participants: Vec<DID>,
     // for call wide broadcasts
     group_key: Vec<u8>,
-    audio_codec: AudioCodec,
-    video_codec: VideoCodec,
 }
 
 impl CallInfo {
-    pub fn new(participants: Vec<DID>, audio_codec: AudioCodec, video_codec: VideoCodec) -> Self {
+    pub fn new(participants: Vec<DID>) -> Self {
         let group_key = Aes256Gcm::generate_key(&mut OsRng).as_slice().into();
         Self {
             id: Uuid::new_v4(),
             participants,
             group_key,
-            audio_codec,
-            video_codec,
         }
     }
 
@@ -145,10 +140,6 @@ impl CallInfo {
 
     pub fn group_key(&self) -> Vec<u8> {
         self.group_key.clone()
-    }
-
-    pub fn audio_codec(&self) -> AudioCodec {
-        self.audio_codec.clone()
     }
 }
 
@@ -168,7 +159,7 @@ impl core::ops::DerefMut for BlinkEventStream {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Serialize, Deserialize, Display, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Display, Copy, Clone, PartialEq, Eq)]
 /// Known WebRTC MIME types
 pub enum MimeType {
     #[display(fmt = "Invalid")]

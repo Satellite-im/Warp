@@ -42,7 +42,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{self, Blink, BlinkEventKind, BlinkEventStream, CallInfo},
+    blink::{self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
     crypto::{Fingerprint, DID},
     error::Error,
     multipass::MultiPass,
@@ -124,6 +124,28 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
     let (ui_event_ch, _rx) = broadcast::channel(1024);
     let webrtc = simple_webrtc::Controller::new().expect("failed to create webrtc controller");
 
+    let cpal_host = cpal::default_host();
+    let default_input = cpal_host.default_input_device();
+    let default_output = cpal_host.default_output_device();
+
+    let default_source_codec = default_input.and_then(|x| {
+        x.default_input_config().ok().map(|x| blink::AudioCodec {
+            mime: MimeType::OPUS.into(),
+            sample_rate: blink::AudioSampleRate::try_from(x.sample_rate().0)
+                .unwrap_or(blink::AudioSampleRate::High),
+            channels: x.channels(),
+        })
+    });
+
+    let default_sink_codec = default_output.and_then(|x| {
+        x.default_input_config().ok().map(|x| blink::AudioCodec {
+            mime: MimeType::OPUS.into(),
+            sample_rate: blink::AudioSampleRate::try_from(x.sample_rate().0)
+                .unwrap_or(blink::AudioSampleRate::High),
+            channels: x.channels(),
+        })
+    });
+
     Mutex::new(StaticData {
         webrtc,
         ui_event_ch,
@@ -131,6 +153,8 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
         cpal_host: cpal::default_host(),
         active_call: None,
         pending_calls: HashMap::new(),
+        audio_source_codec: default_source_codec,
+        audio_sink_codec: default_sink_codec,
     })
 });
 
@@ -142,6 +166,8 @@ struct StaticData {
     pending_calls: HashMap<Uuid, CallInfo>,
     // todo: maybe get rid of this
     cpal_host: cpal::Host,
+    audio_source_codec: Option<blink::AudioCodec>,
+    audio_sink_codec: Option<blink::AudioCodec>,
 }
 
 impl WebRtc {
@@ -209,21 +235,25 @@ impl WebRtc {
         Ok(webrtc)
     }
 
-    async fn init_call(&mut self, data: &mut StaticData, call: CallInfo) -> anyhow::Result<()> {
+    async fn init_call(
+        &mut self,
+        data: &mut StaticData,
+        call: CallInfo,
+        audio_source_codec: AudioCodec,
+    ) -> anyhow::Result<()> {
         data.active_call.replace(call.clone().into());
-        let audio_codec = call.audio_codec();
         // ensure there is an audio source track
         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-            mime_type: audio_codec.mime_type(),
-            clock_rate: audio_codec.sample_rate(),
-            channels: audio_codec.channels(),
+            mime_type: audio_source_codec.mime_type(),
+            clock_rate: audio_source_codec.sample_rate(),
+            channels: audio_source_codec.channels(),
             ..Default::default()
         };
         let track = data
             .webrtc
             .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
             .await?;
-        host_media::create_audio_source_track(track, audio_codec).await?;
+        host_media::create_audio_source_track(track, audio_source_codec).await?;
 
         // next, create event streams and pass them to a task
         let call_broadcast_stream = self
@@ -486,7 +516,14 @@ async fn handle_webrtc(
                                     log::warn!("got TrackAdded event for own id");
                                     continue;
                                 }
-                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track).await {
+                                let audio_sink_codec = match data.audio_sink_codec.clone() {
+                                    Some(r) => r,
+                                    None => {
+                                        log::error!("can not add track - no audio sink codec");
+                                        continue;
+                                    }
+                                };
+                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track, audio_sink_codec).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                             }
@@ -605,24 +642,30 @@ impl Blink for WebRtc {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
-    async fn offer_call(
-        &mut self,
-        mut participants: Vec<DID>,
-        audio_codec: blink::AudioCodec,
-        video_codec: blink::VideoCodec,
-        _screenshare_codec: blink::VideoCodec,
-    ) -> Result<(), Error> {
+    async fn offer_call(&mut self, mut participants: Vec<DID>) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
         if let Some(ac) = data.active_call.as_ref() {
             if ac.call_state != CallState::Closed {
                 return Err(Error::OtherWithContext("previous call not finished".into()));
             }
         }
+        let audio_source_codec = data
+            .audio_source_codec
+            .clone()
+            .ok_or(Error::OtherWithContext(
+                "Audio source codec not specified".into(),
+            ))?;
+        if data.audio_sink_codec.is_none() {
+            return Err(Error::OtherWithContext(
+                "Audio sink codec not specified".into(),
+            ));
+        }
         if !participants.contains(&self.id) {
             participants.push(DID::from_str(&self.id.fingerprint())?);
         };
-        let call_info = CallInfo::new(participants.clone(), audio_codec.clone(), video_codec);
-        self.init_call(&mut data, call_info.clone()).await?;
+        let call_info = CallInfo::new(participants.clone());
+        self.init_call(&mut data, call_info.clone(), audio_source_codec)
+            .await?;
         for dest in participants {
             if dest == *self.id {
                 continue;
@@ -646,8 +689,20 @@ impl Blink for WebRtc {
                 return Err(Error::OtherWithContext("previous call not finished".into()));
             }
         }
+        let audio_source_codec = data
+            .audio_source_codec
+            .clone()
+            .ok_or(Error::OtherWithContext(
+                "Audio source codec not specified".into(),
+            ))?;
+        if data.audio_sink_codec.is_none() {
+            return Err(Error::OtherWithContext(
+                "Audio sink codec not specified".into(),
+            ));
+        }
         if let Some(call) = data.pending_calls.remove(&call_id) {
-            self.init_call(&mut data, call.clone()).await?;
+            self.init_call(&mut data, call.clone(), audio_source_codec)
+                .await?;
             let call_id = call.id();
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Join { call_id };
@@ -847,6 +902,19 @@ impl Blink for WebRtc {
         todo!()
     }
     async fn stop_recording(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+
+    async fn get_audio_source_codec(&self) -> AudioCodec {
+        todo!()
+    }
+    async fn set_audio_source_codec(&mut self, _codec: AudioCodec) -> Result<(), Error> {
+        todo!()
+    }
+    async fn get_audio_sink_codec(&self) -> AudioCodec {
+        todo!()
+    }
+    async fn set_audio_sink_codec(&mut self, _codec: AudioCodec) -> Result<(), Error> {
         todo!()
     }
 

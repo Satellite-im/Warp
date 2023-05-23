@@ -42,7 +42,7 @@ impl SinkTrack for OpusSink {
         let config = cpal::StreamConfig {
             channels: codec.channels,
             sample_rate: SampleRate(codec.clock_rate),
-            buffer_size: cpal::BufferSize::Fixed(4096),
+            buffer_size: cpal::BufferSize::Default,
         };
 
         // number of late samples allowed (for RTP)

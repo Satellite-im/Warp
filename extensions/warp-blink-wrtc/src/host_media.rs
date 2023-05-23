@@ -8,12 +8,11 @@ use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use tokio::sync::{Mutex, RwLock};
-use warp::blink;
+use warp::blink::{self};
 use warp::crypto::DID;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
-use webrtc::{
-    track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
-};
 
 use crate::simple_webrtc::{self, audio};
 
@@ -97,10 +96,20 @@ pub async fn remove_audio_source_track() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn create_audio_sink_track(peer_id: DID, track: Arc<TrackRemote>) -> anyhow::Result<()> {
+pub async fn create_audio_sink_track(
+    peer_id: DID,
+    track: Arc<TrackRemote>,
+    // the format to decode to. Opus supports encoding and decoding to arbitrary sample rates and number of channels.
+    codec: blink::AudioCodec,
+) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     let audio_output = AUDIO_OUTPUT_DEVICE.read().await;
-    let codec = track.codec().await.capability;
+    let codec = RTCRtpCodecCapability {
+        mime_type: codec.mime_type(),
+        clock_rate: codec.sample_rate(),
+        channels: codec.channels(),
+        ..Default::default()
+    };
     let output_device = match audio_output.as_ref() {
         Some(d) => d,
         None => {

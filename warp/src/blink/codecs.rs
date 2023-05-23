@@ -3,12 +3,12 @@ use serde::{Deserialize, Serialize};
 
 use super::MimeType;
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AudioCodec {
-    mime: MimeType,
-    sample_rate: AudioSampleRate,
+    pub mime: MimeType,
+    pub sample_rate: AudioSampleRate,
     /// either 1 or 2
-    channels: u16,
+    pub channels: u16,
 }
 
 #[derive(Clone, Serialize, Debug, Deserialize, PartialEq, Eq)]
@@ -45,6 +45,19 @@ impl TryFrom<String> for AudioSampleRate {
             "low" => AudioSampleRate::Low,
             "medium" => AudioSampleRate::Medium,
             "high" => AudioSampleRate::High,
+            _ => return Err(Error::OtherWithContext("invalid sample rate".into())),
+        };
+        Ok(r)
+    }
+}
+
+impl TryFrom<u32> for AudioSampleRate {
+    type Error = crate::error::Error;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        let r = match value {
+            8000 => AudioSampleRate::Low,
+            24000 => AudioSampleRate::Medium,
+            48000 => AudioSampleRate::High,
             _ => return Err(Error::OtherWithContext("invalid sample rate".into())),
         };
         Ok(r)
