@@ -28,26 +28,30 @@ use warp_mp_ipfs::config::{MpIpfsConfig, UpdateEvents};
 mod logger;
 
 struct Codecs {
+    webrtc: AudioCodec,
     audio: AudioCodec,
-    video: VideoCodec,
-    screen_share: VideoCodec,
+    _video: VideoCodec,
+    _screen_share: VideoCodec,
 }
 
 static OFFERED_CALL: Lazy<Mutex<Option<Uuid>>> = Lazy::new(|| Mutex::new(None));
 
-static _CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
+static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
     let audio = AudioCodecBuiler::new()
         .mime(MimeType::OPUS)
         .sample_rate(AudioSampleRate::High)
         .channels(1)
         .build();
 
+    let webrtc = audio.clone();
+
     let video = VideoCodec::default();
     let screen_share = VideoCodec::default();
     RwLock::new(Codecs {
+        webrtc,
         audio,
-        video,
-        screen_share,
+        _video: video,
+        _screen_share: screen_share,
     })
 });
 
@@ -81,6 +85,8 @@ enum Repl {
     ConnectMicrophone { device_name: String },
     /// specify which speaker to use for output
     ConnectSpeaker { device_name: String },
+    /// set the sampling frequency used to send audio samples over webrtc
+    SetWebRtcAudioRate { rate: String },
     /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
     /// the specified sample rate will be used when the host initiates a call.
     SetAudioRate { rate: String },
@@ -92,9 +98,9 @@ enum Repl {
     /// show the supported CPAL output stream configs
     SupportedOutputConfigs,
     /// show the default input config
-    DefaultInputConfig,
+    ShowInputConfig,
     /// show the default output config
-    DefaultOutputConfig,
+    ShowOutputConfig,
 }
 
 async fn handle_command(
@@ -108,7 +114,8 @@ async fn handle_command(
         }
         Repl::Dial { id } => {
             let did = DID::from_str(&id)?;
-            blink.offer_call(vec![did]).await?;
+            let codecs = CODECS.read().await;
+            blink.offer_call(vec![did], codecs.webrtc.clone()).await?;
         }
         Repl::Answer { id } => {
             let mut lock = OFFERED_CALL.lock().await;
@@ -147,17 +154,24 @@ async fn handle_command(
             blink.select_speaker(&device_name).await?;
         }
         Repl::SetAudioRate { rate } => {
-            let mut codecs = _CODECS.write().await;
+            let mut codecs = CODECS.write().await;
             let audio = AudioCodecBuiler::from(codecs.audio.clone())
                 .sample_rate(rate.try_into()?)
                 .build();
             codecs.audio = audio;
         }
+        Repl::SetWebRtcAudioRate { rate } => {
+            let mut codecs = CODECS.write().await;
+            let webrtc = AudioCodecBuiler::from(codecs.audio.clone())
+                .sample_rate(rate.try_into()?)
+                .build();
+            codecs.webrtc = webrtc;
+        }
         Repl::SetAudioChannels { channels } => {
             if !(1..=2).contains(&channels) {
                 bail!("invalid number of channels");
             }
-            let mut codecs = _CODECS.write().await;
+            let mut codecs = CODECS.write().await;
             let audio = AudioCodecBuiler::from(codecs.audio.clone())
                 .channels(channels)
                 .build();
@@ -183,7 +197,7 @@ async fn handle_command(
                 println!("{config:#?}");
             }
         }
-        Repl::DefaultInputConfig => {
+        Repl::ShowInputConfig => {
             let host = cpal::default_host();
             let dev = host
                 .default_input_device()
@@ -195,7 +209,7 @@ async fn handle_command(
                 blink.get_audio_source_codec().await
             );
         }
-        Repl::DefaultOutputConfig => {
+        Repl::ShowOutputConfig => {
             let host = cpal::default_host();
             let dev = host
                 .default_output_device()

@@ -137,7 +137,7 @@ static STATIC_DATA: Lazy<Mutex<StaticData>> = Lazy::new(|| {
     let mut sink_codec = blink::AudioCodec {
         mime: MimeType::OPUS,
         sample_rate: blink::AudioSampleRate::High,
-        channels: 2,
+        channels: 1,
     };
 
     if let Some(input_device) = cpal_host.default_input_device() {
@@ -268,7 +268,7 @@ impl WebRtc {
             .webrtc
             .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
             .await?;
-        host_media::create_audio_source_track(track, audio_source_codec).await?;
+        host_media::create_audio_source_track(track, call.codec(), audio_source_codec).await?;
 
         // next, create event streams and pass them to a task
         let call_broadcast_stream = self
@@ -527,6 +527,7 @@ async fn handle_webrtc(
                         let call_id = active_call.call.id();
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
+                                let webrtc_codec = active_call.call.codec();
                                 if peer == data.own_id {
                                     log::warn!("got TrackAdded event for own id");
                                     continue;
@@ -538,7 +539,7 @@ async fn handle_webrtc(
                                         continue;
                                     }
                                 };
-                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track, audio_sink_codec).await {
+                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track, webrtc_codec, audio_sink_codec).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                             }
@@ -657,7 +658,11 @@ impl Blink for WebRtc {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
-    async fn offer_call(&mut self, mut participants: Vec<DID>) -> Result<(), Error> {
+    async fn offer_call(
+        &mut self,
+        mut participants: Vec<DID>,
+        webrtc_codec: AudioCodec,
+    ) -> Result<(), Error> {
         let mut data = STATIC_DATA.lock().await;
         if let Some(ac) = data.active_call.as_ref() {
             if ac.call_state != CallState::Closed {
@@ -678,7 +683,7 @@ impl Blink for WebRtc {
         if !participants.contains(&self.id) {
             participants.push(DID::from_str(&self.id.fingerprint())?);
         };
-        let call_info = CallInfo::new(participants.clone());
+        let call_info = CallInfo::new(participants.clone(), webrtc_codec);
         self.init_call(&mut data, call_info.clone(), audio_source_codec)
             .await?;
         for dest in participants {

@@ -2,22 +2,22 @@ use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::Arc;
 use warp::blink::{self, MimeType};
-use webrtc::{
-    rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
-    track::{track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote},
+use webrtc::track::{
+    track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote,
 };
 
-mod opus_sink;
-mod opus_source;
-pub use opus_sink::OpusSink;
-pub use opus_source::OpusSource;
+mod opus;
+
+pub use self::opus::sink::OpusSink;
+pub use self::opus::source::OpusSource;
 
 // stores the TrackRemote at least
 pub trait SourceTrack {
     fn init(
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
-        codec: blink::AudioCodec,
+        webrtc_codec: blink::AudioCodec,
+        source_codec: blink::AudioCodec,
     ) -> Result<Self>
     where
         Self: Sized;
@@ -33,7 +33,8 @@ pub trait SinkTrack {
     fn init(
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
-        codec: RTCRtpCodecCapability,
+        webrtc_codec: blink::AudioCodec,
+        sink_codec: blink::AudioCodec,
     ) -> Result<Self>
     where
         Self: Sized;
@@ -46,12 +47,21 @@ pub trait SinkTrack {
 pub fn create_source_track(
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
-    codec: blink::AudioCodec,
+    webrtc_codec: blink::AudioCodec,
+    source_codec: blink::AudioCodec,
 ) -> Result<Box<dyn SourceTrack>> {
-    match MimeType::try_from(codec.mime_type().as_str())? {
-        MimeType::OPUS => Ok(Box::new(OpusSource::init(input_device, track, codec)?)),
+    if webrtc_codec.mime_type() != source_codec.mime_type() {
+        bail!("mime types don't match");
+    }
+    match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
+        MimeType::OPUS => Ok(Box::new(OpusSource::init(
+            input_device,
+            track,
+            webrtc_codec,
+            source_codec,
+        )?)),
         _ => {
-            bail!("unhandled mime type: {}", &codec.mime_type());
+            bail!("unhandled mime type: {}", &webrtc_codec.mime_type());
         }
     }
 }
@@ -60,12 +70,21 @@ pub fn create_source_track(
 pub fn create_sink_track(
     output_device: &cpal::Device,
     track: Arc<TrackRemote>,
-    codec: RTCRtpCodecCapability,
+    webrtc_codec: blink::AudioCodec,
+    sink_codec: blink::AudioCodec,
 ) -> Result<Box<dyn SinkTrack>> {
-    match MimeType::try_from(codec.mime_type.as_str())? {
-        MimeType::OPUS => Ok(Box::new(OpusSink::init(output_device, track, codec)?)),
+    if webrtc_codec.mime_type() != sink_codec.mime_type() {
+        bail!("mime types don't match");
+    }
+    match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
+        MimeType::OPUS => Ok(Box::new(OpusSink::init(
+            output_device,
+            track,
+            webrtc_codec,
+            sink_codec,
+        )?)),
         _ => {
-            bail!("unhandled mime type: {}", &codec.mime_type);
+            bail!("unhandled mime type: {}", &webrtc_codec.mime_type());
         }
     }
 }

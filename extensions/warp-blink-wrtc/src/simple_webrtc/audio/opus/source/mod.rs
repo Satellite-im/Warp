@@ -1,28 +1,31 @@
-use anyhow::{bail, Result};
-use bytes::Bytes;
+use anyhow::Result;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
 };
 
-use opus::Bitrate;
 use rand::Rng;
 use ringbuf::HeapRb;
 use std::{sync::Arc, time::Duration};
 use tokio::task::JoinHandle;
-use warp::blink;
+use warp::blink::{self};
 
 use webrtc::{
     rtp::{self, packetizer::Packetizer},
     track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
-use super::SourceTrack;
+use crate::simple_webrtc::audio::SourceTrack;
+
+use self::framer::Framer;
+
+mod framer;
 
 pub struct OpusSource {
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     track: Arc<TrackLocalStaticRTP>,
-    codec: blink::AudioCodec,
+    webrtc_codec: blink::AudioCodec,
+    source_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     // used to cancel the current packetizer when the input device is changed.
@@ -39,17 +42,23 @@ impl SourceTrack for OpusSource {
     fn init(
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
-        codec: blink::AudioCodec,
+        webrtc_codec: blink::AudioCodec,
+        source_codec: blink::AudioCodec,
     ) -> Result<Self>
     where
         Self: Sized,
     {
-        let (input_stream, join_handle) =
-            create_source_track(track.clone(), codec.clone(), input_device)?;
+        let (input_stream, join_handle) = create_source_track(
+            input_device,
+            track.clone(),
+            webrtc_codec.clone(),
+            source_codec.clone(),
+        )?;
 
         Ok(Self {
             track,
-            codec,
+            webrtc_codec,
+            source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
         })
@@ -70,103 +79,42 @@ impl SourceTrack for OpusSource {
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()> {
         self.packetizer_handle.abort();
-        let (stream, handle) =
-            create_source_track(self.track.clone(), self.codec.clone(), input_device)?;
+        let (stream, handle) = create_source_track(
+            input_device,
+            self.track.clone(),
+            self.webrtc_codec.clone(),
+            self.source_codec.clone(),
+        )?;
         self.stream = stream;
         self.packetizer_handle = handle;
         Ok(())
     }
 }
 
-pub struct OpusFramer {
-    // encodes groups of samples (frames)
-    encoder: opus::Encoder,
-    // queues samples, to build a frame
-    // options are i16 and f32. seems safer to use a f32.
-    raw_samples: Vec<f32>,
-    // used for the encoder
-    opus_out: Vec<u8>,
-    // number of samples in a frame
-    frame_size: usize,
-}
-
-impl OpusFramer {
-    pub fn init(frame_size: usize, sample_rate: u32, channels: opus::Channels) -> Result<Self> {
-        let mut buf = Vec::new();
-        buf.reserve(frame_size);
-        let mut opus_out = Vec::new();
-        opus_out.resize(frame_size * 4, 0);
-        let mut encoder = opus::Encoder::new(sample_rate, channels, opus::Application::Voip)
-            .map_err(|e| {
-                anyhow::anyhow!("{e}: sample_rate: {sample_rate}, channels: {channels:?}")
-            })?;
-        // todo: abstract this
-        encoder.set_bitrate(Bitrate::Bits(16000))?;
-
-        Ok(Self {
-            encoder,
-            raw_samples: buf,
-            opus_out,
-            frame_size,
-        })
-    }
-
-    pub fn frame(&mut self, sample: f32) -> Option<Bytes> {
-        self.raw_samples.push(sample);
-        if self.raw_samples.len() == self.frame_size {
-            match self.encoder.encode_float(
-                self.raw_samples.as_mut_slice(),
-                self.opus_out.as_mut_slice(),
-            ) {
-                Ok(size) => {
-                    self.raw_samples.clear();
-                    let slice = self.opus_out.as_slice();
-                    let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
-                    Some(bytes)
-                }
-                Err(e) => {
-                    log::error!("OpusPacketizer failed to encode: {}", e);
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    }
-}
-
-fn err_fn(err: cpal::StreamError) {
-    log::error!("an error occurred on stream: {}", err);
-}
-
 fn create_source_track(
-    track: Arc<TrackLocalStaticRTP>,
-    codec: blink::AudioCodec,
     input_device: &cpal::Device,
+    track: Arc<TrackLocalStaticRTP>,
+    webrtc_codec: blink::AudioCodec,
+    source_codec: blink::AudioCodec,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
     let config = cpal::StreamConfig {
-        channels: codec.channels(),
-        sample_rate: SampleRate(codec.sample_rate()),
+        channels: source_codec.channels(),
+        sample_rate: SampleRate(source_codec.sample_rate()),
         buffer_size: cpal::BufferSize::Default, //Fixed(4096 * 50),
-    };
-
-    // if clock rate represents the sampling frequency, then
-    // this variable determines the bandwidth
-    let sample_rate = codec.sample_rate();
-    let channels = match codec.channels() {
-        1 => opus::Channels::Mono,
-        2 => opus::Channels::Stereo,
-        x => bail!("invalid number of channels: {x}"),
     };
 
     // create the ssrc for the RTP packets. ssrc serves to uniquely identify the sender
     let mut rng = rand::thread_rng();
     let ssrc: u32 = rng.gen();
 
-    let ring = HeapRb::<f32>::new(codec.sample_rate() as usize * 2);
+    let ring = HeapRb::<f32>::new(source_codec.sample_rate() as usize * 2);
     let (mut producer, mut consumer) = ring.split();
 
-    let mut framer = OpusFramer::init(codec.frame_size(), sample_rate, channels)?;
+    let mut framer = Framer::init(
+        source_codec.frame_size(),
+        webrtc_codec.clone(),
+        source_codec.clone(),
+    )?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
 
@@ -182,7 +130,7 @@ fn create_source_track(
         ssrc,
         opus,
         seq,
-        sample_rate,
+        webrtc_codec.sample_rate(),
     );
 
     // todo: when the input device changes, this needs to change too.
@@ -192,7 +140,7 @@ fn create_source_track(
             while let Some(sample) = consumer.pop() {
                 if let Some(bytes) = framer.frame(sample) {
                     match packetizer
-                        .packetize(&bytes, codec.frame_size() as u32)
+                        .packetize(&bytes, source_codec.frame_size() as u32)
                         .await
                     {
                         Ok(packets) => {
@@ -228,6 +176,10 @@ fn create_source_track(
         })?;
 
     Ok((input_stream, join_handle))
+}
+
+fn err_fn(err: cpal::StreamError) {
+    log::error!("an error occurred on stream: {}", err);
 }
 
 #[cfg(test)]

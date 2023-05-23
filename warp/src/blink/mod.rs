@@ -43,7 +43,11 @@ pub trait Blink {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
-    async fn offer_call(&mut self, participants: Vec<DID>) -> Result<(), Error>;
+    async fn offer_call(
+        &mut self,
+        participants: Vec<DID>,
+        webrtc_codec: AudioCodec,
+    ) -> Result<(), Error>;
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error>;
     /// notify a sender/group that you will not join a call
@@ -118,15 +122,17 @@ pub struct CallInfo {
     participants: Vec<DID>,
     // for call wide broadcasts
     group_key: Vec<u8>,
+    codec: AudioCodec,
 }
 
 impl CallInfo {
-    pub fn new(participants: Vec<DID>) -> Self {
+    pub fn new(participants: Vec<DID>, codec: AudioCodec) -> Self {
         let group_key = Aes256Gcm::generate_key(&mut OsRng).as_slice().into();
         Self {
             id: Uuid::new_v4(),
             participants,
             group_key,
+            codec,
         }
     }
 
@@ -140,6 +146,10 @@ impl CallInfo {
 
     pub fn group_key(&self) -> Vec<u8> {
         self.group_key.clone()
+    }
+
+    pub fn codec(&self) -> AudioCodec {
+        self.codec.clone()
     }
 }
 

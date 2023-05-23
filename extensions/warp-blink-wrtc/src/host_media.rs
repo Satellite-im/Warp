@@ -10,7 +10,6 @@ use once_cell::sync::Lazy;
 use tokio::sync::{Mutex, RwLock};
 use warp::blink::{self};
 use warp::crypto::DID;
-use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
@@ -63,7 +62,8 @@ pub async fn has_audio_source() -> bool {
 // use AUDIO_SOURCE_ID
 pub async fn create_audio_source_track(
     track: Arc<TrackLocalStaticRTP>,
-    codec: blink::AudioCodec,
+    webrtc_codec: blink::AudioCodec,
+    source_codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     let audio_input = AUDIO_INPUT_DEVICE.read().await;
@@ -74,8 +74,9 @@ pub async fn create_audio_source_track(
         }
     };
 
-    let source_track = simple_webrtc::audio::create_source_track(input_device, track, codec)
-        .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
+    let source_track =
+        simple_webrtc::audio::create_source_track(input_device, track, webrtc_codec, source_codec)
+            .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
     source_track
         .play()
         .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;
@@ -100,16 +101,11 @@ pub async fn create_audio_sink_track(
     peer_id: DID,
     track: Arc<TrackRemote>,
     // the format to decode to. Opus supports encoding and decoding to arbitrary sample rates and number of channels.
-    codec: blink::AudioCodec,
+    webrtc_codec: blink::AudioCodec,
+    sink_codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
     let _lock = SINGLETON_MUTEX.lock().await;
     let audio_output = AUDIO_OUTPUT_DEVICE.read().await;
-    let codec = RTCRtpCodecCapability {
-        mime_type: codec.mime_type(),
-        clock_rate: codec.sample_rate(),
-        channels: codec.channels(),
-        ..Default::default()
-    };
     let output_device = match audio_output.as_ref() {
         Some(d) => d,
         None => {
@@ -117,7 +113,8 @@ pub async fn create_audio_sink_track(
         }
     };
 
-    let sink_track = simple_webrtc::audio::create_sink_track(output_device, track, codec)?;
+    let sink_track =
+        simple_webrtc::audio::create_sink_track(output_device, track, webrtc_codec, sink_codec)?;
     sink_track.play()?;
     unsafe {
         AUDIO_SINK_TRACKS.insert(peer_id, sink_track);
