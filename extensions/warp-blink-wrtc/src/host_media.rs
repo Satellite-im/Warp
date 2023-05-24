@@ -13,7 +13,7 @@ use warp::crypto::DID;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-use crate::simple_webrtc::{self, audio};
+use crate::audio::{create_sink_track, create_source_track};
 
 static SINGLETON_MUTEX: Lazy<Mutex<DummyStruct>> = Lazy::new(|| Mutex::new(DummyStruct {}));
 struct DummyStruct {}
@@ -28,8 +28,8 @@ static AUDIO_OUTPUT_DEVICE: Lazy<RwLock<Option<cpal::Device>>> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
     RwLock::new(cpal_host.default_output_device())
 });
-static mut AUDIO_SOURCE_TRACK: Option<Box<dyn audio::SourceTrack>> = None;
-static mut AUDIO_SINK_TRACKS: Lazy<HashMap<DID, Box<dyn audio::SinkTrack>>> =
+static mut AUDIO_SOURCE_TRACK: Option<Box<dyn crate::audio::SourceTrack>> = None;
+static mut AUDIO_SINK_TRACKS: Lazy<HashMap<DID, Box<dyn crate::audio::SinkTrack>>> =
     Lazy::new(HashMap::new);
 
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
@@ -74,9 +74,8 @@ pub async fn create_audio_source_track(
         }
     };
 
-    let source_track =
-        simple_webrtc::audio::create_source_track(input_device, track, webrtc_codec, source_codec)
-            .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
+    let source_track = create_source_track(input_device, track, webrtc_codec, source_codec)
+        .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
     source_track
         .play()
         .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;
@@ -113,8 +112,7 @@ pub async fn create_audio_sink_track(
         }
     };
 
-    let sink_track =
-        simple_webrtc::audio::create_sink_track(output_device, track, webrtc_codec, sink_codec)?;
+    let sink_track = create_sink_track(output_device, track, webrtc_codec, sink_codec)?;
     sink_track.play()?;
     unsafe {
         AUDIO_SINK_TRACKS.insert(peer_id, sink_track);

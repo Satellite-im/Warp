@@ -2,7 +2,7 @@ use bytes::Bytes;
 use opus::Bitrate;
 use warp::blink;
 
-use crate::simple_webrtc::audio::opus::{
+use crate::audio::opus::{
     ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig,
 };
 

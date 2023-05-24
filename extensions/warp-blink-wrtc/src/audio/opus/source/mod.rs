@@ -15,11 +15,10 @@ use webrtc::{
     track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
-use crate::simple_webrtc::audio::SourceTrack;
-
-use self::framer::Framer;
+use crate::audio::SourceTrack;
 
 mod framer;
+use self::framer::Framer;
 
 pub struct OpusSource {
     // holding on to the track in case the input device is changed. in that case a new track is needed.
