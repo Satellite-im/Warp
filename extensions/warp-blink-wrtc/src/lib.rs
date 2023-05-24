@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 use once_cell::sync::Lazy;
@@ -39,7 +39,7 @@ use warp::{
 };
 
 use crate::{
-    signaling::{CallSignal, InitiationSignal, PeerSignal},
+    signaling::{ipfs_routes, CallSignal, InitiationSignal, PeerSignal},
     simple_webrtc::events::{EmittedEvents, WebRtcEventStream},
     store::{
         decode_gossipsub_msg_aes, decode_gossipsub_msg_ecdh, send_signal_aes, send_signal_ecdh,
@@ -47,46 +47,19 @@ use crate::{
     },
 };
 
-#[derive(Clone)]
-struct ActiveCall {
-    call: CallInfo,
-    connected_participants: HashMap<DID, PeerState>,
-    call_state: CallState,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum PeerState {
-    Disconnected,
-    Initializing,
-    Connected,
-    Closed,
-}
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum CallState {
-    // the call was offered but no one joined and there is no peer connection
-    Uninitialized,
-    // at least one peer has connected
-    Started,
-    Closing,
-    Closed,
-}
-
-// used when a call is accepted
-impl From<CallInfo> for ActiveCall {
-    fn from(value: CallInfo) -> Self {
-        Self {
-            call: value,
-            connected_participants: HashMap::new(),
-            call_state: CallState::Uninitialized,
-        }
-    }
-}
-
 // basically a singleton
 // doesn't bother the user with having to use a mutex
 // implements Blink
 #[derive(Clone)]
 pub struct BlinkImpl {}
+
+impl Drop for BlinkImpl {
+    fn drop(&mut self) {
+        tokio::spawn(async {
+            deinit().await;
+        });
+    }
+}
 
 static IPFS: Lazy<Mutex<Option<Ipfs>>> = Lazy::new(|| Mutex::new(None));
 static BLINK_DATA: Lazy<Mutex<BlinkData>> = Lazy::new(|| {
@@ -165,6 +138,41 @@ struct BlinkData {
     webrtc_handler: Option<JoinHandle<()>>,
 }
 
+#[derive(Clone)]
+struct ActiveCall {
+    call: CallInfo,
+    connected_participants: HashMap<DID, PeerState>,
+    call_state: CallState,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub enum PeerState {
+    Disconnected,
+    Initializing,
+    Connected,
+    Closed,
+}
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum CallState {
+    // the call was offered but no one joined and there is no peer connection
+    Uninitialized,
+    // at least one peer has connected
+    Started,
+    Closing,
+    Closed,
+}
+
+// used when a call is accepted
+impl From<CallInfo> for ActiveCall {
+    fn from(value: CallInfo) -> Self {
+        Self {
+            call: value,
+            connected_participants: HashMap::new(),
+            call_state: CallState::Uninitialized,
+        }
+    }
+}
+
 pub async fn deinit() {
     let mut data = BLINK_DATA.lock().await;
     let mut ipfs = IPFS.lock().await;
@@ -179,10 +187,13 @@ pub async fn deinit() {
     log::debug!("deinit finished");
 }
 
-pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<BlinkImpl> {
+pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<Box<BlinkImpl>> {
     log::trace!("initializing WebRTC");
     let mut data = BLINK_DATA.lock().await;
     let mut global_ipfs = IPFS.lock().await;
+    if global_ipfs.is_some() {
+        bail!("blink is already initialized");
+    }
     let identity = loop {
         if let Ok(identity) = account.get_own_identity().await {
             break identity;
@@ -237,7 +248,7 @@ pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<BlinkImpl> {
     data.offer_handler = Some(offer_handler);
 
     log::trace!("finished initializing WebRTC");
-    Ok(BlinkImpl {})
+    Ok(Box::new(BlinkImpl {}))
 }
 
 async fn init_call(
@@ -589,32 +600,6 @@ async fn handle_webrtc(
                 }
             }
         }
-    }
-}
-
-mod ipfs_routes {
-    use uuid::Uuid;
-    use warp::crypto::DID;
-
-    const TELECON_BROADCAST: &str = "telecon";
-    const OFFER_CALL: &str = "offer_call";
-
-    /// subscribe/unsubscribe per-call
-    /// CallSignal
-    pub fn call_signal_route(call_id: &Uuid) -> String {
-        format!("{TELECON_BROADCAST}/{call_id}")
-    }
-
-    /// subscribe/unsubscribe per-call
-    /// PeerSignal
-    pub fn peer_signal_route(peer: &DID, call_id: &Uuid) -> String {
-        format!("{TELECON_BROADCAST}/{call_id}/{peer}")
-    }
-
-    /// subscribe to this when initializing Blink
-    /// InitiationSignal
-    pub fn call_initiation_route(peer: &DID) -> String {
-        format!("{OFFER_CALL}/{peer}")
     }
 }
 
