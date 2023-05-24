@@ -676,7 +676,7 @@ impl Blink for BlinkImpl {
                 call_info: call_info.clone(),
             };
 
-            if let Err(e) = send_signal_ecdh(&ipfs, &data.public_key, &dest, signal, topic).await {
+            if let Err(e) = send_signal_ecdh(&ipfs, &data.own_id, &dest, signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
