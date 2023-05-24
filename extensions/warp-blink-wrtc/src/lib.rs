@@ -1,21 +1,11 @@
 //! A Blink implementation relying on Mozilla's WebRTC library (hence the name warp-blink-wrtc)
 //!
-//! IPFS subscriptions
-//! - note that topics are automatically unsubscribed to when the stream is dropped
-//! - call initiation: offer_call/<DID>
-//! - per call
-//!     - peer join/decline/leave call: telecon/<Uuid>
-//!     - webrtc signaling: telecon/<Uuid>/<DID>
+//! The init() function must be called prior to using the Blink implementation.
+//! the deinit() function must be called to ensure all threads are cleaned up properly.
 //!
-//! Async Tasks
-//! - One handles the offer_call topic
-//!     - a broadcast::Sender<BlinkEventKind> is used to send events to the UI
-//! - One to handle webrtc and related IPFS topics
-//!     - uses the same broadcast::Sender<BlinkEventKind> to drive the UI
+//! init() returns a BlinkImpl struct, which as the name suggests, implements Blink.
+//! All data used by the implementation is contained in two static variables: IPFS and BLINK_DATA.
 //!
-//! WebRTC management
-//! - the struct implementing Blink will keep a Arc<Mutex<simple_webrtc::Controller>>, allowing calls to be initiated by the UI
-//! - the webrtc task also has that simple_webrtc::Controller
 
 mod host_media;
 mod signaling;
@@ -105,7 +95,6 @@ static BLINK_DATA: Lazy<Mutex<BlinkData>> = Lazy::new(|| {
 
     let cpal_host = cpal::default_host();
 
-    // default to 1 channel input and 2 channel output.
     // check SupportedStreamConfigs. if those channels aren't supported, use the default.
     let mut source_codec = blink::AudioCodec {
         mime: MimeType::OPUS,
@@ -129,7 +118,6 @@ static BLINK_DATA: Lazy<Mutex<BlinkData>> = Lazy::new(|| {
         }
     }
 
-    // todo: perhaps remove this. it's probable that devices can convert from 1 channel to 2.
     if let Some(output_device) = cpal_host.default_output_device() {
         if let Ok(mut configs) = output_device.supported_output_configs() {
             if !configs.any(|c| c.channels() == sink_codec.channels()) {
@@ -190,6 +178,7 @@ pub async fn deinit() {
     ipfs.take();
     log::debug!("deinit finished");
 }
+
 pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<BlinkImpl> {
     log::trace!("initializing WebRTC");
     let mut data = BLINK_DATA.lock().await;
