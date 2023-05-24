@@ -1,8 +1,8 @@
 #![allow(clippy::type_complexity)]
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
-use futures::{stream, StreamExt};
-use rust_ipfs::{libp2p::gossipsub::Message, unixfs::AddOption, Ipfs, Keypair};
+use futures::{stream, StreamExt, TryStreamExt};
+use rust_ipfs::{libp2p::gossipsub::Message, unixfs::AddOption, Ipfs, IpfsPath, Keypair};
 use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
@@ -226,7 +226,26 @@ async fn process_request_message<S: Store>(
                         true => anyhow::bail!("No data found"),
                         false => {
                             //For now, we will return the first element
-                            return Ok::<_, anyhow::Error>(data.get(0).map(|data| data.to_vec()));
+                            let data = data
+                                .get(0)
+                                .map(|data| data.to_vec())
+                                .ok_or(anyhow::anyhow!("Data is missing from response"))?;
+
+                            let ipfs_path = String::from_utf8_lossy(&data).to_string();
+
+                            let mut payload_bytes = vec![];
+
+                            let mut stream = ipfs
+                                .unixfs()
+                                .cat(IpfsPath::from_str(&ipfs_path)?, None, &[], false)
+                                .await?
+                                .boxed();
+
+                            while let Some(content) = stream.try_next().await? {
+                                payload_bytes.extend(content);
+                            }
+
+                            return Ok::<_, anyhow::Error>(Some(payload_bytes));
                         }
                     }
                 }
@@ -242,40 +261,34 @@ async fn process_request_message<S: Store>(
             Ok::<_, anyhow::Error>(None)
         }
     };
-    //Now that the request is validated, pass the request off into its own task
-    tokio::spawn({
-        let ipfs = ipfs.clone();
-        async move {
-            let keypair = ipfs.keypair().expect("Keypair exist");
 
-            let data;
+    let keypair = ipfs.keypair().expect("Keypair exist");
 
-            let status = match task.await {
-                Ok(da) => {
-                    let status = Status::Ok;
-                    data = da;
-                    status
-                }
-                Err(e) => {
-                    let status = Status::Error;
-                    let err = e.to_string();
-                    data = Some(err.as_bytes().to_vec());
-                    status
-                }
-            };
+    let data;
 
-            let response = construct_response(keypair, request_id, data.as_deref(), status)?;
-
-            let bytes = response.to_bytes()?;
-
-            let data = ecdh_encrypt(keypair, Some(&publickey), &bytes)?;
-
-            ipfs.pubsub_publish(format!("/shuttle/response/{sender}"), data)
-                .await?;
-
-            Ok::<_, anyhow::Error>(())
+    let status = match task.await {
+        Ok(da) => {
+            let status = Status::Ok;
+            data = da;
+            status
         }
-    });
+        Err(e) => {
+            let status = Status::Error;
+            let err = e.to_string();
+            data = Some(err.as_bytes().to_vec());
+            status
+        }
+    };
+
+    let response = construct_response(keypair, request_id, data.as_deref(), status)?;
+
+    let bytes = response.to_bytes()?;
+
+    let data = ecdh_encrypt(keypair, Some(&publickey), &bytes)?;
+
+    ipfs.pubsub_publish(format!("/shuttle/response/{sender}"), data)
+        .await?;
+
     Ok(())
 }
 
