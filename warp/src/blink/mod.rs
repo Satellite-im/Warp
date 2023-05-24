@@ -110,6 +110,7 @@ pub enum BlinkEventKind {
     /// A participant is speaking
     #[display(fmt = "ParticipantSpeaking")]
     ParticipantSpeaking { call_id: Uuid, peer_id: DID },
+    // todo: maybe don't use this event and just use a timeout.
     /// A participant stopped speaking
     #[display(fmt = "ParticipantNotSpeaking")]
     ParticipantNotSpeaking { call_id: Uuid, peer_id: DID },

@@ -234,12 +234,11 @@ pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<Box<BlinkImpl>>
         }
     };
 
-    let (ui_event_ch, _rx) = broadcast::channel(1024);
-    let ui_event_ch2 = ui_event_ch.clone();
+    let ui_event_ch = data.ui_event_ch.clone();
     let own_id = Arc::new(account.decrypt_private_key(None)?);
     let own_id2 = own_id.clone();
     let offer_handler = tokio::spawn(async {
-        handle_call_initiation(own_id2, call_offer_stream, ui_event_ch2).await;
+        handle_call_initiation(own_id2, call_offer_stream, ui_event_ch).await;
     });
 
     global_ipfs.replace(ipfs);
@@ -542,7 +541,9 @@ async fn handle_webrtc(
                                 }
                             }
                             EmittedEvents::Connected { peer } => {
-                                active_call.connected_participants.insert(peer, PeerState::Connected);
+                                active_call.connected_participants.insert(peer.clone(), PeerState::Connected);
+                                let event = BlinkEventKind::ParticipantJoined { call_id, peer_id: peer};
+                                let _ = ch.send(event);
                             }
                             EmittedEvents::ConnectionClosed { peer } => {
                                 // sometimes this event triggers without Disconnected being triggered.
