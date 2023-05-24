@@ -104,7 +104,8 @@ static BLINK_DATA: Lazy<Mutex<BlinkData>> = Lazy::new(|| {
     Mutex::new(BlinkData {
         webrtc_controller: webrtc,
         ui_event_ch,
-        own_id: DID::default(),
+        own_id: Arc::new(DID::default()),
+        public_key: DID::default(),
         cpal_host: cpal::default_host(),
         active_call: None,
         pending_calls: HashMap::new(),
@@ -112,7 +113,6 @@ static BLINK_DATA: Lazy<Mutex<BlinkData>> = Lazy::new(|| {
         audio_source_codec: Some(source_codec),
         audio_sink_codec: Some(sink_codec),
         _account: None,
-        id: Arc::new(DID::default()),
         offer_handler: None,
         webrtc_handler: None,
     })
@@ -120,7 +120,10 @@ static BLINK_DATA: Lazy<Mutex<BlinkData>> = Lazy::new(|| {
 
 struct BlinkData {
     webrtc_controller: simple_webrtc::Controller,
-    own_id: DID,
+    // the DID generated from Multipass, never cloned. contains the private key
+    own_id: Arc<DID>,
+    // the cloned DID. does not contain the private key. may not be needed.
+    public_key: DID,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     active_call: Option<ActiveCall>,
     pending_calls: HashMap<Uuid, CallInfo>,
@@ -130,7 +133,6 @@ struct BlinkData {
     audio_sink_codec: Option<blink::AudioCodec>,
 
     _account: Option<Box<dyn MultiPass>>,
-    id: Arc<DID>,
     // subscribes to IPFS topic to receive incoming calls
     offer_handler: Option<JoinHandle<()>>,
     // handles 3 streams: one for webrtc events and two IPFS topics
@@ -201,7 +203,9 @@ pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<Box<BlinkImpl>>
         tokio::time::sleep(Duration::from_millis(100)).await
     };
     let did = identity.did_key();
-    data.own_id = did.clone();
+    data.own_id = Arc::new(identity.did_key());
+    // this clone erases the public key.
+    data.public_key = did.clone();
 
     let ipfs_handle = match account.handle() {
         Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
@@ -243,7 +247,6 @@ pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<Box<BlinkImpl>>
 
     global_ipfs.replace(ipfs);
     data._account = Some(account);
-    data.id = Arc::new(did);
     data.offer_handler = Some(offer_handler);
 
     log::trace!("finished initializing WebRTC");
@@ -277,7 +280,7 @@ async fn init_call(
         .context("failed to subscribe to call_broadcast_route")?;
 
     let call_signaling_stream = ipfs
-        .pubsub_subscribe(ipfs_routes::peer_signal_route(&data.id, &call.id()))
+        .pubsub_subscribe(ipfs_routes::peer_signal_route(&data.public_key, &call.id()))
         .await
         .context("failed to subscribe to call_signaling_route")?;
 
@@ -293,7 +296,7 @@ async fn init_call(
     }
 
     let ui_event_ch = data.ui_event_ch.clone();
-    let own_id = data.id.clone();
+    let own_id = data.own_id.clone();
     let ipfs2 = ipfs.clone();
     let webrtc_handle = tokio::task::spawn(async move {
         handle_webrtc(
@@ -525,7 +528,7 @@ async fn handle_webrtc(
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
                                 let webrtc_codec = active_call.call.codec();
-                                if peer == data.own_id {
+                                if peer == data.public_key {
                                     log::warn!("got TrackAdded event for own id");
                                     continue;
                                 }
@@ -659,13 +662,13 @@ impl Blink for BlinkImpl {
                 "Audio sink codec not specified".into(),
             ));
         }
-        if !participants.contains(&data.id) {
-            participants.push(DID::from_str(&data.id.fingerprint())?);
+        if !participants.contains(&data.public_key) {
+            participants.push(DID::from_str(&data.public_key.fingerprint())?);
         };
         let call_info = CallInfo::new(participants.clone(), webrtc_codec);
         init_call(&mut data, &ipfs, call_info.clone(), audio_source_codec).await?;
         for dest in participants {
-            if dest == *data.id {
+            if dest == data.public_key {
                 continue;
             }
             let topic = ipfs_routes::call_initiation_route(&dest);
@@ -673,7 +676,7 @@ impl Blink for BlinkImpl {
                 call_info: call_info.clone(),
             };
 
-            if let Err(e) = send_signal_ecdh(&ipfs, &data.id, &dest, signal, topic).await {
+            if let Err(e) = send_signal_ecdh(&ipfs, &data.public_key, &dest, signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
