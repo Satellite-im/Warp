@@ -12,7 +12,7 @@ use warp::blink::{
     MimeType, VideoCodec,
 };
 
-use warp_blink_wrtc::WebRtc;
+use warp_blink_wrtc::BlinkImpl;
 
 use std::path::Path;
 
@@ -304,7 +304,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut blink: Box<dyn Blink> = Box::new(WebRtc::new(multipass).await?);
+    let mut blink: Box<dyn Blink> = Box::new(BlinkImpl::new(multipass).await?);
     let event_stream = blink.get_event_stream().await?;
     let handle = tokio::spawn(async {
         if let Err(e) = handle_event_stream(event_stream).await {
