@@ -13,7 +13,7 @@ use webrtc::{
     track::track_remote::TrackRemote, util::Unmarshal,
 };
 
-use crate::audio::SinkTrack;
+use crate::host_media::audio::SinkTrack;
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
 

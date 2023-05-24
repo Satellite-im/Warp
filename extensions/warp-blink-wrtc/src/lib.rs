@@ -17,7 +17,6 @@
 //! - the struct implementing Blink will keep a Arc<Mutex<simple_webrtc::Controller>>, allowing calls to be initiated by the UI
 //! - the webrtc task also has that simple_webrtc::Controller
 
-mod audio;
 mod host_media;
 mod signaling;
 mod simple_webrtc;

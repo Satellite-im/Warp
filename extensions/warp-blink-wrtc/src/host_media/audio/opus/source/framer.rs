@@ -2,7 +2,7 @@ use bytes::Bytes;
 use opus::Bitrate;
 use warp::blink;
 
-use crate::audio::opus::{
+use crate::host_media::audio::opus::{
     ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig,
 };
 

@@ -13,7 +13,8 @@ use warp::crypto::DID;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-use crate::audio::{create_sink_track, create_source_track};
+mod audio;
+use audio::{create_sink_track, create_source_track};
 
 static SINGLETON_MUTEX: Lazy<Mutex<DummyStruct>> = Lazy::new(|| Mutex::new(DummyStruct {}));
 struct DummyStruct {}
@@ -28,8 +29,8 @@ static AUDIO_OUTPUT_DEVICE: Lazy<RwLock<Option<cpal::Device>>> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
     RwLock::new(cpal_host.default_output_device())
 });
-static mut AUDIO_SOURCE_TRACK: Option<Box<dyn crate::audio::SourceTrack>> = None;
-static mut AUDIO_SINK_TRACKS: Lazy<HashMap<DID, Box<dyn crate::audio::SinkTrack>>> =
+static mut AUDIO_SOURCE_TRACK: Option<Box<dyn audio::SourceTrack>> = None;
+static mut AUDIO_SINK_TRACKS: Lazy<HashMap<DID, Box<dyn audio::SinkTrack>>> =
     Lazy::new(HashMap::new);
 
 pub const AUDIO_SOURCE_ID: &str = "audio-input";

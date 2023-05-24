@@ -15,9 +15,9 @@ use webrtc::{
     track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
-use crate::audio::SourceTrack;
-
 mod framer;
+use crate::host_media::audio::SourceTrack;
+
 use self::framer::Framer;
 
 pub struct OpusSource {
