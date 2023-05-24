@@ -202,11 +202,6 @@ pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<Box<BlinkImpl>>
         }
         tokio::time::sleep(Duration::from_millis(100)).await
     };
-    let did = identity.did_key();
-    data.own_id = Arc::new(identity.did_key());
-    // this clone erases the public key.
-    data.public_key = did.clone();
-
     let ipfs_handle = match account.handle() {
         Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
         _ => anyhow::bail!("Unable to obtain IPFS Handle"),
@@ -228,7 +223,7 @@ pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<Box<BlinkImpl>>
     }
 
     let call_offer_stream = match ipfs
-        .pubsub_subscribe(ipfs_routes::call_initiation_route(&did))
+        .pubsub_subscribe(ipfs_routes::call_initiation_route(&identity.did_key()))
         .await
     {
         Ok(s) => s,
@@ -239,8 +234,10 @@ pub async fn init(account: Box<dyn MultiPass>) -> anyhow::Result<Box<BlinkImpl>>
     };
 
     let ui_event_ch = data.ui_event_ch.clone();
-    let own_id = Arc::new(account.decrypt_private_key(None)?);
-    let own_id2 = own_id.clone();
+    data.own_id = Arc::new(account.decrypt_private_key(None)?);
+    // this clone erases the public key.
+    data.public_key = identity.did_key();
+    let own_id2 = data.own_id.clone();
     let offer_handler = tokio::spawn(async {
         handle_call_initiation(own_id2, call_offer_stream, ui_event_ch).await;
     });
