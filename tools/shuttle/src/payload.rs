@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use rust_ipfs::{PublicKey, Keypair};
+use rust_ipfs::{Keypair, PublicKey};
 use serde::{Deserialize, Serialize};
 
 use crate::Signer;
@@ -55,7 +55,10 @@ impl Payload<'_> {
 
     pub fn verify(&self) -> Result<bool, anyhow::Error> {
         let publickey = self.sender()?;
-        Ok(publickey.verify(&self.data, &self.signature))
+        let hash = crate::sha256_iter(
+            [Some(&self.sender), Some(&self.recipient), Some(&self.data)].into_iter(),
+        );
+        Ok(publickey.verify(&hash, &self.signature))
     }
 }
 
@@ -83,7 +86,14 @@ pub fn construct_payload<'a>(
     let sender_pk_bytes = sender_pk.encode_protobuf();
     let receiver_pk_bytes = receiver.encode_protobuf();
     let data = crate::ecdh_encrypt(sender, Some(receiver), message)?;
-    let hash = crate::sha256_iter([Some(&data)].into_iter());
+    let hash = crate::sha256_iter(
+        [
+            Some(&sender_pk_bytes),
+            Some(&receiver_pk_bytes),
+            Some(&data),
+        ]
+        .into_iter(),
+    );
     let signature = hash.sign(sender)?;
     Ok(Payload::new(
         sender_pk_bytes.into(),

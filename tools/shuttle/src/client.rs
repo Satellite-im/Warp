@@ -25,6 +25,7 @@ pub enum ClientCommand<'a> {
     },
     Find {
         namespace: Vec<u8>,
+        key: Vec<u8>,
         response: oneshot::Sender<anyhow::Result<(PublicKey, Vec<u8>)>>,
     },
     Delete {
@@ -174,10 +175,62 @@ impl ShuttleClient {
     pub async fn find<D: DeserializeOwned, N: AsRef<[u8]>, P: Into<PublicKey>>(
         &self,
         _agent: Option<PeerId>,
-        _recipient: P,
-        _namespace: N,
+        recipient: P,
+        namespace: N,
     ) -> Result<D, anyhow::Error> {
-        anyhow::bail!("unimplemented")
+        anyhow::ensure!(self.agents.read().await.len() > 0);
+        let keypair = self.ipfs.keypair()?;
+
+        let recipient: PublicKey = recipient.into();
+        let namespace = namespace.as_ref();
+        let key = recipient.encode_protobuf();
+
+        let (tx, rx) = oneshot::channel();
+
+        let command = ClientCommand::Find {
+            namespace: namespace.into(),
+            key,
+            response: tx,
+        };
+
+        self.tx.clone().send(command).await?;
+
+        let (agent, response_bytes) = rx.await??;
+
+        let response = Response::from_bytes(&response_bytes)?;
+
+        if !response.verify(&agent)? {
+            anyhow::bail!("Response cannot be verified");
+        }
+
+        let data = match response.status() {
+            Status::Confirmed | Status::Ok => {
+                let payload_bytes = response
+                    .data()
+                    .ok_or(anyhow::anyhow!("Data is missing from response"))?;
+
+                let payload = Payload::from_bytes(payload_bytes)?;
+
+                if !payload.verify()? {
+                    anyhow::bail!("Payload is invalid or corrupted");
+                }
+
+                let sender_pk = payload.sender()?;
+
+                crate::ecdh_decrypt(keypair, Some(&sender_pk), payload.data())?
+            }
+            Status::Error => {
+                if let Some(data) = response.data() {
+                    let data = String::from_utf8_lossy(data).to_string();
+                    anyhow::bail!("Error while storing data: {data}")
+                } else {
+                    anyhow::bail!("Error while storing data")
+                }
+            }
+            _ => anyhow::bail!("Unreachable errors"),
+        };
+
+        bincode::deserialize(&data).map_err(anyhow::Error::from)
     }
 }
 
@@ -259,7 +312,36 @@ async fn process_command<'a>(
 
             responses.insert(request_id, response);
         }
-        ClientCommand::Find { .. } => {}
+        ClientCommand::Find {
+            namespace,
+            key,
+            response,
+        } => {
+            let agents = Vec::from_iter(agents.read().await.clone());
+            if agents.is_empty() {
+                let _ = response.send(Err(anyhow::anyhow!("No agents available")));
+                anyhow::bail!("No agents available");
+            }
+
+            let request =
+                construct_request(keypair, Identifier::Find, &namespace, Some(&key), None)?;
+
+            let request_id = request.id();
+
+            let request_bytes = request.to_bytes()?;
+
+            // TODO: Prioritize agents
+            for agent in agents {
+                //TODO: Check agent status
+                //TODO: Check and confirm agent is subscribed to topic
+
+                let bytes = ecdh_encrypt(keypair, Some(agent.public_key()), &request_bytes)?;
+
+                ipfs.pubsub_publish(format!("/shuttle/request/{}", agent.peer_id()), bytes)
+                    .await?;
+            }
+            responses.insert(request_id, response);
+        }
         ClientCommand::Delete { .. } => {}
     }
 
