@@ -126,7 +126,7 @@ pub fn construct_request<'a>(
     identifier: Identifier,
     namespace: &'a [u8],
     key: Option<&'a [u8]>,
-    payload: Payload<'a>,
+    payload: Option<Payload<'a>>,
 ) -> anyhow::Result<Request<'a>> {
     let signature = {
         let identifier_byte = vec![u8::from(identifier)];
@@ -135,7 +135,7 @@ pub fn construct_request<'a>(
                 Some(identifier_byte.as_slice()),
                 Some(namespace),
                 key,
-                payload.to_bytes().ok().as_deref(),
+                payload.as_ref().and_then(|data| data.to_bytes().ok()).as_deref(),
             ]
             .into_iter(),
         );
@@ -146,15 +146,14 @@ pub fn construct_request<'a>(
         identifier,
         namespace.into(),
         key.map(Cow::Borrowed),
-        Some(payload),
+        payload,
         signature.into(),
     ))
 }
 #[cfg(test)]
 mod test {
-    use rust_ipfs::Keypair;
     use super::{Identifier, Request};
-
+    use rust_ipfs::Keypair;
 
     #[test]
     fn request_serialization_deserialization() -> anyhow::Result<()> {
@@ -166,7 +165,8 @@ mod test {
         let identifier = Identifier::Store;
         let namespace = b"test::request_serialization_deserialization".to_vec();
 
-        let request = super::construct_request(&alice, identifier, &namespace, None, payload)?;
+        let request =
+            super::construct_request(&alice, identifier, &namespace, None, Some(payload))?;
 
         assert!(request.verify(&alice.public())?);
 

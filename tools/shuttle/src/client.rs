@@ -156,8 +156,15 @@ impl ShuttleClient {
         }
 
         match response.status() {
-            Status::Confirmed | Status::Ok => {},
-            Status::Error => anyhow::bail!("Error while storing data"),
+            Status::Confirmed | Status::Ok => {}
+            Status::Error => {
+                if let Some(data) = response.data() {
+                    let data = String::from_utf8_lossy(data).to_string();
+                    anyhow::bail!("Error while storing data: {data}")
+                } else {
+                    anyhow::bail!("Error while storing data")
+                }
+            }
             _ => anyhow::bail!("Unreachable errors"),
         };
 
@@ -224,11 +231,21 @@ async fn process_command<'a>(
                 anyhow::bail!("Payload exceeds max transmission size");
             }
 
-            let request = construct_request(keypair, Identifier::Store, &namespace, None, payload)?;
+            let recipient = payload.recipient()?;
+            let pkey_proto_bytes = recipient.encode_protobuf();
+
+            let request = construct_request(
+                keypair,
+                Identifier::Store,
+                &namespace,
+                Some(&pkey_proto_bytes),
+                Some(payload),
+            )?;
 
             let request_id = request.id();
 
             let request_bytes = request.to_bytes()?;
+
             // TODO: Prioritize agents
             for agent in agents {
                 //TODO: Check agent status
