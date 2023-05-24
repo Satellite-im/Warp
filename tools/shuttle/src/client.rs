@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::{collections::HashSet, sync::Arc};
 
 use crate::agent::{Agent, AgentStatus};
@@ -8,9 +9,9 @@ use crate::request::{construct_request, Identifier};
 use crate::response::{Response, Status};
 use crate::{ecdh_decrypt, ecdh_encrypt, MAX_TRANSMIT_SIZE};
 use futures::channel::oneshot;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use rust_ipfs::libp2p::gossipsub::Message;
-use rust_ipfs::{Ipfs, Keypair, PeerId, PublicKey};
+use rust_ipfs::{Ipfs, IpfsPath, Keypair, PeerId, PublicKey};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -137,7 +138,9 @@ impl ShuttleClient {
         let recipient = recipient.into();
         let namespace = namespace.as_ref();
         let data = bincode::serialize(&data)?;
+
         let payload = construct_payload(keypair, &recipient, &data)?;
+
         let (tx, rx) = oneshot::channel();
 
         let command = ClientCommand::Store {
@@ -205,26 +208,41 @@ impl ShuttleClient {
 
         let data = match response.status() {
             Status::Confirmed | Status::Ok => {
-                let payload_bytes = response
+                let data_bytes = response
                     .data()
                     .ok_or(anyhow::anyhow!("Data is missing from response"))?;
 
-                let payload = Payload::from_bytes(payload_bytes)?;
+                let ipfs_path = String::from_utf8_lossy(data_bytes).to_string();
+
+                let mut payload_bytes = vec![];
+
+                let mut stream = self
+                    .ipfs
+                    .unixfs()
+                    .cat(IpfsPath::from_str(&ipfs_path)?, None, &[], false)
+                    .await?
+                    .boxed();
+
+                while let Some(content) = stream.try_next().await? {
+                    payload_bytes.extend(content);
+                }
+
+                let payload = Payload::from_bytes(&payload_bytes)?;
 
                 if !payload.verify()? {
                     anyhow::bail!("Payload is invalid or corrupted");
                 }
 
-                let sender_pk = payload.sender()?;
+                let pk = payload.recipient()?;
 
-                crate::ecdh_decrypt(keypair, Some(&sender_pk), payload.data())?
+                crate::ecdh_decrypt(keypair, Some(&pk), payload.data())?
             }
             Status::Error => {
                 if let Some(data) = response.data() {
                     let data = String::from_utf8_lossy(data).to_string();
-                    anyhow::bail!("Error while storing data: {data}")
+                    anyhow::bail!("Error while fetching data: {data}")
                 } else {
-                    anyhow::bail!("Error while storing data")
+                    anyhow::bail!("Error while fetching data")
                 }
             }
             _ => anyhow::bail!("Unreachable errors"),

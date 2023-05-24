@@ -226,7 +226,7 @@ async fn process_request_message<S: Store>(
                         true => anyhow::bail!("No data found"),
                         false => {
                             //For now, we will return the first element
-                            return Ok::<_, anyhow::Error>(data.get(0).map(|data| data.to_vec()))
+                            return Ok::<_, anyhow::Error>(data.get(0).map(|data| data.to_vec()));
                         }
                     }
                 }
