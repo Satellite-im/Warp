@@ -1,8 +1,10 @@
 use rust_ipfs::{
-    p2p::{IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode, UpgradeVersion},
+    p2p::{
+        IdentifyConfiguration, PeerInfo, PubsubConfig, TransportConfig, UpdateMode, UpgradeVersion,
+    },
     UninitializedIpfs,
 };
-// use shuttle::server::ShuttleServer;
+use shuttle::{server::ShuttleServer, store::Store};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,10 +33,73 @@ async fn main() -> anyhow::Result<()> {
         })
         .start()
         .await?;
+    
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    // let memory_store = MemoryStore::default();
-    // let _service = ShuttleServer::new(ipfs.clone(), memory_store);
+    let PeerInfo {
+        peer_id,
+        listen_addrs: addresses,
+        ..
+    } = ipfs.identity(None).await?;
+
+    println!("PeerID: {}", peer_id);
+
+    for address in addresses {
+        println!("Listening on: {address}");
+    }
+
+    let _service = ShuttleServer::new(ipfs.clone(), MemoryStore::default());
 
     tokio::sync::Notify::new().notified().await;
     Ok(())
+}
+
+use std::{
+    borrow::Cow,
+    collections::{hash_map::Entry, HashMap},
+};
+
+#[derive(Default)]
+pub struct MemoryStore {
+    inner: HashMap<Vec<u8>, Vec<Vec<u8>>>,
+}
+
+#[async_trait::async_trait]
+impl Store for MemoryStore {
+    async fn insert(&mut self, key: &[u8], value: &[u8]) -> Result<(), anyhow::Error> {
+        match self.inner.entry(key.into()) {
+            Entry::Vacant(e) => {
+                e.insert(vec![value.into()]);
+            }
+            Entry::Occupied(mut e) => {
+                let entry = e.get_mut();
+                if !entry.contains(&value.into()) {
+                    entry.push(value.into());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn find<'a>(&self, key: &[u8]) -> Result<Vec<Cow<'a, [u8]>>, anyhow::Error> {
+        self.inner
+            .get(key)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| Cow::Owned(item.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .ok_or(anyhow::anyhow!("No entry found"))
+    }
+
+    async fn replace(&mut self, _: &[u8], _: &[u8]) -> Result<(), anyhow::Error> {
+        anyhow::bail!("Unimplemented")
+    }
+
+    async fn remove(&mut self, key: &[u8]) -> Result<(), anyhow::Error> {
+        self.inner.remove(key);
+        Ok(())
+    }
 }
