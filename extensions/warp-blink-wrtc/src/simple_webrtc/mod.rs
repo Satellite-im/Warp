@@ -90,7 +90,7 @@ pub struct Peer {
 }
 
 pub struct RtcRtpManager {
-    sender: Arc<RTCRtpSender>,
+    _sender: Arc<RTCRtpSender>,
     handle: tokio::task::JoinHandle<()>,
 }
 
@@ -254,7 +254,7 @@ impl Controller {
                             log::debug!("terminating rtp_sender thread from add_media_source");
                         });
                         let x = RtcRtpManager {
-                            sender: rtp_sender,
+                            _sender: rtp_sender,
                             handle,
                         };
                         peer.rtp_senders.insert(source_id.clone(), x);
@@ -280,7 +280,7 @@ impl Controller {
         for (peer_id, peer) in &mut self.peers {
             // if source_id isn't found, it will be logged by the next statement
             if let Some(rtp_sender) = peer.rtp_senders.get(&source_id) {
-                if let Err(e) = peer.connection.remove_track(&rtp_sender.sender).await {
+                if let Err(e) = peer.connection.remove_track(&rtp_sender._sender).await {
                     log::error!(
                         "failed to remove track {} for peer {}: {:?}",
                         &source_id,
@@ -347,7 +347,12 @@ impl Controller {
         // create ICE gatherer
         let config = RTCConfiguration {
             ice_servers: vec![RTCIceServer {
-                urls: vec!["stun:stun.l.google.com:19302".into()],
+                urls: vec![
+                    "stun:stun.l.google.com:19302".into(),
+                    "stun:stun1.l.google.com:19302".into(),
+                    "stun:stun2.l.google.com:19302".into(),
+                    "stun:stun3.l.google.com:19302".into(),
+                ],
                 ..Default::default()
             }],
             ..Default::default()
@@ -482,7 +487,7 @@ impl Controller {
                         log::debug!("terminating rtp_sender thread from `connect`");
                     });
                     let x = RtcRtpManager {
-                        sender: rtp_sender,
+                        _sender: rtp_sender,
                         handle,
                     };
                     peer.rtp_senders.insert(source_id.clone(), x);
