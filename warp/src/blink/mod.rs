@@ -78,9 +78,9 @@ pub trait Blink {
     async fn record_call(&mut self, output_file: &str) -> Result<(), Error>;
     async fn stop_recording(&mut self) -> Result<(), Error>;
 
-    async fn get_audio_source_codec(&self) -> Option<AudioCodec>;
+    async fn get_audio_source_codec(&self) -> AudioCodec;
     async fn set_audio_source_codec(&mut self, codec: AudioCodec) -> Result<(), Error>;
-    async fn get_audio_sink_codec(&self) -> Option<AudioCodec>;
+    async fn get_audio_sink_codec(&self) -> AudioCodec;
     async fn set_audio_sink_codec(&mut self, codec: AudioCodec) -> Result<(), Error>;
 
     // ------ Utility Functions ------

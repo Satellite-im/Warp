@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 use warp::blink::{self};
 
 use webrtc::{
-    rtp::{self, packetizer::Packetizer},
+    rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
     track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
@@ -144,7 +144,18 @@ fn create_source_track(
                     {
                         Ok(packets) => {
                             for packet in &packets {
-                                if let Err(e) = track2.write_rtp(packet).await {
+                                if let Err(e) = track2
+                                    .write_rtp_with_extensions(
+                                        packet,
+                                        &[rtp::extension::HeaderExtension::AudioLevel(
+                                            AudioLevelExtension {
+                                                level: 10,
+                                                voice: true,
+                                            },
+                                        )],
+                                    )
+                                    .await
+                                {
                                     log::error!("failed to send RTP packet: {}", e);
                                 }
                             }
