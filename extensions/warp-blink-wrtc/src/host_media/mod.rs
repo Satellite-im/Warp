@@ -7,9 +7,9 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
-use tokio::sync::RwLock;
 use warp::blink::{self};
 use warp::crypto::DID;
+use warp::sync::RwLock;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
@@ -36,25 +36,25 @@ static mut DATA: Lazy<RwLock<Data>> = Lazy::new(|| {
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
 
 pub async fn get_input_device_name() -> Option<String> {
-    let data = DATA.read().await;
+    let data = unsafe { DATA.read() };
     data.audio_input_device.as_ref().and_then(|x| x.name().ok())
 }
 
 pub async fn get_output_device_name() -> Option<String> {
-    let data = DATA.read().await;
+    let data = unsafe { DATA.read() };
     data.audio_output_device
         .as_ref()
         .and_then(|x| x.name().ok())
 }
 
 pub async fn reset() {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     data.audio_source_track.take();
     data.audio_sink_tracks.clear();
 }
 
 pub async fn has_audio_source() -> bool {
-    let data = DATA.read().await;
+    let data = unsafe { DATA.read() };
     data.audio_input_device.is_some()
 }
 
@@ -66,7 +66,7 @@ pub async fn create_audio_source_track(
     webrtc_codec: blink::AudioCodec,
     source_codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     let input_device = match data.audio_input_device.as_ref() {
         Some(d) => d,
         None => {
@@ -85,7 +85,7 @@ pub async fn create_audio_source_track(
 }
 
 pub async fn remove_audio_source_track() -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     data.audio_source_track.take();
     Ok(())
 }
@@ -97,7 +97,7 @@ pub async fn create_audio_sink_track(
     webrtc_codec: blink::AudioCodec,
     sink_codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     let output_device = match data.audio_output_device.as_ref() {
         Some(d) => d,
         None => {
@@ -112,7 +112,7 @@ pub async fn create_audio_sink_track(
 }
 
 pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
 
     // change_input_device destroys the audio stream. if that function fails. there should be
     // no audio_input.
@@ -126,7 +126,7 @@ pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
 }
 
 pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
 
     // todo: if this fails, return an error or keep going?
     for (_k, v) in data.audio_sink_tracks.iter_mut() {
@@ -140,13 +140,13 @@ pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
 }
 
 pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     data.audio_sink_tracks.remove(&peer_id);
     Ok(())
 }
 
 pub async fn mute_peer(peer_id: DID) -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     if let Some(track) = data.audio_sink_tracks.get_mut(&peer_id) {
         track
             .pause()
@@ -157,7 +157,7 @@ pub async fn mute_peer(peer_id: DID) -> anyhow::Result<()> {
 }
 
 pub async fn unmute_peer(peer_id: DID) -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     if let Some(track) = data.audio_sink_tracks.get_mut(&peer_id) {
         track
             .play()
@@ -168,7 +168,7 @@ pub async fn unmute_peer(peer_id: DID) -> anyhow::Result<()> {
 }
 
 pub async fn mute_self() -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     if let Some(track) = data.audio_source_track.as_mut() {
         track
             .pause()
@@ -178,7 +178,7 @@ pub async fn mute_self() -> anyhow::Result<()> {
 }
 
 pub async fn unmute_self() -> anyhow::Result<()> {
-    let mut data = DATA.write().await;
+    let mut data = unsafe { DATA.write() };
     if let Some(track) = data.audio_source_track.as_mut() {
         track
             .play()
