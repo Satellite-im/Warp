@@ -120,7 +120,7 @@ async fn handle_command(
             let call_id = match id {
                 Some(r) => Uuid::from_str(&r)?,
                 None => match lock.take() {
-                    Some(id) => id.clone(),
+                    Some(id) => id,
                     None => bail!("no call to answer!"),
                 },
             };

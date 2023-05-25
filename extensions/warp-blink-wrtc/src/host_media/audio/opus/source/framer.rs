@@ -39,20 +39,20 @@ impl Framer {
         // todo: abstract this
         encoder.set_bitrate(Bitrate::Bits(16000))?;
 
-        let resampler_config = if webrtc_codec.sample_rate() == source_codec.sample_rate() {
-            ResamplerConfig::None
-        } else if webrtc_codec.sample_rate() > source_codec.sample_rate() {
-            ResamplerConfig::UpSample(webrtc_codec.sample_rate() / source_codec.sample_rate())
-        } else {
-            ResamplerConfig::DownSample(source_codec.sample_rate() / webrtc_codec.sample_rate())
+        let resampler_config = match webrtc_codec.sample_rate() {
+            x if x == source_codec.sample_rate() => ResamplerConfig::None,
+            x if x > source_codec.sample_rate() => {
+                ResamplerConfig::UpSample(webrtc_codec.sample_rate() / source_codec.sample_rate())
+            }
+            _ => {
+                ResamplerConfig::DownSample(source_codec.sample_rate() / webrtc_codec.sample_rate())
+            }
         };
 
-        let channel_mixer_config = if webrtc_codec.channels() == source_codec.channels() {
-            ChannelMixerConfig::None
-        } else if webrtc_codec.channels() < source_codec.channels() {
-            ChannelMixerConfig::Merge
-        } else {
-            ChannelMixerConfig::Split
+        let channel_mixer_config = match webrtc_codec.channels() {
+            x if x == source_codec.channels() => ChannelMixerConfig::None,
+            x if x < source_codec.channels() => ChannelMixerConfig::Merge,
+            _ => ChannelMixerConfig::Split,
         };
 
         Ok(Self {

@@ -44,24 +44,20 @@ impl SinkTrack for OpusSink {
         webrtc_codec: blink::AudioCodec,
         sink_codec: blink::AudioCodec,
     ) -> Result<Self> {
-        let resampler_config = if webrtc_codec.sample_rate() == sink_codec.sample_rate() {
-            ResamplerConfig::None
-        } else if webrtc_codec.sample_rate() > sink_codec.sample_rate() {
-            ResamplerConfig::DownSample(webrtc_codec.sample_rate() / sink_codec.sample_rate())
-        } else {
-            ResamplerConfig::UpSample(sink_codec.sample_rate() / webrtc_codec.sample_rate())
+        let resampler_config = match webrtc_codec.sample_rate() {
+            x if x == sink_codec.sample_rate() => ResamplerConfig::None,
+            x if x > sink_codec.sample_rate() => {
+                ResamplerConfig::DownSample(webrtc_codec.sample_rate() / sink_codec.sample_rate())
+            }
+            _ => ResamplerConfig::UpSample(sink_codec.sample_rate() / webrtc_codec.sample_rate()),
         };
-
         let resampler = Resampler::new(resampler_config);
 
-        let channel_mixer_config = if webrtc_codec.channels() == sink_codec.channels() {
-            ChannelMixerConfig::None
-        } else if webrtc_codec.channels() > sink_codec.channels() {
-            ChannelMixerConfig::Merge
-        } else {
-            ChannelMixerConfig::Split
+        let channel_mixer_config = match webrtc_codec.channels() {
+            x if x == sink_codec.channels() => ChannelMixerConfig::None,
+            x if x > sink_codec.channels() => ChannelMixerConfig::Merge,
+            _ => ChannelMixerConfig::Split,
         };
-
         let channel_mixer = ChannelMixer::new(channel_mixer_config);
 
         let cpal_config = cpal::StreamConfig {

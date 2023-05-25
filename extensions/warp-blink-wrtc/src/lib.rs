@@ -234,7 +234,7 @@ impl BlinkImpl {
             .await?;
 
         // next, create event streams and pass them to a task
-        let call_broadcast_stream = self
+        let call_signaling_stream = self
             .ipfs
             .read()
             .await
@@ -242,7 +242,7 @@ impl BlinkImpl {
             .await
             .context("failed to subscribe to call_broadcast_route")?;
 
-        let call_signaling_stream = self
+        let peer_signaling_stream = self
             .ipfs
             .read()
             .await
@@ -273,15 +273,17 @@ impl BlinkImpl {
 
         let webrtc_handle = tokio::task::spawn(async move {
             handle_webrtc(
-                own_id,
-                ipfs2,
-                active_call,
-                webrtc_controller,
-                pending_calls,
-                audio_sink_codec,
-                ui_event_ch,
-                call_broadcast_stream,
-                call_signaling_stream,
+                WebRtcHandlerParams {
+                    own_id,
+                    ipfs: ipfs2,
+                    active_call,
+                    webrtc_controller,
+                    _pending_calls: pending_calls,
+                    audio_sink_codec,
+                    ch: ui_event_ch,
+                    call_signaling_stream,
+                    peer_signaling_stream,
+                },
                 webrtc_event_stream,
             )
             .await;
@@ -335,7 +337,7 @@ async fn handle_call_initiation(
     }
 }
 
-async fn handle_webrtc(
+struct WebRtcHandlerParams {
     own_id: Arc<DID>,
     ipfs: Arc<RwLock<Ipfs>>,
     active_call: Arc<RwLock<Option<ActiveCall>>>,
@@ -345,8 +347,20 @@ async fn handle_webrtc(
     ch: Sender<BlinkEventKind>,
     call_signaling_stream: SubscriptionStream,
     peer_signaling_stream: SubscriptionStream,
-    mut webrtc_event_stream: WebRtcEventStream,
-) {
+}
+
+async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEventStream) {
+    let WebRtcHandlerParams {
+        own_id,
+        ipfs,
+        active_call,
+        webrtc_controller,
+        _pending_calls,
+        audio_sink_codec,
+        ch,
+        call_signaling_stream,
+        peer_signaling_stream,
+    } = params;
     futures::pin_mut!(call_signaling_stream);
     futures::pin_mut!(peer_signaling_stream);
 
@@ -384,7 +398,7 @@ async fn handle_webrtc(
                         log::debug!("received signal: Join");
                         match active_call.call_state.clone() {
                             CallState::Uninitialized => active_call.call_state = CallState::Started,
-                            x @ _ => if x != CallState::Started {
+                            x => if x != CallState::Started {
                                      log::error!("someone tried to join call with state: {:?}", active_call.call_state);
                                     continue;
                             }
