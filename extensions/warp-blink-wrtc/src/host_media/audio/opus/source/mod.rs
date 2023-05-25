@@ -12,7 +12,7 @@ use warp::blink::{self};
 
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
-    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
+    track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
 };
 
 mod framer;

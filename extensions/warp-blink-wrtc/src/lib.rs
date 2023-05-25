@@ -7,6 +7,8 @@
 //! All data used by the implementation is contained in two static variables: IPFS and BLINK_DATA.
 //!
 
+#![allow(dead_code)]
+
 mod host_media;
 mod signaling;
 mod simple_webrtc;

@@ -76,7 +76,7 @@ pub struct AudioCodecBuiler {
 
 #[derive(Clone)]
 pub struct VideoCodecBuilder {
-    codec: VideoCodec,
+    _codec: VideoCodec,
 }
 
 impl AudioCodecBuiler {
@@ -157,7 +157,7 @@ impl std::fmt::Display for AudioCodec {
 impl VideoCodecBuilder {
     pub fn new() -> Self {
         Self {
-            codec: VideoCodec::default(),
+            _codec: VideoCodec::default(),
         }
     }
 }
