@@ -30,8 +30,9 @@ impl Resampler {
                 }
             }
             ResamplerConfig::UpSample(x) => {
-                for _ in 0..x {
-                    out.push(sample);
+                out.push(sample);
+                for _ in 1..x {
+                    out.push(0.0);
                 }
             }
         }
