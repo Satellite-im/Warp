@@ -4,7 +4,7 @@ use cpal::{
     SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{mem::MaybeUninit, sync::Arc};
+use std::{cmp::Ordering, mem::MaybeUninit, sync::Arc};
 use tokio::task::JoinHandle;
 use warp::blink;
 
@@ -44,18 +44,18 @@ impl SinkTrack for OpusSink {
         webrtc_codec: blink::AudioCodec,
         sink_codec: blink::AudioCodec,
     ) -> Result<Self> {
-        let resampler_config = match webrtc_codec.sample_rate() {
-            x if x == sink_codec.sample_rate() => ResamplerConfig::None,
-            x if x > sink_codec.sample_rate() => {
+        let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_codec.sample_rate()) {
+            Ordering::Equal => ResamplerConfig::None,
+            Ordering::Greater => {
                 ResamplerConfig::DownSample(webrtc_codec.sample_rate() / sink_codec.sample_rate())
             }
             _ => ResamplerConfig::UpSample(sink_codec.sample_rate() / webrtc_codec.sample_rate()),
         };
         let resampler = Resampler::new(resampler_config);
 
-        let channel_mixer_config = match webrtc_codec.channels() {
-            x if x == sink_codec.channels() => ChannelMixerConfig::None,
-            x if x > sink_codec.channels() => ChannelMixerConfig::Merge,
+        let channel_mixer_config = match webrtc_codec.channels().cmp(&sink_codec.channels()) {
+            Ordering::Equal => ChannelMixerConfig::None,
+            Ordering::Greater => ChannelMixerConfig::Merge,
             _ => ChannelMixerConfig::Split,
         };
         let channel_mixer = ChannelMixer::new(channel_mixer_config);

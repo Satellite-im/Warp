@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use bytes::Bytes;
 use opus::Bitrate;
 use warp::blink;
@@ -39,9 +41,9 @@ impl Framer {
         // todo: abstract this
         encoder.set_bitrate(Bitrate::Bits(16000))?;
 
-        let resampler_config = match webrtc_codec.sample_rate() {
-            x if x == source_codec.sample_rate() => ResamplerConfig::None,
-            x if x > source_codec.sample_rate() => {
+        let resampler_config = match webrtc_codec.sample_rate().cmp(&source_codec.sample_rate()) {
+            Ordering::Equal => ResamplerConfig::None,
+            Ordering::Greater => {
                 ResamplerConfig::UpSample(webrtc_codec.sample_rate() / source_codec.sample_rate())
             }
             _ => {
@@ -49,9 +51,9 @@ impl Framer {
             }
         };
 
-        let channel_mixer_config = match webrtc_codec.channels() {
-            x if x == source_codec.channels() => ChannelMixerConfig::None,
-            x if x < source_codec.channels() => ChannelMixerConfig::Merge,
+        let channel_mixer_config = match webrtc_codec.channels().cmp(&source_codec.channels()) {
+            Ordering::Equal => ChannelMixerConfig::None,
+            Ordering::Less => ChannelMixerConfig::Merge,
             _ => ChannelMixerConfig::Split,
         };
 
