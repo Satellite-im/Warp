@@ -1,6 +1,6 @@
 //! CPAL is used for audio IO. cpal has a stream which isn't Send or Sync, making it difficult to use in an abstraction.
 //! To circumvent this, the collection of SinkTracks and the host's SourceTrack are static variables. Mutating static variables
-//! is `unsafe`. However, it should not be dangerous so long as the `SINGLETON_MUTEX` is acquired prior.
+//! is `unsafe`. However, it should not be dangerous due to the RwLock.
 //!
 use std::{collections::HashMap, sync::Arc};
 
