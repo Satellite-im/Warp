@@ -49,12 +49,12 @@ use crate::{
 // implements Blink
 pub struct BlinkImpl {
     ipfs: Arc<RwLock<Ipfs>>,
+    pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
+    active_call: Arc<RwLock<Option<ActiveCall>>>,
     webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
     // the DID generated from Multipass, never cloned. contains the private key
     own_id: Arc<DID>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
-    active_call: Arc<RwLock<Option<ActiveCall>>>,
-    pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
     audio_source_codec: Arc<RwLock<blink::AudioCodec>>,
     audio_sink_codec: Arc<RwLock<blink::AudioCodec>>,
 
@@ -285,18 +285,6 @@ impl BlinkImpl {
             .await;
         });
 
-        /* own_id: Arc<DID>,
-        public_key: DID,
-        ipfs: Arc<RwLock<Ipfs>>,
-        active_call: Arc<RwLock<Option<ActiveCall>>>,
-        webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
-        pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
-        audio_sink_codec: Arc<RwLock<blink::AudioCodec>>,
-        ch: Sender<BlinkEventKind>,
-        call_signaling_stream: SubscriptionStream,
-        peer_signaling_stream: SubscriptionStream,
-        mut webrtc_event_stream: WebRtcEventStream, */
-
         self.webrtc_handler.replace(webrtc_handle);
         Ok(())
     }
@@ -459,17 +447,16 @@ async fn handle_webrtc(
                         continue;
                     }
                 };
-                let mut webrtc_controller = webrtc_controller.write().await;
-
                 if matches!(active_call.call_state, CallState::Closing | CallState::Closed) {
                     log::warn!("received a signal for a call which is being closed");
                     continue;
                 }
-
                 if !active_call.call.participants().contains(&sender) {
                     log::error!("received a signal from a peer who isn't part of the call");
                     continue;
                 }
+
+                let mut webrtc_controller = webrtc_controller.write().await;
 
                 match signal {
                     PeerSignal::Ice(ice) => {
@@ -512,6 +499,7 @@ async fn handle_webrtc(
                         } else {
                             log::debug!("webrtc event: {event}");
                         }
+                        let ipfs = ipfs.read().await.clone();
                         let mut lock = active_call.write().await;
                         let active_call = match lock.as_mut() {
                             Some(ac) => ac,
@@ -521,7 +509,6 @@ async fn handle_webrtc(
                             }
                         };
                         let mut webrtc_controller = webrtc_controller.write().await;
-                        let ipfs = ipfs.read().await.clone();
                         let call_id = active_call.call.id();
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
