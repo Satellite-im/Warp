@@ -20,13 +20,15 @@ use crate::host_media::audio::SourceTrack;
 
 use self::framer::Framer;
 
+use super::SinkSourceStream;
+
 pub struct OpusSource {
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
     source_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
-    stream: cpal::Stream,
+    stream: SinkSourceStream,
     // used to cancel the current packetizer when the input device is changed.
     packetizer_handle: JoinHandle<()>,
 }
@@ -53,12 +55,12 @@ impl SourceTrack for OpusSource {
             webrtc_codec.clone(),
             source_codec.clone(),
         )?;
-
+        
         Ok(Self {
             track,
             webrtc_codec,
             source_codec,
-            stream: input_stream,
+            stream: SinkSourceStream(input_stream),
             packetizer_handle: join_handle,
         })
     }
@@ -84,7 +86,7 @@ impl SourceTrack for OpusSource {
             self.webrtc_codec.clone(),
             self.source_codec.clone(),
         )?;
-        self.stream = stream;
+        self.stream = SinkSourceStream(stream);
         self.packetizer_handle = handle;
         Ok(())
     }

@@ -49,7 +49,7 @@ pub fn create_source_track(
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
     source_codec: blink::AudioCodec,
-) -> Result<Box<dyn SourceTrack>> {
+) -> Result<Box<dyn SourceTrack + Sync + Send>> {
     if webrtc_codec.mime_type() != source_codec.mime_type() {
         bail!("mime types don't match");
     }
@@ -72,7 +72,7 @@ pub fn create_sink_track(
     track: Arc<TrackRemote>,
     webrtc_codec: blink::AudioCodec,
     sink_codec: blink::AudioCodec,
-) -> Result<Box<dyn SinkTrack>> {
+) -> Result<Box<dyn SinkTrack + Send + Sync>> {
     if webrtc_codec.mime_type() != sink_codec.mime_type() {
         bail!("mime types don't match");
     }

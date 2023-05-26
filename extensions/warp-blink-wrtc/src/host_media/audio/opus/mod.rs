@@ -1,6 +1,18 @@
 pub mod sink;
 pub mod source;
 
+pub struct SinkSourceStream(cpal::Stream);
+
+impl std::ops::Deref for SinkSourceStream {
+    type Target = cpal::Stream;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+unsafe impl Sync for SinkSourceStream {}
+unsafe impl Send for SinkSourceStream {}
+
 pub enum ResamplerConfig {
     None,
     DownSample(u32),

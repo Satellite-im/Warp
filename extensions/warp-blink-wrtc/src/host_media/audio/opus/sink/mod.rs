@@ -15,7 +15,7 @@ use webrtc::{
 
 use crate::host_media::audio::SinkTrack;
 
-use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
+use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig, SinkSourceStream};
 
 pub struct OpusSink {
     // save this for changing the output device
@@ -25,7 +25,7 @@ pub struct OpusSink {
     // same
     sink_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
-    stream: cpal::Stream,
+    stream: SinkSourceStream,
     decoder_handle: JoinHandle<()>,
 }
 
@@ -113,8 +113,12 @@ impl SinkTrack for OpusSink {
                 //log::trace!("output stream fell behind: try increasing latency");
             }
         };
-        let output_stream =
-            output_device.build_output_stream(&cpal_config, output_data_fn, err_fn, None)?;
+        let output_stream = SinkSourceStream(output_device.build_output_stream(
+            &cpal_config,
+            output_data_fn,
+            err_fn,
+            None,
+        )?);
 
         Ok(Self {
             stream: output_stream,
