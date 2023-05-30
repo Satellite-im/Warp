@@ -77,10 +77,12 @@ enum Cli {
         file_name: String,
         sample_rate: Option<u32>,
     },
+    /// calculates loudness in 100ms intervals using the bs177 algorithm
     LoudnessBs177 {
         input_file_name: String,
         output_file_name: String,
     },
+    /// calculates loudness in 100ms intervals using root mean square
     LoudnessRms {
         input_file_name: String,
         output_file_name: String,
