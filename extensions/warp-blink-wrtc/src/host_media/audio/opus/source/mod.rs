@@ -1,4 +1,5 @@
 use anyhow::Result;
+use bs1770::ChannelLoudnessMeter;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
@@ -112,7 +113,7 @@ fn create_source_track(
     let mut framer = Framer::init(
         source_codec.frame_size(),
         webrtc_codec.clone(),
-        source_codec,
+        source_codec.clone(),
     )?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
@@ -137,20 +138,27 @@ fn create_source_track(
     let join_handle = tokio::spawn(async move {
         loop {
             while let Some(sample) = consumer.pop() {
-                if let Some(bytes) = framer.frame(sample) {
+                if let Some(output) = framer.frame(sample) {
                     match packetizer
-                        .packetize(&bytes, webrtc_codec.frame_size() as u32)
+                        .packetize(&output.bytes, webrtc_codec.frame_size() as u32)
                         .await
                     {
                         Ok(packets) => {
+                            // according to this: https://docs.rs/bs1770/1.0.0/bs1770/struct.Power.html loudness has range [-1.0,1.0]
+                            // but webrtc requires a u8. For now, take the abs.
+                            let mut loudness = output
+                                .loudness
+                                .map(|x| x.loudness_lkfs().abs())
+                                .unwrap_or(0.0);
+                            loudness *= 256.0;
                             for packet in &packets {
                                 if let Err(e) = track2
                                     .write_rtp_with_extensions(
                                         packet,
                                         &[rtp::extension::HeaderExtension::AudioLevel(
                                             AudioLevelExtension {
-                                                level: 10,
-                                                voice: true,
+                                                level: loudness as u8,
+                                                voice: false,
                                             },
                                         )],
                                     )
