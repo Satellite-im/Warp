@@ -306,7 +306,7 @@ Frame size (in samples) vs duration for various sampling rates:
         Cli::LoudnessRms {
             input_file_name,
             output_file_name,
-        } => loudness::calculate_loudness_rms(sm.clone(), &input_file_name, &output_file_name)?,
+        } => loudness::calculate_loudness_rms(&input_file_name, &output_file_name)?,
         Cli::LoudnessRms2 {
             input_file_name,
             output_file_name,
