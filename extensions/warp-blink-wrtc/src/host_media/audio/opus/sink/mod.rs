@@ -6,16 +6,17 @@ use cpal::{
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
-use warp::{blink, crypto::DID};
+use warp::{
+    blink::{self, BlinkEventKind},
+    crypto::DID,
+};
 
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
     track::track_remote::TrackRemote, util::Unmarshal,
 };
 
-use crate::host_media::audio::{
-    opus::AudioSampleProducer, speech, AudioEvent, AudioEventStream, SinkTrack,
-};
+use crate::host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack};
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
 
@@ -30,7 +31,7 @@ pub struct OpusSink {
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
-    event_ch: broadcast::Sender<AudioEvent>,
+    event_ch: broadcast::Sender<BlinkEventKind>,
 }
 
 impl Drop for OpusSink {
@@ -44,6 +45,7 @@ impl Drop for OpusSink {
 impl SinkTrack for OpusSink {
     fn init(
         peer_id: DID,
+        event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
         webrtc_codec: blink::AudioCodec,
@@ -79,8 +81,6 @@ impl SinkTrack for OpusSink {
             2 => opus::Channels::Stereo,
             x => bail!("invalid number of channels: {x}"),
         };
-
-        let (event_ch, _rx) = broadcast::channel(1024);
 
         let decoder = opus::Decoder::new(webrtc_sample_rate, webrtc_channels)?;
         let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
@@ -138,20 +138,6 @@ impl SinkTrack for OpusSink {
         })
     }
 
-    fn get_event_stream(&mut self) -> Result<AudioEventStream> {
-        let mut rx = self.event_ch.subscribe();
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-        Ok(AudioEventStream(Box::pin(stream)))
-    }
-
     fn play(&self) -> Result<()> {
         if let Err(e) = self.stream.play() {
             return Err(e.into());
@@ -170,6 +156,7 @@ impl SinkTrack for OpusSink {
 
         let new_sink = Self::init(
             self.peer_id.clone(),
+            self.event_ch.clone(),
             output_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
@@ -196,12 +183,13 @@ async fn decode_media_stream<T>(
     mut decoder: opus::Decoder,
     mut resampler: Resampler,
     mut channel_mixer: ChannelMixer,
-    event_ch: broadcast::Sender<AudioEvent>,
+    event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
 ) -> Result<()>
 where
     T: Depacketizer,
 {
+    // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
     let mut raw_samples: Vec<f32> = vec![];
     let mut decoder_output_buf = [0_f32; 2880 * 4];
@@ -228,7 +216,9 @@ where
                     let audio_level = extension.payload.first().map(|x| x & 0x7F).unwrap_or(0);
                     if speech_detector.should_emit_event(audio_level) {
                         let _ = event_ch
-                            .send(AudioEvent::UserTalking(peer_id.clone()))
+                            .send(BlinkEventKind::ParticipantSpeaking {
+                                peer_id: peer_id.clone(),
+                            })
                             .is_err();
                     }
                 }
