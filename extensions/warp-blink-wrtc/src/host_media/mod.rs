@@ -114,7 +114,13 @@ pub async fn create_audio_sink_track(
         }
     };
 
-    let sink_track = create_sink_track(output_device, track, webrtc_codec, sink_codec)?;
+    let sink_track = create_sink_track(
+        peer_id.clone(),
+        output_device,
+        track,
+        webrtc_codec,
+        sink_codec,
+    )?;
     sink_track.play()?;
     unsafe {
         DATA.audio_sink_tracks.insert(peer_id, sink_track);
