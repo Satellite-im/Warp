@@ -17,12 +17,11 @@ pub fn calculate_loudness_bs177(
     let mut output_file = File::create(output_file_name)?;
     let mut loudness_meter = bs1770::ChannelLoudnessMeter::new(args.sample_rate);
     let header = "loudness\n";
-    output_file.write(header.as_bytes())?;
+    let _ = output_file.write(header.as_bytes())?;
     let mut buf = [0_f32; 48000];
     let bp: *mut u8 = buf.as_mut_ptr() as _;
-    let mut bs: &mut [u8] =
-        unsafe { slice::from_raw_parts_mut(bp, mem::size_of::<f32>() * buf.len()) };
-    while let Ok(len) = input_file.read(&mut bs) {
+    let bs: &mut [u8] = unsafe { slice::from_raw_parts_mut(bp, mem::size_of::<f32>() * buf.len()) };
+    while let Ok(len) = input_file.read(bs) {
         if len == 0 {
             break;
         }
@@ -32,7 +31,7 @@ pub fn calculate_loudness_bs177(
         if loudness.is_some() {
             for sample in loudness_meter.as_100ms_windows().inner {
                 let s = format!("{}\n", sample.loudness_lkfs());
-                output_file.write(s.as_bytes())?;
+                let _ = output_file.write(s.as_bytes())?;
             }
             // reset the algorithm
             loudness_meter = bs1770::ChannelLoudnessMeter::new(args.sample_rate);
@@ -47,13 +46,12 @@ pub fn calculate_loudness_rms(input_file_name: &str, output_file_name: &str) -> 
     let mut input_file = File::open(input_file_name)?;
     let mut output_file = File::create(output_file_name)?;
     let header = "loudness\n";
-    output_file.write(header.as_bytes())?;
+    let _ = output_file.write(header.as_bytes())?;
     // 100 ms samples, for easy comparison with bs177
     let mut buf = [0_f32; 4800];
     let bp: *mut u8 = buf.as_mut_ptr() as _;
-    let mut bs: &mut [u8] =
-        unsafe { slice::from_raw_parts_mut(bp, mem::size_of::<f32>() * buf.len()) };
-    while let Ok(len) = input_file.read(&mut bs) {
+    let bs: &mut [u8] = unsafe { slice::from_raw_parts_mut(bp, mem::size_of::<f32>() * buf.len()) };
+    while let Ok(len) = input_file.read(bs) {
         if len == 0 {
             break;
         }
@@ -66,7 +64,7 @@ pub fn calculate_loudness_rms(input_file_name: &str, output_file_name: &str) -> 
         sum = sum.div(num_samples as f32);
         sum = f32::sqrt(sum);
         let s = format!("{}\n", sum);
-        output_file.write(s.as_bytes())?;
+        let _ = output_file.write(s.as_bytes())?;
     }
 
     println!("finished calculating loudness");
@@ -110,13 +108,12 @@ pub fn calculate_loudness_rms2(
     let mut output_file = File::create(output_file_name)?;
     let mut loudness_calculator = LoudnessCalculator::new();
     let header = "loudness\n";
-    output_file.write(header.as_bytes())?;
+    let _ = output_file.write(header.as_bytes())?;
     // 100 ms samples, for easy comparison with bs177
     let mut buf = [0_f32; 4800];
     let bp: *mut u8 = buf.as_mut_ptr() as _;
-    let mut bs: &mut [u8] =
-        unsafe { slice::from_raw_parts_mut(bp, mem::size_of::<f32>() * buf.len()) };
-    while let Ok(len) = input_file.read(&mut bs) {
+    let bs: &mut [u8] = unsafe { slice::from_raw_parts_mut(bp, mem::size_of::<f32>() * buf.len()) };
+    while let Ok(len) = input_file.read(bs) {
         if len == 0 {
             break;
         }
@@ -125,7 +122,7 @@ pub fn calculate_loudness_rms2(
             loudness_calculator.insert(*sample);
         }
         let s = format!("{}\n", loudness_calculator.get_rms());
-        output_file.write(s.as_bytes())?;
+        let _ = output_file.write(s.as_bytes())?;
     }
 
     println!("finished calculating loudness");
