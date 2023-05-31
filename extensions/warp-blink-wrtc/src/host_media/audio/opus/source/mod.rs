@@ -87,6 +87,14 @@ impl SourceTrack for OpusSource {
         self.packetizer_handle = handle;
         Ok(())
     }
+
+    fn record(&mut self, _output_file_name: &str) -> Result<()> {
+        todo!()
+    }
+
+    fn stop_recording(&mut self) -> Result<()> {
+        todo!()
+    }
 }
 
 fn create_source_track(
@@ -143,7 +151,7 @@ fn create_source_track(
                     {
                         Ok(packets) => {
                             let loudness = match output.loudness.mul(1000.0) {
-                                x if x >= 255.0 => 255,
+                                x if x >= 127.0 => 127,
                                 x => x as u8,
                             };
                             for packet in &packets {
