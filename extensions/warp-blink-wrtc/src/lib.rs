@@ -230,8 +230,13 @@ impl BlinkImpl {
             .await
             .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
             .await?;
-        host_media::create_audio_source_track(track, call.codec(), audio_source_codec.clone())
-            .await?;
+        host_media::create_audio_source_track(
+            self.ui_event_ch.clone(),
+            track,
+            call.codec(),
+            audio_source_codec.clone(),
+        )
+        .await?;
 
         // next, create event streams and pass them to a task
         let call_signaling_stream = self
