@@ -110,10 +110,8 @@ pub enum BlinkEventKind {
     /// A participant is speaking
     #[display(fmt = "ParticipantSpeaking")]
     ParticipantSpeaking { peer_id: DID },
-    // todo: maybe don't use this event and just use a timeout.
-    /// A participant stopped speaking
-    #[display(fmt = "ParticipantNotSpeaking")]
-    ParticipantNotSpeaking { peer_id: DID },
+    #[display(fmt = "SelfSpeaking")]
+    SelfSpeaking,
     /// audio packets were dropped for the peer
     #[display(fmt = "AudioDegredation")]
     AudioDegredation { peer_id: DID },
