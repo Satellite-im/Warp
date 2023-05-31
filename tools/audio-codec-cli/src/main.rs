@@ -87,7 +87,7 @@ enum Cli {
         input_file_name: String,
         output_file_name: String,
     },
-    /// basically a moving average filter
+    /// basically a moving average filter.
     LoudnessRms2 {
         input_file_name: String,
         output_file_name: String,

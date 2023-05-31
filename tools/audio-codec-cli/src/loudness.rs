@@ -75,39 +75,30 @@ pub fn calculate_loudness_rms(input_file_name: &str, output_file_name: &str) -> 
 
 // reminds me of C code
 struct LoudnessCalculator {
-    buf: [f32; 480],
+    buf: [f32; 4800],
     // sum of squares
     ss: f32,
     idx: usize,
-    len: usize,
 }
 
 impl LoudnessCalculator {
     fn new() -> Self {
         Self {
-            buf: [0.0; 480],
+            buf: [0.0; 4800],
             ss: 0.0,
             idx: 0,
-            len: 0,
         }
     }
     fn insert(&mut self, sample: f32) {
-        let sq = sample * sample;
-
-        if self.len < 4800 {
-            self.len += 1;
-            self.buf[self.idx] = sq;
-        } else {
-            self.ss -= self.buf[self.idx];
-            self.buf[self.idx] = sq;
-        }
-
+        let sq = sample.powf(2.0);
         self.ss += sq;
+        self.ss -= self.buf[self.idx];
+        self.buf[self.idx] = sq;
         self.idx = (self.idx + 1) % self.buf.len();
     }
 
     fn get_rms(&self) -> f32 {
-        f32::sqrt(self.ss.div(self.len as f32))
+        f32::sqrt(self.ss.div(self.buf.len() as f32))
     }
 }
 
@@ -121,7 +112,7 @@ pub fn calculate_loudness_rms2(
     let header = "loudness\n";
     output_file.write(header.as_bytes())?;
     // 100 ms samples, for easy comparison with bs177
-    let mut buf = [0_f32; 480];
+    let mut buf = [0_f32; 4800];
     let bp: *mut u8 = buf.as_mut_ptr() as _;
     let mut bs: &mut [u8] =
         unsafe { slice::from_raw_parts_mut(bp, mem::size_of::<f32>() * buf.len()) };
