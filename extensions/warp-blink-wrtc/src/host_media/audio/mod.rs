@@ -6,6 +6,7 @@ use webrtc::track::{
     track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote,
 };
 
+pub mod loudness;
 mod opus;
 
 pub use self::opus::sink::OpusSink;

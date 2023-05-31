@@ -1,13 +1,11 @@
 use anyhow::Result;
-use bs1770::ChannelLoudnessMeter;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
 };
-
 use rand::Rng;
 use ringbuf::HeapRb;
-use std::{sync::Arc, time::Duration};
+use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::task::JoinHandle;
 use warp::blink::{self};
 
@@ -144,20 +142,17 @@ fn create_source_track(
                         .await
                     {
                         Ok(packets) => {
-                            // according to this: https://docs.rs/bs1770/1.0.0/bs1770/struct.Power.html loudness has range [-1.0,1.0]
-                            // but webrtc requires a u8. For now, take the abs.
-                            let mut loudness = output
-                                .loudness
-                                .map(|x| x.loudness_lkfs().abs())
-                                .unwrap_or(0.0);
-                            loudness *= 256.0;
+                            let loudness = match output.loudness.mul(1000.0) {
+                                x if x >= 255.0 => 255,
+                                x => x as u8,
+                            };
                             for packet in &packets {
                                 if let Err(e) = track2
                                     .write_rtp_with_extensions(
                                         packet,
                                         &[rtp::extension::HeaderExtension::AudioLevel(
                                             AudioLevelExtension {
-                                                level: loudness as u8,
+                                                level: loudness,
                                                 voice: false,
                                             },
                                         )],

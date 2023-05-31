@@ -4,8 +4,9 @@ use bytes::Bytes;
 use opus::Bitrate;
 use warp::blink;
 
-use crate::host_media::audio::opus::{
-    ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig,
+use crate::host_media::audio::{
+    loudness,
+    opus::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig},
 };
 
 pub struct Framer {
@@ -24,13 +25,12 @@ pub struct Framer {
     resampler: Resampler,
     // this is needed by the bs1770 algorithm
     output_sample_rate: u32,
-    loudness_meter: bs1770::ChannelLoudnessMeter,
+    loudness_calculator: loudness::Calculator,
 }
 
 pub struct FramerOutput {
     pub bytes: Bytes,
-    // could be none if less than 100ms of audio have been processed
-    pub loudness: Option<bs1770::Power>,
+    pub loudness: f32,
 }
 
 impl Framer {
@@ -39,10 +39,10 @@ impl Framer {
         webrtc_codec: blink::AudioCodec,
         source_codec: blink::AudioCodec,
     ) -> anyhow::Result<Self> {
-        let loudness_meter = bs1770::ChannelLoudnessMeter::new(webrtc_codec.sample_rate());
-        let mut buf = Vec::new();
+        let loudness_calculator = loudness::Calculator::new(frame_size);
+        let mut buf: Vec<f32> = Vec::new();
         buf.reserve(frame_size);
-        let mut opus_out = Vec::new();
+        let mut opus_out: Vec<u8> = Vec::new();
         opus_out.resize(frame_size * 4, 0);
         let mut encoder = opus::Encoder::new(
             webrtc_codec.sample_rate(),
@@ -77,7 +77,7 @@ impl Framer {
             resampler: Resampler::new(resampler_config),
             channel_mixer: ChannelMixer::new(channel_mixer_config),
             output_sample_rate: webrtc_codec.sample_rate(),
-            loudness_meter,
+            loudness_calculator,
         })
     }
 
@@ -94,7 +94,10 @@ impl Framer {
         }
 
         if self.raw_samples.len() == self.frame_size {
-            self.loudness_meter.push(self.raw_samples.iter().cloned());
+            for sample in self.raw_samples.iter() {
+                self.loudness_calculator.insert(*sample);
+            }
+
             match self.encoder.encode_float(
                 self.raw_samples.as_mut_slice(),
                 self.opus_out.as_mut_slice(),
@@ -104,20 +107,7 @@ impl Framer {
                     let slice = self.opus_out.as_slice();
                     let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
 
-                    let loudness = self
-                        .loudness_meter
-                        .as_100ms_windows()
-                        .inner
-                        .iter()
-                        .last()
-                        .cloned();
-                    if loudness.is_some() {
-                        // reset the algorithm
-                        self.loudness_meter =
-                            bs1770::ChannelLoudnessMeter::new(self.output_sample_rate);
-                        // this might be unnecessary but...it includes the last 10-20ms of samples in the next calculation
-                        self.loudness_meter.push(self.raw_samples.iter().cloned());
-                    }
+                    let loudness = self.loudness_calculator.get_rms();
                     Some(FramerOutput { bytes, loudness })
                 }
                 Err(e) => {
