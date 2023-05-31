@@ -92,16 +92,16 @@ impl SinkTrack for OpusSink {
         let event_ch2 = event_ch.clone();
         let peer_id2 = peer_id.clone();
         let join_handle = tokio::spawn(async move {
-            if let Err(e) = decode_media_stream(
-                track2,
+            if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
+                track: track2,
                 sample_builder,
                 producer,
                 decoder,
                 resampler,
                 channel_mixer,
-                event_ch2,
-                peer_id2,
-            )
+                event_ch: event_ch2,
+                peer_id: peer_id2,
+            })
             .await
             {
                 log::error!("error decoding media stream: {}", e);
@@ -175,20 +175,32 @@ impl SinkTrack for OpusSink {
     }
 }
 
-#[allow(clippy::type_complexity)]
-async fn decode_media_stream<T>(
+struct DecodeMediaStreamArgs<T: Depacketizer> {
     track: Arc<TrackRemote>,
-    mut sample_builder: SampleBuilder<T>,
-    mut producer: AudioSampleProducer,
-    mut decoder: opus::Decoder,
-    mut resampler: Resampler,
-    mut channel_mixer: ChannelMixer,
+    sample_builder: SampleBuilder<T>,
+    producer: AudioSampleProducer,
+    decoder: opus::Decoder,
+    resampler: Resampler,
+    channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
-) -> Result<()>
+}
+
+#[allow(clippy::type_complexity)]
+async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<()>
 where
     T: Depacketizer,
 {
+    let DecodeMediaStreamArgs {
+        track,
+        mut sample_builder,
+        mut producer,
+        mut decoder,
+        mut resampler,
+        mut channel_mixer,
+        event_ch,
+        peer_id,
+    } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
     let mut raw_samples: Vec<f32> = vec![];
