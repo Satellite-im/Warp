@@ -4,7 +4,7 @@ use cpal::{
     SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{cmp::Ordering, mem::MaybeUninit, sync::Arc};
+use std::{cmp::Ordering, sync::Arc};
 use tokio::task::JoinHandle;
 use warp::blink;
 
@@ -13,7 +13,7 @@ use webrtc::{
     track::track_remote::TrackRemote, util::Unmarshal,
 };
 
-use crate::host_media::audio::SinkTrack;
+use crate::host_media::audio::{opus::AudioSampleProducer, SinkTrack};
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
 
@@ -156,7 +156,7 @@ impl SinkTrack for OpusSink {
 async fn decode_media_stream<T>(
     track: Arc<TrackRemote>,
     mut sample_builder: SampleBuilder<T>,
-    mut producer: ringbuf::Producer<f32, Arc<ringbuf::SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
+    mut producer: AudioSampleProducer,
     mut decoder: opus::Decoder,
     mut resampler: Resampler,
     mut channel_mixer: ChannelMixer,
