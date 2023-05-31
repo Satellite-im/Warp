@@ -270,11 +270,13 @@ impl BlinkImpl {
         let pending_calls = self.pending_calls.clone();
         let audio_sink_codec = self.audio_sink_codec.clone();
         let ui_event_ch = self.ui_event_ch.clone();
+        let event_ch2 = ui_event_ch.clone();
 
         let webrtc_handle = tokio::task::spawn(async move {
             handle_webrtc(
                 WebRtcHandlerParams {
                     own_id,
+                    event_ch: event_ch2,
                     ipfs: ipfs2,
                     active_call,
                     webrtc_controller,
@@ -339,6 +341,7 @@ async fn handle_call_initiation(
 
 struct WebRtcHandlerParams {
     own_id: Arc<DID>,
+    event_ch: broadcast::Sender<BlinkEventKind>,
     ipfs: Arc<RwLock<Ipfs>>,
     active_call: Arc<RwLock<Option<ActiveCall>>>,
     webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
@@ -352,6 +355,7 @@ struct WebRtcHandlerParams {
 async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEventStream) {
     let WebRtcHandlerParams {
         own_id,
+        event_ch,
         ipfs,
         active_call,
         webrtc_controller,
@@ -534,7 +538,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                                     continue;
                                 }
                                 let audio_sink_codec = audio_sink_codec.read().await.clone();
-                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), track, webrtc_codec, audio_sink_codec).await {
+                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), event_ch.clone(), track, webrtc_codec, audio_sink_codec).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                             }
