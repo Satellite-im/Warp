@@ -125,7 +125,7 @@ fn create_source_track(
     let mut framer = Framer::init(
         source_codec.frame_size(),
         webrtc_codec.clone(),
-        source_codec.clone(),
+        source_codec,
     )?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());

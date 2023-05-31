@@ -237,6 +237,12 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
                 println!("incoming call. id is: {call_id}. sender is: {sender}");
                 lock.replace(call_id);
             }
+            BlinkEventKind::ParticipantSpeaking { peer_id } => {
+                println!("participant is speaking: {}", peer_id);
+            }
+            BlinkEventKind::SelfSpeaking => {
+                println!("you are speaking");
+            }
             _ => {}
         }
     }
