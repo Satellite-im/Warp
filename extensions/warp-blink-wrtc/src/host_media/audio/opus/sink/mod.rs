@@ -185,14 +185,6 @@ impl SinkTrack for OpusSink {
         *self = new_sink;
         Ok(())
     }
-
-    fn record(&mut self) -> Result<()> {
-        todo!()
-    }
-
-    fn stop_recording(&mut self) -> Result<()> {
-        todo!()
-    }
 }
 
 struct DecodeMediaStreamArgs<T: Depacketizer> {
@@ -241,9 +233,8 @@ where
                     }
                 };
 
-                // don't yet know how to set/get the header extension ID, but currently only one extension is being used.
                 if let Some(extension) = rtp_packet.header.extensions.first() {
-                    // too lazy to figure out how to use their api..I can extract the byte myself, thank you...
+                    // don't yet have the MediaEngine exposed. for now since there's only one extension being used, this way seems to be good enough
                     // copies extension::audio_level_extension::AudioLevelExtension from the webrtc-rs crate
                     // todo: use this:
                     // .media_engine
