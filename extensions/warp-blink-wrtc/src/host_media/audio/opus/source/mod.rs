@@ -93,14 +93,6 @@ impl SourceTrack for OpusSource {
         self.packetizer_handle = handle;
         Ok(())
     }
-
-    fn record(&mut self) -> Result<()> {
-        todo!()
-    }
-
-    fn stop_recording(&mut self) -> Result<()> {
-        todo!()
-    }
 }
 
 fn create_source_track(

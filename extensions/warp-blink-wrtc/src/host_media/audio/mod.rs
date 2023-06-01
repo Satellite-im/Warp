@@ -30,8 +30,6 @@ pub trait SourceTrack {
 
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
-    fn record(&mut self) -> Result<()>;
-    fn stop_recording(&mut self) -> Result<()>;
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()>;
 }
@@ -51,9 +49,6 @@ pub trait SinkTrack {
     fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
-
-    fn record(&mut self) -> Result<()>;
-    fn stop_recording(&mut self) -> Result<()>;
 }
 
 /// Uses the MIME type from codec to determine which implementation of SourceTrack to create
