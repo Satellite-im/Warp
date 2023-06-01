@@ -99,6 +99,10 @@ enum Repl {
     ShowInputConfig,
     /// show the default output config
     ShowOutputConfig,
+    /// separately record audio of each participant
+    RecordAudio { output_dir: String },
+    /// stop recording audio
+    StopRecording,
 }
 
 async fn handle_command(
@@ -219,6 +223,8 @@ async fn handle_command(
                 blink.get_audio_sink_codec().await
             );
         }
+        Repl::RecordAudio { output_dir } => blink.record_call(&output_dir).await?,
+        Repl::StopRecording => blink.stop_recording().await?,
     }
     Ok(())
 }

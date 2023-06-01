@@ -75,7 +75,7 @@ pub trait Blink {
     async fn unmute_self(&mut self) -> Result<(), Error>;
     async fn enable_camera(&mut self) -> Result<(), Error>;
     async fn disable_camera(&mut self) -> Result<(), Error>;
-    async fn record_call(&mut self, output_file: &str) -> Result<(), Error>;
+    async fn record_call(&mut self, output_dir: &str) -> Result<(), Error>;
     async fn stop_recording(&mut self) -> Result<(), Error>;
 
     async fn get_audio_source_codec(&self) -> AudioCodec;
