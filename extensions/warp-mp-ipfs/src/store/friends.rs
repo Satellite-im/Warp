@@ -241,7 +241,6 @@ impl FriendsStore {
     }
 
     //TODO: Implement Errors
-    //TODO: Uncomment below once sata is nolonger used here
     #[tracing::instrument(skip(self, data))]
     async fn check_request_message(&mut self, did: &DID, data: &[u8]) -> anyhow::Result<()> {
         let pk_did = &*self.did_key;

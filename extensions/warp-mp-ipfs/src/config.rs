@@ -229,8 +229,8 @@ pub struct StoreSetting {
     pub sync: Vec<Multiaddr>,
     /// Interval to push or check node
     pub sync_interval: Duration,
-    /// TBD
-    pub override_ipld: bool,
+    /// Fetch data over bitswap instead of pubsub
+    pub fetch_over_bitswap: bool,
     /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
     /// Enables phonebook service
@@ -252,7 +252,7 @@ impl Default for StoreSetting {
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
             sync_interval: Duration::from_millis(1000),
-            override_ipld: true,
+            fetch_over_bitswap: false,
             share_platform: false,
             use_phonebook: true,
             friend_request_response_duration: None,
