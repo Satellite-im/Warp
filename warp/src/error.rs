@@ -210,6 +210,14 @@ pub enum Error {
     #[error("Invalid data type")]
     InvalidDataType,
 
+    //Blink Errors
+    #[error("Invalid MIME type: {mime_type}")]
+    InvalidMimeType { mime_type: String },
+    #[error("CPAL: {_0}")]
+    Cpal(String),
+    #[error("Device not found")]
+    DeviceNotFound,
+
     //Misc
     #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]
     InvalidLength {
@@ -238,6 +246,8 @@ pub enum Error {
     ToBeDetermined,
     #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
+    #[error("{0}")]
+    SerdeCborError(#[from] serde_cbor::Error),
     #[error("{0}")]
     UuidError(#[from] uuid::Error),
     #[error("{0}")]

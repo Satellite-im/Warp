@@ -9,6 +9,7 @@ pub mod logging {
     pub use tracing_futures;
 }
 
+pub mod blink;
 pub mod constellation;
 pub mod crypto;
 pub mod data;

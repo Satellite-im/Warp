@@ -1280,7 +1280,6 @@ impl IdentityStore {
             .map(str::to_string)
             .unwrap_or_else(warp::multipass::generator::generate_name);
 
-        // identity.set_username(&username);
         let fingerprint = public_key.fingerprint();
         let bytes = fingerprint.as_bytes();
 
