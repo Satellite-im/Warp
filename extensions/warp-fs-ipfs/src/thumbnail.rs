@@ -80,6 +80,9 @@ impl ThumbnailGenerator {
                     "image" => tokio::task::spawn_blocking(move || {
                         let format: ImageFormat = extension.try_into()?;
                         let image = image::open(own_path).map_err(anyhow::Error::from)?;
+                        let width = width.min(image.width());
+                        let height = height.min(image.height());
+
                         let thumbnail = image.thumbnail(width, height);
 
                         let mut t_buffer = std::io::Cursor::new(vec![]);
@@ -94,7 +97,10 @@ impl ThumbnailGenerator {
                         thumbnail
                             .write_to(&mut t_buffer, output_format)
                             .map_err(anyhow::Error::from)?;
-                        Ok::<_, Error>((ExtensionType::try_from(output_format)?, t_buffer.into_inner()))
+                        Ok::<_, Error>((
+                            ExtensionType::try_from(output_format)?,
+                            t_buffer.into_inner(),
+                        ))
                     })
                     .await
                     .map_err(anyhow::Error::from)?,
@@ -146,6 +152,9 @@ impl ThumbnailGenerator {
                             .decode()
                             .map_err(anyhow::Error::from)?;
 
+                        let width = width.min(image.width());
+                        let height = height.min(image.height());
+
                         let thumbnail = image.thumbnail(width, height);
                         let mut t_buffer = std::io::Cursor::new(vec![]);
                         let output_format = match (output_exact, format) {
@@ -158,7 +167,10 @@ impl ThumbnailGenerator {
                         thumbnail
                             .write_to(&mut t_buffer, output_format)
                             .map_err(anyhow::Error::from)?;
-                        Ok::<_, Error>((ExtensionType::try_from(output_format)?, t_buffer.into_inner()))
+                        Ok::<_, Error>((
+                            ExtensionType::try_from(output_format)?,
+                            t_buffer.into_inner(),
+                        ))
                     })
                     .await
                     .map_err(anyhow::Error::from)?,
