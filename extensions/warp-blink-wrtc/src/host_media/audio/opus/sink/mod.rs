@@ -225,6 +225,12 @@ where
                 if let Some(extension) = rtp_packet.header.extensions.first() {
                     // too lazy to figure out how to use their api..I can extract the byte myself, thank you...
                     // copies extension::audio_level_extension::AudioLevelExtension from the webrtc-rs crate
+                    // todo: use this:
+                    // .media_engine
+                    // .get_header_extension_id(RTCRtpHeaderExtensionCapability {
+                    //     uri: ::sdp::extmap::SDES_MID_URI.to_owned(),
+                    // })
+                    // followed by this: header.get_extension(extension_id)
                     let audio_level = extension.payload.first().map(|x| x & 0x7F).unwrap_or(0);
                     if speech_detector.should_emit_event(audio_level) {
                         let _ = event_ch
