@@ -875,7 +875,7 @@ impl Blink for BlinkImpl {
     async fn disable_camera(&mut self) -> Result<(), Error> {
         todo!()
     }
-    async fn record_call(&mut self, output_dir: &str) -> Result<(), Error> {
+    async fn record_call(&mut self, _output_dir: &str) -> Result<(), Error> {
         todo!()
     }
     async fn stop_recording(&mut self) -> Result<(), Error> {
