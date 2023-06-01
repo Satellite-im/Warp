@@ -5,7 +5,13 @@ use cpal::{
 };
 use rand::Rng;
 use ringbuf::HeapRb;
-use std::{ops::Mul, sync::Arc, time::Duration};
+use std::{fs::OpenOptions, slice};
+use std::{
+    io::{BufWriter, Write},
+    ops::Mul,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{sync::broadcast, task::JoinHandle};
 use warp::blink::{self, BlinkEventKind};
 
@@ -29,11 +35,34 @@ pub struct OpusSource {
     // used to cancel the current packetizer when the input device is changed.
     packetizer_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
+    output_file_name: Option<String>,
 }
 
 impl Drop for OpusSource {
     fn drop(&mut self) {
         self.packetizer_handle.abort();
+    }
+}
+
+impl OpusSource {
+    fn re_init(
+        &mut self,
+        output_file_name: Option<String>,
+        input_device: &cpal::Device,
+    ) -> Result<()> {
+        self.packetizer_handle.abort();
+        let (stream, handle) = create_source_track(
+            input_device,
+            output_file_name.clone(),
+            self.track.clone(),
+            self.webrtc_codec.clone(),
+            self.source_codec.clone(),
+            self.event_ch.clone(),
+        )?;
+        self.output_file_name = output_file_name;
+        self.stream = stream;
+        self.packetizer_handle = handle;
+        Ok(())
     }
 }
 
@@ -50,6 +79,7 @@ impl SourceTrack for OpusSource {
     {
         let (input_stream, join_handle) = create_source_track(
             input_device,
+            None,
             track.clone(),
             webrtc_codec.clone(),
             source_codec.clone(),
@@ -63,6 +93,7 @@ impl SourceTrack for OpusSource {
             source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
+            output_file_name: None,
         })
     }
 
@@ -80,35 +111,41 @@ impl SourceTrack for OpusSource {
     }
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()> {
-        self.packetizer_handle.abort();
-        let (stream, handle) = create_source_track(
-            input_device,
-            self.track.clone(),
-            self.webrtc_codec.clone(),
-            self.source_codec.clone(),
-            self.event_ch.clone(),
-        )?;
-        self.stream = stream;
-        self.packetizer_handle = handle;
-        Ok(())
+        self.re_init(self.output_file_name.clone(), input_device)
     }
 
-    fn record(&mut self, _output_file_name: &str) -> Result<()> {
-        todo!()
+    fn record(&mut self, input_device: &cpal::Device, output_file_name: &str) -> Result<()> {
+        self.re_init(Some(output_file_name.into()), input_device)
     }
 
-    fn stop_recording(&mut self) -> Result<()> {
-        todo!()
+    fn stop_recording(&mut self, input_device: &cpal::Device) -> Result<()> {
+        self.re_init(None, input_device)
     }
 }
 
 fn create_source_track(
     input_device: &cpal::Device,
+    output_file_name: Option<String>,
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
     source_codec: blink::AudioCodec,
     event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
+    let mut buf_writer = output_file_name.and_then(|name| {
+        let file = match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(name)
+        {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("failed to open file for source track: {e}");
+                return None;
+            }
+        };
+        Some(BufWriter::new(file))
+    });
     let config = cpal::StreamConfig {
         channels: source_codec.channels(),
         sample_rate: SampleRate(source_codec.sample_rate()),
@@ -152,6 +189,12 @@ fn create_source_track(
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {
             while let Some(sample) = consumer.pop() {
+                if let Some(bw) = buf_writer.as_mut() {
+                    let f: *const f32 = &sample;
+                    let p: *const u8 = f as _;
+                    let buf = unsafe { slice::from_raw_parts(p, 4) };
+                    let _ = bw.write(buf);
+                }
                 if let Some(output) = framer.frame(sample) {
                     let loudness = match output.loudness.mul(1000.0) {
                         x if x >= 127.0 => 127,
