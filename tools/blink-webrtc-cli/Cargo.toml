@@ -1,0 +1,27 @@
+[package]
+name = "blink-webrtc-cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+fdlimit = "0.2"
+clap = { version = "4.0", features = ["derive"] }
+cpal = "0.15.0"
+log = { version = "0.4.17", features = ["std"]}
+warp = { path = "../../warp" }
+warp-blink-wrtc = { path = "../../extensions/warp-blink-wrtc" }
+warp-mp-ipfs = { path = "../../extensions/warp-mp-ipfs" }
+
+uuid = { workspace = true, features = ["serde", "v4"] }
+tokio = { workspace = true, features = ["full"] }
+
+rand = "0.8.5"
+
+
+anyhow.workspace = true
+serde.workspace = true
+futures.workspace = true
+once_cell.workspace = true
+
