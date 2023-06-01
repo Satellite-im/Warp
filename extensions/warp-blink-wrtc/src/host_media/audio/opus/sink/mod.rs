@@ -4,13 +4,7 @@ use cpal::{
     SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{
-    cmp::Ordering,
-    fs::OpenOptions,
-    io::{BufWriter, Write},
-    slice,
-    sync::Arc,
-};
+use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
 use warp::{
     blink::{self, BlinkEventKind},
@@ -38,7 +32,6 @@ pub struct OpusSink {
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
-    output_file_name: Option<String>,
 }
 
 impl Drop for OpusSink {
@@ -53,7 +46,6 @@ impl OpusSink {
         peer_id: DID,
         event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
-        output_file_name: Option<String>,
         track: Arc<TrackRemote>,
         webrtc_codec: blink::AudioCodec,
         sink_codec: blink::AudioCodec,
@@ -98,7 +90,6 @@ impl OpusSink {
         let track2 = track.clone();
         let event_ch2 = event_ch.clone();
         let peer_id2 = peer_id.clone();
-        let file_name2 = output_file_name.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
                 track: track2,
@@ -109,7 +100,6 @@ impl OpusSink {
                 channel_mixer,
                 event_ch: event_ch2,
                 peer_id: peer_id2,
-                output_file_name: file_name2,
             })
             .await
             {
@@ -144,7 +134,6 @@ impl OpusSink {
             sink_codec,
             decoder_handle: join_handle,
             event_ch,
-            output_file_name,
         })
     }
 }
@@ -163,7 +152,6 @@ impl SinkTrack for OpusSink {
             peer_id,
             event_ch,
             output_device,
-            None,
             track,
             webrtc_codec,
             sink_codec,
@@ -190,7 +178,6 @@ impl SinkTrack for OpusSink {
             self.peer_id.clone(),
             self.event_ch.clone(),
             output_device,
-            self.output_file_name.clone(),
             self.track.clone(),
             self.webrtc_codec.clone(),
             self.sink_codec.clone(),
@@ -199,38 +186,12 @@ impl SinkTrack for OpusSink {
         Ok(())
     }
 
-    fn record(&mut self, output_device: &cpal::Device, output_file_name: &str) -> Result<()> {
-        self.stream.pause()?;
-        self.decoder_handle.abort();
-
-        let new_sink = OpusSink::init_internal(
-            self.peer_id.clone(),
-            self.event_ch.clone(),
-            output_device,
-            Some(output_file_name.into()),
-            self.track.clone(),
-            self.webrtc_codec.clone(),
-            self.sink_codec.clone(),
-        )?;
-        *self = new_sink;
-        Ok(())
+    fn record(&mut self) -> Result<()> {
+        todo!()
     }
 
-    fn stop_recording(&mut self, output_device: &cpal::Device) -> Result<()> {
-        self.stream.pause()?;
-        self.decoder_handle.abort();
-
-        let new_sink = OpusSink::init_internal(
-            self.peer_id.clone(),
-            self.event_ch.clone(),
-            output_device,
-            None,
-            self.track.clone(),
-            self.webrtc_codec.clone(),
-            self.sink_codec.clone(),
-        )?;
-        *self = new_sink;
-        Ok(())
+    fn stop_recording(&mut self) -> Result<()> {
+        todo!()
     }
 }
 
@@ -243,7 +204,6 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
-    output_file_name: Option<String>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -260,23 +220,7 @@ where
         mut channel_mixer,
         event_ch,
         peer_id,
-        output_file_name,
     } = args;
-    let mut buf_writer = output_file_name.and_then(|name| {
-        let file = match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(name)
-        {
-            Ok(r) => r,
-            Err(e) => {
-                log::error!("failed to open file for source track: {e}");
-                return None;
-            }
-        };
-        Some(BufWriter::new(file))
-    });
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
     let mut raw_samples: Vec<f32> = vec![];
@@ -321,6 +265,7 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
+                    // todo: send Sample to other thread
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
                         &mut decoder_output_buf,
@@ -343,12 +288,6 @@ where
                                 for sample in raw_samples.drain(..) {
                                     if let Err(e) = producer.push(sample) {
                                         log::error!("failed to send sample: {}", e);
-                                    }
-                                    if let Some(bw) = buf_writer.as_mut() {
-                                        let f: *const f32 = &sample;
-                                        let p: *const u8 = f as _;
-                                        let buf = unsafe { slice::from_raw_parts(p, 4) };
-                                        let _ = bw.write(buf);
                                     }
                                 }
                             }
