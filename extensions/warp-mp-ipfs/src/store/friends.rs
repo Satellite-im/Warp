@@ -104,7 +104,7 @@ pub enum Event {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
-pub struct PayloadEvent {
+pub struct RequestResponsePayload {
     pub sender: DID,
     pub event: Event,
 }
@@ -246,7 +246,7 @@ impl FriendsStore {
         let pk_did = &*self.did_key;
 
         let bytes = ecdh_decrypt(pk_did, Some(did), data)?;
-        let data = serde_json::from_slice::<PayloadEvent>(&bytes)?;
+        let data = serde_json::from_slice::<RequestResponsePayload>(&bytes)?;
 
         log::info!("Received event from {did}");
 
@@ -266,7 +266,7 @@ impl FriendsStore {
         // Before we validate the request, we should check to see if the key is blocked
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
-            let payload = PayloadEvent {
+            let payload = RequestResponsePayload {
                 sender: (*self.did_key).clone(),
                 event: Event::Block,
             };
@@ -355,7 +355,7 @@ impl FriendsStore {
                         }
                     });
                 }
-                let payload = PayloadEvent {
+                let payload = RequestResponsePayload {
                     sender: (*self.did_key).clone(),
                     event: Event::Response,
                 };
@@ -550,7 +550,7 @@ impl FriendsStore {
             return Err(Error::FriendRequestExist);
         }
 
-        let payload = PayloadEvent {
+        let payload = RequestResponsePayload {
             sender: local_public_key,
             event: Event::Request,
         };
@@ -590,7 +590,7 @@ impl FriendsStore {
             return Ok(());
         }
 
-        let payload = PayloadEvent {
+        let payload = RequestResponsePayload {
             event: Event::Accept,
             sender: local_public_key,
         };
@@ -628,7 +628,7 @@ impl FriendsStore {
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        let payload = PayloadEvent {
+        let payload = RequestResponsePayload {
             sender: local_public_key,
             event: Event::Reject,
         };
@@ -655,7 +655,7 @@ impl FriendsStore {
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        let payload = PayloadEvent {
+        let payload = RequestResponsePayload {
             sender: local_public_key,
             event: Event::Retract,
         };
@@ -742,7 +742,7 @@ impl FriendsStore {
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
-        let payload = PayloadEvent {
+        let payload = RequestResponsePayload {
             sender: local_public_key,
             event: Event::Block,
         };
@@ -770,7 +770,7 @@ impl FriendsStore {
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
 
-        let payload = PayloadEvent {
+        let payload = RequestResponsePayload {
             sender: local_public_key,
             event: Event::Unblock,
         };
@@ -845,7 +845,7 @@ impl FriendsStore {
             let (local_ipfs_public_key, _) = self.local().await?;
             let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
-            let payload = PayloadEvent {
+            let payload = RequestResponsePayload {
                 sender: local_public_key,
                 event: Event::Remove,
             };
@@ -916,7 +916,7 @@ impl FriendsStore {
     #[tracing::instrument(skip(self))]
     pub async fn broadcast_request(
         &mut self,
-        (recipient, payload): (&DID, &PayloadEvent),
+        (recipient, payload): (&DID, &RequestResponsePayload),
         store_request: bool,
         queue_broadcast: bool,
     ) -> Result<(), Error> {
