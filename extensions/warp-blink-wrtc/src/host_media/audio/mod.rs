@@ -10,7 +10,6 @@ use webrtc::track::{
 
 mod loudness;
 mod opus;
-mod recorder;
 mod speech;
 
 pub use self::opus::sink::OpusSink;
