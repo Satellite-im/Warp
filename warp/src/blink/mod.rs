@@ -105,23 +105,12 @@ pub enum BlinkEventKind {
         // the total set of participants who are invited to the call
         participants: Vec<DID>,
     },
-    /// A call has been offered
-    #[display(fmt = "CallOffered")]
-    CallOffered {
-        call_id: Uuid,
-        participants: Vec<DID>,
-    },
-    /// You accepted the call
-    CallAccepted { call_id: Uuid },
     /// Someone joined the call
     #[display(fmt = "ParticipantJoined")]
     ParticipantJoined { call_id: Uuid, peer_id: DID },
     /// Someone left the call
     #[display(fmt = "ParticipantLeft")]
     ParticipantLeft { call_id: Uuid, peer_id: DID },
-    /// You left the call
-    #[display(fmt = "LeftCall")]
-    LeftCall { call_id: Uuid },
     /// A participant is speaking
     #[display(fmt = "ParticipantSpeaking")]
     ParticipantSpeaking { peer_id: DID },
