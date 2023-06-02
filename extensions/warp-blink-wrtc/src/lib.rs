@@ -53,7 +53,7 @@ use crate::{
 // implements Blink
 #[derive(Clone)]
 pub struct BlinkImpl {
-    ipfs: Arc<RwLock<Ipfs>>,
+    ipfs: Ipfs,
     pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
     active_call: Arc<RwLock<Option<ActiveCall>>>,
     webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
@@ -123,6 +123,8 @@ impl Drop for BlinkImpl {
 impl BlinkImpl {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Box<Self>> {
         log::trace!("initializing WebRTC");
+        //Note: This will block the initialization until identity is created or loaded
+        //TODO: Push into separate task if it initially fails
         let identity = loop {
             if let Ok(identity) = account.get_own_identity().await {
                 break identity;
@@ -206,7 +208,7 @@ impl BlinkImpl {
         log::trace!("finished initializing WebRTC");
         Ok(Box::new(Self {
             webrtc_controller: Arc::new(RwLock::new(simple_webrtc::Controller::new()?)),
-            ipfs: Arc::new(RwLock::new(ipfs)),
+            ipfs,
             own_id,
             ui_event_ch,
             active_call: Arc::new(RwLock::new(None)),
@@ -245,16 +247,12 @@ impl BlinkImpl {
         // next, create event streams and pass them to a task
         let call_signaling_stream = self
             .ipfs
-            .read()
-            .await
             .pubsub_subscribe(ipfs_routes::call_signal_route(&call.id()))
             .await
             .context("failed to subscribe to call_broadcast_route")?;
 
         let peer_signaling_stream = self
             .ipfs
-            .read()
-            .await
             .pubsub_subscribe(ipfs_routes::peer_signal_route(&self.own_id, &call.id()))
             .await
             .context("failed to subscribe to call_signaling_route")?;
@@ -352,7 +350,7 @@ async fn handle_call_initiation(
 struct WebRtcHandlerParams {
     own_id: Arc<DID>,
     event_ch: broadcast::Sender<BlinkEventKind>,
-    ipfs: Arc<RwLock<Ipfs>>,
+    ipfs: Ipfs,
     active_call: Arc<RwLock<Option<ActiveCall>>>,
     webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
     _pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
@@ -529,7 +527,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                         } else {
                             log::debug!("webrtc event: {event}");
                         }
-                        let ipfs = ipfs.read().await.clone();
+                        let ipfs = ipfs.clone();
                         let mut lock = active_call.write().await;
                         let active_call = match lock.as_mut() {
                             Some(ac) => ac,
@@ -686,8 +684,7 @@ impl Blink for BlinkImpl {
                 call_info: call_info.clone(),
             };
 
-            let ipfs = self.ipfs.read().await;
-            if let Err(e) = send_signal_ecdh(&ipfs, &self.own_id, &dest, signal, topic).await {
+            if let Err(e) = send_signal_ecdh(&self.ipfs, &self.own_id, &dest, signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
@@ -714,19 +711,17 @@ impl Blink for BlinkImpl {
         let call_id = call.id();
         let topic = ipfs_routes::call_signal_route(&call_id);
         let signal = CallSignal::Join { call_id };
-        let ipfs = self.ipfs.read().await;
-        if let Err(e) = send_signal_aes(&ipfs, &call.group_key(), signal, topic).await {
+        if let Err(e) = send_signal_aes(&self.ipfs, &call.group_key(), signal, topic).await {
             log::error!("failed to send signal: {e}");
         }
         Ok(())
     }
     /// use the Leave signal as a courtesy, to let the group know not to expect you to join.
     async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error> {
-        let ipfs = self.ipfs.read().await;
         if let Some(call) = self.pending_calls.write().await.remove(&call_id) {
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Leave { call_id };
-            if let Err(e) = send_signal_aes(&ipfs, &call.group_key(), signal, topic).await {
+            if let Err(e) = send_signal_aes(&self.ipfs, &call.group_key(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
             Ok(())
@@ -738,7 +733,6 @@ impl Blink for BlinkImpl {
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
-        let ipfs = self.ipfs.read().await;
         if let Some(ac) = self.active_call.write().await.as_mut() {
             match ac.call_state.clone() {
                 CallState::Started => {
@@ -761,7 +755,7 @@ impl Blink for BlinkImpl {
             let call_id = ac.call.id();
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Leave { call_id };
-            if let Err(e) = send_signal_aes(&ipfs, &ac.call.group_key(), signal, topic).await {
+            if let Err(e) = send_signal_aes(&self.ipfs, &ac.call.group_key(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             } else {
                 log::debug!("sent signal to leave call");
