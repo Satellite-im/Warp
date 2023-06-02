@@ -10,6 +10,7 @@ use std::str::FromStr;
 use aes_gcm::{aead::OsRng, Aes256Gcm, KeyInit};
 use async_trait::async_trait;
 use derive_more::Display;
+use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,7 @@ pub use codecs::*;
 use crate::{
     crypto::DID,
     error::{self, Error},
+    SingleHandle,
 };
 
 // todo: add function to renegotiate codecs, either for the entire call or
@@ -32,7 +34,7 @@ use crate::{
 // todo: add functions for screen sharing
 /// Provides teleconferencing capabilities
 #[async_trait]
-pub trait Blink: Sync + Send {
+pub trait Blink: Sync + Send + SingleHandle + DynClone {
     // ------ Misc ------
     /// The event stream notifies the UI of call related events
     async fn get_event_stream(&mut self) -> Result<BlinkEventStream, Error>;
@@ -88,6 +90,8 @@ pub trait Blink: Sync + Send {
     async fn pending_calls(&self) -> Vec<CallInfo>;
     async fn current_call(&self) -> Option<CallInfo>;
 }
+
+dyn_clone::clone_trait_object!(Blink);
 
 /// Drives the UI
 #[derive(Clone, Display)]
