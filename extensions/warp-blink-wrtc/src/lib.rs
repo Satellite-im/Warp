@@ -15,7 +15,7 @@ mod simple_webrtc;
 mod store;
 
 use async_trait::async_trait;
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
 use anyhow::Context;
@@ -36,7 +36,9 @@ use warp::{
     blink::{self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
     crypto::{Fingerprint, DID},
     error::Error,
+    module::Module,
     multipass::MultiPass,
+    Extension, SingleHandle,
 };
 
 use crate::{
@@ -49,6 +51,7 @@ use crate::{
 };
 
 // implements Blink
+#[derive(Clone)]
 pub struct BlinkImpl {
     ipfs: Arc<RwLock<Ipfs>>,
     pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
@@ -61,10 +64,10 @@ pub struct BlinkImpl {
     audio_sink_codec: Arc<RwLock<blink::AudioCodec>>,
 
     // subscribes to IPFS topic to receive incoming calls
-    offer_handler: JoinHandle<()>,
+    offer_handler: Arc<warp::sync::RwLock<JoinHandle<()>>>,
     // handles 3 streams: one for webrtc events and two IPFS topics
     // pertains to the active_call, which is stored in STATIC_DATA
-    webrtc_handler: Option<JoinHandle<()>>,
+    webrtc_handler: Arc<warp::sync::RwLock<Option<JoinHandle<()>>>>,
 }
 
 #[derive(Clone)]
@@ -104,10 +107,11 @@ impl From<CallInfo> for ActiveCall {
 
 impl Drop for BlinkImpl {
     fn drop(&mut self) {
-        if let Some(handle) = self.webrtc_handler.take() {
+        let webrtc_handler = std::mem::take(&mut *self.webrtc_handler.write());
+        if let Some(handle) = webrtc_handler {
             handle.abort();
         }
-        self.offer_handler.abort();
+        self.offer_handler.write().abort();
         let webrtc_controller = self.webrtc_controller.clone();
         tokio::spawn(async move {
             let _ = webrtc_controller.write().await.deinit().await;
@@ -196,9 +200,9 @@ impl BlinkImpl {
         let own_id2 = own_id.clone();
         let pending_calls = Arc::new(RwLock::new(HashMap::new()));
         let pending_calls2 = pending_calls.clone();
-        let offer_handler = tokio::spawn(async {
+        let offer_handler = Arc::new(warp::sync::RwLock::new(tokio::spawn(async {
             handle_call_initiation(own_id2, pending_calls2, call_offer_stream, ui_event_ch2).await;
-        });
+        })));
         log::trace!("finished initializing WebRTC");
         Ok(Box::new(Self {
             webrtc_controller: Arc::new(RwLock::new(simple_webrtc::Controller::new()?)),
@@ -210,7 +214,7 @@ impl BlinkImpl {
             audio_source_codec: Arc::new(RwLock::new(source_codec)),
             audio_sink_codec: Arc::new(RwLock::new(sink_codec)),
             offer_handler,
-            webrtc_handler: None,
+            webrtc_handler: Arc::default(),
         }))
     }
 
@@ -263,7 +267,8 @@ impl BlinkImpl {
                 .context("failed to get webrtc event stream")?,
         ));
 
-        if let Some(handle) = self.webrtc_handler.take() {
+        let webrtc_handler = std::mem::take(&mut *self.webrtc_handler.write());
+        if let Some(handle) = webrtc_handler {
             // just to be safe
             handle.abort();
         }
@@ -296,7 +301,7 @@ impl BlinkImpl {
             .await;
         });
 
-        self.webrtc_handler.replace(webrtc_handle);
+        self.webrtc_handler.write().replace(webrtc_handle);
         Ok(())
     }
 }
@@ -611,6 +616,25 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
     }
 }
 
+impl Extension for BlinkImpl {
+    fn id(&self) -> String {
+        "warp-blink-wrtc".to_string()
+    }
+    fn name(&self) -> String {
+        "Blink WebRTC".into()
+    }
+
+    fn module(&self) -> Module {
+        Module::Media
+    }
+}
+
+impl SingleHandle for BlinkImpl {
+    fn handle(&self) -> Result<Box<dyn Any>, Error> {
+        Err(Error::Unimplemented)
+    }
+}
+
 /// blink implementation
 ///
 ///
@@ -847,14 +871,14 @@ impl Blink for BlinkImpl {
         Ok(())
     }
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {
-        todo!()
+        Err(Error::Unimplemented)
     }
     async fn select_camera(&mut self, _device_name: &str) -> Result<(), Error> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     async fn select_default_camera(&mut self) -> Result<(), Error> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     // ------ Media controls ------
@@ -870,16 +894,16 @@ impl Blink for BlinkImpl {
             .map_err(|e| warp::error::Error::OtherWithContext(e.to_string()))
     }
     async fn enable_camera(&mut self) -> Result<(), Error> {
-        todo!()
+        Err(Error::Unimplemented)
     }
     async fn disable_camera(&mut self) -> Result<(), Error> {
-        todo!()
+        Err(Error::Unimplemented)
     }
     async fn record_call(&mut self, _output_dir: &str) -> Result<(), Error> {
-        todo!()
+        Err(Error::Unimplemented)
     }
     async fn stop_recording(&mut self) -> Result<(), Error> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     async fn get_audio_source_codec(&self) -> AudioCodec {

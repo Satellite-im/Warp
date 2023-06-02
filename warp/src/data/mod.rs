@@ -87,7 +87,7 @@ impl From<Module> for DataType {
             Module::FileSystem => DataType::FileSystem,
             Module::Accounts => DataType::Accounts,
             Module::Cache => DataType::Cache,
-            Module::Unknown => DataType::Unknown,
+            _ => DataType::Unknown,
         }
     }
 }
