@@ -32,7 +32,7 @@ use crate::{
 // todo: add functions for screen sharing
 /// Provides teleconferencing capabilities
 #[async_trait]
-pub trait Blink {
+pub trait Blink: Sync + Send {
     // ------ Misc ------
     /// The event stream notifies the UI of call related events
     async fn get_event_stream(&mut self) -> Result<BlinkEventStream, Error>;
