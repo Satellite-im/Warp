@@ -55,7 +55,6 @@ async fn main() -> anyhow::Result<()> {
 }
 
 use std::{
-    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
 };
 
@@ -82,13 +81,13 @@ impl Store for MemoryStore {
         Ok(())
     }
 
-    async fn find<'a>(&self, key: &[u8]) -> Result<Vec<Cow<'a, [u8]>>, anyhow::Error> {
+    async fn find(&self, key: &[u8]) -> Result<Vec<Vec<u8>>, anyhow::Error> {
         self.inner
             .get(key)
             .map(|items| {
                 items
                     .iter()
-                    .map(|item| Cow::Owned(item.clone()))
+                    .map(|item| item.clone())
                     .collect::<Vec<_>>()
             })
             .ok_or(anyhow::anyhow!("No entry found"))
