@@ -16,7 +16,6 @@ use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
-use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
     AttachmentKind, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
     MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
@@ -27,8 +26,6 @@ use warp_fs_ipfs::config::FsIpfsConfig;
 use warp_fs_ipfs::IpfsFileSystem;
 use warp_mp_ipfs::config::Discovery;
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
-use warp_pd_flatfile::FlatfileStorage;
-use warp_pd_stretto::StrettoClient;
 use warp_rg_ipfs::config::RgIpfsConfig;
 use warp_rg_ipfs::IpfsMessaging;
 
@@ -68,18 +65,8 @@ struct Opt {
     wait: Option<u64>,
 }
 
-fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
-    if let Some(root) = root {
-        let storage = FlatfileStorage::new_with_index_file(root, PathBuf::from("cache-index"))?;
-        return Ok(Arc::new(RwLock::new(Box::new(storage))));
-    }
-    let storage = StrettoClient::new()?;
-    Ok(Arc::new(RwLock::new(Box::new(storage))))
-}
-
 async fn create_account<P: AsRef<Path>>(
     path: Option<P>,
-    cache: Arc<RwLock<Box<dyn PocketDimension>>>,
     passphrase: Zeroizing<String>,
     experimental: bool,
     opt: &Opt,
@@ -134,8 +121,8 @@ async fn create_account<P: AsRef<Path>>(
     config.ipfs_setting.mdns.enable = opt.mdns;
 
     let mut account: Box<dyn MultiPass> = match path.is_some() {
-        true => Box::new(ipfs_identity_persistent(config, tesseract, Some(cache)).await?),
-        false => Box::new(ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?),
+        true => Box::new(ipfs_identity_persistent(config, tesseract).await?),
+        false => Box::new(ipfs_identity_temporary(Some(config), tesseract).await?),
     };
 
     if account.get_own_identity().await.is_err() {
@@ -166,7 +153,6 @@ async fn create_rg(
     path: Option<PathBuf>,
     account: Box<dyn MultiPass>,
     filesystem: Option<Box<dyn Constellation>>,
-    cache: Arc<RwLock<Box<dyn PocketDimension>>>,
     disable_sender_emitter: bool,
 ) -> anyhow::Result<Box<dyn RayGun>> {
     let mut config = match path.as_ref() {
@@ -177,11 +163,9 @@ async fn create_rg(
     config.store_setting.disable_sender_event_emit = disable_sender_emitter;
 
     let chat = match path.as_ref() {
-        Some(_) => {
-            Box::new(IpfsMessaging::new(Some(config), account, filesystem, Some(cache)).await?)
-                as Box<dyn RayGun>
-        }
-        None => Box::new(IpfsMessaging::new(Some(config), account, filesystem, Some(cache)).await?)
+        Some(_) => Box::new(IpfsMessaging::new(Some(config), account, filesystem).await?)
+            as Box<dyn RayGun>,
+        None => Box::new(IpfsMessaging::new(Some(config), account, filesystem).await?)
             as Box<dyn RayGun>,
     };
 
@@ -212,7 +196,6 @@ async fn main() -> anyhow::Result<()> {
             .init();
     }
 
-    let cache = cache_setup(opt.path.as_ref().map(|p| p.join("cache")))?;
     let password = if opt.with_key {
         rpassword::prompt_password("Enter A Password: ")?
     } else {
@@ -222,7 +205,6 @@ async fn main() -> anyhow::Result<()> {
     println!("Creating or obtaining account...");
     let new_account = create_account(
         opt.path.clone(),
-        cache.clone(),
         Zeroizing::new(password),
         opt.experimental_node,
         &opt,
@@ -237,7 +219,6 @@ async fn main() -> anyhow::Result<()> {
         opt.path.clone(),
         new_account.clone(),
         Some(fs.clone()),
-        cache,
         opt.disable_sender_emitter,
     )
     .await?;

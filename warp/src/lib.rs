@@ -21,6 +21,7 @@ pub mod pocket_dimension;
 pub mod raygun;
 pub mod tesseract;
 
+use futures::stream::BoxStream;
 pub use libipld;
 pub use sata;
 
@@ -66,6 +67,18 @@ pub trait Extension {
 
     /// Returns the module type the extension is meant to be used for
     fn module(&self) -> crate::module::Module;
+
+    /// Event stream to indicate if an extension is ready for use
+    fn extension_subscribe(
+        &self,
+    ) -> Result<BoxStream<'static, ExtensionEventKind>, crate::error::Error> {
+        Err(error::Error::Unimplemented)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExtensionEventKind {
+    Ready,
 }
 
 impl<T: ?Sized> Extension for sync::Arc<sync::RwLock<Box<T>>>

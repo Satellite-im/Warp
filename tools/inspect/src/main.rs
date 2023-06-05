@@ -48,8 +48,7 @@ async fn account<P: AsRef<Path>>(
     config.ipfs_setting.mdns.enable = false;
     config.ipfs_setting.relay_client.enable = false;
 
-    let account: Box<dyn MultiPass> =
-        Box::new(ipfs_identity_persistent(config, tesseract, None).await?);
+    let account: Box<dyn MultiPass> = Box::new(ipfs_identity_persistent(config, tesseract).await?);
 
     //validating that account exist
     let _ = account.get_own_identity().await?;
@@ -74,7 +73,7 @@ async fn rg(
 ) -> anyhow::Result<Box<dyn RayGun>> {
     let config = RgIpfsConfig::production(path);
 
-    let chat = Box::new(IpfsMessaging::new(Some(config), account, filesystem, None).await?)
+    let chat = Box::new(IpfsMessaging::new(Some(config), account, filesystem).await?)
         as Box<dyn RayGun>;
 
     Ok(chat)
