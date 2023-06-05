@@ -122,7 +122,7 @@ async fn create_account<P: AsRef<Path>>(
     config.store_setting.share_platform = opt.provide_platform_info;
 
     if let Some(oride) = opt.r#override {
-        config.store_setting.override_ipld = oride;
+        config.store_setting.fetch_over_bitswap = oride;
     }
 
     if let Some(bootstrap) = opt.bootstrap {
