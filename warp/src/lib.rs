@@ -68,6 +68,10 @@ pub trait Extension {
     /// Returns the module type the extension is meant to be used for
     fn module(&self) -> crate::module::Module;
 
+    fn is_ready(&self) -> bool {
+        false
+    }
+
     /// Event stream to indicate if an extension is ready for use
     fn extension_subscribe(
         &self,

@@ -541,6 +541,10 @@ impl Extension for IpfsIdentity {
         Module::Accounts
     }
 
+    fn is_ready(&self) -> bool {
+        self.initialized.load(Ordering::SeqCst)
+    }
+
     fn extension_subscribe(
         &self,
     ) -> Result<futures::stream::BoxStream<'static, ExtensionEventKind>, warp::error::Error> {

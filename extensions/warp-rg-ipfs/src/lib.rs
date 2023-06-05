@@ -6,13 +6,13 @@ use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use futures::StreamExt;
 use rust_ipfs::Ipfs;
-use tokio::sync::broadcast;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use store::message::MessageStore;
+use tokio::sync::broadcast;
 use tokio::sync::broadcast::Sender;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream};
@@ -46,11 +46,12 @@ pub struct IpfsMessaging {
     constellation: Option<Box<dyn Constellation>>,
     initialize: Arc<AtomicBool>,
     tx: Sender<RayGunEventKind>,
-    ready_tx: Sender<ExtensionEventKind>, //TODO: GroupManager
-                                          //      * Create, Join, and Leave GroupChats
-                                          //      * Send message
-                                          //      * Assign permissions to peers
-                                          //      * TBD
+    ready_tx: Sender<ExtensionEventKind>,
+    //TODO: GroupManager
+    //      * Create, Join, and Leave GroupChats
+    //      * Send message
+    //      * Assign permissions to peers
+    //      * TBD
 }
 
 impl IpfsMessaging {
@@ -158,6 +159,10 @@ impl Extension for IpfsMessaging {
 
     fn module(&self) -> Module {
         Module::Messaging
+    }
+
+    fn is_ready(&self) -> bool {
+        self.initialize.load(Ordering::SeqCst)
     }
 
     fn extension_subscribe(

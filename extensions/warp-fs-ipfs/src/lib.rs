@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::io::Cursor;
 use std::path::PathBuf;
+use std::sync::atomic::{Ordering, AtomicBool};
 use thumbnail::ThumbnailGenerator;
 use tokio::sync::broadcast;
 use tokio_util::io::ReaderStream;
@@ -50,6 +51,7 @@ pub struct IpfsFileSystem {
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
+    initialized: Arc<AtomicBool>,
     account: Box<dyn MultiPass>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
     ready_tx: tokio::sync::broadcast::Sender<ExtensionEventKind>,
@@ -69,6 +71,7 @@ impl IpfsFileSystem {
             modified: Utc::now(),
             config,
             index_cid: Default::default(),
+            initialized: Arc::default(),
             account,
             ipfs: Default::default(),
             broadcast: tx,
@@ -129,7 +132,9 @@ impl IpfsFileSystem {
                 }
             }
         });
-        
+
+        self.initialized.store(true, Ordering::SeqCst);
+
         let _ = self.ready_tx.send(ExtensionEventKind::Ready);
         Ok(())
     }
@@ -282,6 +287,10 @@ impl Extension for IpfsFileSystem {
 
     fn module(&self) -> Module {
         Module::FileSystem
+    }
+
+    fn is_ready(&self) -> bool {
+        self.initialized.load(Ordering::SeqCst)
     }
 
     fn extension_subscribe(
