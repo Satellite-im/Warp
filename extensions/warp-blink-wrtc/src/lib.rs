@@ -652,21 +652,21 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                             EmittedEvents::CallInitiated { dest, sdp } => {
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Dial(*sdp);
-                                if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
+                                if let Err(e) = send_signal_ecdh(ipfs, own_id, &dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
                             EmittedEvents::Sdp { dest, sdp } => {
                                 let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                 let signal = PeerSignal::Sdp(*sdp);
-                                if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
+                                if let Err(e) = send_signal_ecdh(ipfs, own_id, &dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
                             EmittedEvents::Ice { dest, candidate } => {
                                let topic = ipfs_routes::peer_signal_route(&dest, &call_id);
                                let signal = PeerSignal::Ice(*candidate);
-                                if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
+                                if let Err(e) = send_signal_ecdh(ipfs, own_id, &dest, signal, topic).await {
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
@@ -753,7 +753,7 @@ impl Blink for BlinkImpl {
                 }
             };
 
-            if !participants.contains(&own_id) {
+            if !participants.contains(own_id) {
                 participants.push(DID::from_str(&own_id.fingerprint())?);
             };
         }
@@ -788,7 +788,7 @@ impl Blink for BlinkImpl {
                 call_info: call_info.clone(),
             };
 
-            if let Err(e) = send_signal_ecdh(&ipfs, &own_id, &dest, signal, topic).await {
+            if let Err(e) = send_signal_ecdh(ipfs, own_id, &dest, signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
         }
