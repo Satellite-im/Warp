@@ -47,6 +47,9 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     /// peers included in the Vec<DID>.
     async fn offer_call(
         &mut self,
+        // May want to associate a call with a RayGun conversation.
+        // This field is used for informational purposes only.
+        conversation_id: Option<Uuid>,
         participants: Vec<DID>,
         webrtc_codec: AudioCodec,
     ) -> Result<(), Error>;
@@ -123,7 +126,8 @@ pub enum BlinkEventKind {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CallInfo {
-    id: Uuid,
+    call_id: Uuid,
+    conversation_id: Option<Uuid>,
     // the total set of participants who are invited to the call
     participants: Vec<DID>,
     // for call wide broadcasts
@@ -132,18 +136,23 @@ pub struct CallInfo {
 }
 
 impl CallInfo {
-    pub fn new(participants: Vec<DID>, codec: AudioCodec) -> Self {
+    pub fn new(conversation_id: Option<Uuid>, participants: Vec<DID>, codec: AudioCodec) -> Self {
         let group_key = Aes256Gcm::generate_key(&mut OsRng).as_slice().into();
         Self {
-            id: Uuid::new_v4(),
+            call_id: Uuid::new_v4(),
+            conversation_id,
             participants,
             group_key,
             codec,
         }
     }
 
-    pub fn id(&self) -> Uuid {
-        self.id
+    pub fn call_id(&self) -> Uuid {
+        self.call_id
+    }
+
+    pub fn conversation_id(&self) -> Option<Uuid> {
+        self.conversation_id
     }
 
     pub fn participants(&self) -> Vec<DID> {

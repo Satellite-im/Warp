@@ -117,7 +117,9 @@ async fn handle_command(
         Repl::Dial { id } => {
             let did = DID::from_str(&id)?;
             let codecs = CODECS.read().await;
-            blink.offer_call(vec![did], codecs.webrtc.clone()).await?;
+            blink
+                .offer_call(None, vec![did], codecs.webrtc.clone())
+                .await?;
         }
         Repl::Answer { id } => {
             let mut lock = OFFERED_CALL.lock().await;

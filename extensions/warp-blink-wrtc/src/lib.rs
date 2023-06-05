@@ -282,12 +282,12 @@ impl BlinkImpl {
 
         // next, create event streams and pass them to a task
         let call_signaling_stream = ipfs
-            .pubsub_subscribe(ipfs_routes::call_signal_route(&call.id()))
+            .pubsub_subscribe(ipfs_routes::call_signal_route(&call.call_id()))
             .await
             .context("failed to subscribe to call_broadcast_route")?;
 
         let peer_signaling_stream = ipfs
-            .pubsub_subscribe(ipfs_routes::peer_signal_route(own_id, &call.id()))
+            .pubsub_subscribe(ipfs_routes::peer_signal_route(own_id, &call.call_id()))
             .await
             .context("failed to subscribe to call_signaling_route")?;
 
@@ -372,7 +372,7 @@ async fn handle_call_initiation(
         match signal {
             InitiationSignal::Offer { call_info } => {
                 let evt = BlinkEventKind::IncomingCall {
-                    call_id: call_info.id(),
+                    call_id: call_info.call_id(),
                     sender,
                     participants: call_info.participants(),
                 };
@@ -380,7 +380,7 @@ async fn handle_call_initiation(
                 pending_calls
                     .write()
                     .await
-                    .insert(call_info.id(), call_info);
+                    .insert(call_info.call_id(), call_info);
                 if let Err(e) = ch.send(evt) {
                     log::error!("failed to send IncomingCall Event: {e}");
                 }
@@ -475,7 +475,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                             log::error!("participant tried to leave a call which was already closed");
                             continue;
                         }
-                        if active_call.call.id() != call_id {
+                        if active_call.call.call_id() != call_id {
                             log::error!("participant tried to leave call which wasn't active");
                             continue;
                         }
@@ -602,7 +602,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                             }
                         };
                         let mut webrtc_controller = webrtc_controller.write().await;
-                        let call_id = active_call.call.id();
+                        let call_id = active_call.call.call_id();
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
                                 let webrtc_codec = active_call.call.codec();
@@ -727,6 +727,7 @@ impl Blink for BlinkImpl {
     /// peers included in the Vec<DID>.
     async fn offer_call(
         &mut self,
+        conversation_id: Option<Uuid>,
         mut participants: Vec<DID>,
         webrtc_codec: AudioCodec,
     ) -> Result<(), Error> {
@@ -758,7 +759,7 @@ impl Blink for BlinkImpl {
             };
         }
 
-        let call_info = CallInfo::new(participants.clone(), webrtc_codec);
+        let call_info = CallInfo::new(conversation_id, participants.clone(), webrtc_codec);
         self.init_call(call_info.clone()).await?;
 
         let lock = self.own_id.read().await;
@@ -817,7 +818,7 @@ impl Blink for BlinkImpl {
         };
 
         self.init_call(call.clone()).await?;
-        let call_id = call.id();
+        let call_id = call.call_id();
         let topic = ipfs_routes::call_signal_route(&call_id);
         let signal = CallSignal::Join { call_id };
 
@@ -890,7 +891,7 @@ impl Blink for BlinkImpl {
                 }
             };
 
-            let call_id = ac.call.id();
+            let call_id = ac.call.call_id();
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Leave { call_id };
             if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
