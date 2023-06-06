@@ -45,6 +45,7 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
+    /// returns the Uuid of the call
     async fn offer_call(
         &mut self,
         // May want to associate a call with a RayGun conversation.
@@ -52,7 +53,7 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
         conversation_id: Option<Uuid>,
         participants: Vec<DID>,
         webrtc_codec: AudioCodec,
-    ) -> Result<(), Error>;
+    ) -> Result<Uuid, Error>;
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error>;
     /// notify a sender/group that you will not join a call
@@ -103,6 +104,7 @@ pub enum BlinkEventKind {
     #[display(fmt = "IncomingCall")]
     IncomingCall {
         call_id: Uuid,
+        conversation_id: Option<Uuid>,
         // the person who is offering you to join the call
         sender: DID,
         // the total set of participants who are invited to the call

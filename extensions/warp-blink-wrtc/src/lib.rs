@@ -373,6 +373,7 @@ async fn handle_call_initiation(
             InitiationSignal::Offer { call_info } => {
                 let evt = BlinkEventKind::IncomingCall {
                     call_id: call_info.call_id(),
+                    conversation_id: call_info.conversation_id(),
                     sender,
                     participants: call_info.participants(),
                 };
@@ -730,7 +731,7 @@ impl Blink for BlinkImpl {
         conversation_id: Option<Uuid>,
         mut participants: Vec<DID>,
         webrtc_codec: AudioCodec,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         if self.ipfs.read().await.is_none() {
             return Err(Error::OtherWithContext(
                 "received signal before blink is initialized".into(),
@@ -793,7 +794,7 @@ impl Blink for BlinkImpl {
                 log::error!("failed to send signal: {e}");
             }
         }
-        Ok(())
+        Ok(call_info.call_id())
     }
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {

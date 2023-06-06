@@ -238,6 +238,7 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
         match evt {
             BlinkEventKind::IncomingCall {
                 call_id,
+                conversation_id: _,
                 sender,
                 participants: _,
             } => {
