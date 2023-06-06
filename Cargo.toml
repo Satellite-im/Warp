@@ -77,4 +77,4 @@ getrandom = { version = "0.2" }
 either = "1"
 
 #ipfs dependency
-rust-ipfs = "=0.3.16"
+rust-ipfs = { git = "https://github.com/dariusc93/rust-ipfs", rev = "661115a223e1cc5aeaec446ca929537bc9ae2648" }
