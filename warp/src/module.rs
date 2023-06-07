@@ -40,6 +40,10 @@ pub enum Module {
     #[display(fmt = "cache")]
     Cache,
 
+    /// Represents media such as audio/video calls
+    #[display(fmt = "media")]
+    Media,
+
     /// Unknown module. Should be used by default where a module cannot be identified for any specific reason.
     #[display(fmt = "unknown")]
     Unknown,

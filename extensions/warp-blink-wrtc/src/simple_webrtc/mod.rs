@@ -35,6 +35,8 @@ use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecParameters, RTPCodecType};
+use webrtc::rtp_transceiver::rtp_transceiver_direction::RTCRtpTransceiverDirection;
+use webrtc::sdp::extmap::AUDIO_LEVEL_URI;
 
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
@@ -510,6 +512,15 @@ impl Controller {
 // todo: add support for more codecs. perhaps make it configurable
 fn create_api() -> Result<webrtc::api::API> {
     let mut media = MediaEngine::default();
+
+    media.register_header_extension(
+        webrtc::rtp_transceiver::rtp_codec::RTCRtpHeaderExtensionCapability {
+            uri: AUDIO_LEVEL_URI.into(),
+        },
+        RTPCodecType::Audio,
+        Some(RTCRtpTransceiverDirection::Sendrecv),
+    )?;
+
     media.register_codec(
         RTCRtpCodecParameters {
             capability: RTCRtpCodecCapability {

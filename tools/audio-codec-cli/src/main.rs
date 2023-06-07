@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 mod encode;
 mod feedback;
+mod loudness;
 mod packetizer;
 mod play;
 mod record;
@@ -75,6 +76,21 @@ enum Cli {
     Play {
         file_name: String,
         sample_rate: Option<u32>,
+    },
+    /// calculates loudness in 100ms intervals using the bs177 algorithm
+    LoudnessBs177 {
+        input_file_name: String,
+        output_file_name: String,
+    },
+    /// calculates loudness in 100ms intervals using root mean square
+    LoudnessRms {
+        input_file_name: String,
+        output_file_name: String,
+    },
+    /// basically a moving average filter.
+    LoudnessRms2 {
+        input_file_name: String,
+        output_file_name: String,
     },
     /// print the current config
     ShowConfig,
@@ -285,6 +301,18 @@ Frame size (in samples) vs duration for various sampling rates:
             }
         }
         Cli::ShowConfig => println!("{:#?}", sm),
+        Cli::LoudnessBs177 {
+            input_file_name,
+            output_file_name,
+        } => loudness::calculate_loudness_bs177(sm.clone(), &input_file_name, &output_file_name)?,
+        Cli::LoudnessRms {
+            input_file_name,
+            output_file_name,
+        } => loudness::calculate_loudness_rms(&input_file_name, &output_file_name)?,
+        Cli::LoudnessRms2 {
+            input_file_name,
+            output_file_name,
+        } => loudness::calculate_loudness_rms2(&input_file_name, &output_file_name)?,
         Cli::Feedback => feedback::feedback(sm.clone()).await?,
     }
     Ok(())

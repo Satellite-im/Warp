@@ -7,8 +7,8 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
-use tokio::sync::RwLock;
-use warp::blink::{self};
+use tokio::sync::{broadcast, RwLock};
+use warp::blink::{self, BlinkEventKind};
 use warp::crypto::DID;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
@@ -67,6 +67,7 @@ pub async fn has_audio_source() -> bool {
 // webrtc should remove the old media source before this is called.
 // use AUDIO_SOURCE_ID
 pub async fn create_audio_source_track(
+    event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
     source_codec: blink::AudioCodec,
@@ -79,8 +80,9 @@ pub async fn create_audio_source_track(
         }
     };
 
-    let source_track = create_source_track(input_device, track, webrtc_codec, source_codec)
-        .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
+    let source_track =
+        create_source_track(event_ch, input_device, track, webrtc_codec, source_codec)
+            .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
     source_track
         .play()
         .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;
@@ -101,6 +103,7 @@ pub async fn remove_audio_source_track() -> anyhow::Result<()> {
 
 pub async fn create_audio_sink_track(
     peer_id: DID,
+    event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackRemote>,
     // the format to decode to. Opus supports encoding and decoding to arbitrary sample rates and number of channels.
     webrtc_codec: blink::AudioCodec,
@@ -114,7 +117,14 @@ pub async fn create_audio_sink_track(
         }
     };
 
-    let sink_track = create_sink_track(output_device, track, webrtc_codec, sink_codec)?;
+    let sink_track = create_sink_track(
+        peer_id.clone(),
+        event_ch,
+        output_device,
+        track,
+        webrtc_codec,
+        sink_codec,
+    )?;
     sink_track.play()?;
     unsafe {
         DATA.audio_sink_tracks.insert(peer_id, sink_track);
