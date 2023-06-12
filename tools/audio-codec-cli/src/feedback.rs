@@ -98,7 +98,7 @@ pub async fn feedback(args: StaticArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn feedback_echo(args: StaticArgs) -> anyhow::Result<()> {
+pub async fn echo(args: StaticArgs) -> anyhow::Result<()> {
     let host = cpal::default_host();
     let input_device = host.default_input_device().unwrap();
     let output_device = host.default_output_device().unwrap();
@@ -166,7 +166,7 @@ pub async fn feedback_echo(args: StaticArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn feedback_echo_cancellation(args: StaticArgs) -> anyhow::Result<()> {
+pub async fn echo_cancellation(args: StaticArgs) -> anyhow::Result<()> {
     let mut frame: Vec<f32> = Vec::new();
     frame.reserve(480);
 
@@ -177,7 +177,7 @@ pub async fn feedback_echo_cancellation(args: StaticArgs) -> anyhow::Result<()> 
     })?;
     let config = webrtc_audio_processing::Config {
         echo_cancellation: Some(EchoCancellation {
-            suppression_level: EchoCancellationSuppressionLevel::High,
+            suppression_level: EchoCancellationSuppressionLevel::Moderate,
             stream_delay_ms: None,
             enable_delay_agnostic: true,
             enable_extended_filter: true,

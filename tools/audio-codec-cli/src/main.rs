@@ -318,8 +318,8 @@ Frame size (in samples) vs duration for various sampling rates:
             output_file_name,
         } => loudness::calculate_loudness_rms2(&input_file_name, &output_file_name)?,
         Cli::Feedback => feedback::feedback(sm.clone()).await?,
-        Cli::Echo => feedback::feedback_echo(sm.clone()).await?,
-        Cli::CancelEcho => feedback::feedback_echo_cancellation(sm.clone()).await?,
+        Cli::Echo => feedback::echo(sm.clone()).await?,
+        Cli::CancelEcho => feedback::echo_cancellation(sm.clone()).await?,
     }
     Ok(())
 }
