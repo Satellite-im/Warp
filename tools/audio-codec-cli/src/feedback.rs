@@ -111,7 +111,7 @@ pub async fn feedback_echo(args: StaticArgs) -> anyhow::Result<()> {
     };
 
     // The buffer to share samples
-    let ring = HeapRb::<f32>::new(latency_samples * 2);
+    let ring = HeapRb::<f32>::new(48000 * 2);
     let (mut producer, mut consumer) = ring.split();
 
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -151,11 +151,6 @@ pub async fn feedback_echo(args: StaticArgs) -> anyhow::Result<()> {
     let output_stream = output_device.build_output_stream(&config, output_data_fn, err_fn, None)?;
     println!("Successfully built streams.");
 
-    // Play the streams.
-    println!(
-        "Starting the input and output streams with `{}` milliseconds of latency.",
-        latency
-    );
     input_stream.play()?;
     output_stream.play()?;
 
