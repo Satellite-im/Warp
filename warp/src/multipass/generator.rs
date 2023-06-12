@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 use crate::crypto::rand::Rng;
 
 /// Used to generate a random user name

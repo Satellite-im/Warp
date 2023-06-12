@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 use crate::crypto::DID;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};

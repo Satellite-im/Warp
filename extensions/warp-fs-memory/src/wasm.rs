@@ -160,8 +160,3 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 }
-
-#[wasm_bindgen]
-pub fn constellation_fs_memory() -> ConstellationAdapter {
-    ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(MemorySystem::new()))))
-}

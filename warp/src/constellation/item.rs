@@ -12,9 +12,6 @@ use crate::error::Error;
 use derive_more::Display;
 use warp_derive::FFIFree;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 /// `Item` is a type that handles both `File` and `Directory`
 #[derive(Serialize, Deserialize, Clone, Debug, warp_derive::FFIVec, FFIFree)]
 #[serde(untagged)]
@@ -25,7 +22,6 @@ pub enum Item {
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FormatType {
     #[display(fmt = "generic")]
     #[default]
@@ -80,14 +76,11 @@ impl From<Directory> for Item {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Item {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn new_file(file: File) -> Item {
         Item::File(file)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn new_directory(directory: Directory) -> Item {
         Item::Directory(directory)
     }
@@ -136,7 +129,6 @@ impl Item {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Item {
     /// Get string of `Item`
     pub fn name(&self) -> String {

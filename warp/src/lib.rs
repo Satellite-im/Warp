@@ -89,18 +89,6 @@ where
     }
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "wasm_debug"))]
-use wasm_bindgen::prelude::*;
-
-#[cfg(all(target_arch = "wasm32", feature = "wasm_debug"))]
-#[wasm_bindgen(start)]
-pub fn initialize() {
-    // Any other code that would be used in a manner for initialization can be put here
-    // assuming it would compile and be compatible with WASM
-
-    // Allows us to show detailed error messages in console
-    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-}
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
 

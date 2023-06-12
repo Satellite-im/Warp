@@ -21,14 +21,10 @@ use std::sync::atomic::AtomicBool;
 
 use crate::sync::{Arc, RwLock};
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Tesseract {
     internal: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     enc_pass: Arc<RwLock<Vec<u8>>>,
@@ -327,10 +323,8 @@ impl Tesseract {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
     /// To create an instance of Tesseract
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> Tesseract {
         Tesseract::default()
     }
@@ -344,7 +338,6 @@ impl Tesseract {
     /// tesseract.set_autosave();
     /// assert!(tesseract.autosave_enabled());
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_autosave(&self) {
         let autosave = self.autosave_enabled();
         self.autosave.store(!autosave, Ordering::Relaxed);
@@ -358,7 +351,6 @@ impl Tesseract {
     /// let mut tesseract = warp::tesseract::Tesseract::default();
     /// assert!(!tesseract.autosave_enabled());
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn autosave_enabled(&self) -> bool {
         self.autosave.load(Ordering::Relaxed)
     }
@@ -381,7 +373,6 @@ impl Tesseract {
     ///
     /// assert!(!tesseract.is_key_check_enabled());
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn disable_key_check(&self) {
         self.check.store(false, Ordering::Relaxed);
     }
@@ -400,7 +391,6 @@ impl Tesseract {
     ///
     /// assert!(tesseract.is_key_check_enabled())
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn enable_key_check(&self) {
         self.check.store(true, Ordering::Relaxed);
     }
@@ -415,7 +405,6 @@ impl Tesseract {
     /// assert!(!tesseract.is_key_check_enabled());
     /// //TODO: Perform a check with it enabled
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_key_check_enabled(&self) -> bool {
         self.check.load(Ordering::Relaxed)
     }
@@ -431,7 +420,6 @@ impl Tesseract {
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set(&self, key: &str, value: &str) -> Result<()> {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
@@ -453,7 +441,6 @@ impl Tesseract {
     ///  assert_eq!(tesseract.exist("API"), true);
     ///  assert_eq!(tesseract.exist("NOT_API"), false);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn exist(&self, key: &str) -> bool {
         self.internal.read().contains_key(key)
     }
@@ -470,7 +457,6 @@ impl Tesseract {
     ///  let val = tesseract.retrieve("API").unwrap();
     ///  assert_eq!(val, String::from("MYKEY"));
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn retrieve(&self, key: &str) -> Result<String> {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
@@ -504,7 +490,6 @@ impl Tesseract {
     ///  let val = tesseract.retrieve("API").unwrap();
     ///  assert_eq!("MYKEY", val);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn update_unlock(&self, old_passphrase: &[u8], new_passphrase: &[u8]) -> Result<()> {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
@@ -531,7 +516,6 @@ impl Tesseract {
         self.save()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     fn dry_retrieve(&self, key: &str) -> Result<()> {
         if !self.is_soft_unlock() {
             return Err(Error::TesseractLocked);
@@ -564,7 +548,6 @@ impl Tesseract {
     ///  tesseract.delete("API").unwrap();
     ///  assert_eq!(tesseract.exist("API"), false);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn delete(&self, key: &str) -> Result<()> {
         self.internal
             .write()
@@ -585,7 +568,6 @@ impl Tesseract {
     ///  tesseract.clear();
     ///  assert_eq!(tesseract.exist("API"), false);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn clear(&self) {
         self.internal.write().clear();
 
@@ -605,14 +587,12 @@ impl Tesseract {
     ///  tesseract.lock();
     ///  assert!(!tesseract.is_unlock())
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_unlock(&self) -> bool {
         !self.enc_pass.read().is_empty()
             && self.unlock.load(Ordering::Relaxed)
             && !self.soft_unlock.load(Ordering::Relaxed)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     fn is_soft_unlock(&self) -> bool {
         !self.enc_pass.read().is_empty()
             && !self.unlock.load(Ordering::Relaxed)
@@ -628,7 +608,6 @@ impl Tesseract {
     ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
     ///  assert!(tesseract.is_unlock());
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
         *self.enc_pass.write() = Cipher::self_encrypt(passphrase)?;
         self.soft_unlock.store(true, Ordering::Relaxed);
@@ -658,7 +637,6 @@ impl Tesseract {
     ///  tesseract.lock();
     ///  assert!(!tesseract.is_unlock());
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn lock(&self) {
         if self.save().is_ok() {}
         self.enc_pass.write().zeroize();
@@ -693,34 +671,6 @@ impl Tesseract {
 
 #[cfg(target_arch = "wasm32")]
 impl Tesseract {
-    /// Import and encrypt a hashmap into tesseract
-    pub fn import(passphrase: &[u8], map: JsValue) -> Result<Tesseract> {
-        let map: HashMap<String, String> =
-            serde_wasm_bindgen::from_value(map).map_err(|_| Error::Other)?;
-        let mut tesseract = Tesseract::default();
-        tesseract.unlock(passphrase)?;
-        for (key, val) in map {
-            tesseract.set(key.as_str(), val.as_str())?;
-        }
-        Ok(tesseract)
-    }
-
-    /// Decrypts and export tesseract contents to a `HashMap`
-    pub fn export(&self) -> Result<JsValue> {
-        if !self.is_unlock() {
-            return Err(Error::TesseractLocked);
-        }
-        let mut map = HashMap::new();
-        for key in self.internal_keys() {
-            let value = match self.retrieve(&key) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            map.insert(key.clone(), value);
-        }
-        serde_wasm_bindgen::to_value(&map).map_err(|_| Error::Other)
-    }
-
     /// Used to save contents to local storage
     pub fn save(&self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};

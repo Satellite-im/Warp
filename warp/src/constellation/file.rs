@@ -9,8 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek};
 use uuid::Uuid;
 use warp_derive::FFIFree;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 
 use super::item::FormatType;
 
@@ -21,7 +19,6 @@ use super::item::FormatType;
 /// TODO: Use mime to define the filetype
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FileType {
     #[display(fmt = "generic")]
     #[default]
@@ -32,7 +29,6 @@ pub enum FileType {
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
 #[derive(Clone, Deserialize, Serialize, Debug, warp_derive::FFIVec, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct File {
     /// ID of the `File`
     id: Arc<Uuid>,
@@ -107,7 +103,6 @@ impl Default for File {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl File {
     /// Create a new `File` instance
     ///

@@ -1,7 +1,5 @@
 /// Errors that would host custom errors for modules, utilities, etc.
 use thiserror::Error;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::JsValue;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Error, Debug)]

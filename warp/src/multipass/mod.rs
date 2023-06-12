@@ -6,8 +6,6 @@ use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
 
