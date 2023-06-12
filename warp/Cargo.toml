@@ -24,9 +24,7 @@ async-broadcast.workspace = true
 x25519-dalek.workspace = true
 ed25519-dalek.workspace = true
 curve25519-dalek.workspace = true
-blake2.workspace = true
 sha2.workspace = true
-sha3.workspace = true
 hmac.workspace = true
 digest.workspace = true
 aes-gcm = { workspace = true, features = ["stream"] }

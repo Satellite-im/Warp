@@ -38,6 +38,7 @@ impl Constellation for MemorySystem {
         self.path.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         let mut internal_file = item::file::File::new(name);
 
@@ -86,6 +87,7 @@ impl Constellation for MemorySystem {
         Ok(stream)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get(&self, name: &str, path: &str) -> Result<()> {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
