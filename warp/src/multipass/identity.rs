@@ -11,7 +11,6 @@ pub const SHORT_ID_SIZE: usize = 8;
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display, FFIFree)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum IdentityStatus {
     #[display(fmt = "online")]
     Online,
@@ -26,7 +25,6 @@ pub enum IdentityStatus {
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Display, FFIFree)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum Platform {
     #[display(fmt = "desktop")]
     Desktop,
@@ -40,7 +38,6 @@ pub enum Platform {
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Relationship {
     friends: bool,
     received_friend_request: bool,
@@ -95,7 +92,6 @@ impl Relationship {
 #[derive(
     Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identity {
     /// Username of the identity
     username: String,
@@ -120,77 +116,61 @@ pub struct Identity {
     signature: Option<String>,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identity {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_username(&mut self, user: &str) {
         self.username = user.to_string()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_short_id(&mut self, id: [u8; SHORT_ID_SIZE]) {
         self.short_id = id
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_did_key(&mut self, pubkey: DID) {
         self.did_key = pubkey
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_profile_picture(&mut self, picture: &str) {
         self.profile_picture = picture.to_string();
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_profile_banner(&mut self, banner: &str) {
         self.profile_banner = banner.to_string();
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_signature(&mut self, signature: Option<String>) {
         self.signature = signature;
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identity {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn username(&self) -> String {
         self.username.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn short_id(&self) -> String {
         String::from_utf8_lossy(&self.short_id).to_string()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn did_key(&self) -> DID {
         self.did_key.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn profile_picture(&self) -> String {
         self.profile_picture.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn profile_banner(&self) -> String {
         self.profile_banner.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn signature(&self) -> Option<String> {
         self.signature.clone()
     }

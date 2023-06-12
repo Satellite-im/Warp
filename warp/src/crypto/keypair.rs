@@ -15,7 +15,6 @@ type HmacSha512 = Hmac<Sha512>;
 
 #[derive(Clone, Display, Copy)]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum PhraseType {
     #[display(fmt = "standard")]
     Standard,

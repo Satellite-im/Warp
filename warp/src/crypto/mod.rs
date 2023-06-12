@@ -29,7 +29,6 @@ use wasm_bindgen::prelude::*;
 use crate::error::Error;
 
 #[derive(FFIVec, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct DID(DIDKey);
 
 impl FromStr for DID {

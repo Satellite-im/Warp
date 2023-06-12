@@ -13,8 +13,6 @@ use crate::crypto::rand::Rng;
 ///
 /// assert!(name.len() <= 32);
 /// ```
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn generate_name() -> String {
     let adj_length = adj().len();
     let nouns_length = nouns().len();

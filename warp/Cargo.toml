@@ -82,13 +82,10 @@ tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2" }
-wasm-bindgen-futures = "0.4.30"
-wasm-streams = "0.2"
 gloo = "0.7"
 getrandom = { workspace = true, features = ["js"] }
 web-sys = { version = "0.3" }
 js-sys = { version = "0.3" }
-serde-wasm-bindgen = "0.4.2"
 console_error_panic_hook = { version = "0.1.6" }
 
 

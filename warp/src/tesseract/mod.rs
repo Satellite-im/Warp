@@ -692,10 +692,8 @@ impl Tesseract {
 }
 
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
 impl Tesseract {
     /// Import and encrypt a hashmap into tesseract
-    #[wasm_bindgen]
     pub fn import(passphrase: &[u8], map: JsValue) -> Result<Tesseract> {
         let map: HashMap<String, String> =
             serde_wasm_bindgen::from_value(map).map_err(|_| Error::Other)?;
@@ -708,7 +706,6 @@ impl Tesseract {
     }
 
     /// Decrypts and export tesseract contents to a `HashMap`
-    #[wasm_bindgen]
     pub fn export(&self) -> Result<JsValue> {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
@@ -725,7 +722,6 @@ impl Tesseract {
     }
 
     /// Used to save contents to local storage
-    #[wasm_bindgen]
     pub fn save(&self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 
@@ -739,7 +735,6 @@ impl Tesseract {
     }
 
     /// Used to load contents from local storage
-    #[wasm_bindgen]
     pub fn load_from_storage(&self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 

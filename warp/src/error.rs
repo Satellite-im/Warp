@@ -325,20 +325,3 @@ impl Error {
         }
     }
 }
-
-#[cfg(target_arch = "wasm32")]
-impl From<Error> for JsValue {
-    fn from(error: Error) -> JsValue {
-        JsValue::from_str(&error.to_string())
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn into_error(error: Error) -> wasm_bindgen::JsError {
-    wasm_bindgen::JsError::from(error)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn into_error(error: Error) -> Error {
-    error
-}
