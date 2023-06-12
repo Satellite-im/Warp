@@ -177,8 +177,8 @@ pub async fn feedback_echo_cancellation(args: StaticArgs) -> anyhow::Result<()> 
     })?;
     let config = webrtc_audio_processing::Config {
         echo_cancellation: Some(EchoCancellation {
-            suppression_level: EchoCancellationSuppressionLevel::Low,
-            stream_delay_ms: Some(0),
+            suppression_level: EchoCancellationSuppressionLevel::High,
+            stream_delay_ms: None,
             enable_delay_agnostic: true,
             enable_extended_filter: true,
         }),
@@ -217,6 +217,9 @@ pub async fn feedback_echo_cancellation(args: StaticArgs) -> anyhow::Result<()> 
             if frame.len() == 480 {
                 if let Err(e) = processor.process_capture_frame(frame.as_mut_slice()) {
                     eprintln!("failed to process capture frame: {e}");
+                }
+                if let Err(e) = processor.process_render_frame(frame.as_mut_slice()) {
+                    eprintln!("failed to process render frame: {e}");
                 }
                 for sample in frame.drain(..) {
                     if producer.push(sample).is_err() {
