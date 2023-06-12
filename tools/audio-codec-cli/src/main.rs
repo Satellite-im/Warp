@@ -94,8 +94,10 @@ enum Cli {
     },
     /// print the current config
     ShowConfig,
-    /// test feeding the input and output streams together
+    /// test feeding the input and output streams together, with a 1s delay
     Feedback,
+    /// cause an echo by feeding the input and output streams together without delay
+    Echo,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -314,6 +316,7 @@ Frame size (in samples) vs duration for various sampling rates:
             output_file_name,
         } => loudness::calculate_loudness_rms2(&input_file_name, &output_file_name)?,
         Cli::Feedback => feedback::feedback(sm.clone()).await?,
+        Cli::Echo => feedback::feedback_echo(sm.clone()).await?,
     }
     Ok(())
 }

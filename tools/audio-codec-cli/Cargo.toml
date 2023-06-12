@@ -17,6 +17,7 @@ ringbuf = "0.3.3"
 simple_logger = "4.1.0"
 tokio = { workspace = true, features = ["full"] }
 webrtc = "0.6.0"
+webrtc-audio-processing = "0.4.0"
 
 anyhow.workspace = true
 serde.workspace = true
