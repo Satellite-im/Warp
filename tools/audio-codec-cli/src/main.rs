@@ -98,6 +98,8 @@ enum Cli {
     Feedback,
     /// cause an echo by feeding the input and output streams together without delay
     Echo,
+    /// create an echo and try to cancel it
+    CancelEcho,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -317,6 +319,7 @@ Frame size (in samples) vs duration for various sampling rates:
         } => loudness::calculate_loudness_rms2(&input_file_name, &output_file_name)?,
         Cli::Feedback => feedback::feedback(sm.clone()).await?,
         Cli::Echo => feedback::feedback_echo(sm.clone()).await?,
+        Cli::CancelEcho => feedback::feedback_echo_cancellation(sm.clone()).await?,
     }
     Ok(())
 }

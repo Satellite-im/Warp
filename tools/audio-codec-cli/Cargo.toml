@@ -17,6 +17,7 @@ ringbuf = "0.3.3"
 simple_logger = "4.1.0"
 tokio = { workspace = true, features = ["full"] }
 webrtc = "0.6.0"
+# if this fails to build on mac, run this: `brew install autoconf automake libtool`
 webrtc-audio-processing = { version = "0.4.0", features = ["bundled"] }
 
 anyhow.workspace = true
