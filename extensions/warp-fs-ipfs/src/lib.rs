@@ -83,7 +83,7 @@ impl IpfsFileSystem {
             let mut filesystem = filesystem.clone();
             let account = filesystem.account.clone();
             async move {
-                if account.get_own_identity().await.is_err() {
+                if account.is_ready() {
                     let Ok(mut stream) = account.extension_subscribe() else {
                         return
                     };

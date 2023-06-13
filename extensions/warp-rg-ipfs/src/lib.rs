@@ -77,7 +77,7 @@ impl IpfsMessaging {
         tokio::spawn({
             let mut messaging = messaging.clone();
             async move {
-                if messaging.account.get_own_identity().await.is_err() {
+                if !messaging.account.is_ready() {
                     trace!("Identity doesnt exist. Waiting for it to load or to be created");
                     let Ok(mut stream) = messaging.account.extension_subscribe() else {
                         return
