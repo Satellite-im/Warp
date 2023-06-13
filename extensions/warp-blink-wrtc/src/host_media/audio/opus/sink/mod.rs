@@ -286,6 +286,11 @@ where
                     ) {
                         Ok(siz) => {
                             if let Err(e) = audio_processor
+                                .process_capture_frame(&mut decoder_output_buf[0..siz])
+                            {
+                                log::error!("failed to process capture frame: {e}");
+                            }
+                            if let Err(e) = audio_processor
                                 .process_render_frame(&mut decoder_output_buf[0..siz])
                             {
                                 log::error!("failed to process render frame: {e}");

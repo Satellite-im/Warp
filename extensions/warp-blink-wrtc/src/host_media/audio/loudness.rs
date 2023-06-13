@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// calculates loudness using root mean square.
 /// is basically a moving average filter. has a delay (in samples) equal to the buffer size
 pub struct Calculator {
@@ -32,6 +31,7 @@ impl Calculator {
         f32::sqrt(self.ss * self.normalizer)
     }
 
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         let mut buf = Vec::new();
         buf.resize(self.buf.len(), 0.0);
