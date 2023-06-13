@@ -99,6 +99,10 @@ enum Repl {
     ShowInputConfig,
     /// show the default output config
     ShowOutputConfig,
+    /// separately record audio of each participant
+    RecordAudio { output_dir: String },
+    /// stop recording audio
+    StopRecording,
 }
 
 async fn handle_command(
@@ -113,7 +117,9 @@ async fn handle_command(
         Repl::Dial { id } => {
             let did = DID::from_str(&id)?;
             let codecs = CODECS.read().await;
-            blink.offer_call(vec![did], codecs.webrtc.clone()).await?;
+            blink
+                .offer_call(None, vec![did], codecs.webrtc.clone())
+                .await?;
         }
         Repl::Answer { id } => {
             let mut lock = OFFERED_CALL.lock().await;
@@ -219,6 +225,8 @@ async fn handle_command(
                 blink.get_audio_sink_codec().await
             );
         }
+        Repl::RecordAudio { output_dir } => blink.record_call(&output_dir).await?,
+        Repl::StopRecording => blink.stop_recording().await?,
     }
     Ok(())
 }
@@ -230,6 +238,7 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
         match evt {
             BlinkEventKind::IncomingCall {
                 call_id,
+                conversation_id: _,
                 sender,
                 participants: _,
             } => {

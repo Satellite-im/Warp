@@ -3,12 +3,12 @@ use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
 };
-
 use rand::Rng;
 use ringbuf::HeapRb;
-use std::{sync::Arc, time::Duration};
-use tokio::task::JoinHandle;
-use warp::blink::{self};
+
+use std::{ops::Mul, sync::Arc, time::Duration};
+use tokio::{sync::broadcast, task::JoinHandle};
+use warp::blink::{self, BlinkEventKind};
 
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
@@ -16,7 +16,7 @@ use webrtc::{
 };
 
 mod framer;
-use crate::host_media::audio::SourceTrack;
+use crate::host_media::audio::{speech, SourceTrack};
 
 use self::framer::Framer;
 
@@ -29,6 +29,7 @@ pub struct OpusSource {
     stream: cpal::Stream,
     // used to cancel the current packetizer when the input device is changed.
     packetizer_handle: JoinHandle<()>,
+    event_ch: broadcast::Sender<BlinkEventKind>,
 }
 
 impl Drop for OpusSource {
@@ -39,6 +40,7 @@ impl Drop for OpusSource {
 
 impl SourceTrack for OpusSource {
     fn init(
+        event_ch: broadcast::Sender<BlinkEventKind>,
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
         webrtc_codec: blink::AudioCodec,
@@ -52,9 +54,11 @@ impl SourceTrack for OpusSource {
             track.clone(),
             webrtc_codec.clone(),
             source_codec.clone(),
+            event_ch.clone(),
         )?;
 
         Ok(Self {
+            event_ch,
             track,
             webrtc_codec,
             source_codec,
@@ -83,6 +87,7 @@ impl SourceTrack for OpusSource {
             self.track.clone(),
             self.webrtc_codec.clone(),
             self.source_codec.clone(),
+            self.event_ch.clone(),
         )?;
         self.stream = stream;
         self.packetizer_handle = handle;
@@ -95,6 +100,7 @@ fn create_source_track(
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
     source_codec: blink::AudioCodec,
+    event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
     let config = cpal::StreamConfig {
         channels: source_codec.channels(),
@@ -135,11 +141,20 @@ fn create_source_track(
     // todo: when the input device changes, this needs to change too.
     let track2 = track;
     let join_handle = tokio::spawn(async move {
+        // speech_detector should emit at most 1 event per second
+        let mut speech_detector = speech::Detector::new(10, 100);
         loop {
             while let Some(sample) = consumer.pop() {
-                if let Some(bytes) = framer.frame(sample) {
+                if let Some(output) = framer.frame(sample) {
+                    let loudness = match output.loudness.mul(1000.0) {
+                        x if x >= 127.0 => 127,
+                        x => x as u8,
+                    };
+                    if speech_detector.should_emit_event(loudness) {
+                        let _ = event_ch.send(BlinkEventKind::SelfSpeaking);
+                    }
                     match packetizer
-                        .packetize(&bytes, webrtc_codec.frame_size() as u32)
+                        .packetize(&output.bytes, webrtc_codec.frame_size() as u32)
                         .await
                     {
                         Ok(packets) => {
@@ -149,8 +164,8 @@ fn create_source_track(
                                         packet,
                                         &[rtp::extension::HeaderExtension::AudioLevel(
                                             AudioLevelExtension {
-                                                level: 10,
-                                                voice: true,
+                                                level: loudness,
+                                                voice: false,
                                             },
                                         )],
                                     )
