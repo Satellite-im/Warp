@@ -8,7 +8,7 @@ use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, RwLock};
-use warp::blink::{self, BlinkEventKind, EchoCancellationConfig};
+use warp::blink::{self, BlinkEventKind};
 use warp::crypto::DID;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
@@ -23,7 +23,7 @@ struct Data {
     audio_output_device: Option<cpal::Device>,
     audio_source_track: Option<Box<dyn audio::SourceTrack>>,
     audio_sink_tracks: HashMap<DID, Box<dyn audio::SinkTrack>>,
-    echo_cancellation_config: Option<blink::EchoCancellationConfig>,
+    audio_processing_config: blink::AudioProcessingConfig,
 }
 
 static LOCK: Lazy<RwLock<()>> = Lazy::new(|| RwLock::new(()));
@@ -34,16 +34,16 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
         audio_output_device: cpal_host.default_output_device(),
         audio_source_track: None,
         audio_sink_tracks: HashMap::new(),
-        echo_cancellation_config: None,
+        audio_processing_config: blink::AudioProcessingConfig::default(),
     }
 });
 
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
 
-pub async fn set_echo_cancellation_config(config: EchoCancellationConfig) {
+pub async fn config_audio_processing(config: blink::AudioProcessingConfig) {
     let _lock = LOCK.write().await;
     unsafe {
-        DATA.echo_cancellation_config.replace(config);
+        DATA.audio_processing_config = config;
     }
 }
 
@@ -98,7 +98,7 @@ pub async fn create_audio_source_track(
         track,
         webrtc_codec,
         source_codec,
-        echo_cancellation_config: unsafe { DATA.echo_cancellation_config.clone() },
+        audio_processing_config: unsafe { DATA.audio_processing_config.clone() },
     };
     let source_track = create_source_track(params)
         .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
@@ -144,7 +144,7 @@ pub async fn create_audio_sink_track(
         track,
         webrtc_codec,
         sink_codec,
-        echo_cancellation_config: unsafe { DATA.echo_cancellation_config.clone() },
+        audio_processing_config: unsafe { DATA.audio_processing_config.clone() },
     };
 
     let sink_track = create_sink_track(params)?;

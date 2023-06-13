@@ -3,7 +3,10 @@ use std::cmp::Ordering;
 use bytes::Bytes;
 use opus::Bitrate;
 use warp::blink;
-use webrtc_audio_processing::{EchoCancellation, EchoCancellationSuppressionLevel};
+use webrtc_audio_processing::{
+    EchoCancellation, EchoCancellationSuppressionLevel, NoiseSuppression, NoiseSuppressionLevel,
+    VoiceDetection, VoiceDetectionLikelihood,
+};
 
 use crate::host_media::audio::{
     loudness,
@@ -25,8 +28,7 @@ pub struct Framer {
     // for upsampling and downsampling audio
     resampler: Resampler,
     loudness_calculator: loudness::Calculator,
-    audio_processor: Option<webrtc_audio_processing::Processor>,
-    echo_cancellation_strategy: Option<blink::EchoCancellationStrategy>,
+    audio_processor: webrtc_audio_processing::Processor,
 }
 
 pub struct FramerOutput {
@@ -39,49 +41,67 @@ impl Framer {
         frame_size: usize,
         webrtc_codec: blink::AudioCodec,
         source_codec: blink::AudioCodec,
-        echo_cancellation_config: Option<blink::EchoCancellationConfig>,
+        audio_processing_config: blink::AudioProcessingConfig,
     ) -> anyhow::Result<Self> {
         let frame_size = frame_size * webrtc_codec.channels() as usize;
         let loudness_calculator = loudness::Calculator::new(frame_size);
 
-        let echo_cancellation_strategy = echo_cancellation_config
-            .as_ref()
-            .map(|config| config.strategy.clone());
-        let audio_processor = match &echo_cancellation_config {
-            Some(config) => {
-                let mut processor = webrtc_audio_processing::Processor::new(
-                    &webrtc_audio_processing::InitializationConfig {
-                        num_capture_channels: webrtc_codec.channels() as i32,
-                        num_render_channels: webrtc_codec.channels() as i32,
-                        ..Default::default()
-                    },
-                )?;
+        let mut audio_processor = webrtc_audio_processing::Processor::new(
+            &webrtc_audio_processing::InitializationConfig {
+                num_capture_channels: webrtc_codec.channels() as i32,
+                num_render_channels: webrtc_codec.channels() as i32,
+                ..Default::default()
+            },
+        )?;
 
-                let suppression_level = match config.intensity {
-                    blink::EchoCancellationIntensity::Low => EchoCancellationSuppressionLevel::Low,
-                    blink::EchoCancellationIntensity::Medium => {
-                        EchoCancellationSuppressionLevel::Moderate
-                    }
-                    blink::EchoCancellationIntensity::High => {
-                        EchoCancellationSuppressionLevel::High
-                    }
-                };
+        let echo_config = audio_processing_config.echo.as_ref().map(|config| {
+            let suppression_level = match config {
+                blink::EchoCancellationConfig::Low => EchoCancellationSuppressionLevel::Low,
+                blink::EchoCancellationConfig::Medium => EchoCancellationSuppressionLevel::Moderate,
+                blink::EchoCancellationConfig::High => EchoCancellationSuppressionLevel::High,
+            };
 
-                processor.set_config(webrtc_audio_processing::Config {
-                    echo_cancellation: Some(EchoCancellation {
-                        suppression_level,
-                        stream_delay_ms: None,
-                        enable_delay_agnostic: true,
-                        enable_extended_filter: true,
-                    }),
-                    enable_high_pass_filter: true,
-                    ..Default::default()
-                });
-
-                Some(processor)
+            EchoCancellation {
+                suppression_level,
+                stream_delay_ms: None,
+                enable_delay_agnostic: true,
+                enable_extended_filter: true,
             }
-            None => None,
-        };
+        });
+
+        let noise_suppression = audio_processing_config
+            .noise
+            .as_ref()
+            .map(|noise| match noise {
+                blink::NoiseSuppressionConfig::High => NoiseSuppression {
+                    suppression_level: NoiseSuppressionLevel::High,
+                },
+                blink::NoiseSuppressionConfig::Moderate => NoiseSuppression {
+                    suppression_level: NoiseSuppressionLevel::Moderate,
+                },
+                blink::NoiseSuppressionConfig::Low => NoiseSuppression {
+                    suppression_level: NoiseSuppressionLevel::Low,
+                },
+            });
+
+        let voice_detection = audio_processing_config.voice.as_ref().map(|voice| {
+            let detection_likelihood = match voice {
+                blink::VoiceDetectionConfig::High => VoiceDetectionLikelihood::High,
+                blink::VoiceDetectionConfig::Moderate => VoiceDetectionLikelihood::Moderate,
+                blink::VoiceDetectionConfig::Low => VoiceDetectionLikelihood::Low,
+            };
+            VoiceDetection {
+                detection_likelihood,
+            }
+        });
+
+        audio_processor.set_config(webrtc_audio_processing::Config {
+            echo_cancellation: echo_config,
+            enable_high_pass_filter: true,
+            noise_suppression,
+            voice_detection,
+            ..Default::default()
+        });
 
         let mut buf: Vec<f32> = Vec::new();
         buf.reserve(frame_size);
@@ -121,7 +141,6 @@ impl Framer {
             channel_mixer: ChannelMixer::new(channel_mixer_config),
             loudness_calculator,
             audio_processor,
-            echo_cancellation_strategy,
         })
     }
 
@@ -139,34 +158,18 @@ impl Framer {
 
         // frame_size should be 480 * num_channels
         if self.raw_samples.len() == self.frame_size {
-            if let Some(processor) = self.audio_processor.as_mut() {
-                let strategy = self
-                    .echo_cancellation_strategy
-                    .as_ref()
-                    .unwrap_or(&blink::EchoCancellationStrategy::Normal);
+            if let Err(e) = self
+                .audio_processor
+                .process_capture_frame(self.raw_samples.as_mut_slice())
+            {
+                log::error!("failed to process capture frame: {e}");
+            }
 
-                if matches!(
-                    strategy,
-                    blink::EchoCancellationStrategy::Normal
-                        | blink::EchoCancellationStrategy::DoubleMax
-                        | blink::EchoCancellationStrategy::DoubleInput
-                ) {
-                    if let Err(e) = processor.process_capture_frame(self.raw_samples.as_mut_slice())
-                    {
-                        log::error!("failed to process capture frame: {e}");
-                    }
-                }
-
-                if matches!(
-                    strategy,
-                    blink::EchoCancellationStrategy::DoubleMax
-                        | blink::EchoCancellationStrategy::DoubleInput
-                ) {
-                    if let Err(e) = processor.process_render_frame(self.raw_samples.as_mut_slice())
-                    {
-                        log::error!("failed to process render frame: {e}");
-                    }
-                }
+            if let Err(e) = self
+                .audio_processor
+                .process_render_frame(self.raw_samples.as_mut_slice())
+            {
+                log::error!("failed to process render frame: {e}");
             }
 
             for sample in self.raw_samples.iter() {

@@ -95,10 +95,8 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     async fn current_call(&self) -> Option<CallInfo>;
 
     // ----- Config --------
-    async fn config_echo_cancellation(
-        &mut self,
-        config: EchoCancellationConfig,
-    ) -> Result<(), Error>;
+    async fn config_audio_processing(&mut self, config: AudioProcessingConfig)
+        -> Result<(), Error>;
 }
 
 dyn_clone::clone_trait_object!(Blink);
@@ -304,27 +302,34 @@ mod mime_types {
     pub const MIME_TYPE_PCMA: &str = "audio/PCMA";
 }
 
-#[derive(Debug, Clone)]
-pub struct EchoCancellationConfig {
-    pub intensity: EchoCancellationIntensity,
-    pub strategy: EchoCancellationStrategy,
+#[derive(Debug, Clone, Default)]
+pub struct AudioProcessingConfig {
+    pub echo: Option<EchoCancellationConfig>,
+    pub voice: Option<VoiceDetectionConfig>,
+    pub noise: Option<NoiseSuppressionConfig>,
 }
 
+/// clips the signal when voice is not detected
+/// enumeration represents the probability that voice will be detected
 #[derive(Debug, Clone)]
-pub enum EchoCancellationIntensity {
+pub enum VoiceDetectionConfig {
     Low,
-    Medium,
+    Moderate,
     High,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum EchoCancellationStrategy {
-    // filter input and outputs separately
-    Normal,
-    // perform both filtering steps but only at the input stage
-    DoubleInput,
-    // perform both filtering steps but only at the output stage
-    DoubleOutput,
-    // perform both filtering steps on the input and the output
-    DoubleMax,
+/// clips the signal when noise is detected.
+/// enumeration represents the probability that noise will be detected
+#[derive(Debug, Clone)]
+pub enum NoiseSuppressionConfig {
+    Low,
+    Moderate,
+    High,
+}
+
+#[derive(Debug, Clone)]
+pub enum EchoCancellationConfig {
+    Low,
+    Medium,
+    High,
 }

@@ -34,8 +34,8 @@ use tokio::{
 use uuid::Uuid;
 use warp::{
     blink::{
-        self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo,
-        EchoCancellationConfig, MimeType,
+        self, AudioCodec, AudioProcessingConfig, Blink, BlinkEventKind, BlinkEventStream, CallInfo,
+        MimeType,
     },
     crypto::{Fingerprint, DID},
     error::Error,
@@ -1075,11 +1075,11 @@ impl Blink for BlinkImpl {
 
     // ------ Config ------
 
-    async fn config_echo_cancellation(
+    async fn config_audio_processing(
         &mut self,
-        config: EchoCancellationConfig,
+        config: AudioProcessingConfig,
     ) -> Result<(), Error> {
-        host_media::set_echo_cancellation_config(config).await;
+        host_media::config_audio_processing(config).await;
         Ok(())
     }
 }

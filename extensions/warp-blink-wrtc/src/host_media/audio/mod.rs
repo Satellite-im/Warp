@@ -22,7 +22,7 @@ pub struct SourceTrackParams<'a> {
     pub track: Arc<TrackLocalStaticRTP>,
     pub webrtc_codec: blink::AudioCodec,
     pub source_codec: blink::AudioCodec,
-    pub echo_cancellation_config: Option<blink::EchoCancellationConfig>,
+    pub audio_processing_config: blink::AudioProcessingConfig,
 }
 
 pub struct SinkTrackParams<'a> {
@@ -32,7 +32,7 @@ pub struct SinkTrackParams<'a> {
     pub track: Arc<TrackRemote>,
     pub webrtc_codec: blink::AudioCodec,
     pub sink_codec: blink::AudioCodec,
-    pub echo_cancellation_config: Option<blink::EchoCancellationConfig>,
+    pub audio_processing_config: blink::AudioProcessingConfig,
 }
 
 // stores the TrackRemote at least

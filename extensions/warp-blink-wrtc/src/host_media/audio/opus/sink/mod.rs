@@ -10,7 +10,6 @@ use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
 };
-use webrtc_audio_processing::{EchoCancellation, EchoCancellationSuppressionLevel};
 
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
@@ -33,7 +32,7 @@ pub struct OpusSink {
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
-    echo_cancellation_config: Option<blink::EchoCancellationConfig>,
+    audio_processing_config: blink::AudioProcessingConfig,
 }
 
 impl Drop for OpusSink {
@@ -52,7 +51,7 @@ impl OpusSink {
             track,
             webrtc_codec,
             sink_codec,
-            echo_cancellation_config,
+            audio_processing_config,
         } = params;
 
         let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_codec.sample_rate()) {
@@ -71,41 +70,17 @@ impl OpusSink {
         };
         let channel_mixer = ChannelMixer::new(channel_mixer_config);
 
-        let audio_processor = match &echo_cancellation_config {
-            Some(config) => {
-                let mut processor = webrtc_audio_processing::Processor::new(
-                    &webrtc_audio_processing::InitializationConfig {
-                        num_capture_channels: webrtc_codec.channels() as i32,
-                        num_render_channels: webrtc_codec.channels() as i32,
-                        ..Default::default()
-                    },
-                )?;
+        let mut audio_processor = webrtc_audio_processing::Processor::new(
+            &webrtc_audio_processing::InitializationConfig {
+                num_capture_channels: webrtc_codec.channels() as i32,
+                num_render_channels: webrtc_codec.channels() as i32,
+                ..Default::default()
+            },
+        )?;
 
-                let suppression_level = match config.intensity {
-                    blink::EchoCancellationIntensity::Low => EchoCancellationSuppressionLevel::Low,
-                    blink::EchoCancellationIntensity::Medium => {
-                        EchoCancellationSuppressionLevel::Moderate
-                    }
-                    blink::EchoCancellationIntensity::High => {
-                        EchoCancellationSuppressionLevel::High
-                    }
-                };
-
-                processor.set_config(webrtc_audio_processing::Config {
-                    echo_cancellation: Some(EchoCancellation {
-                        suppression_level,
-                        stream_delay_ms: None,
-                        enable_delay_agnostic: true,
-                        enable_extended_filter: true,
-                    }),
-                    enable_high_pass_filter: true,
-                    ..Default::default()
-                });
-
-                Some(processor)
-            }
-            None => None,
-        };
+        audio_processor.set_config(webrtc_audio_processing::Config {
+            ..Default::default()
+        });
 
         let cpal_config = cpal::StreamConfig {
             channels: sink_codec.channels(),
@@ -131,9 +106,6 @@ impl OpusSink {
         let track2 = track.clone();
         let event_ch2 = event_ch.clone();
         let peer_id2 = peer_id.clone();
-        let echo_cancellation_strategy = echo_cancellation_config
-            .as_ref()
-            .map(|config| config.strategy.clone());
         let join_handle = tokio::spawn(async move {
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
                 track: track2,
@@ -145,7 +117,6 @@ impl OpusSink {
                 event_ch: event_ch2,
                 peer_id: peer_id2,
                 audio_processor,
-                echo_cancellation_strategy,
             })
             .await
             {
@@ -180,7 +151,7 @@ impl OpusSink {
             sink_codec,
             decoder_handle: join_handle,
             event_ch,
-            echo_cancellation_config,
+            audio_processing_config,
         })
     }
 }
@@ -214,7 +185,7 @@ impl SinkTrack for OpusSink {
             track: self.track.clone(),
             webrtc_codec: self.webrtc_codec.clone(),
             sink_codec: self.sink_codec.clone(),
-            echo_cancellation_config: self.echo_cancellation_config.clone(),
+            audio_processing_config: self.audio_processing_config.clone(),
         };
 
         let new_sink = OpusSink::init_internal(params)?;
@@ -232,8 +203,8 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
-    audio_processor: Option<webrtc_audio_processing::Processor>,
-    echo_cancellation_strategy: Option<blink::EchoCancellationStrategy>,
+    #[allow(dead_code)]
+    audio_processor: webrtc_audio_processing::Processor,
 }
 
 #[allow(clippy::type_complexity)]
@@ -250,8 +221,7 @@ where
         mut channel_mixer,
         event_ch,
         peer_id,
-        mut audio_processor,
-        echo_cancellation_strategy,
+        audio_processor: _,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -303,37 +273,6 @@ where
                         false,
                     ) {
                         Ok(siz) => {
-                            if let Some(processor) = audio_processor.as_mut() {
-                                let strategy = echo_cancellation_strategy
-                                    .as_ref()
-                                    .unwrap_or(&blink::EchoCancellationStrategy::Normal);
-
-                                if matches!(
-                                    strategy,
-                                    blink::EchoCancellationStrategy::DoubleOutput
-                                        | blink::EchoCancellationStrategy::DoubleMax
-                                ) {
-                                    if let Err(e) = processor
-                                        .process_capture_frame(&mut decoder_output_buf[0..siz])
-                                    {
-                                        log::error!("failed to process capture frame: {e}");
-                                    }
-                                }
-
-                                if matches!(
-                                    strategy,
-                                    blink::EchoCancellationStrategy::Normal
-                                        | blink::EchoCancellationStrategy::DoubleOutput
-                                        | blink::EchoCancellationStrategy::DoubleMax
-                                ) {
-                                    if let Err(e) = processor
-                                        .process_render_frame(&mut decoder_output_buf[0..siz])
-                                    {
-                                        log::error!("failed to process render frame: {e}");
-                                    }
-                                }
-                            }
-
                             let to_send = decoder_output_buf.iter().take(siz);
                             for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample) {

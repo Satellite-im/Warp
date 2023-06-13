@@ -30,7 +30,7 @@ pub struct OpusSource {
     // used to cancel the current packetizer when the input device is changed.
     packetizer_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
-    echo_cancellation_config: Option<blink::EchoCancellationConfig>,
+    audio_processing_config: blink::AudioProcessingConfig,
 }
 
 impl Drop for OpusSource {
@@ -53,7 +53,7 @@ impl SourceTrack for OpusSource {
             source_codec: params.source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
-            echo_cancellation_config: params.echo_cancellation_config,
+            audio_processing_config: params.audio_processing_config,
         })
     }
 
@@ -78,7 +78,7 @@ impl SourceTrack for OpusSource {
             track: self.track.clone(),
             webrtc_codec: self.webrtc_codec.clone(),
             source_codec: self.source_codec.clone(),
-            echo_cancellation_config: self.echo_cancellation_config.clone(),
+            audio_processing_config: self.audio_processing_config.clone(),
         })?;
         self.stream = stream;
         self.packetizer_handle = handle;
@@ -93,7 +93,7 @@ fn create_source_track(params: SourceTrackParams) -> Result<(cpal::Stream, JoinH
         track,
         webrtc_codec,
         source_codec,
-        echo_cancellation_config,
+        audio_processing_config,
     } = params;
 
     let cpal_config = cpal::StreamConfig {
@@ -113,7 +113,7 @@ fn create_source_track(params: SourceTrackParams) -> Result<(cpal::Stream, JoinH
         source_codec.frame_size(),
         webrtc_codec.clone(),
         source_codec,
-        echo_cancellation_config,
+        audio_processing_config,
     )?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
