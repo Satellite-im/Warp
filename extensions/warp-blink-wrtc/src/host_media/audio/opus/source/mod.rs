@@ -16,7 +16,7 @@ use webrtc::{
 };
 
 mod framer;
-use crate::host_media::audio::{speech, SourceTrack};
+use crate::host_media::audio::{speech, SourceTrack, SourceTrackParams};
 
 use self::framer::Framer;
 
@@ -30,6 +30,7 @@ pub struct OpusSource {
     // used to cancel the current packetizer when the input device is changed.
     packetizer_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
+    echo_cancellation_config: Option<blink::EchoCancellationConfig>,
 }
 
 impl Drop for OpusSource {
@@ -39,31 +40,20 @@ impl Drop for OpusSource {
 }
 
 impl SourceTrack for OpusSource {
-    fn init(
-        event_ch: broadcast::Sender<BlinkEventKind>,
-        input_device: &cpal::Device,
-        track: Arc<TrackLocalStaticRTP>,
-        webrtc_codec: blink::AudioCodec,
-        source_codec: blink::AudioCodec,
-    ) -> Result<Self>
+    fn init<'a>(params: SourceTrackParams<'a>) -> Result<Self>
     where
         Self: Sized,
     {
-        let (input_stream, join_handle) = create_source_track(
-            input_device,
-            track.clone(),
-            webrtc_codec.clone(),
-            source_codec.clone(),
-            event_ch.clone(),
-        )?;
+        let (input_stream, join_handle) = create_source_track(params.clone())?;
 
         Ok(Self {
-            event_ch,
-            track,
-            webrtc_codec,
-            source_codec,
+            event_ch: params.event_ch,
+            track: params.track,
+            webrtc_codec: params.webrtc_codec,
+            source_codec: params.source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
+            echo_cancellation_config: params.echo_cancellation_config,
         })
     }
 
@@ -82,26 +72,32 @@ impl SourceTrack for OpusSource {
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()> {
         self.packetizer_handle.abort();
-        let (stream, handle) = create_source_track(
+        let (stream, handle) = create_source_track(SourceTrackParams {
+            event_ch: self.event_ch.clone(),
             input_device,
-            self.track.clone(),
-            self.webrtc_codec.clone(),
-            self.source_codec.clone(),
-            self.event_ch.clone(),
-        )?;
+            track: self.track.clone(),
+            webrtc_codec: self.webrtc_codec.clone(),
+            source_codec: self.source_codec.clone(),
+            echo_cancellation_config: self.echo_cancellation_config.clone(),
+        })?;
         self.stream = stream;
         self.packetizer_handle = handle;
         Ok(())
     }
 }
 
-fn create_source_track(
-    input_device: &cpal::Device,
-    track: Arc<TrackLocalStaticRTP>,
-    webrtc_codec: blink::AudioCodec,
-    source_codec: blink::AudioCodec,
-    event_ch: broadcast::Sender<BlinkEventKind>,
+fn create_source_track<'a>(
+    params: SourceTrackParams<'a>,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
+    let SourceTrackParams {
+        event_ch,
+        input_device,
+        track,
+        webrtc_codec,
+        source_codec,
+        echo_cancellation_config,
+    } = params;
+
     let cpal_config = cpal::StreamConfig {
         channels: source_codec.channels(),
         sample_rate: SampleRate(source_codec.sample_rate()),
@@ -119,6 +115,7 @@ fn create_source_track(
         source_codec.frame_size(),
         webrtc_codec.clone(),
         source_codec,
+        echo_cancellation_config,
     )?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());

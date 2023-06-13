@@ -33,7 +33,10 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
+    blink::{
+        self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo,
+        EchoCancellationConfig, MimeType,
+    },
     crypto::{Fingerprint, DID},
     error::Error,
     module::Module,
@@ -1068,5 +1071,15 @@ impl Blink for BlinkImpl {
             .await
             .as_ref()
             .map(|x| x.call.clone())
+    }
+
+    // ------ Config ------
+
+    async fn config_echo_cancellation(
+        &mut self,
+        config: EchoCancellationConfig,
+    ) -> Result<(), Error> {
+        host_media::set_echo_cancellation_config(config).await;
+        Ok(())
     }
 }

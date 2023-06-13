@@ -8,7 +8,7 @@ use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, RwLock};
-use warp::blink::{self, BlinkEventKind};
+use warp::blink::{self, BlinkEventKind, EchoCancellationConfig};
 use warp::crypto::DID;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
@@ -16,11 +16,14 @@ use webrtc::track::track_remote::TrackRemote;
 mod audio;
 use audio::{create_sink_track, create_source_track};
 
+use self::audio::{SinkTrackParams, SourceTrackParams};
+
 struct Data {
     audio_input_device: Option<cpal::Device>,
     audio_output_device: Option<cpal::Device>,
     audio_source_track: Option<Box<dyn audio::SourceTrack>>,
     audio_sink_tracks: HashMap<DID, Box<dyn audio::SinkTrack>>,
+    echo_cancellation_config: Option<blink::EchoCancellationConfig>,
 }
 
 static LOCK: Lazy<RwLock<()>> = Lazy::new(|| RwLock::new(()));
@@ -31,10 +34,18 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
         audio_output_device: cpal_host.default_output_device(),
         audio_source_track: None,
         audio_sink_tracks: HashMap::new(),
+        echo_cancellation_config: None,
     }
 });
 
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
+
+pub async fn set_echo_cancellation_config(config: EchoCancellationConfig) {
+    let _lock = LOCK.write().await;
+    unsafe {
+        DATA.echo_cancellation_config.replace(config);
+    }
+}
 
 pub async fn get_input_device_name() -> Option<String> {
     let _lock = LOCK.read().await;
@@ -81,9 +92,16 @@ pub async fn create_audio_source_track(
         }
     };
 
-    let source_track =
-        create_source_track(event_ch, input_device, track, webrtc_codec, source_codec)
-            .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
+    let params = SourceTrackParams {
+        event_ch,
+        input_device,
+        track,
+        webrtc_codec,
+        source_codec,
+        echo_cancellation_config: unsafe { DATA.echo_cancellation_config.clone() },
+    };
+    let source_track = create_source_track(params)
+        .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
     source_track
         .play()
         .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;
@@ -119,14 +137,17 @@ pub async fn create_audio_sink_track(
         }
     };
 
-    let sink_track = create_sink_track(
-        peer_id.clone(),
+    let params = SinkTrackParams {
+        peer_id: peer_id.clone(),
         event_ch,
         output_device,
         track,
         webrtc_codec,
         sink_codec,
-    )?;
+        echo_cancellation_config: unsafe { DATA.echo_cancellation_config.clone() },
+    };
+
+    let sink_track = create_sink_track(params)?;
     sink_track.play()?;
     unsafe {
         DATA.audio_sink_tracks.insert(peer_id, sink_track);
