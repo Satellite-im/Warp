@@ -206,14 +206,23 @@ impl BlinkImpl {
         tokio::spawn(async move {
             let f = async {
                 debug_assert!(!initialized.load(Ordering::SeqCst));
-                //Note: This will block the initialization until identity is created or loaded
-                //TODO: Push into separate task if it initially fails
+
+                if !account.is_ready() {
+                    let mut stream = account.extension_subscribe()?;
+                    while let Some(event) = stream.next().await {
+                        if matches!(event, ExtensionEventKind::Ready) {
+                            break;
+                        }
+                    }
+                }
+
                 let identity = loop {
                     if let Ok(identity) = account.get_own_identity().await {
                         break identity;
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await
                 };
+
                 let ipfs_handle = match account.handle() {
                     Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
                     _ => {
