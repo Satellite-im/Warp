@@ -14,7 +14,6 @@ pub mod constellation;
 pub mod crypto;
 pub mod data;
 pub mod error;
-pub mod hooks;
 pub mod module;
 pub mod multipass;
 pub mod pocket_dimension;

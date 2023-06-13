@@ -13,7 +13,6 @@ use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::constellation::directory::Directory;
-use warp::hooks::Hooks;
 use warp::module::Module;
 use warp::{Extension, SingleHandle};
 
@@ -49,8 +48,6 @@ pub struct MemorySystem {
     internal: Arc<RwLock<MemorySystemInternal>>,
     #[serde(skip)]
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    #[serde(skip)]
-    hooks: Option<Hooks>,
 }
 
 impl SingleHandle for MemorySystem {}
@@ -64,7 +61,6 @@ impl Default for MemorySystem {
             modified: Utc::now(),
             internal: Default::default(),
             cache: None,
-            hooks: None,
         }
     }
 }
@@ -76,10 +72,6 @@ impl MemorySystem {
 
     pub fn set_cache(&mut self, cache: Arc<RwLock<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
-    }
-
-    pub fn set_hook(&mut self, hook: &Hooks) {
-        self.hooks = Some(hook.clone())
     }
 
     pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
