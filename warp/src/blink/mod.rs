@@ -321,7 +321,9 @@ pub enum EchoCancellationIntensity {
 pub enum EchoCancellationStrategy {
     // filter input and outputs separately
     Normal,
-    // perform both filtering steps at the output stage
+    // perform both filtering steps but only at the input stage
+    DoubleInput,
+    // perform both filtering steps but only at the output stage
     DoubleOutput,
     // perform both filtering steps on the input and the output
     DoubleMax,

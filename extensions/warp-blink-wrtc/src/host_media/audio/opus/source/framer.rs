@@ -149,6 +149,7 @@ impl Framer {
                     strategy,
                     blink::EchoCancellationStrategy::Normal
                         | blink::EchoCancellationStrategy::DoubleMax
+                        | blink::EchoCancellationStrategy::DoubleInput
                 ) {
                     if let Err(e) = processor.process_capture_frame(self.raw_samples.as_mut_slice())
                     {
@@ -156,7 +157,11 @@ impl Framer {
                     }
                 }
 
-                if matches!(strategy, blink::EchoCancellationStrategy::DoubleMax) {
+                if matches!(
+                    strategy,
+                    blink::EchoCancellationStrategy::DoubleMax
+                        | blink::EchoCancellationStrategy::DoubleInput
+                ) {
                     if let Err(e) = processor.process_render_frame(self.raw_samples.as_mut_slice())
                     {
                         log::error!("failed to process render frame: {e}");

@@ -320,10 +320,17 @@ where
                                     }
                                 }
 
-                                if let Err(e) =
-                                    processor.process_render_frame(&mut decoder_output_buf[0..siz])
-                                {
-                                    log::error!("failed to process render frame: {e}");
+                                if matches!(
+                                    strategy,
+                                    blink::EchoCancellationStrategy::Normal
+                                        | blink::EchoCancellationStrategy::DoubleOutput
+                                        | blink::EchoCancellationStrategy::DoubleMax
+                                ) {
+                                    if let Err(e) = processor
+                                        .process_render_frame(&mut decoder_output_buf[0..siz])
+                                    {
+                                        log::error!("failed to process render frame: {e}");
+                                    }
                                 }
                             }
 
