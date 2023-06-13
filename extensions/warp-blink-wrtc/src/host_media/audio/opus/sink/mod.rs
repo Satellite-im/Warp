@@ -10,6 +10,7 @@ use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
 };
+use webrtc_audio_processing::{EchoCancellation, EchoCancellationSuppressionLevel};
 
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
@@ -66,6 +67,24 @@ impl OpusSink {
         };
         let channel_mixer = ChannelMixer::new(channel_mixer_config);
 
+        let mut audio_processor = webrtc_audio_processing::Processor::new(
+            &webrtc_audio_processing::InitializationConfig {
+                num_capture_channels: webrtc_codec.channels() as i32,
+                num_render_channels: webrtc_codec.channels() as i32,
+                ..Default::default()
+            },
+        )?;
+        audio_processor.set_config(webrtc_audio_processing::Config {
+            echo_cancellation: Some(EchoCancellation {
+                suppression_level: EchoCancellationSuppressionLevel::Moderate,
+                stream_delay_ms: None,
+                enable_delay_agnostic: true,
+                enable_extended_filter: true,
+            }),
+            enable_high_pass_filter: true,
+            ..Default::default()
+        });
+
         let cpal_config = cpal::StreamConfig {
             channels: sink_codec.channels(),
             sample_rate: SampleRate(sink_codec.sample_rate()),
@@ -100,6 +119,7 @@ impl OpusSink {
                 channel_mixer,
                 event_ch: event_ch2,
                 peer_id: peer_id2,
+                audio_processor,
             })
             .await
             {
@@ -196,6 +216,7 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
+    audio_processor: webrtc_audio_processing::Processor,
 }
 
 #[allow(clippy::type_complexity)]
@@ -212,6 +233,7 @@ where
         mut channel_mixer,
         event_ch,
         peer_id,
+        mut audio_processor,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -263,6 +285,11 @@ where
                         false,
                     ) {
                         Ok(siz) => {
+                            if let Err(e) = audio_processor
+                                .process_render_frame(&mut decoder_output_buf[0..siz])
+                            {
+                                log::error!("failed to process render frame: {e}");
+                            }
                             let to_send = decoder_output_buf.iter().take(siz);
                             for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample) {

@@ -278,6 +278,7 @@ impl Controller {
     /// Removes the media track
     /// ex: stop sharing screen
     /// the user should discard the TrackLocalWriter which they received from add_media_source
+    #[allow(dead_code)]
     pub async fn remove_media_source(&mut self, source_id: MediaSourceId) -> Result<()> {
         for (peer_id, peer) in &mut self.peers {
             // if source_id isn't found, it will be logged by the next statement

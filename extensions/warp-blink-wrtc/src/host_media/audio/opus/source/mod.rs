@@ -102,7 +102,7 @@ fn create_source_track(
     source_codec: blink::AudioCodec,
     event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
-    let config = cpal::StreamConfig {
+    let cpal_config = cpal::StreamConfig {
         channels: source_codec.channels(),
         sample_rate: SampleRate(source_codec.sample_rate()),
         buffer_size: cpal::BufferSize::Default, //Fixed(4096 * 50),
@@ -191,7 +191,7 @@ fn create_source_track(
         }
     };
     let input_stream = input_device
-        .build_input_stream(&config, input_data_fn, err_fn, None)
+        .build_input_stream(&cpal_config, input_data_fn, err_fn, None)
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to build input stream: {e}, {}, {}",

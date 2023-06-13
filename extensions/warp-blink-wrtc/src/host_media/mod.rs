@@ -58,6 +58,7 @@ pub async fn reset() {
     }
 }
 
+#[allow(dead_code)]
 pub async fn has_audio_source() -> bool {
     let _lock = LOCK.read().await;
     unsafe { DATA.audio_input_device.is_some() }
@@ -93,6 +94,7 @@ pub async fn create_audio_source_track(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn remove_audio_source_track() -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
     unsafe {
@@ -174,6 +176,7 @@ pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn mute_peer(peer_id: DID) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
     if let Some(track) = unsafe { DATA.audio_sink_tracks.get_mut(&peer_id) } {
@@ -185,6 +188,7 @@ pub async fn mute_peer(peer_id: DID) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn unmute_peer(peer_id: DID) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
     if let Some(track) = unsafe { DATA.audio_sink_tracks.get_mut(&peer_id) } {

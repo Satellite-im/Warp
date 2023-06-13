@@ -27,6 +27,7 @@ impl AudioSampleRate {
         }
     }
 
+    // frame_size assumes single channel audio. frame_size should be doubled for dual channel audio.
     // this seems backwards. i'd think a greater sample rate would require a larger buffer but for some reason,
     // 48kHz seems to work best with the lowest sample rate.
     pub fn frame_size(&self) -> usize {

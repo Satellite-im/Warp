@@ -102,6 +102,7 @@ pub fn create_sink_track(
     }
 }
 
+#[allow(dead_code)]
 pub fn get_input_device(
     host_id: cpal::HostId,
     device_name: String,
@@ -133,6 +134,7 @@ pub fn get_input_device(
     }
 }
 
+#[allow(dead_code)]
 pub fn get_output_device(
     host_id: cpal::HostId,
     device_name: String,

@@ -3,10 +3,10 @@ use std::cmp::Ordering;
 use bytes::Bytes;
 use opus::Bitrate;
 use warp::blink;
+use webrtc_audio_processing::{EchoCancellation, EchoCancellationSuppressionLevel};
 
-use crate::host_media::audio::{
-    loudness,
-    opus::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig},
+use crate::host_media::audio::opus::{
+    ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig,
 };
 
 pub struct Framer {
@@ -23,9 +23,7 @@ pub struct Framer {
     channel_mixer: ChannelMixer,
     // for upsampling and downsampling audio
     resampler: Resampler,
-    // this is needed by the bs1770 algorithm
-    output_sample_rate: u32,
-    loudness_calculator: loudness::Calculator,
+    audio_processor: webrtc_audio_processing::Processor,
 }
 
 pub struct FramerOutput {
@@ -39,7 +37,25 @@ impl Framer {
         webrtc_codec: blink::AudioCodec,
         source_codec: blink::AudioCodec,
     ) -> anyhow::Result<Self> {
-        let loudness_calculator = loudness::Calculator::new(frame_size);
+        let frame_size = frame_size * webrtc_codec.channels() as usize;
+        let mut audio_processor = webrtc_audio_processing::Processor::new(
+            &webrtc_audio_processing::InitializationConfig {
+                num_capture_channels: webrtc_codec.channels() as i32,
+                num_render_channels: webrtc_codec.channels() as i32,
+                ..Default::default()
+            },
+        )?;
+        audio_processor.set_config(webrtc_audio_processing::Config {
+            echo_cancellation: Some(EchoCancellation {
+                suppression_level: EchoCancellationSuppressionLevel::Moderate,
+                stream_delay_ms: None,
+                enable_delay_agnostic: true,
+                enable_extended_filter: true,
+            }),
+            enable_high_pass_filter: true,
+            ..Default::default()
+        });
+
         let mut buf: Vec<f32> = Vec::new();
         buf.reserve(frame_size);
         let mut opus_out: Vec<u8> = Vec::new();
@@ -76,8 +92,7 @@ impl Framer {
             frame_size,
             resampler: Resampler::new(resampler_config),
             channel_mixer: ChannelMixer::new(channel_mixer_config),
-            output_sample_rate: webrtc_codec.sample_rate(),
-            loudness_calculator,
+            audio_processor,
         })
     }
 
@@ -93,9 +108,13 @@ impl Framer {
             ChannelMixerOutput::None => {}
         }
 
+        // frame_size should be 480 * num_channels
         if self.raw_samples.len() == self.frame_size {
-            for sample in self.raw_samples.iter() {
-                self.loudness_calculator.insert(*sample);
+            if let Err(e) = self
+                .audio_processor
+                .process_capture_frame(self.raw_samples.as_mut_slice())
+            {
+                log::error!("failed to apply echo cancellation: {e}");
             }
 
             match self.encoder.encode_float(
@@ -107,10 +126,15 @@ impl Framer {
                     let slice = self.opus_out.as_slice();
                     let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
 
-                    let loudness = self.loudness_calculator.get_rms();
-                    Some(FramerOutput { bytes, loudness })
+                    // let stats = self.audio_processor.get_stats();
+                    // let loudness = stats.rms_dbfs.unwrap_or(0);
+                    Some(FramerOutput {
+                        bytes,
+                        loudness: 0.0,
+                    })
                 }
                 Err(e) => {
+                    self.raw_samples.clear();
                     log::error!("OpusPacketizer failed to encode: {}", e);
                     None
                 }

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 /// calculates loudness using root mean square.
 /// is basically a moving average filter. has a delay (in samples) equal to the buffer size
 pub struct Calculator {
