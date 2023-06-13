@@ -44,7 +44,7 @@ impl Drop for OpusSink {
 }
 
 impl OpusSink {
-    fn init_internal<'a>(params: SinkTrackParams<'a>) -> Result<Self> {
+    fn init_internal(params: SinkTrackParams) -> Result<Self> {
         let SinkTrackParams {
             peer_id,
             event_ch,
@@ -187,7 +187,7 @@ impl OpusSink {
 
 // todo: ensure no zombie threads
 impl SinkTrack for OpusSink {
-    fn init<'a>(params: SinkTrackParams<'a>) -> Result<Self> {
+    fn init<'a>(params: SinkTrackParams) -> Result<Self> {
         OpusSink::init_internal(params)
     }
 

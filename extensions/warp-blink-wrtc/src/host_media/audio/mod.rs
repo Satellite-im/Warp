@@ -37,7 +37,7 @@ pub struct SinkTrackParams<'a> {
 
 // stores the TrackRemote at least
 pub trait SourceTrack {
-    fn init<'a>(params: SourceTrackParams<'a>) -> Result<Self>
+    fn init(params: SourceTrackParams) -> Result<Self>
     where
         Self: Sized;
 
@@ -49,7 +49,7 @@ pub trait SourceTrack {
 
 // stores the TrackRemote at least
 pub trait SinkTrack {
-    fn init<'a>(params: SinkTrackParams<'a>) -> Result<Self>
+    fn init(params: SinkTrackParams) -> Result<Self>
     where
         Self: Sized;
     fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
@@ -58,7 +58,7 @@ pub trait SinkTrack {
 }
 
 /// Uses the MIME type from codec to determine which implementation of SourceTrack to create
-pub fn create_source_track<'a>(params: SourceTrackParams<'a>) -> Result<Box<dyn SourceTrack>> {
+pub fn create_source_track(params: SourceTrackParams) -> Result<Box<dyn SourceTrack>> {
     if params.webrtc_codec.mime_type() != params.source_codec.mime_type() {
         bail!("mime types don't match");
     }
@@ -71,7 +71,7 @@ pub fn create_source_track<'a>(params: SourceTrackParams<'a>) -> Result<Box<dyn 
 }
 
 /// Uses the MIME type from codec to determine which implementation of SinkTrack to create
-pub fn create_sink_track<'a>(params: SinkTrackParams<'a>) -> Result<Box<dyn SinkTrack>> {
+pub fn create_sink_track(params: SinkTrackParams) -> Result<Box<dyn SinkTrack>> {
     if params.webrtc_codec.mime_type() != params.sink_codec.mime_type() {
         bail!("mime types don't match");
     }

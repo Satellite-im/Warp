@@ -40,7 +40,7 @@ impl Drop for OpusSource {
 }
 
 impl SourceTrack for OpusSource {
-    fn init<'a>(params: SourceTrackParams<'a>) -> Result<Self>
+    fn init<'a>(params: SourceTrackParams) -> Result<Self>
     where
         Self: Sized,
     {
@@ -86,9 +86,7 @@ impl SourceTrack for OpusSource {
     }
 }
 
-fn create_source_track<'a>(
-    params: SourceTrackParams<'a>,
-) -> Result<(cpal::Stream, JoinHandle<()>)> {
+fn create_source_track(params: SourceTrackParams) -> Result<(cpal::Stream, JoinHandle<()>)> {
     let SourceTrackParams {
         event_ch,
         input_device,
