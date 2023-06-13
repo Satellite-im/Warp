@@ -253,8 +253,9 @@ impl BlinkImpl {
                 ipfs.write().await.replace(_ipfs);
                 log::trace!("finished initializing WebRTC");
 
-                let _ = ready_tx.send(ExtensionEventKind::Ready);
                 initialized.store(true, Ordering::SeqCst);
+
+                let _ = ready_tx.send(ExtensionEventKind::Ready);
 
                 Ok(())
             };
