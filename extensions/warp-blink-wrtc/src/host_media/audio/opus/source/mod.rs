@@ -6,7 +6,7 @@ use cpal::{
 use rand::Rng;
 use ringbuf::HeapRb;
 
-use std::{ops::Mul, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
 use warp::blink::{self, BlinkEventKind};
 
@@ -142,15 +142,11 @@ fn create_source_track(
     let track2 = track;
     let join_handle = tokio::spawn(async move {
         // speech_detector should emit at most 1 event per second
-        let mut speech_detector = speech::Detector::new(10, 100);
+        let mut speech_detector = speech::Detector::new(47, 150);
         loop {
             while let Some(sample) = consumer.pop() {
                 if let Some(output) = framer.frame(sample) {
-                    let loudness = match output.loudness.mul(1000.0) {
-                        x if x >= 127.0 => 127,
-                        x => x as u8,
-                    };
-                    if speech_detector.should_emit_event(loudness) {
+                    if speech_detector.should_emit_event(output.loudness) {
                         let _ = event_ch.send(BlinkEventKind::SelfSpeaking);
                     }
                     match packetizer
@@ -164,7 +160,7 @@ fn create_source_track(
                                         packet,
                                         &[rtp::extension::HeaderExtension::AudioLevel(
                                             AudioLevelExtension {
-                                                level: loudness,
+                                                level: output.loudness,
                                                 voice: false,
                                             },
                                         )],

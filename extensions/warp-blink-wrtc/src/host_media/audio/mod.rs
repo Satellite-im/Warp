@@ -8,7 +8,6 @@ use webrtc::track::{
     track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote,
 };
 
-mod loudness;
 mod opus;
 mod speech;
 

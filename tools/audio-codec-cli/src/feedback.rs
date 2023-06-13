@@ -221,6 +221,8 @@ pub async fn echo_cancellation(args: StaticArgs) -> anyhow::Result<()> {
                 if let Err(e) = processor.process_render_frame(frame.as_mut_slice()) {
                     eprintln!("failed to process render frame: {e}");
                 }
+                //let stats = processor.get_stats();
+                //println!("rms is: {:?}", stats.rms_dbfs);
                 for sample in frame.drain(..) {
                     if producer.push(sample).is_err() {
                         output_fell_behind = true;
