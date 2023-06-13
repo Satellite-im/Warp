@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use bytes::Bytes;
 use opus::Bitrate;
 use warp::blink;
+use webrtc_audio_processing::{EchoCancellation, EchoCancellationSuppressionLevel};
 
 use crate::host_media::audio::{
     loudness,
@@ -24,6 +25,7 @@ pub struct Framer {
     // for upsampling and downsampling audio
     resampler: Resampler,
     loudness_calculator: loudness::Calculator,
+    audio_processor: webrtc_audio_processing::Processor,
 }
 
 pub struct FramerOutput {
@@ -69,6 +71,24 @@ impl Framer {
             _ => ChannelMixerConfig::Split,
         };
 
+        let mut audio_processor = webrtc_audio_processing::Processor::new(
+            &webrtc_audio_processing::InitializationConfig {
+                num_capture_channels: webrtc_codec.channels() as i32,
+                num_render_channels: webrtc_codec.channels() as i32,
+                ..Default::default()
+            },
+        )?;
+        audio_processor.set_config(webrtc_audio_processing::Config {
+            echo_cancellation: Some(EchoCancellation {
+                suppression_level: EchoCancellationSuppressionLevel::Moderate,
+                stream_delay_ms: None,
+                enable_delay_agnostic: true,
+                enable_extended_filter: true,
+            }),
+            enable_high_pass_filter: true,
+            ..Default::default()
+        });
+
         Ok(Self {
             encoder,
             raw_samples: buf,
@@ -77,6 +97,7 @@ impl Framer {
             resampler: Resampler::new(resampler_config),
             channel_mixer: ChannelMixer::new(channel_mixer_config),
             loudness_calculator,
+            audio_processor,
         })
     }
 
@@ -94,6 +115,19 @@ impl Framer {
 
         // frame_size should be 480 * num_channels
         if self.raw_samples.len() == self.frame_size {
+            if let Err(e) = self
+                .audio_processor
+                .process_capture_frame(self.raw_samples.as_mut_slice())
+            {
+                log::error!("failed to apply echo cancellation (process_capture_frame): {e}");
+            }
+            if let Err(e) = self
+                .audio_processor
+                .process_render_frame(self.raw_samples.as_mut_slice())
+            {
+                log::error!("failed to apply echo cancellation (process_render_frame): {e}");
+            }
+
             for sample in self.raw_samples.iter() {
                 self.loudness_calculator.insert(*sample);
             }
