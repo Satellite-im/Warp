@@ -28,7 +28,7 @@ pub struct Framer {
 
 pub struct FramerOutput {
     pub bytes: Bytes,
-    pub loudness: u8,
+    pub loudness: f32,
 }
 
 impl Framer {
@@ -126,11 +126,11 @@ impl Framer {
                     let slice = self.opus_out.as_slice();
                     let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
 
-                    let stats = self.audio_processor.get_stats();
-                    let loudness = stats.rms_dbfs.map(|x| x + 127).unwrap_or(0);
+                    // let stats = self.audio_processor.get_stats();
+                    // let loudness = stats.rms_dbfs.unwrap_or(0);
                     Some(FramerOutput {
                         bytes,
-                        loudness: loudness as u8,
+                        loudness: 0.0,
                     })
                 }
                 Err(e) => {

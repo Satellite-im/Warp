@@ -236,7 +236,7 @@ where
         mut audio_processor,
     } = args;
     // speech_detector should emit at most 1 event per second
-    let mut speech_detector = speech::Detector::new(47, 150);
+    let mut speech_detector = speech::Detector::new(10, 100);
     let mut raw_samples: Vec<f32> = vec![];
     let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
