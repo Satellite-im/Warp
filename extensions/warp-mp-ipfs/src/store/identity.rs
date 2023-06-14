@@ -1179,8 +1179,8 @@ impl IdentityStore {
                             if emit {
                                 log::trace!("Emitting identity update event");
                                 self.emit_event(MultiPassEventKind::IdentityUpdate {
-                                        did: document.did.clone(),
-                                    });
+                                    did: document.did.clone(),
+                                });
                             }
                         }
                     }
@@ -2143,10 +2143,7 @@ impl IdentityStore {
 
     pub fn clear_internal_cache(&mut self) {}
 
-
     pub fn emit_event(&self, event: MultiPassEventKind) {
         let _ = self.event.send(event);
     }
-
 }
-
