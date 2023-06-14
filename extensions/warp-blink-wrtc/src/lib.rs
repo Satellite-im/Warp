@@ -735,6 +735,11 @@ impl Blink for BlinkImpl {
         mut participants: Vec<DID>,
         webrtc_codec: AudioCodec,
     ) -> Result<Uuid, Error> {
+        if webrtc_codec.channels() != 1 {
+            return Err(Error::OtherWithContext(
+                "webrtc_codec must have only 1 channel".into(),
+            ));
+        }
         if self.ipfs.read().await.is_none() {
             return Err(Error::OtherWithContext(
                 "received signal before blink is initialized".into(),
