@@ -6,9 +6,11 @@ use cpal::{
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
+use uuid::Uuid;
 use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
+    sync::Mutex as WarpMutex,
 };
 
 use webrtc::{
@@ -16,7 +18,9 @@ use webrtc::{
     track::track_remote::TrackRemote, util::Unmarshal,
 };
 
-use crate::host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack, SinkTrackParams};
+use crate::host_media::audio::{
+    echo_canceller::EchoCanceller, opus::AudioSampleProducer, speech, SinkTrack, SinkTrackParams,
+};
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
 
@@ -32,7 +36,7 @@ pub struct OpusSink {
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
-    audio_processing_config: blink::AudioProcessingConfig,
+    echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
 
 impl Drop for OpusSink {
@@ -51,7 +55,7 @@ impl OpusSink {
             track,
             webrtc_codec,
             sink_codec,
-            audio_processing_config,
+            echo_canceller,
         } = params;
 
         let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_codec.sample_rate()) {
@@ -69,18 +73,6 @@ impl OpusSink {
             _ => ChannelMixerConfig::Split,
         };
         let channel_mixer = ChannelMixer::new(channel_mixer_config);
-
-        let mut audio_processor = webrtc_audio_processing::Processor::new(
-            &webrtc_audio_processing::InitializationConfig {
-                num_capture_channels: webrtc_codec.channels() as i32,
-                num_render_channels: webrtc_codec.channels() as i32,
-                ..Default::default()
-            },
-        )?;
-
-        audio_processor.set_config(webrtc_audio_processing::Config {
-            ..Default::default()
-        });
 
         let cpal_config = cpal::StreamConfig {
             channels: sink_codec.channels(),
@@ -106,7 +98,15 @@ impl OpusSink {
         let track2 = track.clone();
         let event_ch2 = event_ch.clone();
         let peer_id2 = peer_id.clone();
+        let echo_canceller2 = echo_canceller.clone();
         let join_handle = tokio::spawn(async move {
+            let echo_canceller_id = match echo_canceller2.lock().add_sink_track() {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("failed to add sink track to echo canceller: {e}");
+                    return;
+                }
+            };
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
                 track: track2,
                 sample_builder,
@@ -116,11 +116,15 @@ impl OpusSink {
                 channel_mixer,
                 event_ch: event_ch2,
                 peer_id: peer_id2,
-                audio_processor,
+                echo_canceller_id,
+                echo_canceller: echo_canceller2.clone(),
             })
             .await
             {
                 log::error!("error decoding media stream: {}", e);
+            }
+            if let Err(e) = echo_canceller2.lock().remove_sink_track(echo_canceller_id) {
+                log::error!("failed to remove sink track from echo canceller: {e}");
             }
             log::debug!("stopping decode_media_stream thread");
         });
@@ -151,7 +155,7 @@ impl OpusSink {
             sink_codec,
             decoder_handle: join_handle,
             event_ch,
-            audio_processing_config,
+            echo_canceller,
         })
     }
 }
@@ -185,7 +189,7 @@ impl SinkTrack for OpusSink {
             track: self.track.clone(),
             webrtc_codec: self.webrtc_codec.clone(),
             sink_codec: self.sink_codec.clone(),
-            audio_processing_config: self.audio_processing_config.clone(),
+            echo_canceller: self.echo_canceller.clone(),
         };
 
         let new_sink = OpusSink::init_internal(params)?;
@@ -203,8 +207,8 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
-    #[allow(dead_code)]
-    audio_processor: webrtc_audio_processing::Processor,
+    echo_canceller_id: Uuid,
+    echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -221,10 +225,12 @@ where
         mut channel_mixer,
         event_ch,
         peer_id,
-        audio_processor: _,
+        echo_canceller_id,
+        echo_canceller,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
+    let mut webrtc_samples: Vec<f32> = vec![];
     let mut raw_samples: Vec<f32> = vec![];
     let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
@@ -273,6 +279,17 @@ where
                         false,
                     ) {
                         Ok(siz) => {
+                            for sample in decoder_output_buf.iter().take(siz) {
+                                webrtc_samples.push(*sample);
+                                if webrtc_samples.len() == 480 {
+                                    let _ = echo_canceller.lock().insert_render_frame(
+                                        echo_canceller_id,
+                                        webrtc_samples.as_mut_slice(),
+                                    );
+                                    webrtc_samples.clear();
+                                }
+                            }
+
                             let to_send = decoder_output_buf.iter().take(siz);
                             for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample) {

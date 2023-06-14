@@ -4,15 +4,17 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use warp::blink::{self, BlinkEventKind, MimeType};
 use warp::crypto::DID;
+use warp::sync::Mutex as WarpMutex;
 use webrtc::track::{
     track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote,
 };
 
-mod echo_canceller;
+pub(super) mod echo_canceller;
 mod loudness;
 mod opus;
 mod speech;
 
+use self::echo_canceller::EchoCanceller;
 pub use self::opus::sink::OpusSink;
 pub use self::opus::source::OpusSource;
 
@@ -23,7 +25,7 @@ pub struct SourceTrackParams<'a> {
     pub track: Arc<TrackLocalStaticRTP>,
     pub webrtc_codec: blink::AudioCodec,
     pub source_codec: blink::AudioCodec,
-    pub audio_processing_config: blink::AudioProcessingConfig,
+    pub echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
 
 pub struct SinkTrackParams<'a> {
@@ -33,7 +35,7 @@ pub struct SinkTrackParams<'a> {
     pub track: Arc<TrackRemote>,
     pub webrtc_codec: blink::AudioCodec,
     pub sink_codec: blink::AudioCodec,
-    pub audio_processing_config: blink::AudioProcessingConfig,
+    pub echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
 
 // stores the TrackRemote at least

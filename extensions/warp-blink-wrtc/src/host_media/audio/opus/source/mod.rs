@@ -9,6 +9,7 @@ use ringbuf::HeapRb;
 use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
 use warp::blink::{self, BlinkEventKind};
+use warp::sync::Mutex as WarpMutex;
 
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
@@ -16,7 +17,9 @@ use webrtc::{
 };
 
 mod framer;
-use crate::host_media::audio::{speech, SourceTrack, SourceTrackParams};
+use crate::host_media::audio::{
+    echo_canceller::EchoCanceller, speech, SourceTrack, SourceTrackParams,
+};
 
 use self::framer::Framer;
 
@@ -30,7 +33,7 @@ pub struct OpusSource {
     // used to cancel the current packetizer when the input device is changed.
     packetizer_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
-    audio_processing_config: blink::AudioProcessingConfig,
+    echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
 
 impl Drop for OpusSource {
@@ -53,7 +56,7 @@ impl SourceTrack for OpusSource {
             source_codec: params.source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
-            audio_processing_config: params.audio_processing_config,
+            echo_canceller: params.echo_canceller,
         })
     }
 
@@ -78,7 +81,7 @@ impl SourceTrack for OpusSource {
             track: self.track.clone(),
             webrtc_codec: self.webrtc_codec.clone(),
             source_codec: self.source_codec.clone(),
-            audio_processing_config: self.audio_processing_config.clone(),
+            echo_canceller: self.echo_canceller.clone(),
         })?;
         self.stream = stream;
         self.packetizer_handle = handle;
@@ -93,7 +96,7 @@ fn create_source_track(params: SourceTrackParams) -> Result<(cpal::Stream, JoinH
         track,
         webrtc_codec,
         source_codec,
-        audio_processing_config,
+        echo_canceller,
     } = params;
 
     let cpal_config = cpal::StreamConfig {
@@ -113,7 +116,7 @@ fn create_source_track(params: SourceTrackParams) -> Result<(cpal::Stream, JoinH
         source_codec.frame_size(),
         webrtc_codec.clone(),
         source_codec,
-        audio_processing_config,
+        echo_canceller,
     )?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
