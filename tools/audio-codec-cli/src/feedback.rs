@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     SampleRate,
@@ -167,8 +169,11 @@ pub async fn echo(args: StaticArgs) -> anyhow::Result<()> {
 }
 
 pub async fn echo_cancellation(args: StaticArgs) -> anyhow::Result<()> {
-    let mut frame: Vec<f32> = Vec::new();
-    frame.reserve(480);
+    let mut input_frame: Vec<f32> = Vec::new();
+    input_frame.reserve(480);
+
+    let mut output_frame: Vec<f32> = Vec::new();
+    output_frame.reserve(480);
 
     let mut processor = webrtc_audio_processing::Processor::new(&InitializationConfig {
         num_capture_channels: 1,
@@ -210,42 +215,63 @@ pub async fn echo_cancellation(args: StaticArgs) -> anyhow::Result<()> {
         let _ = producer.push(0.0);
     }
 
+    let processor = Arc::new(Mutex::new(processor));
+    let processor2 = processor.clone();
+
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-        let mut output_fell_behind = false;
+        let mut input_fell_behind = false;
         for &sample in data {
-            frame.push(sample);
-            if frame.len() == 480 {
-                if let Err(e) = processor.process_capture_frame(frame.as_mut_slice()) {
+            input_frame.push(sample);
+            if input_frame.len() == 480 {
+                let mut ap = match processor.lock() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("failed to acquire lock in input callback: {e}");
+                        return;
+                    }
+                };
+                if let Err(e) = ap.process_capture_frame(input_frame.as_mut_slice()) {
                     eprintln!("failed to process capture frame: {e}");
                 }
-                if let Err(e) = processor.process_render_frame(frame.as_mut_slice()) {
-                    eprintln!("failed to process render frame: {e}");
-                }
-                for sample in frame.drain(..) {
+                for sample in input_frame.drain(..) {
                     if producer.push(sample).is_err() {
-                        output_fell_behind = true;
+                        input_fell_behind = true;
                     }
                 }
             }
         }
-        if output_fell_behind {
-            eprintln!("output stream fell behind: try increasing latency");
+        if input_fell_behind {
+            eprintln!("input stream fell behind: try increasing latency");
         }
     };
 
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-        let mut input_fell_behind = false;
+        let mut output_fell_behind = false;
         for sample in data {
             *sample = match consumer.pop() {
                 Some(s) => s,
                 None => {
-                    input_fell_behind = true;
+                    output_fell_behind = true;
                     0.0
                 }
             };
+            output_frame.push(*sample);
+            if output_frame.len() == 480 {
+                let mut ap = match processor2.lock() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("failed to acquire lock in output callback: {e}");
+                        return;
+                    }
+                };
+                if let Err(e) = ap.process_render_frame(output_frame.as_mut_slice()) {
+                    eprintln!("failed to process render frame: {e}");
+                }
+                output_frame.clear();
+            }
         }
-        if input_fell_behind {
-            eprintln!("input stream fell behind: try increasing latency");
+        if output_fell_behind {
+            eprintln!("output stream fell behind: try increasing latency");
         }
     };
 
