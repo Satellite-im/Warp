@@ -4,8 +4,11 @@ use cpal::{
     SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{cmp::Ordering, sync::Arc};
-use tokio::{sync::broadcast, task::JoinHandle};
+use std::{
+    cmp::Ordering,
+    sync::{atomic::AtomicBool, Arc},
+};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 use warp::{
     blink::{self, BlinkEventKind},
@@ -34,7 +37,7 @@ pub struct OpusSink {
     sink_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
-    decoder_handle: JoinHandle<()>,
+    abort_task: Arc<AtomicBool>,
     event_ch: broadcast::Sender<BlinkEventKind>,
     echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
@@ -42,7 +45,8 @@ pub struct OpusSink {
 impl Drop for OpusSink {
     fn drop(&mut self) {
         // this is a failsafe in case the caller doesn't close the associated TrackRemote
-        self.decoder_handle.abort();
+        self.abort_task
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -99,7 +103,9 @@ impl OpusSink {
         let event_ch2 = event_ch.clone();
         let peer_id2 = peer_id.clone();
         let echo_canceller2 = echo_canceller.clone();
-        let join_handle = tokio::spawn(async move {
+        let abort_task = Arc::new(AtomicBool::new(false));
+        let abort_task2 = abort_task.clone();
+        tokio::spawn(async move {
             let echo_canceller_id = match echo_canceller2.lock().add_sink_track() {
                 Ok(r) => r,
                 Err(e) => {
@@ -118,6 +124,7 @@ impl OpusSink {
                 peer_id: peer_id2,
                 echo_canceller_id,
                 echo_canceller: echo_canceller2.clone(),
+                abort_task: abort_task2,
             })
             .await
             {
@@ -153,7 +160,7 @@ impl OpusSink {
             track,
             webrtc_codec,
             sink_codec,
-            decoder_handle: join_handle,
+            abort_task,
             event_ch,
             echo_canceller,
         })
@@ -180,7 +187,8 @@ impl SinkTrack for OpusSink {
     }
     fn change_output_device(&mut self, output_device: &cpal::Device) -> Result<()> {
         self.stream.pause()?;
-        self.decoder_handle.abort();
+        self.abort_task
+            .store(true, std::sync::atomic::Ordering::Relaxed);
 
         let params = SinkTrackParams {
             peer_id: self.peer_id.clone(),
@@ -209,6 +217,7 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     peer_id: DID,
     echo_canceller_id: Uuid,
     echo_canceller: Arc<WarpMutex<EchoCanceller>>,
+    abort_task: Arc<AtomicBool>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -227,6 +236,7 @@ where
         peer_id,
         echo_canceller_id,
         echo_canceller,
+        abort_task,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -236,6 +246,9 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
     loop {
+        if abort_task.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {
                 // get RTP packet
