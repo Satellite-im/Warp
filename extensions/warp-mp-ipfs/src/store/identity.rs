@@ -72,7 +72,7 @@ pub struct IdentityStore {
 
     relay: Option<Vec<Multiaddr>>,
 
-    override_ipld: Arc<AtomicBool>,
+    fetch_over_bitswap: Arc<AtomicBool>,
 
     share_platform: Arc<AtomicBool>,
 
@@ -178,7 +178,7 @@ impl IdentityStore {
         tesseract: Tesseract,
         interval: Option<Duration>,
         tx: broadcast::Sender<MultiPassEventKind>,
-        (discovery, relay, override_ipld, share_platform, update_event, disable_image): (
+        (discovery, relay, fetch_over_bitswap, share_platform, update_event, disable_image): (
             Discovery,
             Option<Vec<Multiaddr>>,
             bool,
@@ -197,7 +197,7 @@ impl IdentityStore {
         let end_event = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
         let cache_cid = Arc::new(Default::default());
-        let override_ipld = Arc::new(AtomicBool::new(override_ipld));
+        let fetch_over_bitswap = Arc::new(AtomicBool::new(fetch_over_bitswap));
         let online_status = Arc::default();
         let share_platform = Arc::new(AtomicBool::new(share_platform));
         let root_task = Arc::default();
@@ -218,7 +218,7 @@ impl IdentityStore {
             discovery,
             relay,
             tesseract,
-            override_ipld,
+            fetch_over_bitswap,
             root_task,
             task_send,
             event,
@@ -786,8 +786,6 @@ impl IdentityStore {
 
         let mut identity = self.own_identity_document().await?;
 
-        let _override_ipld = self.override_ipld.load(Ordering::Relaxed);
-
         let is_friend = match self.friend_store().await {
             Ok(store) => store.is_friend(out_did).await.unwrap_or_default(),
             _ => false,
@@ -1068,17 +1066,54 @@ impl IdentityStore {
                                             "Requesting profile picture from {}",
                                             identity.did
                                         );
-                                        if let Err(e) = store
-                                            .request(
-                                                &in_did,
-                                                RequestOption::Image {
-                                                    banner: None,
-                                                    picture: identity.profile_picture,
-                                                },
-                                            )
-                                            .await
-                                        {
-                                            error!("Error requesting profile picture from {in_did}: {e}");
+
+                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
+                                            if let Err(e) = store
+                                                .request(
+                                                    &in_did,
+                                                    RequestOption::Image {
+                                                        banner: None,
+                                                        picture: identity.profile_picture,
+                                                    },
+                                                )
+                                                .await
+                                            {
+                                                error!("Error requesting profile picture from {in_did}: {e}");
+                                            }
+                                        } else {
+                                            let identity_profile_picture =
+                                                identity.profile_picture.expect("Cid is provided");
+                                            tokio::spawn({
+                                                let ipfs = store.ipfs.clone();
+                                                let emit = emit;
+                                                let tx = store.event.clone();
+                                                let did = in_did.clone();
+                                                async move {
+                                                    let mut stream = ipfs
+                                                        .unixfs()
+                                                        .cat(
+                                                            identity_profile_picture,
+                                                            None,
+                                                            &[],
+                                                            false,
+                                                        )
+                                                        .await?
+                                                        .boxed();
+                                                    while let Some(_d) = stream.next().await {
+                                                        let _d = _d.map_err(anyhow::Error::from)?;
+                                                    }
+
+                                                    if emit {
+                                                        let _ = tx.send(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        );
+                                                    }
+
+                                                    Ok::<_, anyhow::Error>(())
+                                                }
+                                            });
                                         }
                                     }
                                     if document.profile_banner != identity.profile_banner
@@ -1088,17 +1123,55 @@ impl IdentityStore {
                                             "Requesting profile banner from {}",
                                             identity.did
                                         );
-                                        if let Err(e) = store
-                                            .request(
-                                                &in_did,
-                                                RequestOption::Image {
-                                                    banner: identity.profile_banner,
-                                                    picture: None,
-                                                },
-                                            )
-                                            .await
-                                        {
-                                            error!("Error requesting profile banner from {in_did}: {e}");
+
+                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
+                                            if let Err(e) = store
+                                                .request(
+                                                    &in_did,
+                                                    RequestOption::Image {
+                                                        banner: identity.profile_banner,
+                                                        picture: None,
+                                                    },
+                                                )
+                                                .await
+                                            {
+                                                error!("Error requesting profile banner from {in_did}: {e}");
+                                            }
+                                        } else {
+                                            let identity_profile_banner =
+                                                identity.profile_banner.expect("Cid is provided");
+                                            tokio::spawn({
+                                                let ipfs = store.ipfs.clone();
+                                                let emit = emit;
+                                                let tx = store.event.clone();
+                                                let did = in_did.clone();
+                                                async move {
+                                                    let mut stream = ipfs
+                                                        .unixfs()
+                                                        .cat(
+                                                            identity_profile_banner,
+                                                            None,
+                                                            &[],
+                                                            false,
+                                                        )
+                                                        .await?
+                                                        .boxed();
+
+                                                    while let Some(_d) = stream.next().await {
+                                                        let _d = _d.map_err(anyhow::Error::from)?;
+                                                    }
+
+                                                    if emit {
+                                                        let _ = tx.send(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        );
+                                                    }
+
+                                                    Ok::<_, anyhow::Error>(())
+                                                }
+                                            });
                                         }
                                     }
                                 }
@@ -1133,8 +1206,8 @@ impl IdentityStore {
                         }
 
                         if matches!(self.update_event, UpdateEvents::Enabled) {
-                            let tx = self.event.clone();
                             tokio::spawn({
+                                let tx = self.event.clone();
                                 let did = document_did.clone();
                                 async move {
                                     let _ = tx.send(MultiPassEventKind::IdentityUpdate { did });
@@ -1172,12 +1245,66 @@ impl IdentityStore {
                                     }
 
                                     if banner.is_some() || picture.is_some() {
-                                        store
-                                            .request(
-                                                &in_did,
-                                                RequestOption::Image { banner, picture },
-                                            )
-                                            .await?;
+                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
+                                            store
+                                                .request(
+                                                    &in_did,
+                                                    RequestOption::Image { banner, picture },
+                                                )
+                                                .await?;
+                                        } else {
+                                            if let Some(picture) = picture {
+                                                tokio::spawn({
+                                                    let tx = store.event.clone();
+                                                    let ipfs = store.ipfs.clone();
+                                                    let did = in_did.clone();
+                                                    async move {
+                                                        let mut stream = ipfs
+                                                            .unixfs()
+                                                            .cat(picture, None, &[], false)
+                                                            .await?
+                                                            .boxed();
+                                                        while let Some(_d) = stream.next().await {
+                                                            let _d =
+                                                                _d.map_err(anyhow::Error::from)?;
+                                                        }
+                                                        let _ = tx.send(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        );
+
+                                                        Ok::<_, anyhow::Error>(())
+                                                    }
+                                                });
+                                            }
+                                            if let Some(banner) = banner {
+                                                tokio::spawn({
+                                                    let tx = store.event.clone();
+                                                    let ipfs = store.ipfs.clone();
+
+                                                    let did = in_did.clone();
+                                                    async move {
+                                                        let mut stream = ipfs
+                                                            .unixfs()
+                                                            .cat(banner, None, &[], false)
+                                                            .await?
+                                                            .boxed();
+                                                        while let Some(_d) = stream.next().await {
+                                                            let _d =
+                                                                _d.map_err(anyhow::Error::from)?;
+                                                        }
+                                                        let _ = tx.send(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        );
+
+                                                        Ok::<_, anyhow::Error>(())
+                                                    }
+                                                });
+                                            }
+                                        }
                                     }
 
                                     Ok::<_, Error>(())

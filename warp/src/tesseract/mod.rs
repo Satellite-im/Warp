@@ -855,6 +855,7 @@ mod test {
         Ok(())
     }
 
+    #[allow(clippy::redundant_clone)]
     #[test]
     pub fn tesseract_eq() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();

@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 bytes = "1.4.0"
+bs1770 = "1.0.0"
 clap = { version = "4.0", features = ["derive"] }
 cpal = "0.15.0"
 log = { version = "0.4.17", features = ["std"]}

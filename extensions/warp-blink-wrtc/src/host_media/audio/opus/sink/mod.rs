@@ -4,20 +4,24 @@ use cpal::{
     SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{cmp::Ordering, mem::MaybeUninit, sync::Arc};
-use tokio::task::JoinHandle;
-use warp::blink;
+use std::{cmp::Ordering, sync::Arc};
+use tokio::{sync::broadcast, task::JoinHandle};
+use warp::{
+    blink::{self, BlinkEventKind},
+    crypto::DID,
+};
 
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
     track::track_remote::TrackRemote, util::Unmarshal,
 };
 
-use crate::host_media::audio::SinkTrack;
+use crate::host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack};
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
 
 pub struct OpusSink {
+    peer_id: DID,
     // save this for changing the output device
     track: Arc<TrackRemote>,
     // same
@@ -27,6 +31,7 @@ pub struct OpusSink {
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
+    event_ch: broadcast::Sender<BlinkEventKind>,
 }
 
 impl Drop for OpusSink {
@@ -36,9 +41,10 @@ impl Drop for OpusSink {
     }
 }
 
-// todo: ensure no zombie threads
-impl SinkTrack for OpusSink {
-    fn init(
+impl OpusSink {
+    fn init_internal(
+        peer_id: DID,
+        event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
         webrtc_codec: blink::AudioCodec,
@@ -82,15 +88,19 @@ impl SinkTrack for OpusSink {
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
         let sample_builder = SampleBuilder::new(max_late, depacketizer, webrtc_sample_rate);
         let track2 = track.clone();
+        let event_ch2 = event_ch.clone();
+        let peer_id2 = peer_id.clone();
         let join_handle = tokio::spawn(async move {
-            if let Err(e) = decode_media_stream(
-                track2,
+            if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
+                track: track2,
                 sample_builder,
                 producer,
                 decoder,
                 resampler,
                 channel_mixer,
-            )
+                event_ch: event_ch2,
+                peer_id: peer_id2,
+            })
             .await
             {
                 log::error!("error decoding media stream: {}", e);
@@ -117,12 +127,35 @@ impl SinkTrack for OpusSink {
             output_device.build_output_stream(&cpal_config, output_data_fn, err_fn, None)?;
 
         Ok(Self {
+            peer_id,
             stream: output_stream,
             track,
             webrtc_codec,
             sink_codec,
             decoder_handle: join_handle,
+            event_ch,
         })
+    }
+}
+
+// todo: ensure no zombie threads
+impl SinkTrack for OpusSink {
+    fn init(
+        peer_id: DID,
+        event_ch: broadcast::Sender<BlinkEventKind>,
+        output_device: &cpal::Device,
+        track: Arc<TrackRemote>,
+        webrtc_codec: blink::AudioCodec,
+        sink_codec: blink::AudioCodec,
+    ) -> Result<Self> {
+        OpusSink::init_internal(
+            peer_id,
+            event_ch,
+            output_device,
+            track,
+            webrtc_codec,
+            sink_codec,
+        )
     }
 
     fn play(&self) -> Result<()> {
@@ -141,7 +174,9 @@ impl SinkTrack for OpusSink {
         self.stream.pause()?;
         self.decoder_handle.abort();
 
-        let new_sink = Self::init(
+        let new_sink = OpusSink::init_internal(
+            self.peer_id.clone(),
+            self.event_ch.clone(),
             output_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
@@ -152,20 +187,35 @@ impl SinkTrack for OpusSink {
     }
 }
 
-#[allow(clippy::type_complexity)]
-async fn decode_media_stream<T>(
+struct DecodeMediaStreamArgs<T: Depacketizer> {
     track: Arc<TrackRemote>,
-    mut sample_builder: SampleBuilder<T>,
-    mut producer: ringbuf::Producer<f32, Arc<ringbuf::SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
-    mut decoder: opus::Decoder,
-    mut resampler: Resampler,
-    mut channel_mixer: ChannelMixer,
-) -> Result<()>
+    sample_builder: SampleBuilder<T>,
+    producer: AudioSampleProducer,
+    decoder: opus::Decoder,
+    resampler: Resampler,
+    channel_mixer: ChannelMixer,
+    event_ch: broadcast::Sender<BlinkEventKind>,
+    peer_id: DID,
+}
+
+#[allow(clippy::type_complexity)]
+async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<()>
 where
     T: Depacketizer,
 {
+    let DecodeMediaStreamArgs {
+        track,
+        mut sample_builder,
+        mut producer,
+        mut decoder,
+        mut resampler,
+        mut channel_mixer,
+        event_ch,
+        peer_id,
+    } = args;
+    // speech_detector should emit at most 1 event per second
+    let mut speech_detector = speech::Detector::new(10, 100);
     let mut raw_samples: Vec<f32> = vec![];
-
     let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
@@ -182,17 +232,31 @@ where
                         break;
                     }
                 };
-                // if desired, you may set the payload_type here.
-                // the payload type is application specific and at this point in the process,
-                // the appilcation knows what the payload type is.
-                //rtp_packet.header.payload_type = ?;
 
-                // todo: send the RTP packet somewhere else if needed (such as something which is writing the media to an MP4 file)
+                if let Some(extension) = rtp_packet.header.extensions.first() {
+                    // don't yet have the MediaEngine exposed. for now since there's only one extension being used, this way seems to be good enough
+                    // copies extension::audio_level_extension::AudioLevelExtension from the webrtc-rs crate
+                    // todo: use this:
+                    // .media_engine
+                    // .get_header_extension_id(RTCRtpHeaderExtensionCapability {
+                    //     uri: ::sdp::extmap::SDES_MID_URI.to_owned(),
+                    // })
+                    // followed by this: header.get_extension(extension_id)
+                    let audio_level = extension.payload.first().map(|x| x & 0x7F).unwrap_or(0);
+                    if speech_detector.should_emit_event(audio_level) {
+                        let _ = event_ch
+                            .send(BlinkEventKind::ParticipantSpeaking {
+                                peer_id: peer_id.clone(),
+                            })
+                            .is_err();
+                    }
+                }
 
                 // turn RTP packets into samples via SampleBuilder.push
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
+                    // todo: send Sample to other thread
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
                         &mut decoder_output_buf,

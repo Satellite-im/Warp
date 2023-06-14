@@ -10,6 +10,7 @@ use std::str::FromStr;
 use aes_gcm::{aead::OsRng, Aes256Gcm, KeyInit};
 use async_trait::async_trait;
 use derive_more::Display;
+use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,7 @@ pub use codecs::*;
 use crate::{
     crypto::DID,
     error::{self, Error},
+    SingleHandle,
 };
 
 // todo: add function to renegotiate codecs, either for the entire call or
@@ -32,7 +34,7 @@ use crate::{
 // todo: add functions for screen sharing
 /// Provides teleconferencing capabilities
 #[async_trait]
-pub trait Blink {
+pub trait Blink: Sync + Send + SingleHandle + DynClone {
     // ------ Misc ------
     /// The event stream notifies the UI of call related events
     async fn get_event_stream(&mut self) -> Result<BlinkEventStream, Error>;
@@ -43,11 +45,15 @@ pub trait Blink {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
+    /// returns the Uuid of the call
     async fn offer_call(
         &mut self,
+        // May want to associate a call with a RayGun conversation.
+        // This field is used for informational purposes only.
+        conversation_id: Option<Uuid>,
         participants: Vec<DID>,
         webrtc_codec: AudioCodec,
-    ) -> Result<(), Error>;
+    ) -> Result<Uuid, Error>;
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error>;
     /// notify a sender/group that you will not join a call
@@ -75,7 +81,7 @@ pub trait Blink {
     async fn unmute_self(&mut self) -> Result<(), Error>;
     async fn enable_camera(&mut self) -> Result<(), Error>;
     async fn disable_camera(&mut self) -> Result<(), Error>;
-    async fn record_call(&mut self, output_file: &str) -> Result<(), Error>;
+    async fn record_call(&mut self, output_dir: &str) -> Result<(), Error>;
     async fn stop_recording(&mut self) -> Result<(), Error>;
 
     async fn get_audio_source_codec(&self) -> AudioCodec;
@@ -89,13 +95,16 @@ pub trait Blink {
     async fn current_call(&self) -> Option<CallInfo>;
 }
 
+dyn_clone::clone_trait_object!(Blink);
+
 /// Drives the UI
 #[derive(Clone, Display)]
 pub enum BlinkEventKind {
-    /// A call has been offered
+    /// A call is being offered
     #[display(fmt = "IncomingCall")]
     IncomingCall {
         call_id: Uuid,
+        conversation_id: Option<Uuid>,
         // the person who is offering you to join the call
         sender: DID,
         // the total set of participants who are invited to the call
@@ -109,16 +118,18 @@ pub enum BlinkEventKind {
     ParticipantLeft { call_id: Uuid, peer_id: DID },
     /// A participant is speaking
     #[display(fmt = "ParticipantSpeaking")]
-    ParticipantSpeaking { call_id: Uuid, peer_id: DID },
-    // todo: maybe don't use this event and just use a timeout.
-    /// A participant stopped speaking
-    #[display(fmt = "ParticipantNotSpeaking")]
-    ParticipantNotSpeaking { call_id: Uuid, peer_id: DID },
+    ParticipantSpeaking { peer_id: DID },
+    #[display(fmt = "SelfSpeaking")]
+    SelfSpeaking,
+    /// audio packets were dropped for the peer
+    #[display(fmt = "AudioDegredation")]
+    AudioDegredation { peer_id: DID },
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CallInfo {
-    id: Uuid,
+    call_id: Uuid,
+    conversation_id: Option<Uuid>,
     // the total set of participants who are invited to the call
     participants: Vec<DID>,
     // for call wide broadcasts
@@ -127,18 +138,23 @@ pub struct CallInfo {
 }
 
 impl CallInfo {
-    pub fn new(participants: Vec<DID>, codec: AudioCodec) -> Self {
+    pub fn new(conversation_id: Option<Uuid>, participants: Vec<DID>, codec: AudioCodec) -> Self {
         let group_key = Aes256Gcm::generate_key(&mut OsRng).as_slice().into();
         Self {
-            id: Uuid::new_v4(),
+            call_id: Uuid::new_v4(),
+            conversation_id,
             participants,
             group_key,
             codec,
         }
     }
 
-    pub fn id(&self) -> Uuid {
-        self.id
+    pub fn call_id(&self) -> Uuid {
+        self.call_id
+    }
+
+    pub fn conversation_id(&self) -> Option<Uuid> {
+        self.conversation_id
     }
 
     pub fn participants(&self) -> Vec<DID> {

@@ -16,7 +16,7 @@ use warp::{
 
 use crate::store::{ecdh_encrypt, PeerTopic};
 
-use super::{connected_to_peer, discovery::Discovery, friends::PayloadEvent};
+use super::{connected_to_peer, discovery::Discovery, friends::RequestResponsePayload};
 
 pub struct Queue {
     path: Option<PathBuf>,
@@ -66,19 +66,19 @@ impl Queue {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get(&self, did: &DID) -> Option<PayloadEvent> {
+    pub async fn get(&self, did: &DID) -> Option<RequestResponsePayload> {
         let entry = self.entries.read().await.get(did).cloned()?;
         Some(entry.event())
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn insert(&self, did: &DID, payload: PayloadEvent) {
+    pub async fn insert(&self, did: &DID, payload: RequestResponsePayload) {
         if let Err(_e) = self.discovery.insert(did).await {}
         self.raw_insert(did, payload).await;
         self.save().await;
     }
 
-    async fn raw_insert(&self, did: &DID, payload: PayloadEvent) {
+    async fn raw_insert(&self, did: &DID, payload: RequestResponsePayload) {
         let entry = QueueEntry::new(
             self.ipfs.clone(),
             did.clone(),
@@ -99,7 +99,7 @@ impl Queue {
         self.entries.read().await.keys().cloned().collect()
     }
 
-    pub async fn map(&self) -> HashMap<DID, PayloadEvent> {
+    pub async fn map(&self) -> HashMap<DID, RequestResponsePayload> {
         let mut map = HashMap::new();
         for recipient in self.entries_recipients().await {
             if let Some(event) = self.get(&recipient).await {
@@ -110,7 +110,7 @@ impl Queue {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn remove(&self, did: &DID) -> Option<PayloadEvent> {
+    pub async fn remove(&self, did: &DID) -> Option<RequestResponsePayload> {
         let entry = self.entries.write().await.remove(did).clone();
 
         if let Some(entry) = entry {
@@ -137,7 +137,7 @@ impl Queue {
 
             let data = Cipher::direct_decrypt(&data, &prik)?;
 
-            let map: HashMap<DID, PayloadEvent> = serde_json::from_slice(&data)?;
+            let map: HashMap<DID, RequestResponsePayload> = serde_json::from_slice(&data)?;
 
             for (did, payload) in map {
                 self.raw_insert(&did, payload).await;
@@ -188,7 +188,7 @@ pub struct QueueEntry {
     ipfs: Ipfs,
     recipient: DID,
     did: Arc<DID>,
-    item: PayloadEvent,
+    item: RequestResponsePayload,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
@@ -208,7 +208,7 @@ impl QueueEntry {
     pub async fn new(
         ipfs: Ipfs,
         recipient: DID,
-        item: PayloadEvent,
+        item: RequestResponsePayload,
         did: Arc<DID>,
         tx: mpsc::UnboundedSender<DID>,
     ) -> QueueEntry {
@@ -278,7 +278,7 @@ impl QueueEntry {
         entry
     }
 
-    pub fn event(&self) -> PayloadEvent {
+    pub fn event(&self) -> RequestResponsePayload {
         self.item.clone()
     }
 

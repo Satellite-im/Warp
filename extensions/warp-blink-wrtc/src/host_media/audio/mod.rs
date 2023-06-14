@@ -1,12 +1,16 @@
 use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::Arc;
-use warp::blink::{self, MimeType};
+use tokio::sync::broadcast;
+use warp::blink::{self, BlinkEventKind, MimeType};
+use warp::crypto::DID;
 use webrtc::track::{
     track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote,
 };
 
+mod loudness;
 mod opus;
+mod speech;
 
 pub use self::opus::sink::OpusSink;
 pub use self::opus::source::OpusSource;
@@ -14,6 +18,7 @@ pub use self::opus::source::OpusSource;
 // stores the TrackRemote at least
 pub trait SourceTrack {
     fn init(
+        event_ch: broadcast::Sender<BlinkEventKind>,
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
         webrtc_codec: blink::AudioCodec,
@@ -31,6 +36,8 @@ pub trait SourceTrack {
 // stores the TrackRemote at least
 pub trait SinkTrack {
     fn init(
+        peer_id: DID,
+        event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
         webrtc_codec: blink::AudioCodec,
@@ -38,13 +45,14 @@ pub trait SinkTrack {
     ) -> Result<Self>
     where
         Self: Sized;
+    fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
-    fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
 }
 
 /// Uses the MIME type from codec to determine which implementation of SourceTrack to create
 pub fn create_source_track(
+    event_ch: broadcast::Sender<BlinkEventKind>,
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
@@ -55,6 +63,7 @@ pub fn create_source_track(
     }
     match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSource::init(
+            event_ch,
             input_device,
             track,
             webrtc_codec,
@@ -68,6 +77,8 @@ pub fn create_source_track(
 
 /// Uses the MIME type from codec to determine which implementation of SinkTrack to create
 pub fn create_sink_track(
+    peer_id: DID,
+    event_ch: broadcast::Sender<BlinkEventKind>,
     output_device: &cpal::Device,
     track: Arc<TrackRemote>,
     webrtc_codec: blink::AudioCodec,
@@ -78,6 +89,8 @@ pub fn create_sink_track(
     }
     match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSink::init(
+            peer_id,
+            event_ch,
             output_device,
             track,
             webrtc_codec,
