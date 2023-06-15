@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::atomic::{Ordering, AtomicBool};
+use std::sync::atomic::{AtomicBool, Ordering};
 use thumbnail::ThumbnailGenerator;
 use tokio::sync::broadcast;
 use tokio_util::io::ReaderStream;

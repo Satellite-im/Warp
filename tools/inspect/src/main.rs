@@ -73,8 +73,8 @@ async fn rg(
 ) -> anyhow::Result<Box<dyn RayGun>> {
     let config = RgIpfsConfig::production(path);
 
-    let chat = Box::new(IpfsMessaging::new(Some(config), account, filesystem).await?)
-        as Box<dyn RayGun>;
+    let chat =
+        Box::new(IpfsMessaging::new(Some(config), account, filesystem).await?) as Box<dyn RayGun>;
 
     Ok(chat)
 }
