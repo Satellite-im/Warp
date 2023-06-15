@@ -92,7 +92,7 @@ impl EchoCanceller {
 
     pub fn add_sink_track(&mut self) -> Result<Uuid> {
         // order the operations to not modify self in the event of an error
-        let mut new_config = self.initialization_config.clone();
+        let mut new_config = self.initialization_config;
         new_config.num_capture_channels += 1;
         let mut ap = AudioProcessor::new(&new_config)?;
         self.initialization_config = new_config;
@@ -117,7 +117,7 @@ impl EchoCanceller {
             .position(|x| x == &sink_id)
             .ok_or(anyhow::anyhow!("id not found"))?;
 
-        let mut new_config = self.initialization_config.clone();
+        let mut new_config = self.initialization_config;
         new_config.num_capture_channels -= 1;
         let mut ap = AudioProcessor::new(&new_config)?;
         self.initialization_config = new_config;

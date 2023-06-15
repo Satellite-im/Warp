@@ -4,11 +4,8 @@ use cpal::{
     SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{
-    cmp::Ordering,
-    sync::{atomic::AtomicBool, Arc},
-};
-use tokio::sync::broadcast;
+use std::{cmp::Ordering, sync::Arc};
+use tokio::sync::{broadcast, Notify};
 use uuid::Uuid;
 use warp::{
     blink::{self, BlinkEventKind},
@@ -37,7 +34,7 @@ pub struct OpusSink {
     sink_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
-    abort_task: Arc<AtomicBool>,
+    abort_task: Arc<Notify>,
     event_ch: broadcast::Sender<BlinkEventKind>,
     echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
@@ -45,8 +42,7 @@ pub struct OpusSink {
 impl Drop for OpusSink {
     fn drop(&mut self) {
         // this is a failsafe in case the caller doesn't close the associated TrackRemote
-        self.abort_task
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.abort_task.notify_waiters()
     }
 }
 
@@ -103,7 +99,7 @@ impl OpusSink {
         let event_ch2 = event_ch.clone();
         let peer_id2 = peer_id.clone();
         let echo_canceller2 = echo_canceller.clone();
-        let abort_task = Arc::new(AtomicBool::new(false));
+        let abort_task = Arc::new(Notify::new());
         let abort_task2 = abort_task.clone();
         tokio::spawn(async move {
             let echo_canceller_id = match echo_canceller2.lock().add_sink_track() {
@@ -113,23 +109,26 @@ impl OpusSink {
                     return;
                 }
             };
-            if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
-                track: track2,
-                sample_builder,
-                producer,
-                decoder,
-                resampler,
-                channel_mixer,
-                event_ch: event_ch2,
-                peer_id: peer_id2,
-                echo_canceller_id,
-                echo_canceller: echo_canceller2.clone(),
-                abort_task: abort_task2,
-            })
-            .await
-            {
-                log::error!("error decoding media stream: {}", e);
-            }
+            tokio::select! {
+                _ = abort_task2.notified() => {},
+                r = decode_media_stream(DecodeMediaStreamArgs {
+                    track: track2,
+                    sample_builder,
+                    producer,
+                    decoder,
+                    resampler,
+                    channel_mixer,
+                    event_ch: event_ch2,
+                    peer_id: peer_id2,
+                    echo_canceller_id,
+                    echo_canceller: echo_canceller2.clone(),
+                }) => {
+                    if let Err(e) = r {
+                        log::error!("error decoding media stream: {}", e);
+                    }
+                }
+            };
+
             if let Err(e) = echo_canceller2.lock().remove_sink_track(echo_canceller_id) {
                 log::error!("failed to remove sink track from echo canceller: {e}");
             }
@@ -187,8 +186,7 @@ impl SinkTrack for OpusSink {
     }
     fn change_output_device(&mut self, output_device: &cpal::Device) -> Result<()> {
         self.stream.pause()?;
-        self.abort_task
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.abort_task.notify_waiters();
 
         let params = SinkTrackParams {
             peer_id: self.peer_id.clone(),
@@ -217,7 +215,6 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     peer_id: DID,
     echo_canceller_id: Uuid,
     echo_canceller: Arc<WarpMutex<EchoCanceller>>,
-    abort_task: Arc<AtomicBool>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -236,7 +233,6 @@ where
         peer_id,
         echo_canceller_id,
         echo_canceller,
-        abort_task,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -245,10 +241,8 @@ where
     let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
+
     loop {
-        if abort_task.load(std::sync::atomic::Ordering::Relaxed) {
-            break;
-        }
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {
                 // get RTP packet
