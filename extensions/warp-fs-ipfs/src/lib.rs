@@ -84,8 +84,12 @@ impl IpfsFileSystem {
             let account = filesystem.account.clone();
             async move {
                 if !account.is_ready() {
-                    let Ok(mut stream) = account.extension_subscribe() else {
-                        return
+                    let mut stream = match account.extension_subscribe() {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            error!("Error while getting extensions stream: {e}");
+                            return;
+                        }
                     };
 
                     while let Some(event) = stream.next().await {

@@ -79,8 +79,12 @@ impl IpfsMessaging {
             async move {
                 if !messaging.account.is_ready() {
                     trace!("Identity doesnt exist. Waiting for it to load or to be created");
-                    let Ok(mut stream) = messaging.account.extension_subscribe() else {
-                        return
+                    let mut stream = match messaging.account.extension_subscribe() {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            error!("Error while getting extensions stream: {e}");
+                            return;
+                        }
                     };
 
                     while let Some(event) = stream.next().await {
