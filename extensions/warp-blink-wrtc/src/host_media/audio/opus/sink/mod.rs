@@ -6,7 +6,6 @@ use cpal::{
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::sync::{broadcast, Notify};
-use uuid::Uuid;
 use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
@@ -102,13 +101,6 @@ impl OpusSink {
         let abort_task = Arc::new(Notify::new());
         let abort_task2 = abort_task.clone();
         tokio::spawn(async move {
-            let echo_canceller_id = match echo_canceller2.lock().add_sink_track() {
-                Ok(r) => r,
-                Err(e) => {
-                    log::error!("failed to add sink track to echo canceller: {e}");
-                    return;
-                }
-            };
             tokio::select! {
                 _ = abort_task2.notified() => {},
                 r = decode_media_stream(DecodeMediaStreamArgs {
@@ -120,7 +112,6 @@ impl OpusSink {
                     channel_mixer,
                     event_ch: event_ch2,
                     peer_id: peer_id2,
-                    echo_canceller_id,
                     echo_canceller: echo_canceller2.clone(),
                 }) => {
                     if let Err(e) = r {
@@ -129,9 +120,6 @@ impl OpusSink {
                 }
             };
 
-            if let Err(e) = echo_canceller2.lock().remove_sink_track(echo_canceller_id) {
-                log::error!("failed to remove sink track from echo canceller: {e}");
-            }
             log::debug!("stopping decode_media_stream thread");
         });
 
@@ -213,7 +201,6 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
-    echo_canceller_id: Uuid,
     echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
 
@@ -231,7 +218,6 @@ where
         mut channel_mixer,
         event_ch,
         peer_id,
-        echo_canceller_id,
         echo_canceller,
     } = args;
     // speech_detector should emit at most 1 event per second
@@ -290,7 +276,7 @@ where
                                 webrtc_samples.push(*sample);
                                 if webrtc_samples.len() == 480 {
                                     let _ = echo_canceller.lock().insert_render_frame(
-                                        echo_canceller_id,
+                                        &peer_id,
                                         webrtc_samples.as_mut_slice(),
                                     );
                                     webrtc_samples.clear();

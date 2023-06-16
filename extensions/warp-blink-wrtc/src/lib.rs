@@ -260,6 +260,15 @@ impl BlinkImpl {
             Some(r) => r,
             None => bail!("blink not initialized"),
         };
+
+        let other_participants = call
+            .participants()
+            .iter()
+            .filter(|x| x != &own_id)
+            .cloned()
+            .collect();
+        host_media::init_echo_canceller(other_participants).await?;
+
         self.active_call.write().await.replace(call.clone().into());
         let audio_source_codec = self.audio_source_codec.read().await;
         // ensure there is an audio source track

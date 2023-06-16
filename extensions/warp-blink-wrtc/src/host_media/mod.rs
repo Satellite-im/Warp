@@ -24,6 +24,7 @@ struct Data {
     audio_output_device: Option<cpal::Device>,
     audio_source_track: Option<Box<dyn audio::SourceTrack>>,
     audio_sink_tracks: HashMap<DID, Box<dyn audio::SinkTrack>>,
+    audio_config: blink::AudioProcessingConfig,
     echo_canceller: Arc<WarpMutex<EchoCanceller>>,
 }
 
@@ -35,20 +36,29 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
         audio_output_device: cpal_host.default_output_device(),
         audio_source_track: None,
         audio_sink_tracks: HashMap::new(),
+        audio_config: blink::AudioProcessingConfig::default(),
         echo_canceller: Arc::new(WarpMutex::new(
-            EchoCanceller::new().expect("failed to create echo canceller"),
+            EchoCanceller::new(vec![]).expect("failed to create echo canceller"),
         )),
     }
 });
 
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
 
+pub async fn init_echo_canceller(other_participants: Vec<DID>) -> anyhow::Result<()> {
+    let _lock = LOCK.write().await;
+    let mut echo_canceller = audio::echo_canceller::EchoCanceller::new(other_participants)?;
+    unsafe {
+        echo_canceller.config_audio_processor(DATA.audio_config.clone())?;
+        DATA.echo_canceller = Arc::new(WarpMutex::new(echo_canceller));
+    }
+
+    Ok(())
+}
 pub async fn config_audio_processing(config: blink::AudioProcessingConfig) {
     let _lock = LOCK.write().await;
     unsafe {
-        if let Err(e) = DATA.echo_canceller.lock().config_audio_processor(config) {
-            log::error!("failed to config audio processor: {e}");
-        }
+        DATA.audio_config = config;
     }
 }
 

@@ -1,6 +1,5 @@
-use anyhow::{bail, Result};
-use uuid::Uuid;
-use warp::blink;
+use anyhow::Result;
+use warp::{blink, crypto::DID};
 use webrtc_audio_processing::{
     EchoCancellation, EchoCancellationSuppressionLevel, NoiseSuppression, NoiseSuppressionLevel,
     Processor as AudioProcessor, VoiceDetection, VoiceDetectionLikelihood,
@@ -9,7 +8,7 @@ use webrtc_audio_processing::{
 pub const AUDIO_FRAME_SIZE: usize = 480;
 pub struct EchoCanceller {
     // when a SinkTrack adds a frame, this is used to determine which Vec of frames gets updated
-    sink_ids: Vec<Uuid>,
+    sink_ids: Vec<DID>,
     // these come from SinkTracks. they get processed before processing a capture frame.
     render_frames: Vec<Vec<f32>>,
     audio_processor: AudioProcessor,
@@ -18,17 +17,21 @@ pub struct EchoCanceller {
 }
 
 impl EchoCanceller {
-    pub fn new() -> Result<Self> {
+    pub fn new(other_participants: Vec<DID>) -> Result<Self> {
         let initialization_config = webrtc_audio_processing::InitializationConfig {
             num_capture_channels: 1,
-            num_render_channels: 0,
+            num_render_channels: other_participants.len() as i32,
             ..Default::default()
         };
         let audio_processing_config = webrtc_audio_processing::Config::default();
         let audio_processor = AudioProcessor::new(&initialization_config)?;
+        let mut render_frames = vec![];
+        for _ in 0..other_participants.len() {
+            render_frames.push(Vec::from([0.0; AUDIO_FRAME_SIZE]));
+        }
         Ok(Self {
-            sink_ids: vec![],
-            render_frames: vec![vec![]],
+            sink_ids: other_participants,
+            render_frames,
             audio_processor,
             initialization_config,
             audio_processing_config,
@@ -90,50 +93,11 @@ impl EchoCanceller {
         Ok(())
     }
 
-    pub fn add_sink_track(&mut self) -> Result<Uuid> {
-        // order the operations to not modify self in the event of an error
-        let mut new_config = self.initialization_config;
-        new_config.num_capture_channels += 1;
-        let mut ap = AudioProcessor::new(&new_config)?;
-        self.initialization_config = new_config;
-
-        ap.set_config(self.audio_processing_config.clone());
-
-        let id = Uuid::new_v4();
-        self.sink_ids.push(id);
-        self.render_frames.push(Vec::from([0.0; AUDIO_FRAME_SIZE]));
-
-        Ok(id)
-    }
-
-    pub fn remove_sink_track(&mut self, sink_id: Uuid) -> Result<()> {
-        if self.initialization_config.num_capture_channels == 0 {
-            bail!("no tracks to remove");
-        }
-
+    pub fn insert_render_frame(&mut self, sink_id: &DID, frame: &[f32]) -> Result<()> {
         let idx = self
             .sink_ids
             .iter()
-            .position(|x| x == &sink_id)
-            .ok_or(anyhow::anyhow!("id not found"))?;
-
-        let mut new_config = self.initialization_config;
-        new_config.num_capture_channels -= 1;
-        let mut ap = AudioProcessor::new(&new_config)?;
-        self.initialization_config = new_config;
-        ap.set_config(self.audio_processing_config.clone());
-
-        self.sink_ids.remove(idx);
-        self.render_frames.remove(idx);
-
-        Ok(())
-    }
-
-    pub fn insert_render_frame(&mut self, sink_id: Uuid, frame: &[f32]) -> Result<()> {
-        let idx = self
-            .sink_ids
-            .iter()
-            .position(|x| x == &sink_id)
+            .position(|x| x == sink_id)
             .ok_or(anyhow::anyhow!("id not found"))?;
         self.render_frames[idx] = Vec::from(frame);
 
@@ -144,6 +108,12 @@ impl EchoCanceller {
         self.audio_processor
             .process_render_frame_noninterleaved(&mut self.render_frames)?;
         self.audio_processor.process_capture_frame(frame)?;
+
+        let mut render_frames = vec![];
+        for _ in 0..self.sink_ids.len() {
+            render_frames.push(Vec::from([0.0; AUDIO_FRAME_SIZE]));
+        }
+        self.render_frames = render_frames;
         Ok(())
     }
 }
