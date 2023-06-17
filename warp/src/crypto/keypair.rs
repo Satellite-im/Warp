@@ -120,13 +120,9 @@ pub mod ffi {
         os::raw::c_char,
     };
 
-    use crate::{
-        error::Error,
-        ffi::{FFIResult, FFIResult_Null},
-        tesseract::Tesseract,
-    };
+    use crate::{error::Error, ffi::FFIResult_Null, tesseract::Tesseract};
 
-    use super::{PhraseType, DID};
+    use super::PhraseType;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -136,17 +132,6 @@ pub mod ffi {
             Ok(cstr) => cstr.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn did_from_mnemonic(phrase: *const c_char) -> FFIResult<DID> {
-        if phrase.is_null() {
-            return FFIResult::err(Error::from(anyhow::anyhow!("phrase is null")));
-        }
-
-        let phrase = CStr::from_ptr(phrase).to_string_lossy().to_string();
-        super::did_from_mnemonic(&phrase, None).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
