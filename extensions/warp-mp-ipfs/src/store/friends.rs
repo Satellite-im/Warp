@@ -154,11 +154,10 @@ impl FriendsStore {
             wait_on_response,
         };
 
-        let stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await?;
-
         tokio::spawn({
             let mut store = store.clone();
             async move {
+                log::info!("Loading queue");
                 tokio::spawn({
                     let store = store.clone();
                     async move { if let Err(_e) = store.queue.load().await {} }
@@ -169,6 +168,7 @@ impl FriendsStore {
                         if let Err(_e) = phonebook.add_relay(addr).await {}
                     }
 
+                    log::info!("Loading friends list into phonebook");
                     if let Ok(friends) = store.friends_list().await {
                         if let Err(_e) = phonebook.add_friend_list(friends).await {
                             error!("Error adding friends in phonebook: {_e}");
@@ -213,7 +213,15 @@ impl FriendsStore {
                         }
                     }
                 });
-                tokio::task::yield_now().await;
+
+                let stream = match store.ipfs.pubsub_subscribe(store.did_key.inbox()).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        //TODO: Maybe panic as a means of notifying about this being a fatal error?
+                        log::error!("Error subscribing to topic: {e}");
+                        return;
+                    }
+                };
 
                 futures::pin_mut!(stream);
 
@@ -264,6 +272,7 @@ impl FriendsStore {
             return Ok(());
         }
 
+        //TODO: Send error if dropped early due to error when processing request
         let mut signal = self.signal.write().await.remove(&data.sender);
 
         log::debug!("Event {:?}", data.event);
@@ -470,6 +479,7 @@ impl FriendsStore {
                 }
 
                 if let Some(tx) = std::mem::take(&mut signal) {
+                    log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Err(Error::BlockedByUser));
                 }
             }
@@ -499,11 +509,13 @@ impl FriendsStore {
             }
             Event::Response => {
                 if let Some(tx) = std::mem::take(&mut signal) {
+                    log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Ok(()));
                 }
             }
         };
         if let Some(tx) = std::mem::take(&mut signal) {
+            log::debug!("Signaling broadcast of response...");
             let _ = tx.send(Ok(()));
         }
 
