@@ -1083,7 +1083,7 @@ impl IdentityStore {
                                             tokio::spawn({
                                                 let ipfs = store.ipfs.clone();
                                                 let emit = emit;
-                                                let tx = store.event.clone();
+                                                let store = store.clone();
                                                 let did = in_did.clone();
                                                 async move {
                                                     let mut stream = ipfs
@@ -1101,7 +1101,7 @@ impl IdentityStore {
                                                     }
 
                                                     if emit {
-                                                        let _ = tx.send(
+                                                        store.emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
                                                                 did,
                                                             },
@@ -1140,7 +1140,6 @@ impl IdentityStore {
                                             tokio::spawn({
                                                 let ipfs = store.ipfs.clone();
                                                 let emit = emit;
-                                                let tx = store.event.clone();
                                                 let did = in_did.clone();
                                                 async move {
                                                     let mut stream = ipfs
@@ -1159,7 +1158,7 @@ impl IdentityStore {
                                                     }
 
                                                     if emit {
-                                                        let _ = tx.send(
+                                                        store.emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
                                                                 did,
                                                             },
@@ -1176,12 +1175,9 @@ impl IdentityStore {
 
                             if emit {
                                 log::trace!("Emitting identity update event");
-                                let tx = self.event.clone();
-                                let _ = tx
-                                    .send(MultiPassEventKind::IdentityUpdate {
-                                        did: document.did.clone(),
-                                    })
-                                    .ok();
+                                self.emit_event(MultiPassEventKind::IdentityUpdate {
+                                    did: document.did.clone(),
+                                });
                             }
                         }
                     }
@@ -1203,13 +1199,8 @@ impl IdentityStore {
                         }
 
                         if matches!(self.update_event, UpdateEvents::Enabled) {
-                            tokio::spawn({
-                                let tx = self.event.clone();
-                                let did = document_did.clone();
-                                async move {
-                                    let _ = tx.send(MultiPassEventKind::IdentityUpdate { did });
-                                }
-                            });
+                            let did = document_did.clone();
+                            self.emit_event(MultiPassEventKind::IdentityUpdate { did });
                         }
 
                         let mut emit = false;
@@ -1252,20 +1243,22 @@ impl IdentityStore {
                                         } else {
                                             if let Some(picture) = picture {
                                                 tokio::spawn({
-                                                    let tx = store.event.clone();
                                                     let ipfs = store.ipfs.clone();
                                                     let did = in_did.clone();
+                                                    let store = store.clone();
                                                     async move {
                                                         let mut stream = ipfs
                                                             .unixfs()
                                                             .cat(picture, None, &[], false)
                                                             .await?
                                                             .boxed();
+
                                                         while let Some(_d) = stream.next().await {
                                                             let _d =
                                                                 _d.map_err(anyhow::Error::from)?;
                                                         }
-                                                        let _ = tx.send(
+
+                                                        store.emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
                                                                 did,
                                                             },
@@ -2114,4 +2107,8 @@ impl IdentityStore {
     }
 
     pub fn clear_internal_cache(&mut self) {}
+
+    pub fn emit_event(&self, event: MultiPassEventKind) {
+        let _ = self.event.send(event);
+    }
 }
