@@ -328,7 +328,6 @@ impl FriendsStore {
                         .await?;
 
                     tokio::spawn({
-                        let tx = self.tx.clone();
                         let store = self.identity.clone();
                         let from = data.sender.clone();
                         async move {
@@ -347,11 +346,7 @@ impl FriendsStore {
                             .await
                             .ok();
 
-                            if let Err(e) =
-                                tx.send(MultiPassEventKind::FriendRequestReceived { from })
-                            {
-                                error!("Error broadcasting event: {e}");
-                            }
+                            store.emit_event(MultiPassEventKind::FriendRequestReceived { from });
                         }
                     });
                 }
@@ -377,12 +372,9 @@ impl FriendsStore {
                     .root_document_remove_request(&internal_request)
                     .await?;
 
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::OutgoingFriendRequestRejected { did: data.sender })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
+                    did: data.sender,
+                });
             }
             Event::Remove => {
                 if self.is_friend(&data.sender).await? {
@@ -403,32 +395,19 @@ impl FriendsStore {
                     .root_document_remove_request(&internal_request)
                     .await?;
 
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.sender })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
+                    did: data.sender,
+                });
             }
             Event::Block => {
                 if self.has_request_from(&data.sender).await? {
-                    if let Err(e) = self
-                        .tx
-                        .send(MultiPassEventKind::IncomingFriendRequestClosed {
-                            did: data.sender.clone(),
-                        })
-                    {
-                        error!("Error broadcasting event: {e}");
-                    }
+                    self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
+                        did: data.sender.clone(),
+                    });
                 } else if self.sent_friend_request_to(&data.sender).await? {
-                    if let Err(e) =
-                        self.tx
-                            .send(MultiPassEventKind::OutgoingFriendRequestRejected {
-                                did: data.sender.clone(),
-                            })
-                    {
-                        error!("Error broadcasting event: {e}");
-                    }
+                    self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
+                        did: data.sender.clone(),
+                    });
                 }
 
                 let list = self.list_all_raw_request().await?;
@@ -483,12 +462,7 @@ impl FriendsStore {
                             let _ = store.request(&sender, RequestOption::Identity).await.ok();
                         }
                     });
-                    if let Err(e) = self
-                        .tx
-                        .send(MultiPassEventKind::UnblockedBy { did: data.sender })
-                    {
-                        error!("Error broadcasting event: {e}");
-                    }
+                    self.emit_event(MultiPassEventKind::UnblockedBy { did: data.sender });
                 }
             }
             Event::Response => {
@@ -667,14 +641,10 @@ impl FriendsStore {
         if let Some(entry) = self.queue.get(pubkey).await {
             if entry.event == Event::Request {
                 self.queue.remove(pubkey).await;
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::OutgoingFriendRequestClosed {
-                        did: pubkey.clone(),
-                    })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
+                    did: pubkey.clone(),
+                });
+
                 return Ok(());
             }
         }
@@ -818,11 +788,9 @@ impl FriendsStore {
         // We dont care if this errors or not.
         let _ = self.identity.push(pubkey).await.ok();
 
-        if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
+        self.emit_event(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
+        });
 
         Ok(())
     }
@@ -854,11 +822,9 @@ impl FriendsStore {
                 .await?;
         }
 
-        if let Err(e) = self.tx.send(MultiPassEventKind::FriendRemoved {
+        self.emit_event(MultiPassEventKind::FriendRemoved {
             did: pubkey.clone(),
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
+        });
 
         Ok(())
     }
@@ -993,31 +959,19 @@ impl FriendsStore {
 
         match payload.event {
             Event::Request => {
-                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestSent {
+                self.emit_event(MultiPassEventKind::FriendRequestSent {
                     to: recipient.clone(),
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
+                });
             }
             Event::Retract => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::OutgoingFriendRequestClosed {
-                        did: recipient.clone(),
-                    })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
+                    did: recipient.clone(),
+                });
             }
             Event::Reject => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::IncomingFriendRequestRejected {
-                        did: recipient.clone(),
-                    })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::IncomingFriendRequestRejected {
+                    did: recipient.clone(),
+                });
             }
             Event::Block => {
                 tokio::spawn({
@@ -1031,11 +985,9 @@ impl FriendsStore {
                             .ok();
                     }
                 });
-                if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
+                self.emit_event(MultiPassEventKind::Blocked {
                     did: recipient.clone(),
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
+                });
             }
             Event::Unblock => {
                 tokio::spawn({
@@ -1049,14 +1001,21 @@ impl FriendsStore {
                             .ok();
                     }
                 });
-                if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
+
+                self.emit_event(MultiPassEventKind::Unblocked {
                     did: recipient.clone(),
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
+                });
             }
             _ => {}
         };
         Ok(())
+    }
+}
+
+impl FriendsStore {
+    pub fn emit_event(&self, event: MultiPassEventKind) {
+        if let Err(e) = self.tx.send(event) {
+            error!("Error broadcasting event: {e}");
+        }
     }
 }
