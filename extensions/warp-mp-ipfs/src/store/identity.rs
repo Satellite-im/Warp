@@ -11,10 +11,7 @@ use futures::{
     FutureExt, StreamExt,
 };
 use ipfs::{Ipfs, IpfsPath, Keypair, Multiaddr};
-use libipld::{
-    serde::{from_ipld, to_ipld},
-    Cid,
-};
+use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -1031,7 +1028,7 @@ impl IdentityStore {
                             let document_did = identity.did.clone();
                             cache_documents.replace(identity.clone());
 
-                            let new_cid = self.put_dag(cache_documents).await?;
+                            let new_cid = cache_documents.to_cid(&self.ipfs).await?;
 
                             self.ipfs.insert_pin(&new_cid, false).await?;
                             self.save_cache_cid(new_cid).await?;
@@ -1193,7 +1190,7 @@ impl IdentityStore {
                         let document_did = identity.did.clone();
                         cache_documents.insert(identity.clone());
 
-                        let new_cid = self.put_dag(cache_documents).await?;
+                        let new_cid = cache_documents.to_cid(&self.ipfs).await?;
 
                         self.ipfs.insert_pin(&new_cid, false).await?;
                         self.save_cache_cid(new_cid).await?;
@@ -1373,7 +1370,7 @@ impl IdentityStore {
         }
     }
 
-    pub fn discovery_type(&self) -> DiscoveryConfig {
+    pub fn discovery_type(&self) -> &DiscoveryConfig {
         self.discovery.discovery_config()
     }
 
@@ -1427,7 +1424,7 @@ impl IdentityStore {
         let did_kp = self.get_keypair_did()?;
         let identity = identity.sign(&did_kp)?;
 
-        let ident_cid = self.put_dag(identity.clone()).await?;
+        let ident_cid = identity.to_cid(&self.ipfs).await?;
 
         let mut root_document = RootDocument {
             identity: ident_cid,
@@ -1436,7 +1433,7 @@ impl IdentityStore {
 
         root_document.sign(&did_kp)?;
 
-        let root_cid = self.put_dag(root_document).await?;
+        let root_cid = root_document.to_cid(&self.ipfs).await?;
 
         // Pin the dag
         self.ipfs.insert_pin(&root_cid, true).await?;
@@ -1600,7 +1597,7 @@ impl IdentityStore {
         let identity = identity.sign(&kp)?;
 
         let mut root_document = self.get_root_document().await?;
-        let ident_cid = self.put_dag(identity).await?;
+        let ident_cid = identity.to_cid(&self.ipfs).await?;
         root_document.identity = ident_cid;
 
         self.set_root_document(root_document).await
@@ -1851,39 +1848,7 @@ impl IdentityStore {
     }
 
     pub async fn get_local_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
-        self.ipfs
-            .dag()
-            .get(path, &[], true)
-            .await
-            .map_err(anyhow::Error::from)
-            .map_err(Error::from)
-            .and_then(|ipld| {
-                from_ipld::<D>(ipld)
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
-            })
-    }
-
-    pub async fn get_dag<D: DeserializeOwned>(
-        &self,
-        path: IpfsPath,
-        timeout: Option<Duration>,
-    ) -> Result<D, Error> {
-        //Because it utilizes DHT requesting other nodes for the cid, it will stall so here we would need to timeout
-        //the request.
-        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
-        let identity = match tokio::time::timeout(timeout, self.ipfs.get_dag(path)).await {
-            Ok(Ok(ipld)) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
-            Ok(Err(e)) => return Err(Error::Any(e)),
-            Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-        };
-        Ok(identity)
-    }
-
-    pub async fn put_dag<S: Serialize>(&self, data: S) -> Result<Cid, Error> {
-        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
-        let cid = self.ipfs.put_dag(ipld).await?;
-        Ok(cid)
+        path.get_local_dag(&self.ipfs).await
     }
 
     pub async fn own_identity_document(&self) -> Result<IdentityDocument, Error> {

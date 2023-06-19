@@ -246,6 +246,9 @@ impl FriendsStore {
         let pk_did = &*self.did_key;
 
         let bytes = ecdh_decrypt(pk_did, Some(did), data)?;
+
+        log::trace!("received payload size: {} bytes", bytes.len());
+
         let data = serde_json::from_slice::<RequestResponsePayload>(&bytes)?;
 
         log::info!("Received event from {did}");
@@ -263,9 +266,12 @@ impl FriendsStore {
 
         let mut signal = self.signal.write().await.remove(&data.sender);
 
+        log::debug!("Event {:?}", data.event);
+
         // Before we validate the request, we should check to see if the key is blocked
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+            log::warn!("Received event from a blocked identity.");
             let payload = RequestResponsePayload {
                 sender: (*self.did_key).clone(),
                 event: Event::Block,
