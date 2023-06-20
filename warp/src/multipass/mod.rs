@@ -79,9 +79,6 @@ pub trait MultiPass:
 
     /// Update your own [`Identity`] using [`IdentityUpdate`]
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
-
-    /// Clear out cache related to [`Module::Accounts`]
-    fn refresh_cache(&mut self) -> Result<(), Error>;
 }
 
 dyn_clone::clone_trait_object!(MultiPass);

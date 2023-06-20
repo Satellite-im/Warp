@@ -912,20 +912,6 @@ impl MultiPass for IpfsIdentity {
 
         Ok(())
     }
-
-    // fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
-    //     let store = self.identity_store_sync()?;
-    //     let kp = store.get_raw_keypair()?.to_bytes();
-    //     let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-    //     let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
-    //     Ok(did.into())
-    // }
-
-    fn refresh_cache(&mut self) -> Result<(), Error> {
-        let mut store = self.identity_store_sync()?;
-        store.clear_internal_cache();
-        self.get_cache_mut()?.empty(DataType::from(self.module()))
-    }
 }
 
 #[async_trait::async_trait]
