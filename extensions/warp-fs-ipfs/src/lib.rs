@@ -25,7 +25,7 @@ use warp::constellation::{
 use warp::crypto::cipher::Cipher;
 use warp::crypto::did_key::{Generate, ECDH};
 use warp::crypto::zeroize::Zeroizing;
-use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
+use warp::crypto::{DIDKey, Ed25519KeyPair, KeyMaterial, DID};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -33,7 +33,7 @@ use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use warp::module::Module;
 
 use chrono::{DateTime, Utc};
-use ipfs::{Ipfs, IpfsPath};
+use ipfs::{Ipfs, IpfsPath, Keypair};
 
 use warp::constellation::{directory::Directory, Constellation};
 use warp::error::Error;
@@ -50,6 +50,7 @@ pub struct IpfsFileSystem {
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
+    keypair: Arc<RwLock<Option<Arc<DID>>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
     account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
@@ -71,6 +72,7 @@ impl IpfsFileSystem {
             config,
             index_cid: Default::default(),
             account: Default::default(),
+            keypair: Default::default(),
             ipfs: Default::default(),
             broadcast: tx,
             cache: None,
@@ -127,6 +129,8 @@ impl IpfsFileSystem {
         };
 
         let ipfs = ipfs_handle.ok_or(Error::ConstellationExtensionUnavailable)?;
+        let ipfs_keypair = ipfs.keypair()?;
+        *self.keypair.write() = Some(Arc::new(get_keypair_did(ipfs_keypair)?));
 
         *self.ipfs.write() = Some(ipfs);
 
@@ -152,9 +156,8 @@ impl IpfsFileSystem {
     pub async fn export_index(&self) -> Result<()> {
         let ipfs = self.ipfs()?;
         let index = self.export(ConstellationDataType::Json)?;
-        let account = self.account().await?;
 
-        let key = account.decrypt_private_key(None)?;
+        let key = self.keypair()?;
         let data = ecdh_encrypt(&key, None, index.as_bytes())?;
 
         let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
@@ -265,9 +268,8 @@ impl IpfsFileSystem {
                     let mut bytes = result.map_err(anyhow::Error::from)?;
                     data.append(&mut bytes);
                 }
-                let account = self.account().await?;
 
-                let key = account.decrypt_private_key(None)?;
+                let key = self.keypair()?;
 
                 let index_bytes = ecdh_decrypt(&key, None, data)?;
 
@@ -278,6 +280,11 @@ impl IpfsFileSystem {
             }
         }
         Ok(())
+    }
+
+    pub fn keypair(&self) -> Result<Arc<DID>> {
+        let kp = self.keypair.read().clone().ok_or(Error::Other)?;
+        Ok(kp)
     }
 
     pub async fn account(&self) -> Result<Box<dyn MultiPass>> {
@@ -1172,4 +1179,11 @@ pub(crate) fn to_file_type(name: &str) -> FileType {
         .unwrap_or(ExtensionType::Other);
 
     extension.into()
+}
+
+pub fn get_keypair_did(keypair: &Keypair) -> anyhow::Result<DID> {
+    let kp = Zeroizing::new(keypair.clone().try_into_ed25519()?.to_bytes());
+    let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+    Ok(did.into())
 }

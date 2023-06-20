@@ -20,7 +20,6 @@ use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::debug;
 use tracing::log::{self, error, info, trace, warn};
-use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
 use warp::sata::Sata;
@@ -34,7 +33,7 @@ use warp::{Extension, SingleHandle};
 use ipfs::{
     Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
 };
-use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
+use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
 use warp::multipass::{
@@ -914,13 +913,13 @@ impl MultiPass for IpfsIdentity {
         Ok(())
     }
 
-    fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
-        let store = self.identity_store_sync()?;
-        let kp = store.get_raw_keypair()?.to_bytes();
-        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-        let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
-        Ok(did.into())
-    }
+    // fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
+    //     let store = self.identity_store_sync()?;
+    //     let kp = store.get_raw_keypair()?.to_bytes();
+    //     let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+    //     let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+    //     Ok(did.into())
+    // }
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
         let mut store = self.identity_store_sync()?;

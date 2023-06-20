@@ -38,8 +38,8 @@ use warp::sync::Arc;
 
 use crate::store::payload::Payload;
 use crate::store::{
-    connected_to_peer, ecdh_decrypt, ecdh_encrypt, sign_serde, ConversationRequestKind,
-    ConversationRequestResponse, ConversationResponseKind, PeerTopic,
+    connected_to_peer, ecdh_decrypt, ecdh_encrypt, get_keypair_did, sign_serde,
+    ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, PeerTopic,
 };
 use crate::SpamFilter;
 
@@ -131,7 +131,7 @@ impl MessageStore {
 
         let queue = Arc::new(Default::default());
         let conversation_cid = Arc::new(Default::default());
-        let did = Arc::new(account.decrypt_private_key(None)?);
+        let did = Arc::new(get_keypair_did(ipfs.keypair()?)?);
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());

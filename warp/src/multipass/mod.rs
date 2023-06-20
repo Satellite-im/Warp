@@ -80,9 +80,6 @@ pub trait MultiPass:
     /// Update your own [`Identity`] using [`IdentityUpdate`]
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
 
-    /// Decrypt and provide private key for [`Identity`]
-    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error>;
-
     /// Clear out cache related to [`Module::Accounts`]
     fn refresh_cache(&mut self) -> Result<(), Error>;
 }
@@ -333,29 +330,6 @@ pub mod ffi {
         let mp = &mut *(ctx);
         let option = &*option;
         async_on_block(async { mp.update_identity(option.clone()).await }).into()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_decrypt_private_key(
-        ctx: *mut MultiPassAdapter,
-        passphrase: *const c_char,
-    ) -> FFIResult<DID> {
-        if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
-        }
-        let passphrase = match passphrase.is_null() {
-            false => {
-                let passphrase = CStr::from_ptr(passphrase).to_string_lossy().to_string();
-                Some(passphrase)
-            }
-            true => None,
-        };
-        let mp = &*(ctx);
-        match async_on_block(async { mp.decrypt_private_key(passphrase.as_deref()) }) {
-            Ok(key) => FFIResult::ok(key),
-            Err(e) => FFIResult::err(e),
-        }
     }
 
     #[allow(clippy::missing_safety_doc)]
