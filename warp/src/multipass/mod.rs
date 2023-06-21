@@ -331,17 +331,6 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_refresh_cache(ctx: *mut MultiPassAdapter) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
-
-        let mp = &mut *(ctx);
-        async_on_block(async { mp.refresh_cache() }).into()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
     pub unsafe extern "C" fn multipass_send_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const DID,
