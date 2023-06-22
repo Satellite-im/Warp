@@ -1,6 +1,4 @@
 use libipld::{serde::to_ipld, Ipld};
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
@@ -9,7 +7,6 @@ use warp_derive::FFIFree;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[serde(rename_all = "lowercase")]
 pub enum Comparator {
     Eq,
@@ -45,16 +42,13 @@ impl From<(Comparator, String, Ipld)> for ComparatorFilter {
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct QueryBuilder {
     r#where: Vec<(String, Ipld)>,
     comparator: Vec<ComparatorFilter>,
     limit: Option<usize>,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl QueryBuilder {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn import(data: &str) -> Result<QueryBuilder, Error> {
         serde_json::from_str(data).map_err(Error::SerdeJsonError)
     }

@@ -48,7 +48,6 @@ pub enum Code {
 macro_rules! create_hash_functions {
     ($code:expr) => {
         paste::item! {
-            #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
             pub fn [<$code:lower _multihash_slice>](slice: &[u8]) -> Result<Vec<u8>, crate::error::Error> {
                 multihash_slice::<$code>(Code::$code, slice).map_err(crate::error::Error::from)
             }
