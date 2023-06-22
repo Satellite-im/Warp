@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use warp::data::{DataObject, DataType};
+use warp::data::DataType;
 use warp::error::Error;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::DimensionData;
@@ -38,6 +38,7 @@ impl Constellation for MemorySystem {
         self.path.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         let mut internal_file = item::file::File::new(name);
 
@@ -57,7 +58,7 @@ impl Constellation for MemorySystem {
         file.set_size(bytes);
         file.hash_mut().hash_from_file(path)?;
 
-        self.current_directory()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file)?;
         if let Ok(mut cache) = self.get_cache_mut() {
             let data = Sata::default().encode(
                 warp::sata::libipld::IpldCodec::DagCbor,
@@ -67,10 +68,6 @@ impl Constellation for MemorySystem {
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            hook.trigger("filesystem::new_file", &object)
-        }
         let name = name.to_string();
 
         let stream = ConstellationProgressStream(
@@ -86,6 +83,7 @@ impl Constellation for MemorySystem {
         Ok(stream)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get(&self, name: &str, path: &str) -> Result<()> {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
@@ -133,7 +131,7 @@ impl Constellation for MemorySystem {
         file.set_size(bytes);
         file.hash_mut().hash_from_slice(buf)?;
 
-        self.current_directory()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file)?;
         if let Ok(mut cache) = self.get_cache_mut() {
             let data = Sata::default().encode(
                 warp::sata::libipld::IpldCodec::DagCbor,
@@ -143,10 +141,6 @@ impl Constellation for MemorySystem {
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            hook.trigger("filesystem::new_file", &object)
-        }
         Ok(())
     }
 
@@ -249,10 +243,6 @@ impl Constellation for MemorySystem {
 
         self.current_directory()?.add_item(directory)?;
 
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), ())?;
-            hook.trigger("filesystem::create_directory", &object)
-        }
         Ok(())
     }
 }

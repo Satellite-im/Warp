@@ -1,9 +1,6 @@
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 //
 /// `Messaging` - Allows direct, and multi-user encrypted messaging with ownership rights added so only
 ///             the expected users can edit, and delete messages.
@@ -18,7 +15,6 @@ use wasm_bindgen::prelude::*;
 ///
 #[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[repr(C)]
 pub enum Module {
     /// Allows for direct, and multi-user encrypted messaging with ownership

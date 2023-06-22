@@ -12,39 +12,16 @@ use crate::error::Error;
 use derive_more::Display;
 use warp_derive::FFIFree;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 /// `Item` is a type that handles both `File` and `Directory`
 #[derive(Serialize, Deserialize, Clone, Debug, warp_derive::FFIVec, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Item(ItemInner);
-
-impl core::hash::Hash for Item {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id().hash(state)
-    }
-}
-
-impl PartialEq for Item {
-    fn eq(&self, other: &Self) -> bool {
-        self.id() == other.id()
-    }
-}
-
-impl Eq for Item {}
-
-/// `Item` is a type that handles both `File` and `Directory`
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(untagged)]
-pub enum ItemInner {
+pub enum Item {
     File(File),
     Directory(Directory),
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FormatType {
     #[display(fmt = "generic")]
     #[default]
@@ -99,30 +76,27 @@ impl From<Directory> for Item {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Item {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn new_file(file: File) -> Item {
-        Item(ItemInner::File(file))
+        Item::File(file)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn new_directory(directory: Directory) -> Item {
-        Item(ItemInner::Directory(directory))
+        Item::Directory(directory)
     }
 }
 
 impl Item {
     pub fn file(&self) -> Option<File> {
-        match &self.0 {
-            ItemInner::File(item) => Some(item.clone()),
+        match self {
+            Item::File(item) => Some(item.clone()),
             _ => None,
         }
     }
 
     pub fn directory(&self) -> Option<Directory> {
-        match &self.0 {
-            ItemInner::Directory(item) => Some(item.clone()),
+        match self {
+            Item::Directory(item) => Some(item.clone()),
             _ => None,
         }
     }
@@ -132,193 +106,145 @@ impl Item {
 impl Item {
     /// Get id of `Item`
     pub fn id(&self) -> Uuid {
-        match &self.0 {
-            ItemInner::File(file) => file.id(),
-            ItemInner::Directory(directory) => directory.id(),
+        match self {
+            Item::File(file) => file.id(),
+            Item::Directory(directory) => directory.id(),
         }
     }
 
     /// Get the creation date of `Item`
     pub fn creation(&self) -> DateTime<Utc> {
-        match &self.0 {
-            ItemInner::File(file) => file.creation(),
-            ItemInner::Directory(directory) => directory.creation(),
+        match self {
+            Item::File(file) => file.creation(),
+            Item::Directory(directory) => directory.creation(),
         }
     }
 
     /// Get the modified date of `Item`
     pub fn modified(&self) -> DateTime<Utc> {
-        match &self.0 {
-            ItemInner::File(file) => file.modified(),
-            ItemInner::Directory(directory) => directory.modified(),
+        match self {
+            Item::File(file) => file.modified(),
+            Item::Directory(directory) => directory.modified(),
         }
     }
 }
 
-//TODO: Possibly remove depending on how we proceed with wasm compatibility
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl Item {
-    /// Get id of `Item`
-    #[wasm_bindgen(getter)]
-    pub fn id(&self) -> String {
-        match &self.0 {
-            ItemInner::File(file) => file.id(),
-            ItemInner::Directory(directory) => directory.id(),
-        }
-    }
-
-    /// Get the creation date of `Item`
-    #[wasm_bindgen(getter)]
-    pub fn creation(&self) -> i64 {
-        match &self.0 {
-            ItemInner::File(file) => file.creation(),
-            ItemInner::Directory(directory) => directory.creation(),
-        }
-    }
-
-    /// Get the modified date of `Item`
-    #[wasm_bindgen(getter)]
-    pub fn modified(&self) -> i64 {
-        match &self.0 {
-            ItemInner::File(file) => file.modified(),
-            ItemInner::Directory(directory) => directory.modified(),
-        }
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Item {
     /// Get string of `Item`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
-        match &self.0 {
-            ItemInner::File(file) => file.name(),
-            ItemInner::Directory(directory) => directory.name(),
+        match self {
+            Item::File(file) => file.name(),
+            Item::Directory(directory) => directory.name(),
         }
     }
 
     /// Get description of `Item`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn description(&self) -> String {
-        match &self.0 {
-            ItemInner::File(file) => file.description(),
-            ItemInner::Directory(directory) => directory.description(),
+        match self {
+            Item::File(file) => file.description(),
+            Item::Directory(directory) => directory.description(),
         }
     }
 
     /// Get size of `Item`.
     /// If `Item` is a `File` it will return the size of the `File`.
     /// If `Item` is a `Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn size(&self) -> usize {
-        match &self.0 {
-            ItemInner::File(file) => file.size(),
-            ItemInner::Directory(directory) => directory.get_items().iter().map(Item::size).sum(),
+        match self {
+            Item::File(file) => file.size(),
+            Item::Directory(directory) => directory.get_items().iter().map(Item::size).sum(),
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn thumbnail_format(&self) -> FormatType {
-        match &self.0 {
-            ItemInner::File(file) => file.thumbnail_format(),
-            ItemInner::Directory(directory) => directory.thumbnail_format(),
+        match self {
+            Item::File(file) => file.thumbnail_format(),
+            Item::Directory(directory) => directory.thumbnail_format(),
         }
     }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    
     pub fn thumbnail(&self) -> Vec<u8> {
-        match &self.0 {
-            ItemInner::File(file) => file.thumbnail(),
-            ItemInner::Directory(directory) => directory.thumbnail(),
+        match self {
+            Item::File(file) => file.thumbnail(),
+            Item::Directory(directory) => directory.thumbnail(),
         }
     }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    
     pub fn favorite(&self) -> bool {
-        match &self.0 {
-            ItemInner::File(file) => file.favorite(),
-            ItemInner::Directory(directory) => directory.favorite(),
+        match self {
+            Item::File(file) => file.favorite(),
+            Item::Directory(directory) => directory.favorite(),
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_favorite(&self, fav: bool) {
-        match &self.0 {
-            ItemInner::File(file) => file.set_favorite(fav),
-            ItemInner::Directory(directory) => directory.set_favorite(fav),
+        match self {
+            Item::File(file) => file.set_favorite(fav),
+            Item::Directory(directory) => directory.set_favorite(fav),
         }
     }
 
     /// Rename the name of `Item`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn rename(&self, name: &str) -> Result<(), Error> {
         let name = name.trim();
         if self.name() == name {
             return Err(Error::DuplicateName);
         }
 
-        match &self.0 {
-            ItemInner::File(file) => file.set_name(name),
-            ItemInner::Directory(directory) => directory.set_name(name),
+        match self {
+            Item::File(file) => file.set_name(name),
+            Item::Directory(directory) => directory.set_name(name),
         }
 
         Ok(())
     }
 
     /// Check to see if `Item` is `Directory`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_directory(&self) -> bool {
-        matches!(&self.0, ItemInner::Directory(_))
+        matches!(self, Item::Directory(_))
     }
 
     /// Check to see if `Item` is `File`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_file(&self) -> bool {
-        matches!(&self.0, ItemInner::File(_))
+        matches!(self, Item::File(_))
     }
 
     /// Returns the type that `Item` represents
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn item_type(&self) -> ItemType {
-        match self.0 {
-            ItemInner::Directory(_) => ItemType::DirectoryItem,
-            ItemInner::File(_) => ItemType::FileItem,
+        match self {
+            Item::Directory(_) => ItemType::DirectoryItem,
+            Item::File(_) => ItemType::FileItem,
         }
     }
 
     /// Set description of `Item`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_description(&self, desc: &str) {
-        match &self.0 {
-            ItemInner::File(file) => file.set_description(desc),
-            ItemInner::Directory(directory) => directory.set_description(desc),
+        match self {
+            Item::File(file) => file.set_description(desc),
+            Item::Directory(directory) => directory.set_description(desc),
         }
     }
 
     /// Set thumbnail of `Item`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_thumbnail(&self, data: &[u8]) {
-        match &self.0 {
-            ItemInner::File(file) => file.set_thumbnail(data),
-            ItemInner::Directory(directory) => directory.set_thumbnail(data),
+        match self {
+            Item::File(file) => file.set_thumbnail(data),
+            Item::Directory(directory) => directory.set_thumbnail(data),
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn set_thumbnail_format(&self, format: FormatType) {
-        match &self.0 {
-            ItemInner::File(file) => file.set_thumbnail_format(format),
-            ItemInner::Directory(directory) => directory.set_thumbnail_format(format),
+        match self {
+            Item::File(file) => file.set_thumbnail_format(format),
+            Item::Directory(directory) => directory.set_thumbnail_format(format),
         }
     }
 
     /// Set size of `Item` if its a `File`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_size(&self, size: usize) -> Result<(), Error> {
-        match &self.0 {
-            ItemInner::File(file) => file.set_size(size),
-            ItemInner::Directory(_) => return Err(Error::ItemNotFile),
+        match self {
+            Item::File(file) => file.set_size(size),
+            Item::Directory(_) => return Err(Error::ItemNotFile),
         }
         Ok(())
     }
