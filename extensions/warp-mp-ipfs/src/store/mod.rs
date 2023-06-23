@@ -7,7 +7,6 @@ pub mod queue;
 
 use std::{fmt::Display, time::Duration};
 
-use futures::StreamExt;
 use libipld::Multihash;
 use rust_ipfs as ipfs;
 
@@ -107,24 +106,6 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
     let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
     let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes()));
     Ok(did.into())
-}
-
-// This function stores the topic as a dag in a "discovery:<topic>" format and provide the cid over DHT and obtain the providers of the same cid
-// who are providing and connect to them.
-// Note that there is usually a delay in `ipfs.provide`.
-// TODO: Investigate the delay in providing the CID
-pub async fn discovery<S: AsRef<str>>(ipfs: ipfs::Ipfs, topic: S) -> anyhow::Result<()> {
-    let topic = topic.as_ref();
-    let cid = ipfs
-        .put_dag(libipld::ipld!(format!("discovery:{topic}")))
-        .await?;
-    ipfs.provide(cid).await?;
-
-    loop {
-        let mut stream = ipfs.get_providers(cid).await?;
-        while let Some(_providers) = stream.next().await {}
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
 }
 
 fn ecdh_encrypt<K: AsRef<[u8]>>(
