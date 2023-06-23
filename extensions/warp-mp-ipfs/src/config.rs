@@ -1,6 +1,7 @@
 use ipfs::Multiaddr;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
+use warp::multipass::identity::Identity;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
@@ -214,7 +215,10 @@ pub enum UpdateEvents {
     Disable,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+pub type DefaultPfpFn =
+    std::sync::Arc<dyn Fn(&Identity) -> Result<Vec<u8>, std::io::Error> + Send + Sync + 'static>;
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     /// Interval for broadcasting out identity (cannot be less than 3 minutes)
     /// Note:
@@ -243,6 +247,15 @@ pub struct StoreSetting {
     pub update_events: UpdateEvents,
     /// Disable providing images for identities
     pub disable_images: bool,
+    /// Function to call to provide data for a default profile picture if one is not apart of the identity
+    #[serde(skip)]
+    pub default_profile_picture: Option<DefaultPfpFn>,
+}
+
+impl std::fmt::Debug for StoreSetting {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreSetting").finish()
+    }
 }
 
 impl Default for StoreSetting {
@@ -259,6 +272,7 @@ impl Default for StoreSetting {
             emit_online_event: false,
             update_events: Default::default(),
             disable_images: false,
+            default_profile_picture: None,
         }
     }
 }
