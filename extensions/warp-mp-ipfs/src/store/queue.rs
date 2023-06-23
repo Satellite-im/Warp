@@ -14,7 +14,7 @@ use warp::{
     error::Error,
 };
 
-use crate::store::{ecdh_encrypt, PeerTopic};
+use crate::store::{ecdh_encrypt, PeerIdExt, PeerTopic};
 
 use super::{connected_to_peer, discovery::Discovery, friends::RequestResponsePayload};
 
@@ -226,8 +226,22 @@ impl QueueEntry {
                 let mut retry = 10;
                 loop {
                     let entry = entry.clone();
-                    if let Ok(crate::store::PeerConnectionType::Connected) =
-                        connected_to_peer(&entry.ipfs, entry.recipient.clone()).await
+                    //TODO: Replace with future event to detect connection/disconnection from peer as well as pubsub subscribing event
+                    let (connection_result, peers_result) = futures::join!(
+                        connected_to_peer(&entry.ipfs, entry.recipient.clone()),
+                        entry.ipfs.pubsub_peers(Some(entry.recipient.inbox()))
+                    );
+
+                    if matches!(
+                        connection_result,
+                        Ok(crate::store::PeerConnectionType::Connected)
+                    ) && peers_result
+                        .map(|list| {
+                            list.iter()
+                                .filter_map(|peer_id| peer_id.to_did().ok())
+                                .any(|did| did.eq(&entry.recipient))
+                        })
+                        .unwrap_or_default()
                     {
                         log::info!(
                             "{} is connected. Attempting to send request",
