@@ -10,8 +10,6 @@ use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use warp_derive::FFIFree;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 
 use chrono::{DateTime, Utc};
 use core::ops::Range;
@@ -981,7 +979,6 @@ pub trait RayGunEvents: Sync + Send {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct RayGunAdapter {
     object: Box<dyn RayGun>,

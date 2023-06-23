@@ -18,15 +18,6 @@ use item::Item;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-#[cfg(target_arch = "wasm32")]
-use js_sys::Promise;
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::future_to_promise;
-
 #[derive(Debug, Clone)]
 pub enum ConstellationEventKind {
     Uploaded {
@@ -291,7 +282,6 @@ pub trait ConstellationEvent: Sync + Send {
 /// types to be use for import and export.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum ConstellationDataType {
     Json,
     Yaml,
@@ -309,7 +299,6 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct ConstellationAdapter {
     object: Box<dyn Constellation>,
@@ -333,189 +322,6 @@ impl core::ops::DerefMut for ConstellationAdapter {
         &mut self.object
     }
 }
-
-// #[cfg(target_arch = "wasm32")]
-// #[wasm_bindgen]
-// impl ConstellationAdapter {
-//     #[wasm_bindgen]
-//     pub fn modified(&self) -> i64 {
-//         self.object.modified().timestamp()
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn version(&self) -> String {
-//         self.object.version().to_string()
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn root_directory(&self) -> Directory {
-//         self.object.root_directory().clone()
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn current_directory(&self) -> Directory {
-//         self.object.current_directory().clone()
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn select(&mut self, path: &str) -> Result<(), Error> {
-//         self.object.write().select(path)
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn go_back(&mut self) -> Result<(), Error> {
-//         self.object.write().go_back()
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn export(&self, data_type: ConstellationDataType) -> Result<String, Error> {
-//         self.object.read().export(data_type)
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn import(&mut self, data_type: ConstellationDataType, data: String) -> Result<(), Error> {
-//         self.object.write().import(data_type, data)
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn put(&mut self, remote: String, local: String) -> Promise {
-//         let inner = self.object.clone();
-//         future_to_promise(async move {
-//             let mut inner = inner
-//                 .write()
-//                 .put(&remote, &local)
-//                 .await
-//                 .map_err(crate::error::into_error)
-//                 .map_err(JsValue::from)?;
-
-//             Ok(JsValue::from_bool(true))
-//         })
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn get(&self, remote: String, local: String) -> Promise {
-//         let inner = self.object.clone();
-//         future_to_promise(async move {
-//             let inner = inner
-//                 .read()
-//                 .get(&remote, &local)
-//                 .await
-//                 .map_err(crate::error::into_error)
-//                 .map_err(JsValue::from)?;
-
-//             Ok(JsValue::from_bool(true))
-//         })
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn put_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
-//         let inner = self.object.clone();
-//         future_to_promise(async move {
-//             let mut inner = inner
-//                 .write()
-//                 .put_buffer(&remote, &data)
-//                 .await
-//                 .map_err(crate::error::into_error)
-//                 .map_err(JsValue::from)?;
-
-//             Ok(JsValue::from_bool(true))
-//         })
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn get_buffer(&self, remote: String) -> Promise {
-//         let inner = self.object.clone();
-//         future_to_promise(async move {
-//             let inner = inner.read();
-//             let data = inner
-//                 .get_buffer(&remote)
-//                 .await
-//                 .map_err(crate::error::into_error)?;
-//             let val = serde_wasm_bindgen::to_value(&data).unwrap();
-//             Ok(val)
-//         })
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn remove(&mut self, remote: String, recursive: bool) -> Promise {
-//         let inner = self.object.clone();
-//         future_to_promise(async move {
-//             let mut inner = inner.write();
-//             inner
-//                 .remove(&remote, recursive)
-//                 .await
-//                 .map_err(crate::error::into_error)
-//                 .map_err(JsValue::from)?;
-
-//             Ok(JsValue::from_bool(true))
-//         })
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn move_item(&mut self, from: String, to: String) -> Promise {
-//         let inner = self.object.clone();
-//         future_to_promise(async move {
-//             let mut inner = inner
-//                 .write()
-//                 .move_item(&from, &to)
-//                 .await
-//                 .map_err(crate::error::into_error)
-//                 .map_err(JsValue::from)?;
-
-//             Ok(JsValue::from_bool(true))
-//         })
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn create_directory(&mut self, remote: String, recursive: bool) -> Promise {
-//         let inner = self.object.clone();
-//         future_to_promise(async move {
-//             let mut inner = inner.write();
-//             inner
-//                 .create_directory(&remote, recursive)
-//                 .await
-//                 .map_err(crate::error::into_error)
-//                 .map_err(JsValue::from)?;
-
-//             Ok(JsValue::from_bool(true))
-//         })
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn sync_ref(&mut self, remote: String) -> Promise {
-//         let inner = self.object.clone();
-//         future_to_promise(async move {
-//             let mut inner = inner.write();
-//             inner
-//                 .sync_ref(&remote)
-//                 .await
-//                 .map_err(crate::error::into_error)
-//                 .map_err(JsValue::from)?;
-
-//             Ok(JsValue::from_bool(true))
-//         })
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn id(&self) -> String {
-//         self.object.read().id()
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn name(&self) -> String {
-//         self.object.read().name()
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn description(&self) -> String {
-//         self.object.read().description()
-//     }
-
-//     #[wasm_bindgen]
-//     pub fn module(&self) -> crate::module::Module {
-//         self.object.read().module()
-//     }
-// }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {

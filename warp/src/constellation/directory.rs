@@ -9,9 +9,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp_derive::FFIFree;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 /// `DirectoryType` handles the supported types for the directory.
 #[derive(Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
 #[serde(rename_all = "lowercase")]
@@ -23,7 +20,6 @@ pub enum DirectoryType {
 
 /// `Directory` handles folders and its contents.
 #[derive(Clone, Serialize, Deserialize, Debug, warp_derive::FFIVec, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Directory {
     /// ID of the `Directory`
     id: Arc<Uuid>,
@@ -89,7 +85,6 @@ impl Default for Directory {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Directory {
     /// Create a `Directory` instance
     ///
@@ -107,7 +102,6 @@ impl Directory {
     ///     let test = root.get_item("test").and_then(|item| item.get_directory()).unwrap();
     ///     assert_eq!(test.has_item("test2"), true);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new(name: &str) -> Self {
         let directory = Directory::default();
         // let name = name.trim();
@@ -152,7 +146,6 @@ impl Directory {
     ///
     ///     assert_eq!(root.has_item("Sub Directory"), true);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn has_item(&self, item_name: &str) -> bool {
         self.get_items()
             .iter()
@@ -162,7 +155,6 @@ impl Directory {
     }
 
     /// Add a file to the `Directory`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn add_file(&self, file: File) -> Result<(), Error> {
         if self.has_item(&file.name()) {
             return Err(Error::DuplicateName);
@@ -173,7 +165,6 @@ impl Directory {
     }
 
     /// Add a directory to the `Directory`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn add_directory(&self, directory: Directory) -> Result<(), Error> {
         if self.has_item(&directory.name()) {
             return Err(Error::DuplicateName);
@@ -205,7 +196,6 @@ impl Directory {
     ///     assert_eq!(root.get_item_index("Sub3 Directory").is_err(), true);
     ///
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn get_item_index(&self, item_name: &str) -> Result<usize, Error> {
         self.items
             .read()
@@ -232,7 +222,6 @@ impl Directory {
     ///     assert_eq!(root.has_item("Test Directory"), true);
     ///
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn rename_item(&self, current_name: &str, new_name: &str) -> Result<(), Error> {
         self.get_item_by_path(current_name)?.rename(new_name)
     }
@@ -252,7 +241,6 @@ impl Directory {
     ///     let _ = root.remove_item("Sub Directory").unwrap();
     ///     assert_eq!(root.has_item("Sub Directory"), false);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_item(&self, item_name: &str) -> Result<Item, Error> {
         if !self.has_item(item_name) {
             return Err(Error::InvalidItem);
@@ -294,7 +282,6 @@ impl Directory {
     ///
     ///         assert_eq!(root.get_item_by_path("Sub Directory 1/Sub Directory 2/Sub Directory 3").is_err(), true);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_item_from_path(&self, directory: &str, item: &str) -> Result<Item, Error> {
         self.get_item_by_path(directory)?
             .get_directory()?
@@ -321,7 +308,6 @@ impl Directory {
     ///
     ///     assert_ne!(root.has_item("Sub Directory 2"), true);
     /// ```
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn move_item_to(&self, child: &str, dst: &str) -> Result<(), Error> {
         let (child, dst) = (child.trim(), dst.trim());
 
@@ -507,14 +493,11 @@ impl Directory {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Directory {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
         self.name.read().to_owned()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_name(&self, name: &str) {
         let mut name = name.trim();
         if name.len() > 256 {
@@ -523,59 +506,48 @@ impl Directory {
         *self.name.write() = name.to_string()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_thumbnail_format(&self, format: FormatType) {
         *self.thumbnail_format.write() = format;
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn thumbnail_format(&self) -> FormatType {
         self.thumbnail_format.read().clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_thumbnail(&self, desc: &[u8]) {
         *self.thumbnail.write() = desc.to_vec()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn thumbnail(&self) -> Vec<u8> {
         self.thumbnail.read().to_vec()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_favorite(&self, fav: bool) {
         *self.favorite.write() = fav;
         self.set_modified();
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn favorite(&self) -> bool {
         *self.favorite.read()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn description(&self) -> String {
         self.description.read().to_owned()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_description(&self, desc: &str) {
         *self.description.write() = desc.to_string()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn size(&self) -> usize {
         self.get_items().iter().map(Item::size).sum()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_modified(&self) {
         *self.modified.write() = Utc::now()
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Directory {
     pub fn id(&self) -> Uuid {
         *self.id
@@ -587,25 +559,6 @@ impl Directory {
 
     pub fn modified(&self) -> DateTime<Utc> {
         *self.modified.read()
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl Directory {
-    #[wasm_bindgen(getter)]
-    pub fn id(&self) -> String {
-        self.id.to_string()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn creation(&self) -> i64 {
-        self.creation.timestamp()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn modified(&self) -> i64 {
-        self.modified.timestamp()
     }
 }
 

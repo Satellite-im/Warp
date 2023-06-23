@@ -10,9 +10,6 @@ use warp::{
     Extension, SingleHandle,
 };
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Default)]
@@ -207,15 +204,6 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
         }
     }
     Ok(list)
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn pocketdimension_pd_memory() -> warp::pocket_dimension::PocketDimensionAdapter {
-    let client = MemoryClient::new();
-    warp::pocket_dimension::PocketDimensionAdapter::new(warp::sync::Arc::new(
-        warp::sync::RwLock::new(Box::new(client)),
-    ))
 }
 
 pub mod ffi {
