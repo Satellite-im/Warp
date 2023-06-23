@@ -135,7 +135,7 @@ impl RootDocument {
                 from_ipld::<IdentityDocument>(ipld)
                     .map_err(anyhow::Error::from)
                     .map_err(Error::from)?
-                    .resolve(ipfs, true)
+                    .resolve(ipfs, true, None)
                     .await?
             }
             Err(_) => return Err(Error::IdentityInvalid),

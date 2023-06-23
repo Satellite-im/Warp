@@ -2,7 +2,7 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::{Discovery as DiscoveryConfig, UpdateEvents},
+    config::{Discovery as DiscoveryConfig, UpdateEvents, DefaultPfpFn},
     store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
 };
 use futures::{
@@ -91,6 +91,8 @@ pub struct IdentityStore {
     disable_image: bool,
 
     friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
+
+    default_pfp_callback: Option<DefaultPfpFn>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -175,6 +177,7 @@ impl IdentityStore {
         tesseract: Tesseract,
         interval: Option<Duration>,
         tx: broadcast::Sender<MultiPassEventKind>,
+        default_pfp_callback: Option<DefaultPfpFn>,
         (discovery, relay, fetch_over_bitswap, share_platform, update_event, disable_image): (
             Discovery,
             Option<Vec<Multiaddr>>,
@@ -222,6 +225,7 @@ impl IdentityStore {
             friend_store,
             update_event,
             disable_image,
+            default_pfp_callback
         };
 
         if store.path.is_some() {
@@ -1431,7 +1435,7 @@ impl IdentityStore {
         // Pin the dag
         self.ipfs.insert_pin(&root_cid, true).await?;
 
-        let identity = identity.resolve(&self.ipfs, false).await?;
+        let identity = identity.resolve(&self.ipfs, false, None).await?;
 
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
@@ -1574,7 +1578,7 @@ impl IdentityStore {
         let list = futures::stream::FuturesUnordered::from_iter(
             idents_docs
                 .iter()
-                .map(|doc| doc.resolve(&self.ipfs, !self.disable_image).boxed()),
+                .map(|doc| doc.resolve(&self.ipfs, !self.disable_image, self.default_pfp_callback.clone()).boxed()),
         )
         .filter_map(|res| async { res.ok() })
         .chain(stream::iter(preidentity))
@@ -1866,7 +1870,7 @@ impl IdentityStore {
         let identity = self
             .get_local_dag::<IdentityDocument>(path)
             .await?
-            .resolve(&ipfs, with_images)
+            .resolve(&ipfs, with_images, self.default_pfp_callback.clone())
             .await?;
 
         let public_key = identity.did_key();
