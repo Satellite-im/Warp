@@ -154,11 +154,10 @@ impl FriendsStore {
             wait_on_response,
         };
 
-        let stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await?;
-
         tokio::spawn({
             let mut store = store.clone();
             async move {
+                log::info!("Loading queue");
                 tokio::spawn({
                     let store = store.clone();
                     async move { if let Err(_e) = store.queue.load().await {} }
@@ -169,6 +168,7 @@ impl FriendsStore {
                         if let Err(_e) = phonebook.add_relay(addr).await {}
                     }
 
+                    log::info!("Loading friends list into phonebook");
                     if let Ok(friends) = store.friends_list().await {
                         if let Err(_e) = phonebook.add_friend_list(friends).await {
                             error!("Error adding friends in phonebook: {_e}");
@@ -213,7 +213,15 @@ impl FriendsStore {
                         }
                     }
                 });
-                tokio::task::yield_now().await;
+
+                let stream = match store.ipfs.pubsub_subscribe(store.did_key.inbox()).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        //TODO: Maybe panic as a means of notifying about this being a fatal error?
+                        log::error!("Error subscribing to topic: {e}");
+                        return;
+                    }
+                };
 
                 futures::pin_mut!(stream);
 
@@ -246,6 +254,9 @@ impl FriendsStore {
         let pk_did = &*self.did_key;
 
         let bytes = ecdh_decrypt(pk_did, Some(did), data)?;
+
+        log::trace!("received payload size: {} bytes", bytes.len());
+
         let data = serde_json::from_slice::<RequestResponsePayload>(&bytes)?;
 
         log::info!("Received event from {did}");
@@ -261,11 +272,15 @@ impl FriendsStore {
             return Ok(());
         }
 
+        //TODO: Send error if dropped early due to error when processing request
         let mut signal = self.signal.write().await.remove(&data.sender);
+
+        log::debug!("Event {:?}", data.event);
 
         // Before we validate the request, we should check to see if the key is blocked
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+            log::warn!("Received event from a blocked identity.");
             let payload = RequestResponsePayload {
                 sender: (*self.did_key).clone(),
                 event: Event::Block,
@@ -328,7 +343,6 @@ impl FriendsStore {
                         .await?;
 
                     tokio::spawn({
-                        let tx = self.tx.clone();
                         let store = self.identity.clone();
                         let from = data.sender.clone();
                         async move {
@@ -347,11 +361,7 @@ impl FriendsStore {
                             .await
                             .ok();
 
-                            if let Err(e) =
-                                tx.send(MultiPassEventKind::FriendRequestReceived { from })
-                            {
-                                error!("Error broadcasting event: {e}");
-                            }
+                            store.emit_event(MultiPassEventKind::FriendRequestReceived { from });
                         }
                     });
                 }
@@ -377,12 +387,9 @@ impl FriendsStore {
                     .root_document_remove_request(&internal_request)
                     .await?;
 
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::OutgoingFriendRequestRejected { did: data.sender })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
+                    did: data.sender,
+                });
             }
             Event::Remove => {
                 if self.is_friend(&data.sender).await? {
@@ -403,32 +410,19 @@ impl FriendsStore {
                     .root_document_remove_request(&internal_request)
                     .await?;
 
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.sender })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
+                    did: data.sender,
+                });
             }
             Event::Block => {
                 if self.has_request_from(&data.sender).await? {
-                    if let Err(e) = self
-                        .tx
-                        .send(MultiPassEventKind::IncomingFriendRequestClosed {
-                            did: data.sender.clone(),
-                        })
-                    {
-                        error!("Error broadcasting event: {e}");
-                    }
+                    self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
+                        did: data.sender.clone(),
+                    });
                 } else if self.sent_friend_request_to(&data.sender).await? {
-                    if let Err(e) =
-                        self.tx
-                            .send(MultiPassEventKind::OutgoingFriendRequestRejected {
-                                did: data.sender.clone(),
-                            })
-                    {
-                        error!("Error broadcasting event: {e}");
-                    }
+                    self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
+                        did: data.sender.clone(),
+                    });
                 }
 
                 let list = self.list_all_raw_request().await?;
@@ -464,6 +458,7 @@ impl FriendsStore {
                 }
 
                 if let Some(tx) = std::mem::take(&mut signal) {
+                    log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Err(Error::BlockedByUser));
                 }
             }
@@ -483,21 +478,18 @@ impl FriendsStore {
                             let _ = store.request(&sender, RequestOption::Identity).await.ok();
                         }
                     });
-                    if let Err(e) = self
-                        .tx
-                        .send(MultiPassEventKind::UnblockedBy { did: data.sender })
-                    {
-                        error!("Error broadcasting event: {e}");
-                    }
+                    self.emit_event(MultiPassEventKind::UnblockedBy { did: data.sender });
                 }
             }
             Event::Response => {
                 if let Some(tx) = std::mem::take(&mut signal) {
+                    log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Ok(()));
                 }
             }
         };
         if let Some(tx) = std::mem::take(&mut signal) {
+            log::debug!("Signaling broadcast of response...");
             let _ = tx.send(Ok(()));
         }
 
@@ -667,14 +659,10 @@ impl FriendsStore {
         if let Some(entry) = self.queue.get(pubkey).await {
             if entry.event == Event::Request {
                 self.queue.remove(pubkey).await;
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::OutgoingFriendRequestClosed {
-                        did: pubkey.clone(),
-                    })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
+                    did: pubkey.clone(),
+                });
+
                 return Ok(());
             }
         }
@@ -818,11 +806,9 @@ impl FriendsStore {
         // We dont care if this errors or not.
         let _ = self.identity.push(pubkey).await.ok();
 
-        if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
+        self.emit_event(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
+        });
 
         Ok(())
     }
@@ -854,11 +840,9 @@ impl FriendsStore {
                 .await?;
         }
 
-        if let Err(e) = self.tx.send(MultiPassEventKind::FriendRemoved {
+        self.emit_event(MultiPassEventKind::FriendRemoved {
             did: pubkey.clone(),
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
+        });
 
         Ok(())
     }
@@ -993,31 +977,19 @@ impl FriendsStore {
 
         match payload.event {
             Event::Request => {
-                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestSent {
+                self.emit_event(MultiPassEventKind::FriendRequestSent {
                     to: recipient.clone(),
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
+                });
             }
             Event::Retract => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::OutgoingFriendRequestClosed {
-                        did: recipient.clone(),
-                    })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
+                    did: recipient.clone(),
+                });
             }
             Event::Reject => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::IncomingFriendRequestRejected {
-                        did: recipient.clone(),
-                    })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.emit_event(MultiPassEventKind::IncomingFriendRequestRejected {
+                    did: recipient.clone(),
+                });
             }
             Event::Block => {
                 tokio::spawn({
@@ -1031,11 +1003,9 @@ impl FriendsStore {
                             .ok();
                     }
                 });
-                if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
+                self.emit_event(MultiPassEventKind::Blocked {
                     did: recipient.clone(),
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
+                });
             }
             Event::Unblock => {
                 tokio::spawn({
@@ -1049,14 +1019,21 @@ impl FriendsStore {
                             .ok();
                     }
                 });
-                if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
+
+                self.emit_event(MultiPassEventKind::Unblocked {
                     did: recipient.clone(),
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
+                });
             }
             _ => {}
         };
         Ok(())
+    }
+}
+
+impl FriendsStore {
+    pub fn emit_event(&self, event: MultiPassEventKind) {
+        if let Err(e) = self.tx.send(event) {
+            error!("Error broadcasting event: {e}");
+        }
     }
 }

@@ -94,6 +94,7 @@ pub struct RootDocument {
 }
 
 impl RootDocument {
+    #[tracing::instrument(skip(self, did))]
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
         let mut root_document = self.clone();
         //In case there is a signature already exist
@@ -104,6 +105,7 @@ impl RootDocument {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, ipfs))]
     pub async fn verify(&self, ipfs: &Ipfs) -> Result<(), Error> {
         let (identity, _, _, _, _) = self.resolve(ipfs).await?;
         let mut root_document = self.clone();
@@ -118,6 +120,8 @@ impl RootDocument {
         Ok(())
     }
 
+    #[allow(clippy::type_complexity)]
+    #[tracing::instrument(skip(self, ipfs))]
     pub async fn resolve(
         &self,
         ipfs: &Ipfs,
@@ -131,7 +135,7 @@ impl RootDocument {
                 from_ipld::<IdentityDocument>(ipld)
                     .map_err(anyhow::Error::from)
                     .map_err(Error::from)?
-                    .resolve(ipfs, true)
+                    .resolve(ipfs, true, None)
                     .await?
             }
             Err(_) => return Err(Error::IdentityInvalid),

@@ -22,6 +22,7 @@ use super::PeerConnectionType;
 
 /// Used to handle friends connectivity status
 #[allow(clippy::type_complexity)]
+#[derive(Clone)]
 pub struct PhoneBook {
     ipfs: Ipfs,
     discovery: Discovery,
@@ -29,19 +30,6 @@ pub struct PhoneBook {
     emit_event: Arc<AtomicBool>,
     entries: Arc<RwLock<HashMap<DID, PhoneBookEntry>>>,
     event: broadcast::Sender<MultiPassEventKind>,
-}
-
-impl Clone for PhoneBook {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            discovery: self.discovery.clone(),
-            relays: self.relays.clone(),
-            emit_event: self.emit_event.clone(),
-            entries: self.entries.clone(),
-            event: self.event.clone(),
-        }
-    }
 }
 
 impl PhoneBook {
@@ -149,12 +137,15 @@ impl PhoneBook {
     }
 }
 
+#[derive(Clone)]
+#[allow(dead_code)]
 pub struct PhoneBookEntry {
     ipfs: Ipfs,
     did: DID,
     connection_type: Arc<RwLock<PeerConnectionType>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
     event: broadcast::Sender<MultiPassEventKind>,
+    //TODO: Possibly into discovery?
     relays: Arc<RwLock<Vec<Multiaddr>>>,
     emit_event: Arc<AtomicBool>,
 }
@@ -170,20 +161,6 @@ impl Eq for PhoneBookEntry {}
 impl core::hash::Hash for PhoneBookEntry {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.did.hash(state);
-    }
-}
-
-impl Clone for PhoneBookEntry {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            did: self.did.clone(),
-            connection_type: self.connection_type.clone(),
-            task: self.task.clone(),
-            event: self.event.clone(),
-            relays: self.relays.clone(),
-            emit_event: self.emit_event.clone(),
-        }
     }
 }
 
