@@ -2,7 +2,6 @@
 use std::{fmt::Display, str::FromStr};
 
 pub use aes_gcm;
-pub use blake2;
 pub use curve25519_dalek;
 pub use did_key::{self, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial};
 use did_key::{Generate, P256KeyPair, Secp256k1KeyPair, X25519KeyPair};
@@ -10,9 +9,7 @@ pub use digest;
 pub use ed25519_dalek;
 pub use getrandom;
 pub use rand;
-pub use sha1;
 pub use sha2;
-pub use sha3;
 pub use x25519_dalek;
 pub use zeroize;
 
@@ -23,13 +20,10 @@ pub mod multihash;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use warp_derive::{FFIFree, FFIVec};
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
 
 #[derive(FFIVec, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct DID(DIDKey);
 
 impl FromStr for DID {

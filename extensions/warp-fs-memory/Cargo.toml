@@ -21,8 +21,6 @@ thiserror.workspace = true
 dyn-clone.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 
-wasm-bindgen = "0.2"
-serde-wasm-bindgen = "0.4.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["full"] }

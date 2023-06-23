@@ -15,15 +15,12 @@ use uuid::Uuid;
 use crate::module::Module;
 
 use warp_derive::FFIFree;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 
 pub type DataObject = Data;
 
 /// Standard DataObject used throughout warp.
 /// Unifies output from all modules
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Data {
     /// ID of the Data Object
     id: Uuid,
@@ -48,7 +45,6 @@ pub struct Data {
 #[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum DataType {
     #[display(fmt = "messaging")]
     Messaging,
@@ -111,58 +107,48 @@ impl Default for Data {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Data {
     /// Update the `Data` instance with the current time stamp (UTC)
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn update_time(&mut self) {
         self.timestamp = Utc::now();
     }
 
     /// Update/Set the `Data` instance with a new version. Used mostly in conjunction with `PocketDimension`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_version(&mut self, version: u32) {
         self.version = version;
     }
 
     /// Set/Update size for `Data`. The size
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_size(&mut self, size: u64) {
         self.size = size;
     }
 
     /// Returns the size of the data object
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn size(&self) -> u64 {
         self.size
     }
 
     /// Returns the version of the data object
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn version(&self) -> u32 {
         self.version
     }
 
     /// Returns the data type of the object
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn data_type(&self) -> DataType {
         self.data_type
     }
 
     /// Returns the timestamp of `Data`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn timestamp(&self) -> i64 {
         self.timestamp.timestamp()
     }
 
     /// Set the `Module` for `Data`
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_data_type(&mut self, data_type: DataType) {
         self.data_type = data_type;
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Data {
     /// Creates a instance of `Data` with `Module` and `Payload`
     pub fn new<T>(data_type: DataType, payload: T) -> Result<Self, Error>
@@ -197,39 +183,6 @@ impl Data {
         T: DeserializeOwned,
     {
         serde_json::from_value(self.payload.clone()).map_err(Error::from)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl Data {
-    /// Creates a instance of `Data` with `Module` and `Payload`
-    #[wasm_bindgen(constructor)]
-    pub fn new(data_type: DataType, payload: JsValue) -> Result<Data, Error> {
-        let payload = serde_wasm_bindgen::from_value(payload).map_err(|_| Error::Other)?;
-        Ok(Data {
-            data_type,
-            payload,
-            ..Default::default()
-        })
-    }
-
-    /// Return the UUID of the data object
-    #[wasm_bindgen(getter)]
-    pub fn id(&self) -> String {
-        self.id.to_string()
-    }
-
-    /// Set the payload for `Data`
-    #[wasm_bindgen(setter)]
-    pub fn set_payload(&mut self, payload: JsValue) -> Result<(), Error> {
-        self.payload = serde_wasm_bindgen::from_value(payload).map_err(|_| Error::Other)?;
-        Ok(())
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn payload(&self) -> Result<JsValue, Error> {
-        serde_wasm_bindgen::to_value(&self.payload).map_err(|_| Error::Other)
     }
 }
 
