@@ -451,6 +451,7 @@ impl IpfsIdentity {
             tesseract.clone(),
             config.store_setting.auto_push,
             self.tx.clone(),
+            config.store_setting.default_profile_picture.clone(),
             (
                 discovery.clone(),
                 relays,
