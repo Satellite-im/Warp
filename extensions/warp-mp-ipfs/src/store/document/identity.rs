@@ -105,6 +105,10 @@ impl IdentityDocument {
             if fallback {
                 if let Some(callback) = callback {
                     let picture = callback(&identity).unwrap_or_default();
+                    // Note: Probably move the callback into a blocking task in case the underlining function make calls that blocks the current thread? 
+                    // let picture = tokio::task::spawn_blocking(move || callback(&owned_identity).unwrap_or_default())
+                    //  .await
+                    //  .unwrap_or_default();
                     if !picture.is_empty() {
                         let buffer = String::from_utf8_lossy(&picture).to_string();
                         identity.set_profile_picture(&buffer);
