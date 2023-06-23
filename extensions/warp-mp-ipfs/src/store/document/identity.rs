@@ -86,7 +86,7 @@ impl IdentityDocument {
         identity.set_short_id(self.short_id);
         identity.set_status_message(self.status_message.clone());
 
-        let mut fallback = false;
+        let mut fallback = true;
 
         if with_image {
             if let Some(cid) = self.profile_picture {
@@ -95,16 +95,11 @@ impl IdentityDocument {
                         let picture: String = serde_json::from_slice(&data).unwrap_or_default();
                         if !picture.is_empty() {
                             identity.set_profile_picture(&picture);
-                        } else {
-                            fallback = true;
+                            fallback = false;
                         }
                     }
-                    Err(_e) => {
-                        fallback = true;
-                    }
+                    Err(_e) => {}
                 }
-            } else {
-                fallback = true;
             }
 
             if fallback {
