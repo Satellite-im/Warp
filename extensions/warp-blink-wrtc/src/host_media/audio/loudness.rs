@@ -31,6 +31,7 @@ impl Calculator {
         f32::sqrt(self.ss * self.normalizer)
     }
 
+    //TODO: Evaluate code to determine if its needed
     #[allow(dead_code)]
     pub fn reset(&mut self) {
         let mut buf = Vec::new();

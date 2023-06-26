@@ -17,9 +17,12 @@ pub async fn feedback(args: StaticArgs) -> anyhow::Result<()> {
     let latency = 1000.0;
 
     // Find devices.
-    let input_device = host.default_input_device().unwrap();
-
-    let output_device = host.default_output_device().unwrap();
+    let input_device = host
+        .default_input_device()
+        .ok_or(anyhow::anyhow!("default input device not found"))?;
+    let output_device = host
+        .default_output_device()
+        .ok_or(anyhow::anyhow!("default output device not found"))?;
 
     println!("Using input device: \"{}\"", input_device.name()?);
     println!("Using output device: \"{}\"", output_device.name()?);
@@ -102,8 +105,12 @@ pub async fn feedback(args: StaticArgs) -> anyhow::Result<()> {
 
 pub async fn echo(args: StaticArgs) -> anyhow::Result<()> {
     let host = cpal::default_host();
-    let input_device = host.default_input_device().unwrap();
-    let output_device = host.default_output_device().unwrap();
+    let input_device = host
+        .default_input_device()
+        .ok_or(anyhow::anyhow!("default input device not found"))?;
+    let output_device = host
+        .default_output_device()
+        .ok_or(anyhow::anyhow!("default output device not found"))?;
 
     println!("Using input device: \"{}\"", input_device.name()?);
     println!("Using output device: \"{}\"", output_device.name()?);
@@ -193,8 +200,12 @@ pub async fn echo_cancellation(args: StaticArgs) -> anyhow::Result<()> {
     processor.set_config(config);
 
     let host = cpal::default_host();
-    let input_device = host.default_input_device().unwrap();
-    let output_device = host.default_output_device().unwrap();
+    let input_device = host
+        .default_input_device()
+        .ok_or(anyhow::anyhow!("default input device not found"))?;
+    let output_device = host
+        .default_output_device()
+        .ok_or(anyhow::anyhow!("default output device not found"))?;
 
     println!("Using input device: \"{}\"", input_device.name()?);
     println!("Using output device: \"{}\"", output_device.name()?);
