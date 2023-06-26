@@ -162,14 +162,14 @@ impl Item {
             Item::Directory(directory) => directory.thumbnail_format(),
         }
     }
-    
+
     pub fn thumbnail(&self) -> Vec<u8> {
         match self {
             Item::File(file) => file.thumbnail(),
             Item::Directory(directory) => directory.thumbnail(),
         }
     }
-    
+
     pub fn favorite(&self) -> bool {
         match self {
             Item::File(file) => file.favorite(),
