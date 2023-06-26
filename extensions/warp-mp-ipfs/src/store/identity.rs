@@ -2,7 +2,7 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::{Discovery as DiscoveryConfig, UpdateEvents},
+    config::{DefaultPfpFn, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
 };
 use futures::{
@@ -11,10 +11,7 @@ use futures::{
     FutureExt, StreamExt,
 };
 use ipfs::{Ipfs, IpfsPath, Keypair, Multiaddr};
-use libipld::{
-    serde::{from_ipld, to_ipld},
-    Cid,
-};
+use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -94,6 +91,8 @@ pub struct IdentityStore {
     disable_image: bool,
 
     friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
+
+    default_pfp_callback: Option<DefaultPfpFn>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -178,6 +177,7 @@ impl IdentityStore {
         tesseract: Tesseract,
         interval: Option<Duration>,
         tx: broadcast::Sender<MultiPassEventKind>,
+        default_pfp_callback: Option<DefaultPfpFn>,
         (discovery, relay, fetch_over_bitswap, share_platform, update_event, disable_image): (
             Discovery,
             Option<Vec<Multiaddr>>,
@@ -225,6 +225,7 @@ impl IdentityStore {
             friend_store,
             update_event,
             disable_image,
+            default_pfp_callback,
         };
 
         if store.path.is_some() {
@@ -1031,7 +1032,7 @@ impl IdentityStore {
                             let document_did = identity.did.clone();
                             cache_documents.replace(identity.clone());
 
-                            let new_cid = self.put_dag(cache_documents).await?;
+                            let new_cid = cache_documents.to_cid(&self.ipfs).await?;
 
                             self.ipfs.insert_pin(&new_cid, false).await?;
                             self.save_cache_cid(new_cid).await?;
@@ -1189,7 +1190,7 @@ impl IdentityStore {
                         let document_did = identity.did.clone();
                         cache_documents.insert(identity.clone());
 
-                        let new_cid = self.put_dag(cache_documents).await?;
+                        let new_cid = cache_documents.to_cid(&self.ipfs).await?;
 
                         self.ipfs.insert_pin(&new_cid, false).await?;
                         self.save_cache_cid(new_cid).await?;
@@ -1366,7 +1367,7 @@ impl IdentityStore {
         }
     }
 
-    pub fn discovery_type(&self) -> DiscoveryConfig {
+    pub fn discovery_type(&self) -> &DiscoveryConfig {
         self.discovery.discovery_config()
     }
 
@@ -1420,7 +1421,7 @@ impl IdentityStore {
         let did_kp = self.get_keypair_did()?;
         let identity = identity.sign(&did_kp)?;
 
-        let ident_cid = self.put_dag(identity.clone()).await?;
+        let ident_cid = identity.to_cid(&self.ipfs).await?;
 
         let mut root_document = RootDocument {
             identity: ident_cid,
@@ -1429,12 +1430,12 @@ impl IdentityStore {
 
         root_document.sign(&did_kp)?;
 
-        let root_cid = self.put_dag(root_document).await?;
+        let root_cid = root_document.to_cid(&self.ipfs).await?;
 
         // Pin the dag
         self.ipfs.insert_pin(&root_cid, true).await?;
 
-        let identity = identity.resolve(&self.ipfs, false).await?;
+        let identity = identity.resolve(&self.ipfs, false, None).await?;
 
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
@@ -1574,11 +1575,14 @@ impl IdentityStore {
                 .collect::<Vec<_>>(),
         };
 
-        let list = futures::stream::FuturesUnordered::from_iter(
-            idents_docs
-                .iter()
-                .map(|doc| doc.resolve(&self.ipfs, !self.disable_image).boxed()),
-        )
+        let list = futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
+            doc.resolve(
+                &self.ipfs,
+                !self.disable_image,
+                self.default_pfp_callback.clone(),
+            )
+            .boxed()
+        }))
         .filter_map(|res| async { res.ok() })
         .chain(stream::iter(preidentity))
         .collect::<Vec<_>>()
@@ -1593,7 +1597,7 @@ impl IdentityStore {
         let identity = identity.sign(&kp)?;
 
         let mut root_document = self.get_root_document().await?;
-        let ident_cid = self.put_dag(identity).await?;
+        let ident_cid = identity.to_cid(&self.ipfs).await?;
         root_document.identity = ident_cid;
 
         self.set_root_document(root_document).await
@@ -1844,39 +1848,7 @@ impl IdentityStore {
     }
 
     pub async fn get_local_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
-        self.ipfs
-            .dag()
-            .get(path, &[], true)
-            .await
-            .map_err(anyhow::Error::from)
-            .map_err(Error::from)
-            .and_then(|ipld| {
-                from_ipld::<D>(ipld)
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
-            })
-    }
-
-    pub async fn get_dag<D: DeserializeOwned>(
-        &self,
-        path: IpfsPath,
-        timeout: Option<Duration>,
-    ) -> Result<D, Error> {
-        //Because it utilizes DHT requesting other nodes for the cid, it will stall so here we would need to timeout
-        //the request.
-        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
-        let identity = match tokio::time::timeout(timeout, self.ipfs.get_dag(path)).await {
-            Ok(Ok(ipld)) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
-            Ok(Err(e)) => return Err(Error::Any(e)),
-            Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-        };
-        Ok(identity)
-    }
-
-    pub async fn put_dag<S: Serialize>(&self, data: S) -> Result<Cid, Error> {
-        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
-        let cid = self.ipfs.put_dag(ipld).await?;
-        Ok(cid)
+        path.get_local_dag(&self.ipfs).await
     }
 
     pub async fn own_identity_document(&self) -> Result<IdentityDocument, Error> {
@@ -1901,7 +1873,7 @@ impl IdentityStore {
         let identity = self
             .get_local_dag::<IdentityDocument>(path)
             .await?
-            .resolve(&ipfs, with_images)
+            .resolve(&ipfs, with_images, self.default_pfp_callback.clone())
             .await?;
 
         let public_key = identity.did_key();

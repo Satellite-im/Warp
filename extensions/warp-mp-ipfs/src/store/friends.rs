@@ -154,11 +154,10 @@ impl FriendsStore {
             wait_on_response,
         };
 
-        let stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await?;
-
         tokio::spawn({
             let mut store = store.clone();
             async move {
+                log::info!("Loading queue");
                 tokio::spawn({
                     let store = store.clone();
                     async move { if let Err(_e) = store.queue.load().await {} }
@@ -169,6 +168,7 @@ impl FriendsStore {
                         if let Err(_e) = phonebook.add_relay(addr).await {}
                     }
 
+                    log::info!("Loading friends list into phonebook");
                     if let Ok(friends) = store.friends_list().await {
                         if let Err(_e) = phonebook.add_friend_list(friends).await {
                             error!("Error adding friends in phonebook: {_e}");
@@ -213,7 +213,15 @@ impl FriendsStore {
                         }
                     }
                 });
-                tokio::task::yield_now().await;
+
+                let stream = match store.ipfs.pubsub_subscribe(store.did_key.inbox()).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        //TODO: Maybe panic as a means of notifying about this being a fatal error?
+                        log::error!("Error subscribing to topic: {e}");
+                        return;
+                    }
+                };
 
                 futures::pin_mut!(stream);
 
@@ -246,6 +254,9 @@ impl FriendsStore {
         let pk_did = &*self.did_key;
 
         let bytes = ecdh_decrypt(pk_did, Some(did), data)?;
+
+        log::trace!("received payload size: {} bytes", bytes.len());
+
         let data = serde_json::from_slice::<RequestResponsePayload>(&bytes)?;
 
         log::info!("Received event from {did}");
@@ -261,11 +272,15 @@ impl FriendsStore {
             return Ok(());
         }
 
+        //TODO: Send error if dropped early due to error when processing request
         let mut signal = self.signal.write().await.remove(&data.sender);
+
+        log::debug!("Event {:?}", data.event);
 
         // Before we validate the request, we should check to see if the key is blocked
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+            log::warn!("Received event from a blocked identity.");
             let payload = RequestResponsePayload {
                 sender: (*self.did_key).clone(),
                 event: Event::Block,
@@ -443,6 +458,7 @@ impl FriendsStore {
                 }
 
                 if let Some(tx) = std::mem::take(&mut signal) {
+                    log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Err(Error::BlockedByUser));
                 }
             }
@@ -467,11 +483,13 @@ impl FriendsStore {
             }
             Event::Response => {
                 if let Some(tx) = std::mem::take(&mut signal) {
+                    log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Ok(()));
                 }
             }
         };
         if let Some(tx) = std::mem::take(&mut signal) {
+            log::debug!("Signaling broadcast of response...");
             let _ = tx.send(Ok(()));
         }
 
