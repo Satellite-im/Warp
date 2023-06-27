@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, sync::Arc};
 
+use anyhow::bail;
 use bytes::Bytes;
 use chrono::Utc;
 use opus::Bitrate;
@@ -45,6 +46,9 @@ impl Framer {
         source_codec: blink::AudioCodec,
         echo_canceller: Arc<WarpMutex<EchoCanceller>>,
     ) -> anyhow::Result<Self> {
+        if frame_size != 480 {
+            bail!("frame size should be 480");
+        }
         let loudness_calculator = loudness::Calculator::new(frame_size);
         let mut buf: Vec<AudioSample> = Vec::new();
         buf.reserve(frame_size);
@@ -99,52 +103,50 @@ impl Framer {
         sample.mix(&self.channel_mixer_config);
         self.resampler.process(sample, &mut self.samples);
 
-        if self.samples.len() == self.frame_size {
-            for sample in self.samples.drain(..) {
-                match sample {
-                    AudioSample::Single(x) => {
-                        self.raw_samples.push(x);
-                    }
-                    AudioSample::Dual(l, r) => {
-                        self.raw_samples.push(l);
-                        self.raw_samples.push(r);
-                    }
+        if self.samples.len() < self.frame_size {
+            return None;
+        }
+        self.raw_samples.clear();
+        for sample in self.samples.drain(..self.frame_size) {
+            match sample {
+                AudioSample::Single(x) => {
+                    self.raw_samples.push(x);
+                }
+                AudioSample::Dual(l, r) => {
+                    self.raw_samples.push(l);
+                    self.raw_samples.push(r);
                 }
             }
-            // frame size is 10ms or 10,000us. The frame has been captured and started playing approximately 10ms ago.
-            let start_time_us = Utc::now().timestamp_micros() - 10000;
-            if let Err(e) = self
-                .echo_canceller
-                .lock()
-                .process_capture_frame(start_time_us as u64, self.raw_samples.as_mut_slice())
-            {
-                log::error!("failed to process capture frame: {e}");
-            }
+        }
+        // frame size is 10ms or 10,000us. The frame has been captured and started playing approximately 10ms ago.
+        let start_time_us = Utc::now().timestamp_micros() - 10000;
+        if let Err(e) = self
+            .echo_canceller
+            .lock()
+            .process_capture_frame(start_time_us as u64, self.raw_samples.as_mut_slice())
+        {
+            log::error!("failed to process capture frame: {e}");
+        }
 
-            for sample in self.raw_samples.iter() {
-                self.loudness_calculator.insert(*sample);
-            }
+        for sample in self.raw_samples.iter() {
+            self.loudness_calculator.insert(*sample);
+        }
 
-            match self.encoder.encode_float(
-                self.raw_samples.as_mut_slice(),
-                self.opus_out.as_mut_slice(),
-            ) {
-                Ok(size) => {
-                    self.raw_samples.clear();
-                    let slice = self.opus_out.as_slice();
-                    let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
+        match self.encoder.encode_float(
+            self.raw_samples.as_mut_slice(),
+            self.opus_out.as_mut_slice(),
+        ) {
+            Ok(size) => {
+                let slice = self.opus_out.as_slice();
+                let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
 
-                    let loudness = self.loudness_calculator.get_rms();
-                    Some(FramerOutput { bytes, loudness })
-                }
-                Err(e) => {
-                    self.raw_samples.clear();
-                    log::error!("OpusPacketizer failed to encode: {}", e);
-                    None
-                }
+                let loudness = self.loudness_calculator.get_rms();
+                Some(FramerOutput { bytes, loudness })
             }
-        } else {
-            None
+            Err(e) => {
+                log::error!("OpusPacketizer failed to encode: {}", e);
+                None
+            }
         }
     }
 }
