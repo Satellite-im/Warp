@@ -238,7 +238,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{table}");
         }
         Command::SyncRef { remote } => match filesystem.sync_ref(&remote).await {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => println!("Error: {e}"),
         },
         Command::FileReference { remote } => {
