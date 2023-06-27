@@ -139,9 +139,8 @@ impl EchoCanceller {
                 }
             }
 
-            let mut remaining = AUDIO_FRAME_SIZE.saturating_sub(frame.len());
-            while remaining > 0 {
-                remaining -= 1;
+            let remaining = AUDIO_FRAME_SIZE.saturating_sub(frame.len());
+            for _ in 0..remaining {
                 match v.pop_front() {
                     Some(s) => match s.value {
                         AudioSample::Single(x) => frame.push(x),
