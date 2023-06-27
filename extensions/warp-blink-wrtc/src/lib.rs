@@ -744,9 +744,20 @@ impl Blink for BlinkImpl {
         mut participants: Vec<DID>,
         webrtc_codec: AudioCodec,
     ) -> Result<Uuid, Error> {
+        // I believe that this is no longer needed but am keeping it in place for now.
         if webrtc_codec.channels() != 1 {
             return Err(Error::OtherWithContext(
                 "webrtc_codec must have only 1 channel".into(),
+            ));
+        }
+        // the echo canceller needs to know what frame size to expect. fixing the sample rate to 48000 makes for
+        // a 10ms frame size of 480. If the echo canceller is changed to work with a variable sample rate, this check
+        // could be removed
+        //
+        // also note that libopus converts to 48000 before encoding.
+        if webrtc_codec.sample_rate() != 48000 {
+            return Err(Error::OtherWithContext(
+                "webrtc_codec must have a sample rate of 48000".into(),
             ));
         }
         if self.ipfs.read().await.is_none() {
