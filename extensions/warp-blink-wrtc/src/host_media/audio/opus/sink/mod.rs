@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use chrono::Utc;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
@@ -18,10 +19,12 @@ use webrtc::{
 };
 
 use crate::host_media::audio::{
-    echo_canceller::EchoCanceller, opus::AudioSampleProducer, speech, SinkTrack, SinkTrackParams,
+    self,
+    echo_canceller::EchoCanceller,
+    opus::AudioSampleProducer,
+    sample::{AudioSample, ChannelMixerConfig, Resampler, ResamplerConfig},
+    speech, SinkTrack, SinkTrackParams,
 };
-
-use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
 
 pub struct OpusSink {
     peer_id: DID,
@@ -64,14 +67,13 @@ impl OpusSink {
             }
             _ => ResamplerConfig::UpSample(sink_codec.sample_rate() / webrtc_codec.sample_rate()),
         };
-        let resampler = Resampler::new(resampler_config);
+        let resampler = Resampler::new(resampler_config, sink_codec.channels());
 
         let channel_mixer_config = match webrtc_codec.channels().cmp(&sink_codec.channels()) {
             Ordering::Equal => ChannelMixerConfig::None,
             Ordering::Greater => ChannelMixerConfig::Merge,
             _ => ChannelMixerConfig::Split,
         };
-        let channel_mixer = ChannelMixer::new(channel_mixer_config);
 
         let cpal_config = cpal::StreamConfig {
             channels: sink_codec.channels(),
@@ -93,26 +95,30 @@ impl OpusSink {
         let (producer, mut consumer) = ring.split();
 
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
-        let sample_builder = SampleBuilder::new(max_late, depacketizer, webrtc_sample_rate);
+        let webrtc_sample_builder = SampleBuilder::new(max_late, depacketizer, webrtc_sample_rate);
+        let sample_builder = audio::sample::Builder::new(webrtc_codec.clone());
         let track2 = track.clone();
         let event_ch2 = event_ch.clone();
         let peer_id2 = peer_id.clone();
         let echo_canceller2 = echo_canceller.clone();
         let abort_task = Arc::new(Notify::new());
         let abort_task2 = abort_task.clone();
+        let sink_codec2 = sink_codec.clone();
         tokio::spawn(async move {
             tokio::select! {
                 _ = abort_task2.notified() => {},
                 r = decode_media_stream(DecodeMediaStreamArgs {
                     track: track2,
+                    webrtc_sample_builder,
                     sample_builder,
                     producer,
                     decoder,
                     resampler,
-                    channel_mixer,
+                    channel_mixer_config,
                     event_ch: event_ch2,
                     peer_id: peer_id2,
                     echo_canceller: echo_canceller2.clone(),
+                    sink_codec: sink_codec2,
                 }) => {
                     if let Err(e) = r {
                         log::error!("error decoding media stream: {}", e);
@@ -194,14 +200,16 @@ impl SinkTrack for OpusSink {
 
 struct DecodeMediaStreamArgs<T: Depacketizer> {
     track: Arc<TrackRemote>,
-    sample_builder: SampleBuilder<T>,
+    webrtc_sample_builder: SampleBuilder<T>,
+    sample_builder: audio::sample::Builder,
     producer: AudioSampleProducer,
     decoder: opus::Decoder,
     resampler: Resampler,
-    channel_mixer: ChannelMixer,
+    channel_mixer_config: ChannelMixerConfig,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
     echo_canceller: Arc<WarpMutex<EchoCanceller>>,
+    sink_codec: blink::AudioCodec,
 }
 
 #[allow(clippy::type_complexity)]
@@ -211,22 +219,25 @@ where
 {
     let DecodeMediaStreamArgs {
         track,
+        mut webrtc_sample_builder,
         mut sample_builder,
         mut producer,
         mut decoder,
         mut resampler,
-        mut channel_mixer,
+        channel_mixer_config,
         event_ch,
         peer_id,
         echo_canceller,
+        sink_codec,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
-    let mut webrtc_samples: Vec<f32> = vec![];
     let mut raw_samples: Vec<f32> = vec![];
+    let mut resampled: Vec<AudioSample> = vec![];
     let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
+    let mut num_samples = 0;
 
     loop {
         match track.read(&mut b).await {
@@ -262,9 +273,9 @@ where
                 }
 
                 // turn RTP packets into samples via SampleBuilder.push
-                sample_builder.push(rtp_packet);
+                webrtc_sample_builder.push(rtp_packet);
                 // check if a sample can be created
-                while let Some(media_sample) = sample_builder.pop() {
+                while let Some(media_sample) = webrtc_sample_builder.pop() {
                     // todo: send Sample to other thread
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
@@ -272,32 +283,40 @@ where
                         false,
                     ) {
                         Ok(siz) => {
-                            for sample in decoder_output_buf.iter().take(siz) {
-                                webrtc_samples.push(*sample);
-                                if webrtc_samples.len() == 480 {
+                            for raw_sample in decoder_output_buf.iter().take(siz) {
+                                raw_samples.push(*raw_sample);
+                                let sample = match sample_builder.build(*raw_sample) {
+                                    Some(sample) => sample,
+                                    None => continue,
+                                };
+                                num_samples += 1;
+
+                                // batch samples for echo cancellation.
+                                if num_samples == 480 {
+                                    // the time that the frame will start playing
+                                    let start_time_us = Utc::now().timestamp_micros()
+                                        + sink_codec.samples_to_us(producer.len()) as i64;
                                     let _ = echo_canceller.lock().insert_render_frame(
+                                        start_time_us,
                                         &peer_id,
-                                        webrtc_samples.as_mut_slice(),
+                                        raw_samples.as_mut_slice(),
                                     );
-                                    webrtc_samples.clear();
-                                }
-                            }
-
-                            let to_send = decoder_output_buf.iter().take(siz);
-                            for audio_sample in to_send {
-                                match channel_mixer.process(*audio_sample) {
-                                    ChannelMixerOutput::Single(sample) => {
-                                        resampler.process(sample, &mut raw_samples);
-                                    }
-                                    ChannelMixerOutput::Split(sample) => {
-                                        resampler.process(sample, &mut raw_samples);
-                                        resampler.process(sample, &mut raw_samples);
-                                    }
-                                    ChannelMixerOutput::None => {}
+                                    raw_samples.clear();
+                                    num_samples = 0;
                                 }
 
-                                for sample in raw_samples.drain(..) {
-                                    if let Err(e) = producer.push(sample) {
+                                // prepare to send the audio sample to the speakers by resampling and converting between number of channels
+                                resampler.process(sample, &mut resampled);
+                                for mut sample in resampled.drain(..) {
+                                    sample.mix(&channel_mixer_config);
+                                    let r = match sample {
+                                        AudioSample::Single(x) => producer.push(x),
+                                        AudioSample::Dual(x, y) => {
+                                            let _ = producer.push(x);
+                                            producer.push(y)
+                                        }
+                                    };
+                                    if let Err(e) = r {
                                         log::error!("failed to send sample: {}", e);
                                     }
                                 }

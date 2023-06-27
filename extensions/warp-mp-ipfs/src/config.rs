@@ -1,12 +1,12 @@
 use ipfs::Multiaddr;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use warp::multipass::identity::Identity;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
 };
+use warp::multipass::identity::Identity;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

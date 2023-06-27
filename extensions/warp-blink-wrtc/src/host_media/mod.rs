@@ -26,11 +26,13 @@ struct Data {
     audio_sink_tracks: HashMap<DID, Box<dyn audio::SinkTrack>>,
     audio_config: blink::AudioProcessingConfig,
     echo_canceller: Arc<WarpMutex<EchoCanceller>>,
+    webrtc_audio_codec: blink::AudioCodec,
 }
 
 static LOCK: Lazy<RwLock<()>> = Lazy::new(|| RwLock::new(()));
 static mut DATA: Lazy<Data> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
+    let audio_codec = blink::AudioCodec::default();
     Data {
         audio_input_device: cpal_host.default_input_device(),
         audio_output_device: cpal_host.default_output_device(),
@@ -38,8 +40,10 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
         audio_sink_tracks: HashMap::new(),
         audio_config: blink::AudioProcessingConfig::default(),
         echo_canceller: Arc::new(WarpMutex::new(
-            EchoCanceller::new(vec![]).expect("failed to create echo canceller"),
+            EchoCanceller::new(audio_codec.clone(), vec![])
+                .expect("failed to create echo canceller"),
         )),
+        webrtc_audio_codec: audio_codec,
     }
 });
 
@@ -47,8 +51,12 @@ pub const AUDIO_SOURCE_ID: &str = "audio-input";
 
 pub async fn init_echo_canceller(other_participants: Vec<DID>) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
-    let mut echo_canceller = audio::echo_canceller::EchoCanceller::new(other_participants)?;
+
     unsafe {
+        let mut echo_canceller = audio::echo_canceller::EchoCanceller::new(
+            DATA.webrtc_audio_codec.clone(),
+            other_participants,
+        )?;
         echo_canceller.config_audio_processor(DATA.audio_config.clone())?;
         DATA.echo_canceller = Arc::new(WarpMutex::new(echo_canceller));
     }
@@ -111,7 +119,7 @@ pub async fn create_audio_source_track(
         event_ch,
         input_device,
         track,
-        webrtc_codec,
+        webrtc_codec: webrtc_codec.clone(),
         source_codec,
         echo_canceller: unsafe { DATA.echo_canceller.clone() },
     };
@@ -123,6 +131,7 @@ pub async fn create_audio_source_track(
 
     unsafe {
         DATA.audio_source_track.replace(source_track);
+        DATA.webrtc_audio_codec = webrtc_codec;
     }
     Ok(())
 }

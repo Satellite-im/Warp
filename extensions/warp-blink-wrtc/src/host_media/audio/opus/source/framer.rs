@@ -1,14 +1,16 @@
 use std::{cmp::Ordering, sync::Arc};
 
 use bytes::Bytes;
+use chrono::Utc;
 use opus::Bitrate;
 use warp::blink;
 use warp::sync::Mutex as WarpMutex;
 
 use crate::host_media::audio::{
+    self,
     echo_canceller::EchoCanceller,
     loudness,
-    opus::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig},
+    sample::{AudioSample, ChannelMixerConfig, Resampler, ResamplerConfig},
 };
 
 pub struct Framer {
@@ -16,13 +18,15 @@ pub struct Framer {
     encoder: opus::Encoder,
     // queues samples, to build a frame
     // options are i16 and f32. seems safer to use a f32.
+    samples: Vec<AudioSample>,
+    sample_builder: audio::sample::Builder,
     raw_samples: Vec<f32>,
     // used for the encoder
     opus_out: Vec<u8>,
     // number of samples in a frame
     frame_size: usize,
     // for splitting and merging audio channels
-    channel_mixer: ChannelMixer,
+    channel_mixer_config: ChannelMixerConfig,
     // for upsampling and downsampling audio
     resampler: Resampler,
     loudness_calculator: loudness::Calculator,
@@ -41,13 +45,13 @@ impl Framer {
         source_codec: blink::AudioCodec,
         echo_canceller: Arc<WarpMutex<EchoCanceller>>,
     ) -> anyhow::Result<Self> {
-        let frame_size = frame_size * webrtc_codec.channels() as usize;
         let loudness_calculator = loudness::Calculator::new(frame_size);
-
-        let mut buf: Vec<f32> = Vec::new();
+        let mut buf: Vec<AudioSample> = Vec::new();
         buf.reserve(frame_size);
+        let mut raw_samples: Vec<f32> = Vec::new();
+        raw_samples.reserve(frame_size * webrtc_codec.channels() as usize);
         let mut opus_out: Vec<u8> = Vec::new();
-        opus_out.resize(frame_size * 4, 0);
+        opus_out.resize(frame_size * webrtc_codec.channels() as usize * 4, 0);
         let mut encoder = opus::Encoder::new(
             webrtc_codec.sample_rate(),
             opus::Channels::Mono,
@@ -75,34 +79,44 @@ impl Framer {
 
         Ok(Self {
             encoder,
-            raw_samples: buf,
+            samples: buf,
+            raw_samples,
+            sample_builder: audio::sample::Builder::new(source_codec),
             opus_out,
             frame_size,
-            resampler: Resampler::new(resampler_config),
-            channel_mixer: ChannelMixer::new(channel_mixer_config),
+            resampler: Resampler::new(resampler_config, webrtc_codec.channels()),
+            channel_mixer_config,
             loudness_calculator,
             echo_canceller,
         })
     }
 
     pub fn frame(&mut self, sample: f32) -> Option<FramerOutput> {
-        match self.channel_mixer.process(sample) {
-            ChannelMixerOutput::Single(sample) => {
-                self.resampler.process(sample, &mut self.raw_samples);
-            }
-            ChannelMixerOutput::Split(sample) => {
-                self.resampler.process(sample, &mut self.raw_samples);
-                self.resampler.process(sample, &mut self.raw_samples);
-            }
-            ChannelMixerOutput::None => {}
-        }
+        let mut sample = match self.sample_builder.build(sample) {
+            Some(sample) => sample,
+            None => return None,
+        };
+        sample.mix(&self.channel_mixer_config);
+        self.resampler.process(sample, &mut self.samples);
 
-        // frame_size should be 480 * num_channels
-        if self.raw_samples.len() == self.frame_size {
+        if self.samples.len() == self.frame_size {
+            for sample in self.samples.drain(..) {
+                match sample {
+                    AudioSample::Single(x) => {
+                        self.raw_samples.push(x);
+                    }
+                    AudioSample::Dual(l, r) => {
+                        self.raw_samples.push(l);
+                        self.raw_samples.push(r);
+                    }
+                }
+            }
+            // frame size is 10ms or 10,000us. The frame has been captured and started playing approximately 10ms ago.
+            let start_time_us = Utc::now().timestamp_micros() - 10000;
             if let Err(e) = self
                 .echo_canceller
                 .lock()
-                .process_capture_frame(self.raw_samples.as_mut_slice())
+                .process_capture_frame(start_time_us, self.raw_samples.as_mut_slice())
             {
                 log::error!("failed to process capture frame: {e}");
             }

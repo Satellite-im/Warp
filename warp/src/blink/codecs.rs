@@ -131,6 +131,10 @@ impl AudioCodec {
     pub fn new() -> Self {
         Self::default()
     }
+    pub fn samples_to_us(&self, num_samples: usize) -> f32 {
+        let num_samples = (num_samples / self.channels as usize) as f32;
+        num_samples * 1000000.0 / self.sample_rate() as f32
+    }
 }
 
 impl Default for AudioCodec {

@@ -12,6 +12,7 @@ use webrtc::track::{
 pub(super) mod echo_canceller;
 mod loudness;
 mod opus;
+mod sample;
 mod speech;
 
 use self::echo_canceller::EchoCanceller;
