@@ -122,6 +122,7 @@ impl EchoCanceller {
                             / US_PER_SAMPLE;
 
                         let num_samples_gap = (num_samples_gap.round() as usize).saturating_sub(1);
+                        let num_samples_gap = std::cmp::max(num_samples_gap, AUDIO_FRAME_SIZE);
                         frame.resize(num_samples_gap, 0.0);
                     }
                     Ordering::Less => {
@@ -138,7 +139,7 @@ impl EchoCanceller {
                 }
             }
 
-            let remaining = AUDIO_FRAME_SIZE - frame.len();
+            let remaining = AUDIO_FRAME_SIZE.saturating_sub(frame.len());
             for _ in 0..remaining {
                 match v.pop_front() {
                     Some(s) => match s.value {
