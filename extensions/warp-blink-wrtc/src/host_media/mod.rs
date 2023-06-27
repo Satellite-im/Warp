@@ -32,7 +32,11 @@ struct Data {
 static LOCK: Lazy<RwLock<()>> = Lazy::new(|| RwLock::new(()));
 static mut DATA: Lazy<Data> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
-    let audio_codec = blink::AudioCodec::default();
+    let audio_codec = blink::AudioCodec {
+        mime: blink::MimeType::OPUS,
+        channels: 1,
+        sample_rate: blink::AudioSampleRate::High,
+    };
     Data {
         audio_input_device: cpal_host.default_input_device(),
         audio_output_device: cpal_host.default_output_device(),
