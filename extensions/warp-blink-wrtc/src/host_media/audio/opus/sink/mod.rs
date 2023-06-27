@@ -297,7 +297,7 @@ where
                                     let start_time_us = Utc::now().timestamp_micros()
                                         + sink_codec.samples_to_us(producer.len()) as i64;
                                     let _ = echo_canceller.lock().insert_render_frame(
-                                        start_time_us,
+                                        start_time_us as u64,
                                         &peer_id,
                                         raw_samples.as_mut_slice(),
                                     );

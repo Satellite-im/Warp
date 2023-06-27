@@ -116,7 +116,7 @@ impl Framer {
             if let Err(e) = self
                 .echo_canceller
                 .lock()
-                .process_capture_frame(start_time_us, self.raw_samples.as_mut_slice())
+                .process_capture_frame(start_time_us as u64, self.raw_samples.as_mut_slice())
             {
                 log::error!("failed to process capture frame: {e}");
             }
