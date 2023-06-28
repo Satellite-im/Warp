@@ -15,14 +15,6 @@ use warp_derive::FFIFree;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[wasm_bindgen]
-pub struct DimensionData(DimensionDataInner);
-
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DimensionData {
@@ -206,7 +198,6 @@ where
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct PocketDimensionAdapter {
     object: Arc<RwLock<Box<dyn PocketDimension>>>,
@@ -230,75 +221,47 @@ impl PocketDimensionAdapter {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl PocketDimensionAdapter {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn add_data(&mut self, dim: DataType, data: &Sata) -> Result<(), Error> {
         self.write_guard().add_data(dim, data)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn has_data(&mut self, dim: DataType, query: &QueryBuilder) -> Result<(), Error> {
         self.write_guard().has_data(dim, query)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn size(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<i64, Error> {
         self.read_guard().size(dim, query.as_ref())
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn count(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<i64, Error> {
         self.read_guard().count(dim, query.as_ref())
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn empty(&mut self, dimension: DataType) -> Result<(), Error> {
         self.write_guard().empty(dimension)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn id(&self) -> String {
         self.read_guard().id()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn name(&self) -> String {
         self.read_guard().name()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn description(&self) -> String {
         self.read_guard().description()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn module(&self) -> crate::module::Module {
         self.read_guard().module()
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl PocketDimensionAdapter {
     pub fn get_data(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<Vec<Sata>, Error> {
         self.read_guard().get_data(dim, query.as_ref())
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl PocketDimensionAdapter {
-    #[wasm_bindgen]
-    pub fn get_data(
-        &self,
-        dim: DataType,
-        query: Option<QueryBuilder>,
-    ) -> Result<Vec<JsValue>, Error> {
-        self.read_guard().get_data(dim, query.as_ref()).map(|s| {
-            s.iter()
-                .map(|i| serde_wasm_bindgen::to_value(&i).unwrap())
-                .collect::<Vec<_>>()
-        })
     }
 }
 

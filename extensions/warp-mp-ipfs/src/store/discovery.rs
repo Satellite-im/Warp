@@ -108,8 +108,8 @@ impl Discovery {
         self.events.subscribe()
     }
 
-    pub fn discovery_config(&self) -> DiscoveryConfig {
-        self.config.clone()
+    pub fn discovery_config(&self) -> &DiscoveryConfig {
+        &self.config
     }
 
     #[tracing::instrument(skip(self))]
