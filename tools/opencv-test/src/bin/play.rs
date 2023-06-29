@@ -15,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
 
     let window = "video playback";
     highgui::named_window(window, highgui::WINDOW_AUTOSIZE)?;
-    let mut cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?; // 0 is the default camera
+    let mut cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
     let opened = videoio::VideoCapture::is_opened(&cam)?;
     if !opened {
         panic!("Unable to read from file!");
