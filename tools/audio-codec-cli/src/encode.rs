@@ -16,7 +16,7 @@ use crate::{packetizer::OpusPacketizer, StaticArgs};
 
 // encodes and decodes an audio sample, saving it to a file. additionally passes the samples through
 // the webrtc-rs packetizer to verify that this component doesn't cause degradation of audio signal.
-pub async fn encode_f32_rtp(
+pub async fn f32_opus_rtp(
     args: StaticArgs,
     decoded_sample_rate: u32,
     input_file_name: String,
@@ -120,8 +120,9 @@ pub async fn encode_f32_rtp(
     Ok(())
 }
 
+// reads raw samples from input_file, encodes them, decodes them, and saves them to output_file.
 // allows specifying a different sample rate for the decoder. Opus is supposed to support this.
-pub async fn encode_f32(
+pub async fn f32_opus(
     args: StaticArgs,
     decoded_channels: u16,
     decoded_sample_rate: u32,

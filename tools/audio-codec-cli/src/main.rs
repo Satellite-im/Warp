@@ -1,11 +1,10 @@
 use anyhow::bail;
 use clap::Parser;
 
-use encode::*;
 use log::LevelFilter;
 use once_cell::sync::Lazy;
 use play::*;
-use record::*;
+
 use simple_logger::SimpleLogger;
 use tokio::sync::Mutex;
 
@@ -223,7 +222,7 @@ Frame size (in samples) vs duration for various sampling rates:
                 *AUDIO_FILE_NAME = file_name;
             }
             match sm.sample_type {
-                SampleTypes::Float => record_f32(sm.clone()).await?,
+                SampleTypes::Float => record::raw_f32(sm.clone()).await?,
                 SampleTypes::Signed => todo!(),
             }
         }
@@ -234,7 +233,7 @@ Frame size (in samples) vs duration for various sampling rates:
             // todo
             match sm.sample_type {
                 SampleTypes::Float => {
-                    encode_f32(
+                    encode::f32_opus(
                         sm.clone(),
                         sm.channels,
                         sm.sample_rate,
@@ -251,7 +250,7 @@ Frame size (in samples) vs duration for various sampling rates:
             input_file_name,
             output_file_name,
         } => {
-            encode_f32(
+            encode::f32_opus(
                 sm.clone(),
                 sm.channels,
                 decoded_sample_rate,
@@ -266,7 +265,7 @@ Frame size (in samples) vs duration for various sampling rates:
             input_file_name,
             output_file_name,
         } => {
-            encode_f32(
+            encode::f32_opus(
                 sm.clone(),
                 decoded_channels,
                 decoded_sample_rate,
@@ -280,7 +279,7 @@ Frame size (in samples) vs duration for various sampling rates:
             input_file_name,
             output_file_name,
         } => {
-            encode_f32_rtp(
+            encode::f32_opus_rtp(
                 sm.clone(),
                 decoded_sample_rate,
                 input_file_name,
