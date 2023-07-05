@@ -291,12 +291,10 @@ pub struct Hash {
 }
 
 impl Hash {
-
     pub fn sha256(&self) -> Option<String> {
         self.sha256.clone()
     }
 }
-
 
 impl Hash {
     /// Use to generate a hash from file
@@ -318,7 +316,7 @@ impl Hash {
     ///
     /// assert_eq!(hash.sha256(), Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")));
     /// ```
-    #[cfg(not(target_arch="wasm32"))]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<(), Error> {
         self.sha256hash_from_reader(reader)?;
         Ok(())

@@ -2,7 +2,7 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::{Discovery as DiscoveryConfig, UpdateEvents, DefaultPfpFn},
+    config::{DefaultPfpFn, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
 };
 use futures::{
@@ -225,7 +225,7 @@ impl IdentityStore {
             friend_store,
             update_event,
             disable_image,
-            default_pfp_callback
+            default_pfp_callback,
         };
 
         if store.path.is_some() {
@@ -1575,11 +1575,14 @@ impl IdentityStore {
                 .collect::<Vec<_>>(),
         };
 
-        let list = futures::stream::FuturesUnordered::from_iter(
-            idents_docs
-                .iter()
-                .map(|doc| doc.resolve(&self.ipfs, !self.disable_image, self.default_pfp_callback.clone()).boxed()),
-        )
+        let list = futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
+            doc.resolve(
+                &self.ipfs,
+                !self.disable_image,
+                self.default_pfp_callback.clone(),
+            )
+            .boxed()
+        }))
         .filter_map(|res| async { res.ok() })
         .chain(stream::iter(preidentity))
         .collect::<Vec<_>>()

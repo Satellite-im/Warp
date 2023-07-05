@@ -350,9 +350,6 @@ impl Constellation for IpfsFileSystem {
         }
 
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let path = PathBuf::from(path);
         if !path.is_file() {
@@ -526,9 +523,6 @@ impl Constellation for IpfsFileSystem {
 
     async fn get(&self, name: &str, path: &str) -> Result<()> {
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
@@ -574,9 +568,6 @@ impl Constellation for IpfsFileSystem {
         }
 
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         if self.current_directory()?.get_item_by_path(name).is_ok() {
             return Err(Error::FileExist);
@@ -655,9 +646,6 @@ impl Constellation for IpfsFileSystem {
 
     async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
@@ -863,10 +851,6 @@ impl Constellation for IpfsFileSystem {
     /// Used to remove data from the filesystem
     async fn remove(&mut self, name: &str, _: bool) -> Result<()> {
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
-
         //TODO: Recursively delete directory but for now only support deleting a file
         let directory = self.current_directory()?;
 
@@ -938,9 +922,6 @@ impl Constellation for IpfsFileSystem {
     async fn rename(&mut self, current: &str, new: &str) -> Result<()> {
         //Used as guard in the event its not available but will be used in the future
         let _ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         //Note: This will only support renaming the file or directory in the index
         let directory = self.current_directory()?;
@@ -964,9 +945,6 @@ impl Constellation for IpfsFileSystem {
     async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<()> {
         //Used as guard in the event its not available but will be used in the future
         let _ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let directory = self.current_directory()?;
 
@@ -987,8 +965,6 @@ impl Constellation for IpfsFileSystem {
 
     async fn sync_ref(&mut self, path: &str) -> Result<()> {
         let ipfs = self.ipfs()?;
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let directory = self.current_directory()?;
         let file = directory
