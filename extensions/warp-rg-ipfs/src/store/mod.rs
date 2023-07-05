@@ -4,6 +4,7 @@ pub mod keystore;
 pub mod message;
 pub mod payload;
 
+use ipfs::Keypair;
 use rust_ipfs as ipfs;
 use std::fmt::{Debug, Display};
 
@@ -273,4 +274,11 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
+}
+
+pub fn get_keypair_did(keypair: &Keypair) -> anyhow::Result<DID> {
+    let kp = Zeroizing::new(keypair.clone().try_into_ed25519()?.to_bytes());
+    let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+    Ok(did.into())
 }
