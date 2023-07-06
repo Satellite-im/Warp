@@ -31,7 +31,7 @@ use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
 use ipfs::{
-    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
+    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfsNoop,
 };
 use warp::crypto::DID;
 use warp::error::Error;
@@ -259,7 +259,7 @@ impl IpfsIdentity {
         let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
         info!("Starting ipfs");
-        let ipfs = UninitializedIpfs::with_opt(opts)
+        let ipfs = UninitializedIpfsNoop::with_opt(opts)
             .set_keypair(keypair)
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
