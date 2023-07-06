@@ -15,9 +15,111 @@ use webrtc::{
 
 use crate::{packetizer::OpusPacketizer, StaticArgs};
 
+// revelant documentation
+// "input buffer ran out of bits": https://github.com/haileys/fdk-aac-rs/issues/1
+pub fn f32_aac(
+    args: StaticArgs,
+    input_file_name: String,
+    output_file_name: String,
+) -> anyhow::Result<()> {
+    const SAMPLES_PER_FRAME: usize = 1024;
+    // init
+    let enc = fdk_aac::enc::Encoder::new(fdk_aac::enc::EncoderParams {
+        bit_rate: fdk_aac::enc::BitRate::Cbr(16000),
+        sample_rate: args.sample_rate,
+        transport: fdk_aac::enc::Transport::Raw,
+        channels: fdk_aac::enc::ChannelMode::Mono,
+    })
+    .map_err(|e| anyhow::anyhow!(e))?;
+
+    let mut dec = fdk_aac::dec::Decoder::new(fdk_aac::dec::Transport::Adts);
+
+    let mut sample_buf = [0_u8; 4];
+    let mut frame_buf = [0_i16; SAMPLES_PER_FRAME];
+
+    let mut buf_idx = 0;
+
+    let mut input_file = File::open(&input_file_name)?;
+    let mut output_file = File::create(output_file_name)?;
+    while let Ok(bytes_read) = input_file.read(&mut sample_buf) {
+        if bytes_read == 0 {
+            break;
+        } else if bytes_read != 4 {
+            bail!("invalid number of bytes read: {bytes_read}");
+        }
+
+        let p: *const u8 = sample_buf.as_ptr();
+        let q: *const f32 = p as _;
+        let sample = unsafe { *q };
+
+        frame_buf[buf_idx] = sample as i16;
+        buf_idx += 1;
+        if buf_idx < frame_buf.len() {
+            continue;
+        }
+        buf_idx = 0;
+        let mut output_buf = [0_u8; SAMPLES_PER_FRAME * 4];
+        let encode_info = enc
+            .encode(&frame_buf, &mut output_buf)
+            .map_err(|e| anyhow::anyhow!(format!("{}:{} {}", file!(), line!(), e)))?;
+        // units of input_consumed is samples
+        // units of output_size is bytes
+        println!("{:?}", encode_info);
+        assert_eq!(encode_info.input_consumed, frame_buf.len());
+        if encode_info.output_size == 0 {
+            continue;
+        }
+
+        /*let b = mp4::Bytes::copy_from_slice(&output_buf[0..encode_info.output_size]);
+        let sample = Mp4Sample {
+            start_time: frame_number * 10,
+            duration: 10,
+            rendering_offset: 0,
+            is_sync: true,
+            bytes: b,
+        };*/
+
+        /*let r = dec
+            .fill(&output_buf[0..encode_info.output_size])
+            .map_err(|e| anyhow::anyhow!(format!("{}:{} {}", file!(), line!(), e)))?;
+        assert_eq!(r, encode_info.output_size);
+
+        let mut output_buf2 = [0_i16; SAMPLES_PER_FRAME];
+        dec.decode_frame(&mut output_buf2)
+            .map_err(|e| anyhow::anyhow!(format!("{}:{} {}", file!(), line!(), e)))?;
+        let stream_info = dec.stream_info();
+        assert_eq!(stream_info.frameSize, 480);
+
+        let mut decoded = [0_f32; SAMPLES_PER_FRAME];
+        let mut idx = 0;
+        for b in output_buf2 {
+            decoded[idx] = b as f32;
+            idx += 1;
+        }*/
+
+        // let p: *const f32 = decoded.as_ptr();
+        let bp: *const u8 = output_buf.as_ptr(); //p as _;
+        let bs: &[u8] =
+            unsafe { slice::from_raw_parts(bp, mem::size_of::<u8>() * encode_info.output_size) }; // SAMPLES_PER_FRAME) };
+        match output_file.write(bs) {
+            Ok(num_written) => {
+                assert_eq!(num_written, mem::size_of::<u8>() * encode_info.output_size)
+                // SAMPLES_PER_FRAME)
+            }
+            Err(e) => {
+                log::error!("failed to write bytes to file: {e}");
+            }
+        }
+    }
+
+    output_file.sync_all()?;
+    println!("done encoding/decoding");
+    Ok(())
+}
+
 // reads raw samples from input_file and creates an mp4 file
 // mp4 requires using the AAC codec for audio.
-pub async fn f32_mp4(
+pub fn f32_mp4(
     args: StaticArgs,
     input_file_name: String,
     output_file_name: String,
@@ -270,4 +372,38 @@ pub async fn f32_opus(
     output_file.sync_all()?;
     println!("done encoding/decoding");
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use fdk_aac::enc::InfoStruct;
+
+    use super::*;
+
+    #[test]
+    fn test_enc_info1() {
+        let enc = fdk_aac::enc::Encoder::new(fdk_aac::enc::EncoderParams {
+            bit_rate: fdk_aac::enc::BitRate::Cbr(16000),
+            sample_rate: 48000,
+            transport: fdk_aac::enc::Transport::Raw,
+            channels: fdk_aac::enc::ChannelMode::Mono,
+        })
+        .unwrap();
+
+        let info = enc.info().unwrap();
+        disp_enc_info(&info);
+    }
+
+    fn disp_enc_info(info: &InfoStruct) {
+        println!("maxOutBufBytes: {}", info.maxOutBufBytes);
+        println!("maxAncBytes: {}", info.maxAncBytes);
+        println!("inBufFillLevel: {}", info.inBufFillLevel);
+        println!("inputChannels: {}", info.inputChannels);
+        println!("frameLength: {}", info.frameLength);
+        println!("nDelay: {}", info.nDelay);
+        println!("nDelayCore: {}", info.nDelayCore);
+        println!("confBuf: {:?}", info.confBuf);
+        println!("confSize: {}", info.confSize);
+        //println!(": {}", info.);
+    }
 }

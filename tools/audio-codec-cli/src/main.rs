@@ -53,6 +53,11 @@ enum Cli {
         input_file_name: String,
         output_file_name: String,
     },
+    // test encoding/decoding of aac
+    EncodeAac {
+        input_file_name: String,
+        output_file_name: String,
+    },
     /// tests encoding/decoding with specified decoding parameters
     /// WARNING! when you play the file, be sure to set the sample-rate to the one used
     /// to decode the file.
@@ -100,6 +105,10 @@ enum Cli {
     ShowConfig,
     /// test feeding the input and output streams together
     Feedback,
+    /// quit
+    Quit,
+    /// quit
+    Q,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -161,6 +170,10 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
+        if matches!(cli, Cli::Quit | Cli::Q) {
+            println!("quitting");
+            break;
+        }
         if let Err(e) = handle_command(cli).await {
             println!("command failed: {e}");
         }
@@ -172,6 +185,7 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_command(cli: Cli) -> anyhow::Result<()> {
     let mut sm = STATIC_MEM.lock().await;
     match cli {
+        Cli::Quit | Cli::Q => bail!("user quit"),
         Cli::ConfigInfo => {
             let s = "Important information regarding sample rate and frame size:
 Based on the OPUS RFC, OPUS encodes frames based on duration - 2.5, 5, 10, 20, 40, or 60ms.
@@ -253,7 +267,11 @@ Frame size (in samples) vs duration for various sampling rates:
         Cli::EncodeMp4 {
             input_file_name,
             output_file_name,
-        } => encode::f32_mp4(sm.clone(), input_file_name, output_file_name).await?,
+        } => encode::f32_mp4(sm.clone(), input_file_name, output_file_name)?,
+        Cli::EncodeAac {
+            input_file_name,
+            output_file_name,
+        } => encode::f32_aac(sm.clone(), input_file_name, output_file_name)?,
         Cli::CustomEncode {
             decoded_sample_rate,
             input_file_name,

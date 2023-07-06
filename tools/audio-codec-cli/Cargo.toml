@@ -10,7 +10,7 @@ edition = "2021"
 bs1770 = "1.0.0"
 clap = { version = "4.0", features = ["derive"] }
 cpal = "0.15.0"
-fdk-aac = "0.4.0"
+fdk-aac = { git="https://github.com/sdwoodbury/fdk-aac-rs", branch="master" } #"0.4.0"
 log = { version = "0.4.17", features = ["std"]}
 mp4 = "0.13.0"
 opus = "0.3.0"
