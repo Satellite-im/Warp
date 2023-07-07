@@ -1,12 +1,12 @@
 use std::{
     fs::File,
-    io::{Read, Write},
+    io::{BufWriter, Read, Write},
     mem, slice,
 };
 
 use anyhow::bail;
 use bytes::Bytes;
-use mp4::{Mp4Config, Mp4Writer};
+use mp4::{FourCC, MoovBox, Mp4Box, Mp4Config, Mp4Writer, TrakBox, WriteBox};
 use rand::Rng;
 use webrtc::{
     media::io::sample_builder::SampleBuilder,
@@ -119,53 +119,46 @@ pub fn f32_aac(
 
 // reads raw samples from input_file and creates an mp4 file
 // mp4 requires using the AAC codec for audio.
+// use ffmp4g to verify the validity of the file: `ffmpeg -v error -i input_file.mp4 -f null - 2>error.log`
 pub fn f32_mp4(
     args: StaticArgs,
     input_file_name: String,
     output_file_name: String,
 ) -> anyhow::Result<()> {
     let output_file = File::create(&output_file_name)?;
+    let mut writer = BufWriter::new(output_file);
 
-    // initialize mp4 file
-    let mp4_config = Mp4Config {
+    let ftyp = mp4::FtypBox {
         major_brand: str::parse("isom")?,
         // todo: verify
         minor_version: 512,
-        // todo: verify
-        compatible_brands: vec![
-            str::parse("isom")?,
-            str::parse("iso2")?,
-            str::parse("avc1")?,
-            str::parse("mp41")?,
-        ],
-        // number of timestamp values that represent a duration of one second
-        // todo: should this match the sampling rate?
-        timescale: 1000,
+        compatible_brands: vec![str::parse("isom")?],
     };
 
-    let track_config = mp4::TrackConfig {
-        track_type: mp4::TrackType::Audio,
-        // todo: verify
-        timescale: 48000,
-        language: String::from("en"),
-        media_conf: mp4::MediaConfig::AacConfig(mp4::AacConfig {
-            // todo: verify
-            bitrate: 16000,
-            // todo: verify
-            profile: mp4::AudioObjectType::AacLowComplexity,
-            freq_index: mp4::SampleFreqIndex::Freq48000,
-            chan_conf: mp4::ChannelConfig::Mono,
-        }),
-    };
+    ftyp.write_box(&mut writer)?;
+    writer.flush()?;
 
-    let mut writer = Mp4Writer::write_start(output_file, &mp4_config)?;
-    writer.add_track(&track_config)?;
-    // track id starts at 1 and is incremented for each track added.
-    // let audio_track_id = 1;
+    let mut track = TrakBox::default();
+    // track_enabled | track_in_movie
+    track.tkhd.flags = 1; // | 2;
+    track.tkhd.track_id = 1;
 
-    // let sample = mp4::Mp4Sample::default();
-    // writer.write_sample(audio_track_id, &sample)?;
-    writer.write_end()?;
+    // https://opus-codec.org/docs/opus_in_isobmff.html
+    // 'soun' for Opus
+    track.mdia.hdlr.handler_type = 0x736F756E.into();
+    track.mdia.hdlr.name = String::from("Opus");
+
+    let mut moov = MoovBox::default();
+    // opus frames are 10ms. 100 of them makes 1 second
+    moov.mvhd.timescale = 100;
+    // shall be greater than the largest track id in use
+    moov.mvhd.next_track_id = 2;
+    moov.traks.push(track);
+
+    moov.write_box(&mut writer)?;
+    writer.flush()?;
+
+    println!("done encoding/decoding");
     Ok(())
     /*
     // init opus and stuff
