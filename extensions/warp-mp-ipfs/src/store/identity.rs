@@ -1850,12 +1850,6 @@ impl IdentityStore {
         let path = IpfsPath::from(root_document.identity);
         let identity = self.get_local_dag::<IdentityDocument>(path).await?;
         identity.verify()?;
-
-        let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
-        if identity.did != kp_public_key {
-            //Note if we reach this point, the identity would need to be reconstructed
-            return Err(Error::IdentityDoesntExist);
-        }
         Ok(identity)
     }
 
@@ -1964,13 +1958,16 @@ impl IdentityStore {
             return Err(Error::InvalidIdentityPicture);
         }
 
-        let document = self
-            .cache()
-            .await
-            .iter()
-            .find(|ident| ident.did == *did)
-            .cloned()
-            .ok_or(Error::IdentityDoesntExist)?;
+        let document = match self.own_identity_document().await {
+            Ok(document) if document.did.eq(did) => document,
+            Err(_) | Ok(_) => self
+                .cache()
+                .await
+                .iter()
+                .find(|ident| ident.did == *did)
+                .cloned()
+                .ok_or(Error::IdentityDoesntExist)?,
+        };
 
         let cb = self.default_pfp_callback.clone();
 
@@ -1999,13 +1996,16 @@ impl IdentityStore {
             return Err(Error::InvalidIdentityBanner);
         }
 
-        let document = self
-            .cache()
-            .await
-            .iter()
-            .find(|ident| ident.did == *did)
-            .cloned()
-            .ok_or(Error::IdentityDoesntExist)?;
+        let document = match self.own_identity_document().await {
+            Ok(document) if document.did.eq(did) => document,
+            Err(_) | Ok(_) => self
+                .cache()
+                .await
+                .iter()
+                .find(|ident| ident.did == *did)
+                .cloned()
+                .ok_or(Error::IdentityDoesntExist)?,
+        };
 
         let cb = self.default_pfp_callback.clone();
 

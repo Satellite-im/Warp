@@ -725,8 +725,8 @@ async fn main() -> anyhow::Result<()> {
                                     identity.username(),
                                     identity.did_key().to_string(),
                                     identity.status_message().unwrap_or_default(),
-                                    (!profile_picture.is_empty()).to_string(),
                                     (!profile_banner.is_empty()).to_string(),
+                                    (!profile_picture.is_empty()).to_string(),
                                     platform.to_string(),
                                     format!("{status:?}"),
                                 ]);
