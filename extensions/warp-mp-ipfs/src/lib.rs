@@ -649,7 +649,7 @@ impl MultiPass for IpfsIdentity {
             Identifier::DID(pk) => store.lookup(LookupBy::DidKey(pk)).await,
             Identifier::Username(username) => store.lookup(LookupBy::Username(username)).await,
             Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
-            Identifier::Own => return store.own_identity(true).await.map(|i| vec![i]),
+            Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
         }?;
 
         Ok(idents)
@@ -1014,6 +1014,16 @@ impl FriendsEvent for IpfsIdentity {
 
 #[async_trait::async_trait]
 impl IdentityInformation for IpfsIdentity {
+    async fn identity_picture(&self, did: &DID) -> Result<String, Error> {
+        let store = self.identity_store(true).await?;
+        store.identity_picture(did).await
+    }
+
+    async fn identity_banner(&self, did: &DID) -> Result<String, Error> {
+        let store = self.identity_store(true).await?;
+        store.identity_banner(did).await
+    }
+
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store(true).await?;
         store.identity_status(did).await

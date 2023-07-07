@@ -170,12 +170,12 @@ pub trait FriendsEvent: Sync + Send {
 #[async_trait::async_trait]
 pub trait IdentityInformation: Send + Sync {
     /// Profile picture belonging to the `Identity`
-    async fn profile_picture(&self, _: &DID) -> Result<String, Error> {
+    async fn identity_picture(&self, _: &DID) -> Result<String, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Profile banner belonging to the `Identity`
-    async fn profile_banner(&self, _: &DID) -> Result<String, Error> {
+    async fn identity_banner(&self, _: &DID) -> Result<String, Error> {
         Err(Error::Unimplemented)
     }
 
