@@ -169,6 +169,16 @@ pub trait FriendsEvent: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait IdentityInformation: Send + Sync {
+    /// Profile picture belonging to the `Identity`
+    async fn profile_picture(&self, _: &DID) -> Result<String, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Profile banner belonging to the `Identity`
+    async fn profile_banner(&self, _: &DID) -> Result<String, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// Identity status to determine if they are online or offline
     async fn identity_status(&self, _: &DID) -> Result<IdentityStatus, Error> {
         Err(Error::Unimplemented)
