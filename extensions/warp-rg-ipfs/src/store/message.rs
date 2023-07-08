@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use futures::channel::mpsc::{unbounded, Sender, UnboundedSender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
-use futures::stream::FuturesUnordered;
+use futures::stream::{FuturesUnordered, SelectAll};
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
 use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
@@ -3282,7 +3282,8 @@ impl MessageStore {
 
             let mut receivers_count = 0;
             let receivers_completed = Arc::new(AtomicUsize::new(0));
-            let (mut s_tx, s_rx) = futures::channel::mpsc::unbounded::<(Progression, Option<warp::constellation::file::File>)>();
+            let mut streams: SelectAll<_> = SelectAll::new();
+            
             for file in files {
                 match location {
                     Location::Constellation => {
@@ -3294,7 +3295,10 @@ impl MessageStore {
                             .ok()
                         {
                             Some(f) => {
-                                s_tx.send((Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f))).await.ok();
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
+                                };
+                                streams.push(stream.boxed());
                             },
                             None => continue,
                         }
@@ -3342,7 +3346,10 @@ impl MessageStore {
                         }
 
                         if skip {
-                            s_tx.send((Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None)).await.ok();
+                            let stream = async_stream::stream! {
+                                yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None);
+                            };
+                            streams.push(stream.boxed());
                             continue;
                         }
 
@@ -3354,43 +3361,47 @@ impl MessageStore {
                             Ok(stream) => stream,
                             Err(e) => {
                                 error!("Error uploading {filename}: {e}");
-                                s_tx.send((Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None)).await.ok();
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
+                                };
+                                streams.push(stream.boxed());
                                 continue;
                             }
                         };
 
                         receivers_count += 1;
-                        tokio::spawn({
-                            let tx = s_tx.clone();
-                            let current_directory = current_directory.clone();
-                            let filename = filename.to_string();
-                            let counter = receivers_completed.clone();
-                            async move {
-                                while let Some(progress) = progress.next().await {
-                                    match progress {
-                                        progress @ Progression::CurrentProgress { .. } => {
-                                            let _ = tx.unbounded_send((progress, None)).ok();
-                                        },
-                                        progress @ Progression::ProgressComplete { .. } => {
-                                            let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
-                                            let _ = tx.unbounded_send((progress, file)).ok();
-                                            counter.fetch_add(1, Ordering::SeqCst);
-                                            break;
-                                        },
-                                        progress @ Progression::ProgressFailed { .. } => {
-                                            let _ = tx.unbounded_send((progress, None)).ok();
-                                            counter.fetch_add(1, Ordering::SeqCst);
-                                            break;
-                                        }
+
+                        let current_directory = current_directory.clone();
+                        let filename = filename.to_string();
+                        let counter = receivers_completed.clone();
+
+                        let stream = async_stream::stream! {
+                            while let Some(item) = progress.next().await {
+                                match item {
+                                    item @ Progression::CurrentProgress { .. } => {
+                                        yield (item, None);
+                                    },
+                                    item @ Progression::ProgressComplete { .. } => {
+                                        let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
+                                        yield (item, file);
+                                        counter.fetch_add(1, Ordering::SeqCst);
+                                        break;
+                                    },
+                                    item @ Progression::ProgressFailed { .. } => {
+                                        yield (item, None);
+                                        counter.fetch_add(1, Ordering::SeqCst);
+                                        break;
                                     }
                                 }
                             }
-                        });
+                        };
+                        
+                        streams.push(stream.boxed());
                     }
                 };
             }
 
-            for await (progress, file) in s_rx {
+            for await (progress, file) in streams {
                 yield AttachmentKind::AttachedProgress(progress);
                 if let Some(file) = file {
                     // We reconstruct it to avoid out any metadata that was apart of the `File` structure that we dont want to share
@@ -3414,9 +3425,6 @@ impl MessageStore {
                     }
                 }
             }
-
-            s_tx.close_channel();
-            drop(s_tx);
 
             let final_results = {
                 let mut store = store.clone();
