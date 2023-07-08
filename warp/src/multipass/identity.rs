@@ -101,10 +101,6 @@ pub struct Identity {
 
     /// Status message
     status_message: Option<String>,
-
-    /// Signature of the identity
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<String>,
 }
 
 impl Identity {
@@ -123,10 +119,6 @@ impl Identity {
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
-
-    pub fn set_signature(&mut self, signature: Option<String>) {
-        self.signature = signature;
-    }
 }
 
 impl Identity {
@@ -144,10 +136,6 @@ impl Identity {
 
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
-    }
-
-    pub fn signature(&self) -> Option<String> {
-        self.signature.clone()
     }
 }
 
