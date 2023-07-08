@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
@@ -3280,8 +3280,6 @@ impl MessageStore {
             let mut attachments = vec![];
             let mut total_thumbnail_size = 0;
 
-            let mut receivers_count = 0;
-            let receivers_completed = Arc::new(AtomicUsize::new(0));
             let mut streams: SelectAll<_> = SelectAll::new();
             
             for file in files {
@@ -3369,11 +3367,8 @@ impl MessageStore {
                             }
                         };
 
-                        receivers_count += 1;
-
                         let current_directory = current_directory.clone();
                         let filename = filename.to_string();
-                        let counter = receivers_completed.clone();
 
                         let stream = async_stream::stream! {
                             while let Some(item) = progress.next().await {
@@ -3384,12 +3379,10 @@ impl MessageStore {
                                     item @ Progression::ProgressComplete { .. } => {
                                         let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
                                         yield (item, file);
-                                        counter.fetch_add(1, Ordering::SeqCst);
                                         break;
                                     },
                                     item @ Progression::ProgressFailed { .. } => {
                                         yield (item, None);
-                                        counter.fetch_add(1, Ordering::SeqCst);
                                         break;
                                     }
                                 }
@@ -3420,9 +3413,6 @@ impl MessageStore {
                     new_file.set_hash(file.hash());
                     new_file.set_reference(&file.reference().unwrap_or_default());
                     attachments.push(new_file);
-                    if receivers_completed.load(Ordering::SeqCst) == receivers_count {
-                        break;
-                    }
                 }
             }
 
