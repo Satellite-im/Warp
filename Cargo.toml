@@ -77,4 +77,4 @@ getrandom = { version = "0.2" }
 either = "1"
 
 #ipfs dependency
-rust-ipfs = "=0.3.17"
+rust-ipfs = "=0.3.18"
