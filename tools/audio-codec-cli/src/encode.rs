@@ -6,7 +6,10 @@ use std::{
 
 use anyhow::bail;
 use bytes::Bytes;
-use mp4::{FourCC, MoovBox, Mp4Box, Mp4Config, Mp4Writer, TrakBox, WriteBox};
+use mp4::{
+    mdia::MdiaBox, mvex::MvexBox, tfdt::TfdtBox, tfhd::TfhdBox, traf::TrafBox, trex::TrexBox,
+    trun::TrunBox, FourCC, MoofBox, MoovBox, Mp4Box, Mp4Config, Mp4Writer, TrakBox, WriteBox,
+};
 use rand::Rng;
 use webrtc::{
     media::io::sample_builder::SampleBuilder,
@@ -138,16 +141,47 @@ pub fn f32_mp4(
     ftyp.write_box(&mut writer)?;
     writer.flush()?;
 
+    // create tracks
     let mut track = TrakBox::default();
     // track_enabled | track_in_movie
     track.tkhd.flags = 1; // | 2;
     track.tkhd.track_id = 1;
 
     // https://opus-codec.org/docs/opus_in_isobmff.html
-    // 'soun' for Opus
+    // 'soun' for sound
     track.mdia.hdlr.handler_type = 0x736F756E.into();
     track.mdia.hdlr.name = String::from("Opus");
 
+    // configure fragments
+    let mut mvex = MvexBox {
+        mehd: None,
+        trex: TrexBox {
+            version: 0,
+            // see page 45 of the spec. says: not leading sample,
+            // sample does not depend on others,
+            // no other samples depend on thsi one,
+            // there is no redundant coding in this sample
+            // padding: 0
+            // sample_is_non_sync_sample ... set this to 1?
+            // sample_degredation_priority
+            flags: (2 << 26) | (2 << 24) | (2 << 22) | (2 << 20),
+            track_id: 1,
+            // todo: fix
+            default_sample_description_index: 0,
+            // todo: fix
+            default_sample_duration: 0,
+            // todo: fix
+            default_sample_size: 0,
+            // todo: verify
+            // everything set except duration-is-empty
+            default_sample_flags: 1 | 2 | 8 | 0x10 | 0x20,
+        },
+    };
+    // MovieExtendsBox
+    // MovieExtendsHeaderBox
+    // TrackExtendsBox
+
+    // create movie box, add tracks, and add extends box
     let mut moov = MoovBox::default();
     // opus frames are 10ms. 100 of them makes 1 second
     moov.mvhd.timescale = 100;
@@ -157,6 +191,34 @@ pub fn f32_mp4(
 
     moov.write_box(&mut writer)?;
     writer.flush()?;
+
+    // write fragments
+
+    let mut moof = MoofBox::default();
+    let mut fragment_sequence_number = 1;
+    let mut fragment_start_time = 0;
+    moof.mfhd.sequence_number = fragment_sequence_number;
+
+    let mut traf = TrafBox::default();
+    // track fragment decode time?
+    traf.tfdt.replace(Some(TfdtBox {
+        version: 0,
+        flags: 0,
+        base_media_decode_time: fragment_start_time,
+    }));
+    // track fragment run?
+    traf.trun.replace(TrunBox {
+        version: 0,
+        // data-offset-present
+        flags: 1,
+        sample_count: 100,
+        // todo: fix this
+        data_offset: Some(0xdeadbeef),
+        ..Default::default()
+    });
+    //traf.tfhd = TfhdBox{version: 0, flags: 1}
+
+    // have to write mdat box manually via BoxHeader(BoxType::MdatBox, <size>), followed by the samples.
 
     println!("done encoding/decoding");
     Ok(())
