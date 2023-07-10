@@ -9,8 +9,6 @@ use warp::{
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
 
-use crate::config::DefaultPfpFn;
-
 #[derive(Debug, Clone, Deserialize, Serialize, Eq)]
 pub struct IdentityDocument {
     pub username: String,
@@ -73,60 +71,13 @@ impl IdentityDocument {
 }
 
 impl IdentityDocument {
-    pub async fn resolve(
-        &self,
-        ipfs: &Ipfs,
-        with_image: bool,
-        callback: Option<DefaultPfpFn>,
-    ) -> Result<Identity, Error> {
+    pub fn resolve(&self) -> Result<Identity, Error> {
         self.verify()?;
         let mut identity = Identity::default();
         identity.set_username(&self.username);
         identity.set_did_key(self.did.clone());
         identity.set_short_id(self.short_id);
         identity.set_status_message(self.status_message.clone());
-
-        let mut fallback = true;
-
-        if with_image {
-            if let Some(cid) = self.profile_picture {
-                match unixfs_fetch(ipfs, cid, None, true, Some(2 * 1024 * 1024)).await {
-                    Ok(data) => {
-                        let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                        if !picture.is_empty() {
-                            identity.set_profile_picture(&picture);
-                            fallback = false;
-                        }
-                    }
-                    Err(_e) => {}
-                }
-            }
-
-            if fallback {
-                if let Some(callback) = callback {
-                    let picture = callback(&identity).unwrap_or_default();
-                    // Note: Probably move the callback into a blocking task in case the underlining function make calls that blocks the current thread?
-                    // let picture = tokio::task::spawn_blocking(move || callback(&owned_identity).unwrap_or_default())
-                    //  .await
-                    //  .unwrap_or_default();
-                    if !picture.is_empty() {
-                        let buffer = String::from_utf8_lossy(&picture).to_string();
-                        identity.set_profile_picture(&buffer);
-                    }
-                }
-            }
-
-            if let Some(cid) = self.profile_banner {
-                match unixfs_fetch(ipfs, cid, None, true, Some(2 * 1024 * 1024)).await {
-                    Ok(data) => {
-                        let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                        identity.set_profile_banner(&picture);
-                    }
-                    Err(_e) => {}
-                }
-            }
-        }
-
         Ok(identity)
     }
 
