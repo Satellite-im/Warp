@@ -73,6 +73,9 @@ ENV CC=$CC_aarch64_linux_android \
     CXX=$CXX_aarch64_linux_android \
     LD=$LD_aarch64_linux_android
 
+# for audiopus_sys
+ENV OPUS_STATIC=true OPUS_LIB_DIR=/root/build/libs
+
 # for ring library: https://github.com/briansmith/ring/blob/main/BUILDING.md. one of their dependencies seems to use non-standard environment variables for CC and AR. 
 ENV TARGET_CC=$CC_aarch64_linux_android TARGET_AR=$AR_aarch64_linux_android
 
@@ -81,5 +84,5 @@ WORKDIR /root/build
 CMD ["bash"]
 
 
-# docker build . -t aarch64-buidler3 -f Dockerfile.aarch64
-# docker run --rm -ti -v `pwd`:/root/build aarch64-builder3
+# docker build . -t aarch64-builder -f Dockerfile.aarch64-android
+# docker run --rm -ti -v `pwd`:/root/build aarch64-builder
