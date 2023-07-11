@@ -108,3 +108,4 @@ CMD ["bash"]
 # docker build . -t aarch64-builder -f Dockerfile.aarch64-android
 # docker run --rm -ti -v `pwd`:/root/build aarch64-builder
 # cargo android apk build aarch64
+# cargo build --target aarch64-linux-android --verbose
