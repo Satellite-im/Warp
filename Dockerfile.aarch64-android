@@ -1,10 +1,12 @@
-FROM ubuntu:jammy
+FROM runmymind/docker-android-sdk:ubuntu-standalone-20230711
+# the above docker file can be found here: https://github.com/mindrunner/docker-android-sdk/blob/main/ubuntu/standalone/Dockerfile
 
 RUN apt update && apt install -y build-essential pkg-config git ssh curl openssl libssl-dev wget gettext
 
 RUN apt install -y g++-aarch64-linux-gnu libc6-dev-arm64-cross
 RUN apt install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev librust-alsa-sys-dev
 
+# todo: don't need workdir to be /root/rust
 WORKDIR /root/rust 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
 RUN . $HOME/.cargo/env && rustup target add aarch64-unknown-linux-gnu 
@@ -19,10 +21,10 @@ RUN cd cmake-3.23.1 && make install
 
 RUN apt install -y protobuf-compiler
 RUN apt install -y zip
-# RUN apt install -y zlib1g-dev
 
+# todo: don't need this. the android-sdk docker container already has everything in /opt/android-sdk-linux
 WORKDIR /root/android
-COPY android-ndk-r25c-linux.zip android-ndk-r25c-linux.zip
+RUN wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
 RUN unzip android-ndk-r25c-linux.zip
 
 WORKDIR /root 
@@ -73,13 +75,26 @@ ENV CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN_PREFIX"clang \
 
 ENV CC=$CC_aarch64_linux_android \
     CXX=$CXX_aarch64_linux_android \
-    LD=$LD_aarch64_linux_android
-
-# for audiopus_sys
-ENV OPUS_STATIC=true OPUS_LIB_DIR=/root/build/libs
+    LD=$LD_aarch64_linux_android \
+    AR=$AR_aarch64_linux_android
 
 # for ring library: https://github.com/briansmith/ring/blob/main/BUILDING.md. one of their dependencies seems to use non-standard environment variables for CC and AR. 
 ENV TARGET_CC=$CC_aarch64_linux_android TARGET_AR=$AR_aarch64_linux_android
+
+# todo: move this install further up. needed for opus build
+RUN apt install -y autoconf automake libtool
+
+# cross compile opus 
+WORKDIR /root
+RUN git clone https://github.com/xiph/opus.git
+WORKDIR /root/opus
+RUN git checkout 7b05f44f4baadf34d8d1073f4ff69f1806d5cdb4
+RUN ./autogen.sh
+RUN ./configure --host=aarch64-linux-android
+RUN make -j12
+
+# for audiopus_sys
+ENV OPUS_STATIC=true OPUS_LIB_DIR=/root/opus/.libs
 
 WORKDIR /root/build
 
@@ -87,4 +102,5 @@ CMD ["bash"]
 
 
 # docker build . -t aarch64-builder -f Dockerfile.aarch64-android
+# docker build . -t aarch64-builder2 -f Dockerfile.aarch64-android
 # docker run --rm -ti -v `pwd`:/root/build aarch64-builder
