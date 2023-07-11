@@ -30,6 +30,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
 RUN . $HOME/.cargo/env && rustup target add aarch64-linux-android 
 # RUN . $HOME/.cargo/env && rustup toolchain install aarch64-linux-android 
 
+RUN . $HOME/.cargo/env && cargo install --git https://github.com/tauri-apps/tauri-mobile
+
 ENV MY_ANDROID_NDK_PATH=/root/android/android-ndk-r25c
 ENV MY_SYSROOT=$MY_ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
  
