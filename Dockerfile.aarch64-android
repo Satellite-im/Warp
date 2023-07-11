@@ -25,6 +25,11 @@ WORKDIR /root/android
 COPY android-ndk-r25c-linux.zip android-ndk-r25c-linux.zip
 RUN unzip android-ndk-r25c-linux.zip
 
+workdir /root 
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
+RUN . $HOME/.cargo/env && rustup target add aarch64-linux-android 
+# RUN . $HOME/.cargo/env && rustup toolchain install aarch64-linux-android 
+
 ENV MY_ANDROID_NDK_PATH=/root/android/android-ndk-r25c
 ENV MY_TOOLCHAIN_PATH=$MY_ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
 
@@ -51,7 +56,6 @@ ENV CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CROSS_TOOLCHAIN_PREFIX"clang \
     BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$CROSS_SYSROOT" \
     DEP_Z_INCLUDE="$CROSS_SYSROOT/usr/include"/ \
     RUST_TEST_THREADS=1 \
-    HOME=/tmp/ \
     TMPDIR=/tmp/ \
     ANDROID_DATA=/ \
     ANDROID_DNS_MODE=local \
@@ -67,12 +71,6 @@ ENV CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CROSS_TOOLCHAIN_PREFIX"clang \
 
 # for ring library: https://github.com/briansmith/ring/blob/main/BUILDING.md. so nice of them to add their own versions of CC and AR. how useful. 
 ENV TARGET_CC=$CC_aarch64_linux_android TARGET_AR=$AR_aarch64_linux_android
-
-workdir /root 
-ENV HOME=/root
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
-RUN . $HOME/.cargo/env && rustup target add aarch64-linux-android 
-# RUN . $HOME/.cargo/env && rustup toolchain install aarch64-linux-android 
 
 workdir /root/build
 
