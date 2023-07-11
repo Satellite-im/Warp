@@ -96,11 +96,15 @@ RUN make -j12
 # for audiopus_sys
 ENV OPUS_STATIC=true OPUS_LIB_DIR=/root/opus/.libs
 
+# for tauri mobile
+# todo: use ndk provided by android sdk
+ENV NDK_HOME=/root/android/android-ndk-r25c SDK_HOME=/opt/android-sdk-linux
+
 WORKDIR /root/build
 
 CMD ["bash"]
 
 
 # docker build . -t aarch64-builder -f Dockerfile.aarch64-android
-# docker build . -t aarch64-builder2 -f Dockerfile.aarch64-android
 # docker run --rm -ti -v `pwd`:/root/build aarch64-builder
+# cargo android apk build aarch64
