@@ -1,12 +1,10 @@
-use futures::StreamExt;
-use ipfs::ConnectionEvent;
 use rust_ipfs as ipfs;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinHandle;
-use tracing::log::warn;
 
 use ipfs::Multiaddr;
 use tokio::sync::broadcast;
@@ -20,7 +18,6 @@ use warp::multipass::MultiPassEventKind;
 
 use super::connected_to_peer;
 use super::discovery::Discovery;
-use super::DidExt;
 use super::PeerConnectionType;
 
 /// Used to handle friends connectivity status
@@ -191,9 +188,12 @@ impl PhoneBookEntry {
             let entry = entry.clone();
             async move {
                 let previous_status = entry.connection_type.clone();
-
-                match connected_to_peer(&entry.ipfs, entry.did.clone()).await {
-                    Ok(connection_status) => match connection_status {
+                loop {
+                    let Ok(connection_status) =  connected_to_peer(&entry.ipfs, entry.did.clone()).await else {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    };
+                    match connection_status {
                         PeerConnectionType::Connected => {
                             if matches!(
                                 *previous_status.read().await,
@@ -228,61 +228,8 @@ impl PhoneBookEntry {
                                 *previous_status.write().await = PeerConnectionType::NotConnected;
                             }
                         }
-                    },
-                    Err(e) => {
-                        warn!("Error obtaining status of {}: {e}", entry.did);
                     }
-                };
-
-                let mut stream = match entry
-                    .ipfs
-                    .connection_events(entry.did.to_peer_id().expect("Valid public key"))
-                    .await
-                {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Error creating connection event stream: {e}");
-                        return;
-                    }
-                };
-
-                while let Some(event) = stream.next().await {
-                    match event {
-                        ConnectionEvent::ConnectionEstablished { .. } => {
-                            if matches!(
-                                *previous_status.read().await,
-                                PeerConnectionType::NotConnected
-                            ) {
-                                if entry.emit_event.load(Ordering::Relaxed) {
-                                    let did = entry.did.clone();
-                                    if let Err(e) =
-                                        entry.event.send(MultiPassEventKind::IdentityOnline { did })
-                                    {
-                                        error!("Error broadcasting event: {e}");
-                                    }
-                                }
-                                *previous_status.write().await = PeerConnectionType::Connected;
-                            }
-                        }
-                        ConnectionEvent::ConnectionClosed { .. } => {
-                            let did = entry.did.clone();
-                            if matches!(
-                                *previous_status.read().await,
-                                PeerConnectionType::Connected
-                            ) {
-                                if entry.emit_event.load(Ordering::Relaxed) {
-                                    let did = did.clone();
-                                    if let Err(e) = entry
-                                        .event
-                                        .send(MultiPassEventKind::IdentityOffline { did })
-                                    {
-                                        error!("Error broadcasting event: {e}");
-                                    }
-                                }
-                                *previous_status.write().await = PeerConnectionType::NotConnected;
-                            }
-                        }
-                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         });
