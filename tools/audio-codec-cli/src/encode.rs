@@ -7,8 +7,8 @@ use std::{
 use anyhow::bail;
 use bytes::Bytes;
 use mp4::{
-    mdia::MdiaBox, mvex::MvexBox, tfdt::TfdtBox, tfhd::TfhdBox, traf::TrafBox, trex::TrexBox,
-    trun::TrunBox, FourCC, MoofBox, MoovBox, Mp4Box, Mp4Config, Mp4Writer, TrakBox, WriteBox,
+    BoxHeader, BoxType, FourCC, MdiaBox, MoofBox, MoovBox, Mp4Box, Mp4Config, Mp4Writer, MvexBox,
+    TfdtBox, TfhdBox, TrafBox, TrakBox, TrexBox, TrunBox, WriteBox,
 };
 use rand::Rng;
 use webrtc::{
@@ -128,6 +128,8 @@ pub fn f32_mp4(
     input_file_name: String,
     output_file_name: String,
 ) -> anyhow::Result<()> {
+    // https://stackoverflow.com/questions/35177797/what-exactly-is-fragmented-mp4fmp4-how-is-it-different-from-normal-mp4
+
     let output_file = File::create(&output_file_name)?;
     let mut writer = BufWriter::new(output_file);
 
@@ -141,11 +143,15 @@ pub fn f32_mp4(
     ftyp.write_box(&mut writer)?;
     writer.flush()?;
 
+    const BOX_VERSION: u8 = 0;
     // create tracks
+    let track_id = 1;
+
+    // TrakBox gets added to MoovBox
     let mut track = TrakBox::default();
     // track_enabled | track_in_movie
     track.tkhd.flags = 1; // | 2;
-    track.tkhd.track_id = 1;
+    track.tkhd.track_id = track_id;
 
     // https://opus-codec.org/docs/opus_in_isobmff.html
     // 'soun' for sound
@@ -153,10 +159,13 @@ pub fn f32_mp4(
     track.mdia.hdlr.name = String::from("Opus");
 
     // configure fragments
-    let mut mvex = MvexBox {
+
+    // MvexBox gets added to MoovBox
+    let mvex = MvexBox {
+        // mehd is absent because we don't know beforehand the total duration
         mehd: None,
         trex: TrexBox {
-            version: 0,
+            version: BOX_VERSION,
             // see page 45 of the spec. says: not leading sample,
             // sample does not depend on others,
             // no other samples depend on thsi one,
@@ -188,6 +197,7 @@ pub fn f32_mp4(
     // shall be greater than the largest track id in use
     moov.mvhd.next_track_id = 2;
     moov.traks.push(track);
+    moov.mvex.replace(mvex);
 
     moov.write_box(&mut writer)?;
     writer.flush()?;
@@ -199,16 +209,17 @@ pub fn f32_mp4(
     let mut fragment_start_time = 0;
     moof.mfhd.sequence_number = fragment_sequence_number;
 
+    // create a traf and push to moof.trafs for each track fragment
     let mut traf = TrafBox::default();
     // track fragment decode time?
-    traf.tfdt.replace(Some(TfdtBox {
-        version: 0,
+    traf.tfdt.replace(TfdtBox {
+        version: BOX_VERSION,
         flags: 0,
         base_media_decode_time: fragment_start_time,
-    }));
+    });
     // track fragment run?
     traf.trun.replace(TrunBox {
-        version: 0,
+        version: BOX_VERSION,
         // data-offset-present
         flags: 1,
         sample_count: 100,
@@ -216,10 +227,31 @@ pub fn f32_mp4(
         data_offset: Some(0xdeadbeef),
         ..Default::default()
     });
-    //traf.tfhd = TfhdBox{version: 0, flags: 1}
+    traf.tfhd = TfhdBox {
+        version: BOX_VERSION,
+        // default-base-is-moof is 1 and base-data-offset-present is 0
+        // memory addresses are relative to the start of this box
+        flags: 0x020000,
+        track_id: track_id,
+        ..Default::default()
+    };
+    traf.trun.replace(TrunBox {
+        version: BOX_VERSION,
+        // data-offset-present
+        // use defaults for everthing else (sampel size, duration, flags)
+        flags: 1,
+        sample_count: 5,
+        ..Default::default()
+    });
+
+    moof.trafs.push(traf);
+    moof.write_box(&mut writer)?;
+    writer.flush()?;
 
     // have to write mdat box manually via BoxHeader(BoxType::MdatBox, <size>), followed by the samples.
-
+    BoxHeader::new(BoxType::MdatBox, 8 + 0).write(&mut writer)?;
+    // todo: write the samples
+    writer.flush()?;
     println!("done encoding/decoding");
     Ok(())
     /*
