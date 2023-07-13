@@ -307,38 +307,31 @@ pub fn f32_mp4(
     moof.mfhd.sequence_number = fragment_sequence_number;
 
     // create a traf and push to moof.trafs for each track fragment
-    let mut traf = TrafBox::default();
-    // track fragment decode time?
-    traf.tfdt.replace(TfdtBox {
-        version: BOX_VERSION,
-        flags: 0,
-        base_media_decode_time: fragment_start_time,
-    });
-    // track fragment run?
-    traf.trun.replace(TrunBox {
-        version: BOX_VERSION,
-        // data-offset-present
-        flags: 1,
-        sample_count: 100,
-        data_offset: Some(todo!()),
-        ..Default::default()
-    });
-    traf.tfhd = TfhdBox {
-        version: BOX_VERSION,
-        // default-base-is-moof is 1 and base-data-offset-present is 0
-        // memory addresses are relative to the start of this box
-        flags: 0x020000,
-        track_id: track_id,
-        ..Default::default()
+    let mut traf = TrafBox {
+        tfhd: TfhdBox {
+            version: BOX_VERSION,
+            // default-base-is-moof is 1 and base-data-offset-present is 0
+            // memory addresses are relative to the start of this box
+            flags: 0x020000,
+            track_id: track_id,
+            ..Default::default()
+        },
+        // track fragment decode time?
+        tfdt: Some(TfdtBox {
+            version: BOX_VERSION,
+            flags: 0,
+            base_media_decode_time: fragment_start_time,
+        }),
+        // track fragment run?
+        trun: Some(TrunBox {
+            version: BOX_VERSION,
+            // data-offset-present
+            flags: 1,
+            sample_count: 100,
+            data_offset: Some(todo!()),
+            ..Default::default()
+        }),
     };
-    traf.trun.replace(TrunBox {
-        version: BOX_VERSION,
-        // data-offset-present
-        // use defaults for everthing else (sampel size, duration, flags)
-        flags: 1,
-        sample_count: 5,
-        ..Default::default()
-    });
 
     moof.trafs.push(traf);
     moof.write_box(&mut writer)?;
