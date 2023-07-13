@@ -198,22 +198,19 @@ pub fn f32_aac(
 // mp4 requires using the AAC codec for audio.
 // use ffmp4g to verify the validity of the file: `ffmpeg -v error -i input_file.mp4 -f null - 2>error.log`
 pub fn f32_mp4(
-    mut args: StaticArgs,
+    args: StaticArgs,
     input_file_name: String,
     output_file_name: String,
 ) -> anyhow::Result<()> {
-    args.frame_size = 48000;
-    assert_eq!(args.frame_size as u32 / args.sample_rate, 1);
-
     // https://stackoverflow.com/questions/35177797/what-exactly-is-fragmented-mp4fmp4-how-is-it-different-from-normal-mp4
     let output_file = File::create(&output_file_name)?;
     let mut writer = BufWriter::new(output_file);
 
     let ftyp = mp4::FtypBox {
-        major_brand: str::parse("isom")?,
+        major_brand: str::parse("mp42")?,
         // todo: verify
-        minor_version: 512,
-        compatible_brands: vec![str::parse("isom")?],
+        minor_version: 0,
+        compatible_brands: vec![str::parse("mp42")?, str::parse("iso2")?],
     };
 
     ftyp.write_box(&mut writer)?;
@@ -226,7 +223,7 @@ pub fn f32_mp4(
     // TrakBox gets added to MoovBox
     let mut track = TrakBox::default();
     // track_enabled | track_in_movie
-    track.tkhd.flags = 1; // | 2;
+    track.tkhd.flags = 1 | 2;
     track.tkhd.track_id = track_id;
 
     // https://opus-codec.org/docs/opus_in_isobmff.html
@@ -291,9 +288,9 @@ pub fn f32_mp4(
 
     // create movie box, add tracks, and add extends box
     let mut moov = MoovBox::default();
-    // opus frames received over webrtc are 10ms. 100 of them makes 1 second.
+    // opus frames received over webrtc are 10ms
     // but don't want to have a big vec of sample sizes...queue them up 10 at a time and write out 1 sec at once
-    moov.mvhd.timescale = 1;
+    moov.mvhd.timescale = 100;
     // shall be greater than the largest track id in use
     moov.mvhd.next_track_id = 2;
     moov.traks.push(track);
