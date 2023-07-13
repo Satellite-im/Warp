@@ -5,10 +5,25 @@ use std::{
 };
 
 use anyhow::bail;
+/*use async_mp4::{
+    self,
+    mp4box::{
+        box_trait::BoxWrite,
+        ftyp::FtypBox,
+        mdia::{self, MdiaBox},
+        moov::{Moov, MoovBox},
+        mvex::Mvex,
+        mvhd::MvhdBox,
+        tkhd::{Tkhd, TkhdBox, TrakFlags},
+        trak::{Trak, TrakBox},
+        trex::Trex,
+    },
+}; */
 use bytes::Bytes;
 use mp4::{
-    BoxHeader, BoxType, FourCC, MdiaBox, MoofBox, MoovBox, Mp4Box, Mp4Config, Mp4Writer, MvexBox,
-    TfdtBox, TfhdBox, TrafBox, TrakBox, TrexBox, TrunBox, WriteBox,
+    BoxHeader, BoxType, DopsBox, FixedPointU16, FourCC, MdiaBox, MoofBox, MoovBox, Mp4Box,
+    Mp4Config, Mp4Writer, MvexBox, OpusBox, StsdBox, TfdtBox, TfhdBox, TrafBox, TrakBox, TrexBox,
+    TrunBox, WriteBox,
 };
 use rand::Rng;
 use webrtc::{
@@ -120,6 +135,65 @@ pub fn f32_aac(
     Ok(())
 }
 
+/*pub fn f32_mp4_2(
+    args: StaticArgs,
+    input_file_name: String,
+    output_file_name: String,
+) -> anyhow::Result<()> {
+    let output_file = File::create(&output_file_name)?;
+    let mut writer = BufWriter::new(output_file);
+
+    let ftyp = FtypBox {
+        major_brand: *b"isom",
+        // todo: verify
+        minor_version: 512,
+        compatible_brands: vec![*b"isom"],
+    };
+    ftyp.write(&mut writer)?;
+    writer.flush()?;
+
+    let mut tkhd = TkhdBox::default();
+    tkhd.track_id = 1;
+    tkhd.flags = (TrakFlags::ENABLED/*| TrakFlags::IN_MOVIE*/).into();
+
+    let mut mdia = mdia::Mdia::new();
+
+    const BOX_VERSION: u8 = 0;
+    // todo: populate this
+    let traks: Vec<TrakBox> = vec![];
+    // create tracks
+    let track_id = 1;
+    let moov: MoovBox = Moov {
+        mvhd: Some(Default::default()),
+        mvex: Some(
+            Mvex {
+                trex: traks
+                    .iter()
+                    .map(|trak| {
+                        Trex {
+                            track_id: trak.tkhd.as_ref().map(|it| it.track_id).unwrap_or(0),
+                            default_sample_description_index: 1,
+                            default_sample_duration: 0,
+                            default_sample_size: 0,
+                            default_sample_flags: Default::default(),
+                        }
+                        .into()
+                    })
+                    .collect(),
+            }
+            .into(),
+        ),
+        traks: vec![Trak {
+            tkhd: Some(tkhd),
+            mdia: todo!(),
+        }
+        .into()],
+    }
+    .into();
+
+    todo!()
+}*/
+
 // reads raw samples from input_file and creates an mp4 file
 // mp4 requires using the AAC codec for audio.
 // use ffmp4g to verify the validity of the file: `ffmpeg -v error -i input_file.mp4 -f null - 2>error.log`
@@ -158,6 +232,32 @@ pub fn f32_mp4(
     track.mdia.hdlr.handler_type = 0x736F756E.into();
     track.mdia.hdlr.name = String::from("Opus");
 
+    // track.mdia.minf.dinf.dref: the implementation for automatically writes flags as 1 (all data in file)
+    // https://opus-codec.org/docs/opus_in_isobmff.html
+    // the stsd box in stbl needs an opus specific box
+    let dops = DopsBox {
+        version: BOX_VERSION,
+        pre_skip: 0,
+        input_sample_rate: args.sample_rate,
+        output_gain: 0,
+        channel_mapping_family: mp4::ChannelMappingFamily::Family0 {
+            stereo: args.channels == 2,
+        },
+    };
+    let opus = OpusBox {
+        data_reference_index: 1,
+        channelcount: args.channels,
+        samplesize: 16, // per https://opus-codec.org/docs/opus_in_isobmff.html
+        samplerate: FixedPointU16::new(args.sample_rate as u16),
+        dops,
+    };
+    track.mdia.minf.stbl.stsd = StsdBox {
+        version: BOX_VERSION,
+        flags: 0,
+        opus: Some(opus),
+        ..Default::default()
+    };
+
     // configure fragments
 
     // MvexBox gets added to MoovBox
@@ -175,20 +275,16 @@ pub fn f32_mp4(
             // sample_degredation_priority
             flags: (2 << 26) | (2 << 24) | (2 << 22) | (2 << 20),
             track_id: 1,
-            // todo: fix
-            default_sample_description_index: 0,
-            // todo: fix
+            // stsd entry 1 is for Opus
+            default_sample_description_index: 1,
             default_sample_duration: 0,
-            // todo: fix
+            // warning: opus sample size varies. can't rely on default_sample_size
             default_sample_size: 0,
             // todo: verify
-            // everything set except duration-is-empty
-            default_sample_flags: 1 | 2 | 8 | 0x10 | 0x20,
+            // base-data-offset-present | sample-description-index-present | default-sample-flags-present (use the trex.flags field)
+            default_sample_flags: 1 | 2 | 0x20,
         },
     };
-    // MovieExtendsBox
-    // MovieExtendsHeaderBox
-    // TrackExtendsBox
 
     // create movie box, add tracks, and add extends box
     let mut moov = MoovBox::default();
@@ -206,6 +302,7 @@ pub fn f32_mp4(
 
     let mut moof = MoofBox::default();
     let mut fragment_sequence_number = 1;
+    // todo: what are the time units?
     let mut fragment_start_time = 0;
     moof.mfhd.sequence_number = fragment_sequence_number;
 
@@ -223,8 +320,7 @@ pub fn f32_mp4(
         // data-offset-present
         flags: 1,
         sample_count: 100,
-        // todo: fix this
-        data_offset: Some(0xdeadbeef),
+        data_offset: Some(todo!()),
         ..Default::default()
     });
     traf.tfhd = TfhdBox {
@@ -436,6 +532,10 @@ pub async fn f32_opus(
         let q: *const f32 = p as _;
         let sample = unsafe { *q };
         if let Some(encoded_len) = packetizer.packetize_f32(sample, &mut encoded)? {
+            // println!(
+            //     "frame_size: {}, encoded len: {}",
+            //     args.frame_size, encoded_len
+            // );
             let decoded_len =
                 decoder.decode_float(&encoded[0..encoded_len], &mut decoded, false)?;
             if decoded_len > 0 {
