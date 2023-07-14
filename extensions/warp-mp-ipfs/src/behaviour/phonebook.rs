@@ -31,11 +31,18 @@ pub enum PhoneBookCommand {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhoneBookState {
+    Online,
+    Offline,
+}
+
 pub struct Behaviour {
     connections: HashMap<PeerId, Vec<ConnectionId>>,
     entry: HashSet<PeerId>,
     event: tokio::sync::broadcast::Sender<MultiPassEventKind>,
     command: futures::channel::mpsc::Receiver<PhoneBookCommand>,
+    entry_state: HashMap<PeerId, PhoneBookState>,
 }
 
 impl Behaviour {
@@ -46,17 +53,35 @@ impl Behaviour {
         Behaviour {
             connections: Default::default(),
             entry: Default::default(),
+            entry_state: Default::default(),
             event,
             command,
         }
     }
 
-    fn send_online_event(&self, peer_id: PeerId) {
+    fn send_online_event(&mut self, peer_id: PeerId) {
+        if !self.connections.contains_key(&peer_id) {
+            return;
+        }
+
         let did = match peer_id.to_did() {
             Ok(did) => did,
             Err(_) => {
                 //Note: If we get the error, we should probably blacklist the entry
                 return;
+            }
+        };
+
+        match self.entry_state.entry(peer_id) {
+            Entry::Occupied(mut entry) => {
+                let state = entry.get_mut();
+                if matches!(state, PhoneBookState::Online) {
+                    return;
+                }
+                *state = PhoneBookState::Online;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(PhoneBookState::Online);
             }
         };
 
@@ -67,12 +92,25 @@ impl Behaviour {
         });
     }
 
-    fn send_offline_event(&self, peer_id: PeerId) {
+    fn send_offline_event(&mut self, peer_id: PeerId) {
         let did = match peer_id.to_did() {
             Ok(did) => did,
             Err(_) => {
                 //Note: If we get the error, we should probably blacklist the entry
                 return;
+            }
+        };
+
+        match self.entry_state.entry(peer_id) {
+            Entry::Occupied(mut entry) => {
+                let state = entry.get_mut();
+                if matches!(state, PhoneBookState::Offline) {
+                    return;
+                }
+                *state = PhoneBookState::Offline;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(PhoneBookState::Offline);
             }
         };
 
