@@ -75,6 +75,7 @@ tracing = { version = "0.1" }
 tracing-futures = { version = "0.2" }
 getrandom = { version = "0.2" }
 either = "1"
+void = "1"
 
 #ipfs dependency
 rust-ipfs = "=0.3.18"
