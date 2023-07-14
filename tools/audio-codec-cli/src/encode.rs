@@ -355,14 +355,30 @@ pub fn f32_mp4(
 
             let moof_size = moof.box_size();
             if let Some(trun) = moof.trafs[0].trun.as_mut() {
-                trun.data_offset = Some(moof_size as i32 + 8 + 16);
+                // todo: why do I need to add 16? one of the boxes must be calculating its size wrong.
+                trun.data_offset = Some(moof_size as i32 + 8);
                 //println!("trun data offset is: {:?}", trun.data_offset);
             }
 
             fragment_start_time += num_samples_in_trun as u64;
             fragment_sequence_number += 1;
 
-            moof.write_box(&mut writer)?;
+            // this commented out code is helpful for debugging invalid mp4 files.
+            //let mfhd_size = moof.mfhd.box_size();
+            //println!("mfhd size is: {}", mfhd_size);
+            //for traf in moof.trafs.iter() {
+            //    let traf_size = traf.box_size();
+            //    println!("traf_size size is: {}", traf_size);
+            //    let tfhd_size = traf.tfhd.box_size();
+            //    let tfdt_size = traf.tfdt.as_ref().map(|x| x.box_size()).unwrap_or(0);
+            //    let trun_size = traf.trun.as_ref().map(|x| x.box_size()).unwrap_or(0);
+            //    println!("tfhd_size size is: {}", tfhd_size);
+            //    println!("tfdt_size size is: {}", tfdt_size);
+            //    println!("trun_size size is: {}", trun_size);
+            //}
+            //let written = moof.write_box(&mut writer)?;
+            //println!("moof written: {}", written);
+
             writer.flush()?;
 
             // have to write mdat box manually via BoxHeader(BoxType::MdatBox, <size>), followed by the samples.
