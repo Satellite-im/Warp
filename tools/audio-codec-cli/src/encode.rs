@@ -21,9 +21,11 @@ use anyhow::bail;
 }; */
 use bytes::Bytes;
 use mp4::{
-    BoxHeader, BoxType, DopsBox, FixedPointU16, FourCC, MdiaBox, MfhdBox, MoofBox, MoovBox, Mp4Box,
-    Mp4Config, Mp4Writer, MvexBox, OpusBox, StsdBox, TfdtBox, TfhdBox, TrafBox, TrakBox, TrexBox,
-    TrunBox, WriteBox,
+    BoxHeader, BoxType, DopsBox, FixedPointI8, FixedPointU16, FixedPointU8, FourCC, HdlrBox,
+    MdhdBox, MdiaBox, MfhdBox, MinfBox, MoofBox, MoovBox, Mp4Box, Mp4Config, Mp4Writer, MvexBox,
+    MvhdBox, OpusBox, SmhdBox, StblBox, StscBox, StsdBox, StszBox, SttsBox, TfdtBox, TfhdBox,
+    TrafBox, TrakBox, TrexBox, TrunBox, WriteBox, {DinfBox, DrefBox, UrlBox},
+    {Matrix, TkhdBox, TrackFlag},
 };
 use rand::Rng;
 use webrtc::{
@@ -221,16 +223,8 @@ pub fn f32_mp4(
     const TRACK_ID: u32 = 1;
 
     // TrakBox gets added to MoovBox
-    let mut track = TrakBox::default();
-    // track_enabled | track_in_movie
-    track.tkhd.flags = 1 | 2;
-    track.tkhd.track_id = TRACK_ID;
 
-    // https://opus-codec.org/docs/opus_in_isobmff.html
-    // 'soun' for sound
-    track.mdia.hdlr.handler_type = 0x736F756E.into();
-    track.mdia.hdlr.name = String::from("Opus");
-
+    // this thing goes in TrakBox
     // track.mdia.minf.dinf.dref: the implementation for automatically writes flags as 1 (all data in file)
     // https://opus-codec.org/docs/opus_in_isobmff.html
     // the stsd box in stbl needs an opus specific box
@@ -250,11 +244,56 @@ pub fn f32_mp4(
         samplerate: FixedPointU16::new(args.sample_rate as u16),
         dops,
     };
-    track.mdia.minf.stbl.stsd = StsdBox {
-        version: BOX_VERSION,
-        flags: 0,
-        opus: Some(opus),
-        ..Default::default()
+
+    let opus_track = TrakBox {
+        tkhd: TkhdBox {
+            // track_enabled | track_in_movie
+            flags: TrackFlag::TrackEnabled as u32 | 2,
+            track_id: TRACK_ID,
+            ..Default::default()
+        },
+        edts: None,
+        meta: None,
+        mdia: MdiaBox {
+            mdhd: MdhdBox {
+                timescale: 100,
+                ..Default::default()
+            },
+            hdlr: HdlrBox {
+                version: BOX_VERSION,
+                flags: 0,
+                // https://opus-codec.org/docs/opus_in_isobmff.html
+                // 'soun' for sound
+                handler_type: 0x736F756E.into(),
+                name: String::from("Opus"),
+            },
+            minf: MinfBox {
+                vmhd: None,
+                smhd: Some(SmhdBox {
+                    // it looks like this should always be zero
+                    version: 0,
+                    flags: 0,
+                    // balance puts mono tracks in stereo space. 0 is center.
+                    balance: FixedPointI8::new(0),
+                }),
+                dinf: DinfBox::default(),
+                stbl: StblBox {
+                    stsd: StsdBox {
+                        version: BOX_VERSION,
+                        flags: 0,
+                        opus: Some(opus),
+                        ..Default::default()
+                    },
+                    stts: SttsBox::default(),
+                    ctts: None,
+                    stss: None,
+                    stsc: StscBox::default(),
+                    stsz: StszBox::default(),
+                    stco: None,
+                    co64: None,
+                },
+            },
+        },
     };
 
     // configure fragments
@@ -287,14 +326,19 @@ pub fn f32_mp4(
     };
 
     // create movie box, add tracks, and add extends box
-    let mut moov = MoovBox::default();
-    // opus frames received over webrtc are 10ms
-    // but don't want to have a big vec of sample sizes...queue them up 10 at a time and write out 1 sec at once
-    moov.mvhd.timescale = 100;
-    // shall be greater than the largest track id in use
-    moov.mvhd.next_track_id = 2;
-    moov.traks.push(track);
-    moov.mvex.replace(mvex);
+    let moov = MoovBox {
+        mvhd: MvhdBox {
+            // opus frames received over webrtc are 10ms
+            // but don't want to have a big vec of sample sizes...queue them up 10 at a time and write out 1 sec at once
+            timescale: 100,
+            // shall be greater than the largest track id in use
+            next_track_id: 2,
+            ..Default::default()
+        },
+        mvex: Some(mvex),
+        traks: vec![opus_track],
+        ..Default::default()
+    };
 
     moov.write_box(&mut writer)?;
     writer.flush()?;
