@@ -337,26 +337,14 @@ pub fn f32_mp4(
                     // data-offset-present, sample-size-present
                     flags: 1 | 0x200,
                     sample_count: num_samples_in_trun,
-                    // warning: this needs changing if there are multiple trafs in the moof.
-                    data_offset: Some(
-                        (
-                            // note that header_size is 8.
-                            // contents of TrafBox - including headers of child boxes
-                            ((3 * 8) + 9 + 9 + 13 + total_length)
-                        // contents of MfhdBox
-                        + 9
-                        // headers for TrafBox, MfhdBox, and MoofBox
-                        + (8 * 3)
-                        // header for MdatBox
-                        + 8
-                        ) as i32,
-                    ),
+                    // warning: this needs to be changed after the moof box is declared
+                    data_offset: Some(0),
                     sample_sizes: sample_lengths,
                     ..Default::default()
                 }),
             };
 
-            let moof = MoofBox {
+            let mut moof = MoofBox {
                 mfhd: MfhdBox {
                     version: BOX_VERSION,
                     flags: 0,
@@ -364,6 +352,12 @@ pub fn f32_mp4(
                 },
                 trafs: vec![traf],
             };
+
+            let moof_size = moof.box_size();
+            if let Some(trun) = moof.trafs[0].trun.as_mut() {
+                trun.data_offset = Some(moof_size as i32 + 8 + 16);
+                //println!("trun data offset is: {:?}", trun.data_offset);
+            }
 
             fragment_start_time += num_samples_in_trun as u64;
             fragment_sequence_number += 1;
