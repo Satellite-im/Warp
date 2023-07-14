@@ -376,9 +376,8 @@ pub fn f32_mp4(
             //    println!("tfdt_size size is: {}", tfdt_size);
             //    println!("trun_size size is: {}", trun_size);
             //}
-            //let written = moof.write_box(&mut writer)?;
-            //println!("moof written: {}", written);
 
+            moof.write_box(&mut writer)?;
             writer.flush()?;
 
             // have to write mdat box manually via BoxHeader(BoxType::MdatBox, <size>), followed by the samples.
@@ -422,13 +421,11 @@ pub fn f32_mp4(
             counter += 1;
             total_len += encoded_len;
             sample_lengths.push(encoded_len as u32);
-            if counter == 5 {
+            if counter == 100 {
                 write_opus_frame(&encoded, total_len, sample_lengths.clone())?;
                 counter = 0;
                 total_len = 0;
                 sample_lengths.clear();
-                println!("done encoding/decoding");
-                return Ok(());
             }
         }
     }
