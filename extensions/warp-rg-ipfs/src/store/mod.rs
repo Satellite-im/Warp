@@ -4,9 +4,9 @@ pub mod keystore;
 pub mod message;
 pub mod payload;
 
+use ipfs::Keypair;
 use ipfs::PublicKey;
 use libipld::Multihash;
-use ipfs::Keypair;
 
 use rust_ipfs as ipfs;
 use std::fmt::{Debug, Display};

@@ -167,10 +167,6 @@ impl FriendsStore {
                 });
 
                 if let Some(phonebook) = store.phonebook.as_ref() {
-                    // for addr in store.identity.relays() {
-                    //     if let Err(_e) = phonebook.add_relay(addr).await {}
-                    // }
-
                     log::info!("Loading friends list into phonebook");
                     if let Ok(friends) = store.friends_list().await {
                         if let Err(_e) = phonebook.add_friend_list(friends).await {
@@ -180,6 +176,9 @@ impl FriendsStore {
                 }
 
                 // autoban the blocklist
+                // TODO: implement configuration open to autoban at the libp2p level
+                // Note: If this is done, we would need to attempt reconnection if the user
+                //       is ever unblocked
                 // match store.block_list().await {
                 //     Ok(list) => {
                 //         for pubkey in list {
