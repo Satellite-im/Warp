@@ -11,7 +11,7 @@ use futures::channel::mpsc::{unbounded, Sender, UnboundedSender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::{FuturesUnordered, SelectAll};
 use futures::{SinkExt, Stream, StreamExt};
-use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
+use rust_ipfs::libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
 
 use libipld::Cid;
@@ -46,7 +46,7 @@ use crate::SpamFilter;
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetLocalDag, ToCid};
 use super::keystore::Keystore;
-use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, MessagingEvents};
+use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, DidExt, MessagingEvents};
 
 const PERMIT_AMOUNT: usize = 1;
 
@@ -3281,7 +3281,7 @@ impl MessageStore {
             let mut total_thumbnail_size = 0;
 
             let mut streams: SelectAll<_> = SelectAll::new();
-            
+
             for file in files {
                 match location {
                     Location::Constellation => {
@@ -3388,7 +3388,7 @@ impl MessageStore {
                                 }
                             }
                         };
-                        
+
                         streams.push(stream.boxed());
                     }
                 };
@@ -3508,23 +3508,12 @@ impl MessageStore {
 
                 let did = message.sender();
                 if !did.eq(&own_did) {
-                    if let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
-                        match ipfs.identity(Some(peer_id)).await {
-                            Ok(info) => {
-                                //This is done to insure we can successfully exchange blocks
-                                let opt = DialOpts::peer_id(peer_id)
-                                    .addresses(info.listen_addrs)
-                                    .extend_addresses_through_behaviour()
-                                    .build();
-
-                                if let Err(e) = ipfs.connect(opt).await {
-                                    error!("Error dialing peer: {e}");
-                                }
-                            }
-                            _ => {
-                                warn!("Sender not found or is not connected");
-                            }
-                        };
+                    if let Ok(peer_id) = did.to_peer_id() {
+                        //This is done to insure we can successfully exchange blocks
+                        let opt = DialOpts::peer_id(peer_id).condition(PeerCondition::NotDialing).build();
+                        if let Err(e) = ipfs.connect(opt).await {
+                            warn!("Issue performing a connection to peer: {e}");
+                        }
                     }
                 }
 
