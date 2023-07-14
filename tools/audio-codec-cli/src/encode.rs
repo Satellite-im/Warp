@@ -399,7 +399,6 @@ pub fn f32_mp4(
 
             let moof_size = moof.box_size();
             if let Some(trun) = moof.trafs[0].trun.as_mut() {
-                // todo: why do I need to add 16? one of the boxes must be calculating its size wrong.
                 trun.data_offset = Some(moof_size as i32 + 8);
                 //println!("trun data offset is: {:?}", trun.data_offset);
             }
