@@ -12,7 +12,7 @@ clap = { version = "4.0", features = ["derive"] }
 cpal = "0.15.0"
 fdk-aac = { git="https://github.com/sdwoodbury/fdk-aac-rs", branch="master" } #"0.4.0"
 log = { version = "0.4.17", features = ["std"]}
-mp4 = { git="https://github.com/sdwoodbury/mp4-rust", rev="5d070ebfbf6eb595d0a1a0a1e84bc63c0e9b8647" }
+mp4 = { git="https://github.com/sdwoodbury/mp4-rust", rev="6a591766df8d8607fde943cf6b69c3ad5032c03d" }
 opus = "0.3.0"
 ringbuf = "0.3.3"
 simple_logger = "4.1.0"

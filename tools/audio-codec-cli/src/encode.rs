@@ -23,8 +23,8 @@ use bytes::Bytes;
 use mp4::{
     BoxHeader, BoxType, DopsBox, FixedPointI8, FixedPointU16, FixedPointU8, FourCC, HdlrBox,
     MdhdBox, MdiaBox, MfhdBox, MinfBox, MoofBox, MoovBox, Mp4Box, Mp4Config, Mp4Writer, MvexBox,
-    MvhdBox, OpusBox, SmhdBox, StblBox, StscBox, StsdBox, StszBox, SttsBox, TfdtBox, TfhdBox,
-    TrafBox, TrakBox, TrexBox, TrunBox, WriteBox, {DinfBox, DrefBox, UrlBox},
+    MvhdBox, OpusBox, SmhdBox, StblBox, StcoBox, StscBox, StsdBox, StszBox, SttsBox, TfdtBox,
+    TfhdBox, TrafBox, TrakBox, TrexBox, TrunBox, WriteBox, {DinfBox, DrefBox, UrlBox},
     {Matrix, TkhdBox, TrackFlag},
 };
 use rand::Rng;
@@ -289,7 +289,8 @@ pub fn f32_mp4(
                     stss: None,
                     stsc: StscBox::default(),
                     stsz: StszBox::default(),
-                    stco: None,
+                    // either stco or co64 must be present
+                    stco: Some(StcoBox::default()),
                     co64: None,
                 },
             },
@@ -302,8 +303,9 @@ pub fn f32_mp4(
     let mvex = MvexBox {
         // mehd is absent because we don't know beforehand the total duration
         mehd: None,
-        trex: TrexBox {
+        trex: vec![TrexBox {
             version: BOX_VERSION,
+            // todo: maybe delete this comment. flags is expected to have the most significant byte empty.
             // see page 45 of the spec. says: not leading sample,
             // sample does not depend on others,
             // no other samples depend on thsi one,
@@ -311,7 +313,7 @@ pub fn f32_mp4(
             // padding: 0
             // sample_is_non_sync_sample ... set this to 1?
             // sample_degredation_priority
-            flags: (2 << 26) | (2 << 24) | (2 << 22) | (2 << 20),
+            flags: 0, //(2 << 26) | (2 << 24) | (2 << 22) | (2 << 20),
             track_id: 1,
             // stsd entry 1 is for Opus
             default_sample_description_index: 1,
@@ -322,7 +324,7 @@ pub fn f32_mp4(
             // todo: verify
             // base-data-offset-present | sample-description-index-present | default-sample-flags-present (use the trex.flags field)
             default_sample_flags: 1 | 2 | 0x20,
-        },
+        }],
     };
 
     // create movie box, add tracks, and add extends box
