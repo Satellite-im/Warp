@@ -207,10 +207,10 @@ pub fn f32_mp4(
     let mut writer = BufWriter::new(output_file);
 
     let ftyp = mp4::FtypBox {
-        major_brand: str::parse("mp42")?,
+        major_brand: str::parse("isom")?,
         // todo: verify
         minor_version: 0,
-        compatible_brands: vec![str::parse("mp42")?, str::parse("iso2")?],
+        compatible_brands: vec![str::parse("isom")?, str::parse("iso2")?],
     };
 
     ftyp.write_box(&mut writer)?;
@@ -297,6 +297,9 @@ pub fn f32_mp4(
     moov.mvex.replace(mvex);
 
     moov.write_box(&mut writer)?;
+
+    // write an empty mdat box
+    BoxHeader::new(BoxType::MdatBox, 8).write(&mut writer)?;
     writer.flush()?;
 
     // write fragments
@@ -305,79 +308,81 @@ pub fn f32_mp4(
     let mut fragment_start_time = 0;
 
     // use a closure to write fragments
-    let mut write_opus_frame = |sample_buf: &[u8], sample_length: usize| -> anyhow::Result<()> {
-        // create a traf and push to moof.trafs for each track fragment
-        let traf = TrafBox {
-            //  track fragment header
-            // size is 9 + header_size
-            tfhd: TfhdBox {
-                version: BOX_VERSION,
-                // default-base-is-moof is 1 and base-data-offset-present is 0
-                // memory addresses are relative to the start of this box
-                flags: 0x020000,
-                track_id: track_id,
-                ..Default::default()
-            },
-            // track fragment decode time
-            // size is 9 + header_size
-            tfdt: Some(TfdtBox {
-                version: BOX_VERSION,
-                flags: 0,
-                base_media_decode_time: fragment_start_time,
-            }),
-            // track fragment run
-            // size is 13 + sample_length + header_size
-            trun: Some(TrunBox {
-                version: BOX_VERSION,
-                // data-offset-present, sample-size-present
-                flags: 1 | 0x200,
-                sample_count: 1,
-                // warning: this needs changing if there are multiple trafs in the moof.
-                data_offset: Some(
-                    (
-                        // note that header_size is 8.
-                        // contents of TrafBox - including headers of child boxes
-                        ((3 * 8) + 9 + 9 + 13 + sample_length)
+    let mut write_opus_frame =
+        |sample_buf: &[u8], total_length: usize, sample_lengths: Vec<u32>| -> anyhow::Result<()> {
+            // create a traf and push to moof.trafs for each track fragment
+            let traf = TrafBox {
+                //  track fragment header
+                // size is 9 + header_size
+                tfhd: TfhdBox {
+                    version: BOX_VERSION,
+                    // default-base-is-moof is 1 and base-data-offset-present is 0
+                    // memory addresses are relative to the start of this box
+                    flags: 0x020000,
+                    track_id: track_id,
+                    ..Default::default()
+                },
+                // track fragment decode time
+                // size is 9 + header_size
+                tfdt: Some(TfdtBox {
+                    version: BOX_VERSION,
+                    flags: 0,
+                    base_media_decode_time: fragment_start_time,
+                }),
+                // track fragment run
+                // size is 13 + sample_length + header_size
+                trun: Some(TrunBox {
+                    version: BOX_VERSION,
+                    // data-offset-present, sample-size-present
+                    flags: 1 | 0x200,
+                    sample_count: sample_lengths.len() as u32,
+                    // warning: this needs changing if there are multiple trafs in the moof.
+                    data_offset: Some(
+                        (
+                            // note that header_size is 8.
+                            // contents of TrafBox - including headers of child boxes
+                            ((3 * 8) + 9 + 9 + 13 + total_length)
                         // contents of MfhdBox
                         + 9
                         // headers for TrafBox, MfhdBox, and MoofBox
                         + (8 * 3)
                         // header for MdatBox
                         + 8
-                    ) as i32,
-                ),
-                sample_sizes: vec![sample_length as u32],
-                ..Default::default()
-            }),
+                        ) as i32,
+                    ),
+                    sample_sizes: sample_lengths,
+                    ..Default::default()
+                }),
+            };
+
+            let moof = MoofBox {
+                mfhd: MfhdBox {
+                    version: BOX_VERSION,
+                    flags: 0,
+                    sequence_number: fragment_sequence_number,
+                },
+                trafs: vec![traf],
+            };
+
+            fragment_start_time += 1;
+            fragment_sequence_number += 1;
+
+            moof.write_box(&mut writer)?;
+            writer.flush()?;
+
+            // have to write mdat box manually via BoxHeader(BoxType::MdatBox, <size>), followed by the samples.
+            BoxHeader::new(BoxType::MdatBox, 8_u64 + total_length as u64).write(&mut writer)?;
+            Write::write(&mut writer, &sample_buf[0..total_length])?;
+            writer.flush()?;
+
+            Ok(())
         };
-
-        let moof = MoofBox {
-            mfhd: MfhdBox {
-                version: BOX_VERSION,
-                flags: 0,
-                sequence_number: fragment_sequence_number,
-            },
-            trafs: vec![traf],
-        };
-
-        fragment_start_time += 1;
-        fragment_sequence_number += 1;
-
-        moof.write_box(&mut writer)?;
-        writer.flush()?;
-
-        // have to write mdat box manually via BoxHeader(BoxType::MdatBox, <size>), followed by the samples.
-        BoxHeader::new(BoxType::MdatBox, 8_u64 + sample_length as u64).write(&mut writer)?;
-        Write::write(&mut writer, &sample_buf[0..sample_length])?;
-        writer.flush()?;
-
-        Ok(())
-    };
 
     // init opus encoder
     // max frame size is 48kHz for 120ms
     const MAX_FRAME_SIZE: usize = 5760;
     let mut encoded = [0; MAX_FRAME_SIZE * 4];
+    let max_encoded_len = encoded.len();
     let encoder_channels = match args.channels {
         1 => opus::Channels::Mono,
         _ => opus::Channels::Stereo,
@@ -386,6 +391,9 @@ pub fn f32_mp4(
     let mut input_file = File::open(&input_file_name)?;
     let mut sample_buf = [0_u8; 4];
 
+    let mut counter = 0;
+    let mut total_len = 0;
+    let mut sample_lengths = vec![];
     // process input file
     while let Ok(bytes_read) = input_file.read(&mut sample_buf) {
         if bytes_read == 0 {
@@ -397,10 +405,22 @@ pub fn f32_mp4(
         let p: *const u8 = sample_buf.as_ptr();
         let q: *const f32 = p as _;
         let sample = unsafe { *q };
-        if let Some(encoded_len) = packetizer.packetize_f32(sample, &mut encoded)? {
-            write_opus_frame(&encoded, encoded_len)?;
+        if let Some(encoded_len) =
+            packetizer.packetize_f32(sample, &mut encoded[total_len..max_encoded_len])?
+        {
+            counter += 1;
+            total_len += encoded_len;
+            sample_lengths.push(encoded_len as u32);
+            if counter == 10 {
+                write_opus_frame(&encoded, total_len, sample_lengths.clone())?;
+                counter = 0;
+                total_len = 0;
+                sample_lengths.clear();
+            }
         }
     }
+
+    write_opus_frame(&encoded, total_len, sample_lengths)?;
 
     println!("done encoding/decoding");
     Ok(())
