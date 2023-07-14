@@ -218,13 +218,13 @@ pub fn f32_mp4(
 
     const BOX_VERSION: u8 = 0;
     // create tracks
-    let track_id = 1;
+    const TRACK_ID: u32 = 1;
 
     // TrakBox gets added to MoovBox
     let mut track = TrakBox::default();
     // track_enabled | track_in_movie
     track.tkhd.flags = 1 | 2;
-    track.tkhd.track_id = track_id;
+    track.tkhd.track_id = TRACK_ID;
 
     // https://opus-codec.org/docs/opus_in_isobmff.html
     // 'soun' for sound
@@ -297,9 +297,6 @@ pub fn f32_mp4(
     moov.mvex.replace(mvex);
 
     moov.write_box(&mut writer)?;
-
-    // write an empty mdat box
-    BoxHeader::new(BoxType::MdatBox, 8).write(&mut writer)?;
     writer.flush()?;
 
     // write fragments
@@ -310,16 +307,20 @@ pub fn f32_mp4(
     // use a closure to write fragments
     let mut write_opus_frame =
         |sample_buf: &[u8], total_length: usize, sample_lengths: Vec<u32>| -> anyhow::Result<()> {
+            let num_samples_in_trun = sample_lengths.len() as u32;
             // create a traf and push to moof.trafs for each track fragment
             let traf = TrafBox {
                 //  track fragment header
                 // size is 9 + header_size
                 tfhd: TfhdBox {
                     version: BOX_VERSION,
-                    // default-base-is-moof is 1 and base-data-offset-present is 0
+                    // 0x020000: default-base-is-moof is 1 and base-data-offset-present is 0
                     // memory addresses are relative to the start of this box
-                    flags: 0x020000,
-                    track_id: track_id,
+                    //
+                    // 0x10: sample size is present
+                    flags: 0x020000, //| 0x10,
+                    track_id: TRACK_ID,
+                    //default_sample_size: Some(1),
                     ..Default::default()
                 },
                 // track fragment decode time
@@ -335,7 +336,7 @@ pub fn f32_mp4(
                     version: BOX_VERSION,
                     // data-offset-present, sample-size-present
                     flags: 1 | 0x200,
-                    sample_count: sample_lengths.len() as u32,
+                    sample_count: num_samples_in_trun,
                     // warning: this needs changing if there are multiple trafs in the moof.
                     data_offset: Some(
                         (
@@ -364,7 +365,7 @@ pub fn f32_mp4(
                 trafs: vec![traf],
             };
 
-            fragment_start_time += 1;
+            fragment_start_time += num_samples_in_trun as u64;
             fragment_sequence_number += 1;
 
             moof.write_box(&mut writer)?;
@@ -411,16 +412,20 @@ pub fn f32_mp4(
             counter += 1;
             total_len += encoded_len;
             sample_lengths.push(encoded_len as u32);
-            if counter == 10 {
+            if counter == 5 {
                 write_opus_frame(&encoded, total_len, sample_lengths.clone())?;
                 counter = 0;
                 total_len = 0;
                 sample_lengths.clear();
+                println!("done encoding/decoding");
+                return Ok(());
             }
         }
     }
 
-    write_opus_frame(&encoded, total_len, sample_lengths)?;
+    if total_len > 0 {
+        write_opus_frame(&encoded, total_len, sample_lengths)?;
+    }
 
     println!("done encoding/decoding");
     Ok(())
