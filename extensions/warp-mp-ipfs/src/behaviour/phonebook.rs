@@ -60,6 +60,7 @@ impl Behaviour {
     }
 
     fn send_online_event(&mut self, peer_id: PeerId) {
+        // Check to determine if we have any connections to the peer before emitting event
         if !self.connections.contains_key(&peer_id) {
             return;
         }
