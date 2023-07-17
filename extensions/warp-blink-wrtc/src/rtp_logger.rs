@@ -41,15 +41,14 @@ struct HeaderWrapper {
 
 impl CsvFormat for SampleWrapper {
     fn write_header<T: io::Write>(writer: &mut T) -> Result<()> {
-        writer.write(
-            format!("timestamp,duration_ms,packet_timestamp,prev_dropped,prev_padding\n",)
-                .as_bytes(),
+        let _ = writer.write(
+            "timestamp,duration_ms,packet_timestamp,prev_dropped,prev_padding\n".as_bytes(),
         )?;
 
         Ok(())
     }
     fn write_row<T: io::Write>(&self, writer: &mut T) -> Result<()> {
-        writer.write(
+        let _ = writer.write(
             format!(
                 "{:?},{},{},{},{}\n",
                 self.val.timestamp,
@@ -67,12 +66,12 @@ impl CsvFormat for SampleWrapper {
 
 impl CsvFormat for HeaderWrapper {
     fn write_header<T: io::Write>(writer: &mut T) -> Result<()> {
-        writer.write(format!("timestamp,sequence_number\n",).as_bytes())?;
+        let _ = writer.write("timestamp,sequence_number\n".as_bytes())?;
 
         Ok(())
     }
     fn write_row<T: io::Write>(&self, writer: &mut T) -> Result<()> {
-        writer
+        let _ = writer
             .write(format!("{},{}\n", self.val.timestamp, self.val.sequence_number).as_bytes())?;
 
         Ok(())
