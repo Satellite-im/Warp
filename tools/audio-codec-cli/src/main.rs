@@ -53,11 +53,6 @@ enum Cli {
         input_file_name: String,
         output_file_name: String,
     },
-    // test encoding/decoding of aac
-    EncodeAac {
-        input_file_name: String,
-        output_file_name: String,
-    },
     /// tests encoding/decoding with specified decoding parameters
     /// WARNING! when you play the file, be sure to set the sample-rate to the one used
     /// to decode the file.
@@ -268,10 +263,6 @@ Frame size (in samples) vs duration for various sampling rates:
             input_file_name,
             output_file_name,
         } => encode::f32_mp4(sm.clone(), input_file_name, output_file_name)?,
-        Cli::EncodeAac {
-            input_file_name,
-            output_file_name,
-        } => encode::f32_aac(sm.clone(), input_file_name, output_file_name)?,
         Cli::CustomEncode {
             decoded_sample_rate,
             input_file_name,
