@@ -4,6 +4,9 @@ pub mod keystore;
 pub mod message;
 pub mod payload;
 
+use ipfs::Keypair;
+use ipfs::PublicKey;
+
 use rust_ipfs as ipfs;
 use std::fmt::{Debug, Display};
 
@@ -30,6 +33,31 @@ pub trait PeerTopic: Display {
 }
 
 impl PeerTopic for DID {}
+
+pub trait PeerIdExt {
+    fn to_did(&self) -> Result<DID, anyhow::Error>;
+}
+
+pub trait DidExt {
+    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
+}
+
+impl PeerIdExt for PeerId {
+    fn to_did(&self) -> Result<DID, anyhow::Error> {
+        let multihash = self.as_ref();
+        if multihash.code() != 0 {
+            anyhow::bail!("PeerId does not contain inline public key");
+        }
+        let public_key = PublicKey::try_decode_protobuf(multihash.digest())?;
+        libp2p_pub_to_did(&public_key)
+    }
+}
+
+impl DidExt for DID {
+    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error> {
+        did_to_libp2p_pub(self).map(|p| p.to_peer_id())
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
 #[allow(clippy::enum_variant_names)]
@@ -273,4 +301,11 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
+}
+
+pub fn get_keypair_did(keypair: &Keypair) -> anyhow::Result<DID> {
+    let kp = Zeroizing::new(keypair.clone().try_into_ed25519()?.to_bytes());
+    let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+    Ok(did.into())
 }

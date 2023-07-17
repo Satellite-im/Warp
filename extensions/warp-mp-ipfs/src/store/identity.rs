@@ -7,8 +7,8 @@ use crate::{
 };
 use futures::{
     channel::{mpsc, oneshot},
-    stream::{self, BoxStream},
-    FutureExt, StreamExt,
+    stream::BoxStream,
+    StreamExt,
 };
 use ipfs::{Ipfs, IpfsPath, Keypair, Multiaddr};
 use libipld::Cid;
@@ -236,7 +236,7 @@ impl IdentityStore {
 
         store.start_root_task().await;
 
-        if let Ok(ident) = store.own_identity(false).await {
+        if let Ok(ident) = store.own_identity().await {
             log::info!("Identity loaded with {}", ident.did_key());
             *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
@@ -1390,7 +1390,7 @@ impl IdentityStore {
     pub async fn create_identity(&mut self, username: Option<&str>) -> Result<Identity, Error> {
         let raw_kp = self.get_raw_keypair()?;
 
-        if self.own_identity(false).await.is_ok() {
+        if self.own_identity().await.is_ok() {
             return Err(Error::IdentityExist);
         }
 
@@ -1435,7 +1435,7 @@ impl IdentityStore {
         // Pin the dag
         self.ipfs.insert_pin(&root_cid, true).await?;
 
-        let identity = identity.resolve(&self.ipfs, false, None).await?;
+        let identity = identity.resolve()?;
 
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
@@ -1467,7 +1467,7 @@ impl IdentityStore {
             LookupBy::DidKey(pubkey) => {
                 //Maybe we should omit our own key here?
                 if *pubkey == own_did {
-                    return self.own_identity(true).await.map(|i| vec![i]);
+                    return self.own_identity().await.map(|i| vec![i]);
                 }
                 tokio::spawn({
                     let discovery = self.discovery.clone();
@@ -1507,7 +1507,7 @@ impl IdentityStore {
 
                 for pubkey in list {
                     if own_did.eq(pubkey) {
-                        let own_identity = match self.own_identity(true).await {
+                        let own_identity = match self.own_identity().await {
                             Ok(id) => id,
                             Err(_) => continue,
                         };
@@ -1575,18 +1575,12 @@ impl IdentityStore {
                 .collect::<Vec<_>>(),
         };
 
-        let list = futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
-            doc.resolve(
-                &self.ipfs,
-                !self.disable_image,
-                self.default_pfp_callback.clone(),
-            )
-            .boxed()
-        }))
-        .filter_map(|res| async { res.ok() })
-        .chain(stream::iter(preidentity))
-        .collect::<Vec<_>>()
-        .await;
+        let mut list = idents_docs
+            .iter()
+            .filter_map(|doc| doc.resolve().ok())
+            .collect::<Vec<_>>();
+
+        list.extend(preidentity);
 
         Ok(list)
     }
@@ -1856,25 +1850,17 @@ impl IdentityStore {
         let path = IpfsPath::from(root_document.identity);
         let identity = self.get_local_dag::<IdentityDocument>(path).await?;
         identity.verify()?;
-
-        let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
-        if identity.did != kp_public_key {
-            //Note if we reach this point, the identity would need to be reconstructed
-            return Err(Error::IdentityDoesntExist);
-        }
         Ok(identity)
     }
 
-    pub async fn own_identity(&self, with_images: bool) -> Result<Identity, Error> {
+    pub async fn own_identity(&self) -> Result<Identity, Error> {
         let root_document = self.get_root_document().await?;
 
-        let ipfs = self.ipfs.clone();
         let path = IpfsPath::from(root_document.identity);
         let identity = self
             .get_local_dag::<IdentityDocument>(path)
             .await?
-            .resolve(&ipfs, with_images, self.default_pfp_callback.clone())
-            .await?;
+            .resolve()?;
 
         let public_key = identity.did_key();
         let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
@@ -1967,6 +1953,82 @@ impl IdentityStore {
     }
 
     #[tracing::instrument(skip(self))]
+    pub async fn identity_picture(&self, did: &DID) -> Result<String, Error> {
+        if self.disable_image {
+            return Err(Error::InvalidIdentityPicture);
+        }
+
+        let document = match self.own_identity_document().await {
+            Ok(document) if document.did.eq(did) => document,
+            Err(_) | Ok(_) => self
+                .cache()
+                .await
+                .iter()
+                .find(|ident| ident.did == *did)
+                .cloned()
+                .ok_or(Error::IdentityDoesntExist)?,
+        };
+
+        let cb = self.default_pfp_callback.clone();
+
+        if let Some(cid) = document.profile_picture {
+            if let Ok(data) = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
+            {
+                let picture: String = serde_json::from_slice(&data).unwrap_or_default();
+                if !picture.is_empty() {
+                    return Ok(picture);
+                }
+            }
+        }
+
+        if let Some(cb) = cb {
+            let identity = document.resolve()?;
+            let picture = cb(&identity)?;
+            return Ok(String::from_utf8_lossy(&picture).to_string());
+        }
+
+        Err(Error::InvalidIdentityPicture)
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn identity_banner(&self, did: &DID) -> Result<String, Error> {
+        if self.disable_image {
+            return Err(Error::InvalidIdentityBanner);
+        }
+
+        let document = match self.own_identity_document().await {
+            Ok(document) if document.did.eq(did) => document,
+            Err(_) | Ok(_) => self
+                .cache()
+                .await
+                .iter()
+                .find(|ident| ident.did == *did)
+                .cloned()
+                .ok_or(Error::IdentityDoesntExist)?,
+        };
+
+        let cb = self.default_pfp_callback.clone();
+
+        if let Some(cid) = document.profile_banner {
+            if let Ok(data) = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
+            {
+                let picture: String = serde_json::from_slice(&data).unwrap_or_default();
+                if !picture.is_empty() {
+                    return Ok(picture);
+                }
+            }
+        }
+
+        if let Some(cb) = cb {
+            let identity = document.resolve()?;
+            let picture = cb(&identity)?;
+            return Ok(String::from_utf8_lossy(&picture).to_string());
+        }
+
+        Err(Error::InvalidIdentityBanner)
+    }
+
+    #[tracing::instrument(skip(self))]
     pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
         let ipfs = self.ipfs.clone();
 
@@ -2040,7 +2102,7 @@ impl IdentityStore {
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
-        let ident = self.own_identity(false).await?;
+        let ident = self.own_identity().await?;
         self.validate_identity(&ident)?;
         *self.identity.write().await = Some(ident);
         Ok(())

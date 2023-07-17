@@ -63,6 +63,10 @@ pub enum Error {
     IdentityDoesntExist,
     #[error("Identity was invalid")]
     IdentityInvalid,
+    #[error("Picture is invalid or unavailable")]
+    InvalidIdentityPicture,
+    #[error("Banner is invalid or unavailable")]
+    InvalidIdentityBanner,
     #[error("Username cannot be updated for identity")]
     CannotUpdateIdentityUsername,
     #[error("Picture cannot be updated for identity")]

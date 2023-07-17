@@ -99,18 +99,8 @@ pub struct Identity {
     /// Public key for the identity
     did_key: DID,
 
-    /// Profile picture
-    profile_picture: String,
-
-    /// Profile banner
-    profile_banner: String,
-
     /// Status message
     status_message: Option<String>,
-
-    /// Signature of the identity
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<String>,
 }
 
 impl Identity {
@@ -126,20 +116,8 @@ impl Identity {
         self.did_key = pubkey
     }
 
-    pub fn set_profile_picture(&mut self, picture: &str) {
-        self.profile_picture = picture.to_string();
-    }
-
-    pub fn set_profile_banner(&mut self, banner: &str) {
-        self.profile_banner = banner.to_string();
-    }
-
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
-    }
-
-    pub fn set_signature(&mut self, signature: Option<String>) {
-        self.signature = signature;
     }
 }
 
@@ -156,20 +134,8 @@ impl Identity {
         self.did_key.clone()
     }
 
-    pub fn profile_picture(&self) -> String {
-        self.profile_picture.clone()
-    }
-
-    pub fn profile_banner(&self) -> String {
-        self.profile_banner.clone()
-    }
-
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
-    }
-
-    pub fn signature(&self) -> Option<String> {
-        self.signature.clone()
     }
 }
 
@@ -251,40 +217,6 @@ pub mod ffi {
     use std::os::raw::c_char;
 
     use super::Relationship;
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_profile_picture(
-        identity: *const Identity,
-    ) -> *mut c_char {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-
-        match CString::new(identity.profile_picture()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_profile_banner(
-        identity: *const Identity,
-    ) -> *mut c_char {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-
-        match CString::new(identity.profile_banner()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
