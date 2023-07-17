@@ -41,6 +41,10 @@ pub trait PeerIdExt {
     fn to_did(&self) -> Result<DID, anyhow::Error>;
 }
 
+pub trait DidExt {
+    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
+}
+
 impl PeerIdExt for PeerId {
     fn to_did(&self) -> Result<DID, anyhow::Error> {
         let multihash: Multihash = (*self).into();
@@ -49,6 +53,12 @@ impl PeerIdExt for PeerId {
         }
         let public_key = PublicKey::try_decode_protobuf(multihash.digest())?;
         libp2p_pub_to_did(&public_key)
+    }
+}
+
+impl DidExt for DID {
+    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error> {
+        did_to_libp2p_pub(self).map(|p| p.to_peer_id())
     }
 }
 

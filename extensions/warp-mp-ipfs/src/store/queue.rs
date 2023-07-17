@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use futures::{channel::mpsc, StreamExt};
 use rust_ipfs::Ipfs;
@@ -261,7 +266,13 @@ impl QueueEntry {
 
                             log::info!("Sending request to {}", recipient);
 
+                            let time = Instant::now();
+
                             entry.ipfs.pubsub_publish(recipient.inbox(), bytes).await?;
+
+                            let elapsed = time.elapsed();
+
+                            log::info!("took {}ms to send", elapsed.as_millis());
 
                             Ok::<_, anyhow::Error>(())
                         };

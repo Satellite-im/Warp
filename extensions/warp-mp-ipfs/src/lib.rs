@@ -1,9 +1,10 @@
+mod behaviour;
 pub mod config;
 pub mod store;
 
 use config::MpIpfsConfig;
 use either::Either;
-use futures::channel::mpsc::unbounded;
+use futures::channel::mpsc::{channel, unbounded};
 use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
@@ -20,7 +21,6 @@ use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::debug;
 use tracing::log::{self, error, info, trace, warn};
-use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
 use warp::sata::Sata;
@@ -34,7 +34,7 @@ use warp::{Extension, SingleHandle};
 use ipfs::{
     Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
 };
-use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
+use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
 use warp::multipass::{
@@ -259,8 +259,15 @@ impl IpfsIdentity {
 
         let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
+        let (pb_tx, pb_rx) = channel(50);
+
+        let behaviour = behaviour::Behaviour {
+            phonebook: behaviour::phonebook::Behaviour::new(self.tx.clone(), pb_rx),
+        };
+
         info!("Starting ipfs");
         let ipfs = UninitializedIpfs::with_opt(opts)
+            .set_custom_behaviour(behaviour)
             .set_keypair(keypair)
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
@@ -472,6 +479,7 @@ impl IpfsIdentity {
             config.clone(),
             tesseract.clone(),
             self.tx.clone(),
+            pb_tx,
         )
         .await?;
         info!("friends store initialized");
@@ -650,7 +658,7 @@ impl MultiPass for IpfsIdentity {
             Identifier::DID(pk) => store.lookup(LookupBy::DidKey(pk)).await,
             Identifier::Username(username) => store.lookup(LookupBy::Username(username)).await,
             Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
-            Identifier::Own => return store.own_identity(true).await.map(|i| vec![i]),
+            Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
         }?;
 
         Ok(idents)
@@ -914,20 +922,6 @@ impl MultiPass for IpfsIdentity {
 
         Ok(())
     }
-
-    fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
-        let store = self.identity_store_sync()?;
-        let kp = store.get_raw_keypair()?.to_bytes();
-        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-        let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
-        Ok(did.into())
-    }
-
-    fn refresh_cache(&mut self) -> Result<(), Error> {
-        let mut store = self.identity_store_sync()?;
-        store.clear_internal_cache();
-        self.get_cache_mut()?.empty(DataType::from(self.module()))
-    }
 }
 
 #[async_trait::async_trait]
@@ -1029,6 +1023,16 @@ impl FriendsEvent for IpfsIdentity {
 
 #[async_trait::async_trait]
 impl IdentityInformation for IpfsIdentity {
+    async fn identity_picture(&self, did: &DID) -> Result<String, Error> {
+        let store = self.identity_store(true).await?;
+        store.identity_picture(did).await
+    }
+
+    async fn identity_banner(&self, did: &DID) -> Result<String, Error> {
+        let store = self.identity_store(true).await?;
+        store.identity_banner(did).await
+    }
+
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store(true).await?;
         store.identity_status(did).await

@@ -22,7 +22,7 @@ use anyhow::{bail, Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 
-use rust_ipfs::{Ipfs, SubscriptionStream};
+use rust_ipfs::{Ipfs, Keypair, SubscriptionStream};
 
 use tokio::{
     sync::{
@@ -34,7 +34,7 @@ use tokio::{
 use uuid::Uuid;
 use warp::{
     blink::{self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
-    crypto::{Fingerprint, DID},
+    crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     module::Module,
     multipass::MultiPass,
@@ -219,7 +219,7 @@ impl BlinkImpl {
                     }
                 };
 
-                let _own_id = account.decrypt_private_key(None)?;
+                let _own_id = get_keypair_did(_ipfs.keypair()?)?;
                 own_id.write().await.replace(_own_id);
 
                 let own_id2 = own_id.clone();
@@ -1069,4 +1069,11 @@ impl Blink for BlinkImpl {
             .as_ref()
             .map(|x| x.call.clone())
     }
+}
+
+pub fn get_keypair_did(keypair: &Keypair) -> anyhow::Result<DID> {
+    let kp = Zeroizing::new(keypair.clone().try_into_ed25519()?.to_bytes());
+    let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+    Ok(did.into())
 }
