@@ -1,11 +1,10 @@
 use anyhow::bail;
 use clap::Parser;
 
-use encode::*;
 use log::LevelFilter;
 use once_cell::sync::Lazy;
 use play::*;
-use record::*;
+
 use simple_logger::SimpleLogger;
 use tokio::sync::Mutex;
 
@@ -46,6 +45,11 @@ enum Cli {
     Record { file_name: String },
     /// encode and decode the given file, saving the output to a new file
     Encode {
+        input_file_name: String,
+        output_file_name: String,
+    },
+    /// read raw samples from the input file and convert to .mp4 format
+    EncodeMp4 {
         input_file_name: String,
         output_file_name: String,
     },
@@ -96,6 +100,10 @@ enum Cli {
     ShowConfig,
     /// test feeding the input and output streams together
     Feedback,
+    /// quit
+    Quit,
+    /// quit
+    Q,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -157,6 +165,10 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
+        if matches!(cli, Cli::Quit | Cli::Q) {
+            println!("quitting");
+            break;
+        }
         if let Err(e) = handle_command(cli).await {
             println!("command failed: {e}");
         }
@@ -168,6 +180,7 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_command(cli: Cli) -> anyhow::Result<()> {
     let mut sm = STATIC_MEM.lock().await;
     match cli {
+        Cli::Quit | Cli::Q => bail!("user quit"),
         Cli::ConfigInfo => {
             let s = "Important information regarding sample rate and frame size:
 Based on the OPUS RFC, OPUS encodes frames based on duration - 2.5, 5, 10, 20, 40, or 60ms.
@@ -223,7 +236,7 @@ Frame size (in samples) vs duration for various sampling rates:
                 *AUDIO_FILE_NAME = file_name;
             }
             match sm.sample_type {
-                SampleTypes::Float => record_f32(sm.clone()).await?,
+                SampleTypes::Float => record::raw_f32(sm.clone()).await?,
                 SampleTypes::Signed => todo!(),
             }
         }
@@ -234,7 +247,7 @@ Frame size (in samples) vs duration for various sampling rates:
             // todo
             match sm.sample_type {
                 SampleTypes::Float => {
-                    encode_f32(
+                    encode::f32_opus(
                         sm.clone(),
                         sm.channels,
                         sm.sample_rate,
@@ -246,12 +259,16 @@ Frame size (in samples) vs duration for various sampling rates:
                 SampleTypes::Signed => todo!(),
             }
         }
+        Cli::EncodeMp4 {
+            input_file_name,
+            output_file_name,
+        } => encode::f32_mp4(sm.clone(), input_file_name, output_file_name)?,
         Cli::CustomEncode {
             decoded_sample_rate,
             input_file_name,
             output_file_name,
         } => {
-            encode_f32(
+            encode::f32_opus(
                 sm.clone(),
                 sm.channels,
                 decoded_sample_rate,
@@ -266,7 +283,7 @@ Frame size (in samples) vs duration for various sampling rates:
             input_file_name,
             output_file_name,
         } => {
-            encode_f32(
+            encode::f32_opus(
                 sm.clone(),
                 decoded_channels,
                 decoded_sample_rate,
@@ -280,7 +297,7 @@ Frame size (in samples) vs duration for various sampling rates:
             input_file_name,
             output_file_name,
         } => {
-            encode_f32_rtp(
+            encode::f32_opus_rtp(
                 sm.clone(),
                 decoded_sample_rate,
                 input_file_name,
