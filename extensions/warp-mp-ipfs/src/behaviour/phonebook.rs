@@ -79,9 +79,7 @@ impl Behaviour {
 
         let event = self.event.clone();
 
-        tokio::spawn(async move {
-            let _ = event.send(MultiPassEventKind::IdentityOnline { did });
-        });
+        let _ = event.send(MultiPassEventKind::IdentityOnline { did });
     }
 
     fn send_offline_event(&mut self, peer_id: PeerId) {
@@ -100,9 +98,7 @@ impl Behaviour {
 
         let event = self.event.clone();
 
-        tokio::spawn(async move {
-            let _ = event.send(MultiPassEventKind::IdentityOffline { did });
-        });
+        let _ = event.send(MultiPassEventKind::IdentityOffline { did });
     }
 }
 
