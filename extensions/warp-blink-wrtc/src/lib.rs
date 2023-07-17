@@ -115,6 +115,7 @@ impl Drop for BlinkImpl {
         let webrtc_controller = self.webrtc_controller.clone();
         tokio::spawn(async move {
             let _ = webrtc_controller.write().await.deinit().await;
+            host_media::reset().await;
             log::debug!("deinit finished");
         });
     }
