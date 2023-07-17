@@ -195,16 +195,7 @@ impl NetworkBehaviour for Behaviour {
                     self.send_offline_event(peer_id);
                 }
             }
-            FromSwarm::NewListenAddr(_)
-            | FromSwarm::AddressChange(_)
-            | FromSwarm::DialFailure(_)
-            | FromSwarm::ListenFailure(_)
-            | FromSwarm::NewListener(_)
-            | FromSwarm::ExpiredListenAddr(_)
-            | FromSwarm::ListenerError(_)
-            | FromSwarm::ListenerClosed(_)
-            | FromSwarm::NewExternalAddr(_)
-            | FromSwarm::ExpiredExternalAddr(_) => {}
+            _ => {}
         }
     }
 
