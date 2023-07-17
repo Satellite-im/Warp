@@ -150,23 +150,23 @@ fn run() -> Result<()> {
     while let Ok(cmd) = ch.recv() {
         match cmd {
             RtpLoggerCmd::LogSinkTrack(id, _) => {
-                if !writers.contains_key(&id) {
+                if let std::collections::hash_map::Entry::Vacant(e) = writers.entry(id) {
                     let f = fs::File::create(format!("/tmp/{}.csv", id))?;
                     let mut w = BufWriter::new(f);
                     if let Err(e) = SampleWrapper::write_header(&mut w) {
                         log::error!("failed to write header for sink track: {e}");
                     }
-                    writers.insert(id, w);
+                    e.insert(w);
                 }
             }
             RtpLoggerCmd::LogSourceTrack(id, _) => {
-                if !writers.contains_key(&id) {
+                if let std::collections::hash_map::Entry::Vacant(e) = writers.entry(id) {
                     let f = fs::File::create(format!("/tmp/{}.csv", id))?;
                     let mut w = BufWriter::new(f);
                     if let Err(e) = HeaderWrapper::write_header(&mut w) {
                         log::error!("failed to write header for source track: {e}");
                     }
-                    writers.insert(id, w);
+                    e.insert(w);
                 }
             }
             RtpLoggerCmd::Quit => {
