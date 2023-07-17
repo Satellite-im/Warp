@@ -27,6 +27,8 @@ tracing = "0.1"
 
 chrono = { workspace = true, features = ["serde"] }
 
+void.workspace = true
+
 [dev-dependencies]
 fdlimit = "0.2"
 bs58 = "0.4"
