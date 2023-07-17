@@ -60,6 +60,7 @@ impl Behaviour {
     }
 
     fn send_online_event(&mut self, peer_id: PeerId) {
+        // Check to determine if we have any connections to the peer before emitting event
         if !self.connections.contains_key(&peer_id) {
             return;
         }
@@ -72,24 +73,14 @@ impl Behaviour {
             }
         };
 
-        match self.entry_state.entry(peer_id) {
-            Entry::Occupied(mut entry) => {
-                let state = entry.get_mut();
-                if matches!(state, PhoneBookState::Online) {
-                    return;
-                }
-                *state = PhoneBookState::Online;
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(PhoneBookState::Online);
-            }
-        };
+        self.entry_state
+            .entry(peer_id)
+            .and_modify(|state| *state = PhoneBookState::Online)
+            .or_insert(PhoneBookState::Online);
 
         let event = self.event.clone();
 
-        tokio::spawn(async move {
-            let _ = event.send(MultiPassEventKind::IdentityOnline { did });
-        });
+        let _ = event.send(MultiPassEventKind::IdentityOnline { did });
     }
 
     fn send_offline_event(&mut self, peer_id: PeerId) {
@@ -101,24 +92,14 @@ impl Behaviour {
             }
         };
 
-        match self.entry_state.entry(peer_id) {
-            Entry::Occupied(mut entry) => {
-                let state = entry.get_mut();
-                if matches!(state, PhoneBookState::Offline) {
-                    return;
-                }
-                *state = PhoneBookState::Offline;
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(PhoneBookState::Offline);
-            }
-        };
+        self.entry_state
+            .entry(peer_id)
+            .and_modify(|state| *state = PhoneBookState::Offline)
+            .or_insert(PhoneBookState::Offline);
 
         let event = self.event.clone();
 
-        tokio::spawn(async move {
-            let _ = event.send(MultiPassEventKind::IdentityOffline { did });
-        });
+        let _ = event.send(MultiPassEventKind::IdentityOffline { did });
     }
 }
 
@@ -214,16 +195,7 @@ impl NetworkBehaviour for Behaviour {
                     self.send_offline_event(peer_id);
                 }
             }
-            FromSwarm::NewListenAddr(_)
-            | FromSwarm::AddressChange(_)
-            | FromSwarm::DialFailure(_)
-            | FromSwarm::ListenFailure(_)
-            | FromSwarm::NewListener(_)
-            | FromSwarm::ExpiredListenAddr(_)
-            | FromSwarm::ListenerError(_)
-            | FromSwarm::ListenerClosed(_)
-            | FromSwarm::NewExternalAddr(_)
-            | FromSwarm::ExpiredExternalAddr(_) => {}
+            _ => {}
         }
     }
 
