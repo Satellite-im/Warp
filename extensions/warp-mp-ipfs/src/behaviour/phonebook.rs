@@ -72,18 +72,10 @@ impl Behaviour {
             }
         };
 
-        match self.entry_state.entry(peer_id) {
-            Entry::Occupied(mut entry) => {
-                let state = entry.get_mut();
-                if matches!(state, PhoneBookState::Online) {
-                    return;
-                }
-                *state = PhoneBookState::Online;
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(PhoneBookState::Online);
-            }
-        };
+        self.entry_state
+            .entry(peer_id)
+            .and_modify(|state| *state = PhoneBookState::Online)
+            .or_insert(PhoneBookState::Online);
 
         let event = self.event.clone();
 
@@ -101,18 +93,10 @@ impl Behaviour {
             }
         };
 
-        match self.entry_state.entry(peer_id) {
-            Entry::Occupied(mut entry) => {
-                let state = entry.get_mut();
-                if matches!(state, PhoneBookState::Offline) {
-                    return;
-                }
-                *state = PhoneBookState::Offline;
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(PhoneBookState::Offline);
-            }
-        };
+        self.entry_state
+            .entry(peer_id)
+            .and_modify(|state| *state = PhoneBookState::Offline)
+            .or_insert(PhoneBookState::Offline);
 
         let event = self.event.clone();
 
