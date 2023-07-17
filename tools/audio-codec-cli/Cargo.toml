@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# async-mp4 = "0.1.1"
 bs1770 = "1.0.0"
 clap = { version = "4.0", features = ["derive"] }
 cpal = "0.15.0"
