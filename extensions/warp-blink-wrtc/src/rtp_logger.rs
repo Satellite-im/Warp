@@ -82,26 +82,20 @@ impl CsvFormat for HeaderWrapper {
 
 pub struct RtpLogger {
     tx: SyncSender<RtpLoggerCmd>,
-    should_continue: Arc<AtomicBool>,
 }
 
 impl RtpLogger {
     pub fn new(log_path: PathBuf) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel(1024 * 5);
-        let should_continue = Arc::new(AtomicBool::new(true));
         let id = Uuid::new_v4();
-        let should_continue2 = should_continue.clone();
         std::thread::spawn(move || {
-            if let Err(e) = run(rx, should_continue2, log_path.join(format!("{}.csv", id))) {
+            if let Err(e) = run(rx, log_path.join(format!("{}.csv", id))) {
                 log::error!("error running rtp_logger: {e}");
             }
             log::debug!("rtp_logger terminating: {}", id);
         });
 
-        Self {
-            tx,
-            should_continue,
-        }
+        Self { tx }
     }
 
     // for sink tracks
@@ -124,33 +118,13 @@ impl RtpLogger {
     }
 }
 
-impl Drop for RtpLogger {
-    fn drop(&mut self) {
-        self.should_continue.swap(false, atomic::Ordering::SeqCst);
-    }
-}
-
-fn run(
-    ch: Receiver<RtpLoggerCmd>,
-    should_continue: Arc<AtomicBool>,
-    rtp_log_path: PathBuf,
-) -> Result<()> {
+fn run(ch: Receiver<RtpLoggerCmd>, rtp_log_path: PathBuf) -> Result<()> {
     let f = fs::File::create(rtp_log_path)?;
     let mut writer = BufWriter::new(f);
     let mut wrote_header = false;
 
-    // write the header first if it doesn't exist
-    while should_continue.load(atomic::Ordering::SeqCst) {
-        let cmd = match ch.try_recv() {
-            Ok(r) => r,
-            Err(TryRecvError::Empty) => {
-                std::thread::sleep(Duration::from_millis(5));
-                continue;
-            }
-            Err(TryRecvError::Disconnected) => {
-                bail!("rx channel disconnected");
-            }
-        };
+    while let Ok(cmd) = ch.recv() {
+        // write the header first if it doesn't exist
         if !wrote_header {
             wrote_header = true;
             match cmd {
