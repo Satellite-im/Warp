@@ -238,7 +238,7 @@ impl NetworkBehaviour for Behaviour {
                     let peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
                         Err(e) => {
-                            let _ = response.send(Err(Error::PublicKeyInvalid));
+                            let _ = response.send(Err(e));
                             continue;
                         }
                     };
@@ -249,7 +249,7 @@ impl NetworkBehaviour for Behaviour {
                     let peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
                         Err(e) => {
-                            let _ = response.send(Err(Error::PublicKeyInvalid));
+                            let _ = response.send(Err(e));
                             continue;
                         }
                     };
@@ -265,7 +265,7 @@ impl NetworkBehaviour for Behaviour {
                     let peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
                         Err(e) => {
-                            let _ = response.send(Err(Error::PublicKeyInvalid));
+                            let _ = response.send(Err(e));
                             continue;
                         }
                     };
@@ -278,21 +278,39 @@ impl NetworkBehaviour for Behaviour {
                     identity,
                     response,
                 })) => {
-                    //TODO:
+                    let peer_id = match did.to_peer_id() {
+                        Ok(peer_id) => peer_id,
+                        Err(e) => {
+                            let _ = response.send(Err(e));
+                            continue;
+                        }
+                    };
                 }
                 Poll::Ready(Some(IdentityCommand::SendProfilePicture {
                     did,
                     picture,
                     response,
                 })) => {
-                    //TODO:
+                    let peer_id = match did.to_peer_id() {
+                        Ok(peer_id) => peer_id,
+                        Err(e) => {
+                            let _ = response.send(Err(e));
+                            continue;
+                        }
+                    };
                 }
                 Poll::Ready(Some(IdentityCommand::SendProfileBanner {
                     did,
                     banner,
                     response,
                 })) => {
-                    //TODO:
+                    let peer_id = match did.to_peer_id() {
+                        Ok(peer_id) => peer_id,
+                        Err(e) => {
+                            let _ = response.send(Err(e));
+                            continue;
+                        }
+                    };
                 }
                 Poll::Ready(None) => unreachable!("Channels are owned"),
                 Poll::Pending => break,
