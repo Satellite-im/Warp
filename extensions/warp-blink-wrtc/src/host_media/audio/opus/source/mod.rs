@@ -5,9 +5,8 @@ use cpal::{
 };
 use rand::Rng;
 use ringbuf::HeapRb;
-use uuid::Uuid;
 
-use std::{ops::Mul, sync::Arc, time::Duration};
+use std::{ops::Mul, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
 use warp::blink::{self, BlinkEventKind};
 
@@ -142,8 +141,7 @@ fn create_source_track(
         webrtc_codec.sample_rate(),
     );
 
-    let debug_rtp = std::env::var("RTP_LOG_PATH").is_ok();
-    let debug_uuid = Uuid::new_v4();
+    let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs"));
 
     // todo: when the input device changes, this needs to change too.
     let track2 = track;
@@ -166,14 +164,10 @@ fn create_source_track(
                     {
                         Ok(packets) => {
                             for packet in &packets {
-                                if debug_rtp {
-                                    if let Err(e) = rtp_logger::log_rtp_header(
-                                        debug_uuid,
-                                        packet.header.clone(),
-                                    ) {
-                                        log::error!("failed to log rtp header: {e}");
-                                    }
+                                if let Err(e) = logger.log_rtp_header(packet.header.clone()) {
+                                    log::error!("failed to log rtp header: {e}");
                                 }
+
                                 if let Err(e) = track2
                                     .write_rtp_with_extensions(
                                         packet,

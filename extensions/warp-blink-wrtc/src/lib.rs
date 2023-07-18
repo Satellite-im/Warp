@@ -119,9 +119,6 @@ impl Drop for BlinkImpl {
                 log::error!("error in webrtc_controller deinit: {e}");
             }
             host_media::reset().await;
-            if let Err(e) = rtp_logger::stop() {
-                log::error!("error during stopping rtp_logger::stop(): {e}");
-            }
             log::debug!("deinit finished");
         });
     }
@@ -130,10 +127,6 @@ impl Drop for BlinkImpl {
 impl BlinkImpl {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Box<Self>> {
         log::trace!("initializing WebRTC");
-
-        if let Err(e) = rtp_logger::start() {
-            log::error!("error in rtp_logger::start: {e}");
-        }
 
         let cpal_host = cpal::platform::default_host();
         if let Some(d) = cpal_host.default_input_device() {

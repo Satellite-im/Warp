@@ -4,9 +4,8 @@ use cpal::{
     SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{cmp::Ordering, sync::Arc};
+use std::{cmp::Ordering, path::PathBuf, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
-use uuid::Uuid;
 use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
@@ -223,8 +222,7 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
 
-    let debug_rtp = std::env::var("RTP_LOG_PATH").is_ok();
-    let debug_uuid = Uuid::new_v4();
+    let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs"));
 
     loop {
         match track.read(&mut b).await {
@@ -263,11 +261,10 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
-                    if debug_rtp {
-                        if let Err(e) = rtp_logger::log_rtp_sample(debug_uuid, &media_sample) {
-                            log::error!("failed to log rtp sample: {e}");
-                        };
-                    }
+                    if let Err(e) = logger.log_rtp_sample(&media_sample) {
+                        log::error!("failed to log rtp sample: {e}");
+                    };
+
                     // todo: send Sample to other thread
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
