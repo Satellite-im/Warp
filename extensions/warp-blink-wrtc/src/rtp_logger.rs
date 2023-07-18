@@ -7,7 +7,7 @@ use std::{
     path::Path,
     sync::{
         atomic::{self, AtomicBool},
-        mpsc::{Receiver, SyncSender},
+        mpsc::{Receiver, SyncSender, TryRecvError},
         Arc,
     },
     time::{Duration, SystemTime},
@@ -148,7 +148,7 @@ fn log(cmd: RtpLoggerCmd) -> Result<()> {
     if unsafe { !RTP_LOGGER_STARTED.load(atomic::Ordering::SeqCst) } {
         bail!("logger not started");
     }
-    RTP_LOGGER_CMD_CH.tx.try_send(cmd)?;
+    RTP_LOGGER_CMD_CH.tx.clone().try_send(cmd)?;
     Ok(())
 }
 
@@ -156,14 +156,22 @@ fn run() -> Result<()> {
     let mut writers: HashMap<Uuid, BufWriter<fs::File>> = HashMap::new();
 
     let ch = RTP_LOGGER_CMD_CH.rx.lock();
-    // no sense checking RTP_LOGGER_STARTED because writing to that variable won't wake the task while it is waiting for
-    // a command to be sent over this channel.
 
     let rtp_log_path = std::env::var("RTP_LOG_PATH").unwrap_or(".".into());
     let rtp_log_path = Path::new(&rtp_log_path);
 
     // write the header first if it doesn't exist
-    while let Ok(cmd) = ch.recv() {
+    while unsafe { RTP_LOGGER_STARTED.load(atomic::Ordering::SeqCst) } {
+        let cmd = match ch.try_recv() {
+            Ok(r) => r,
+            Err(TryRecvError::Empty) => {
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            Err(TryRecvError::Disconnected) => {
+                bail!("rx channel disconnected");
+            }
+        };
         match cmd {
             RtpLoggerCmd::LogSinkTrack(id, _) => {
                 if let std::collections::hash_map::Entry::Vacant(e) = writers.entry(id) {
