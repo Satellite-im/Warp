@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::{
     fs,
-    io::{self, BufWriter},
+    io::{self, BufWriter, Write},
     path::PathBuf,
     sync::{
         atomic::{self, AtomicBool},
@@ -44,7 +44,7 @@ struct HeaderWrapper {
 impl CsvFormat for SampleWrapper {
     fn write_header<T: io::Write>(writer: &mut T) -> Result<()> {
         let _ = writer.write(
-            "timestamp,duration_ms,packet_timestamp,prev_dropped,prev_padding\n".as_bytes(),
+            "time_ago,duration_ms,packet_timestamp,prev_dropped,prev_padding\n".as_bytes(),
         )?;
 
         Ok(())
@@ -52,8 +52,8 @@ impl CsvFormat for SampleWrapper {
     fn write_row<T: io::Write>(&self, writer: &mut T) -> Result<()> {
         let _ = writer.write(
             format!(
-                "{:?},{},{},{},{}\n",
-                self.timestamp,
+                "{},{},{},{},{}\n",
+                self.timestamp.elapsed()?.as_millis(),
                 self.duration.as_millis(),
                 self.packet_timestamp,
                 self.prev_dropped_packets,
@@ -137,7 +137,6 @@ fn run(
 ) -> Result<()> {
     let f = fs::File::create(rtp_log_path)?;
     let mut writer = BufWriter::new(f);
-
     let mut wrote_header = false;
 
     // write the header first if it doesn't exist
@@ -182,6 +181,6 @@ fn run(
             }
         }
     }
-
+    let _ = writer.flush();
     Ok(())
 }
