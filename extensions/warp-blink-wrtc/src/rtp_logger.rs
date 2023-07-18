@@ -121,8 +121,8 @@ impl RtpLogger {
     }
 
     fn log(&self, cmd: RtpLoggerCmd) -> Result<()> {
-        if self.should_continue.load(atomic::Ordering::SeqCst) {
-            bail!("logger not started");
+        if !self.should_continue.load(atomic::Ordering::SeqCst) {
+            bail!("logger stopped");
         }
         self.tx.try_send(cmd)?;
         Ok(())
