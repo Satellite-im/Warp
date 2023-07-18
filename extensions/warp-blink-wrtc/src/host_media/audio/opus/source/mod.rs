@@ -142,7 +142,7 @@ fn create_source_track(
         webrtc_codec.sample_rate(),
     );
 
-    let debug_rtp = std::env::var("DEBUG_RTP").is_ok();
+    let debug_rtp = std::env::var("RTP_LOG_PATH").is_ok();
     let debug_uuid = Uuid::new_v4();
 
     // todo: when the input device changes, this needs to change too.

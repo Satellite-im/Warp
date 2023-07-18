@@ -223,7 +223,7 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
 
-    let debug_rtp = std::env::var("DEBUG_RTP").is_ok();
+    let debug_rtp = std::env::var("RTP_LOG_PATH").is_ok();
     let debug_uuid = Uuid::new_v4();
 
     loop {
@@ -264,9 +264,7 @@ where
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
                     if debug_rtp {
-                        if let Err(e) =
-                            rtp_logger::log_rtp_sample(debug_uuid, &media_sample)
-                        {
+                        if let Err(e) = rtp_logger::log_rtp_sample(debug_uuid, &media_sample) {
                             log::error!("failed to log rtp sample: {e}");
                         };
                     }
