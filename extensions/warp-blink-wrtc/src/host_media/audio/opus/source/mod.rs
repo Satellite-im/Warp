@@ -141,11 +141,10 @@ fn create_source_track(
         webrtc_codec.sample_rate(),
     );
 
-    let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs"));
-
     // todo: when the input device changes, this needs to change too.
     let track2 = track;
     let join_handle = tokio::spawn(async move {
+        let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs"));
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {

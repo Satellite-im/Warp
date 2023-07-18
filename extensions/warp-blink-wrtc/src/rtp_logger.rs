@@ -4,15 +4,9 @@ use std::{
     fs,
     io::{self, BufWriter, Write},
     path::PathBuf,
-    sync::{
-        atomic::{self, AtomicBool},
-        mpsc::{Receiver, SyncSender, TryRecvError},
-        Arc,
-    },
+    sync::mpsc::{Receiver, SyncSender},
     time::{Duration, SystemTime},
 };
-
-use anyhow::bail;
 
 use uuid::Uuid;
 use webrtc::{media::Sample, rtp::header::Header};
