@@ -4,10 +4,9 @@ use std::{
     fs,
     io::{self, BufWriter, Write},
     path::PathBuf,
-    sync::mpsc::{Receiver, SyncSender},
     time::{Duration, SystemTime},
 };
-
+use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 use webrtc::{media::Sample, rtp::header::Header};
 
@@ -75,12 +74,12 @@ impl CsvFormat for HeaderWrapper {
 }
 
 pub struct RtpLogger {
-    tx: SyncSender<RtpLoggerCmd>,
+    tx: Sender<RtpLoggerCmd>,
 }
 
 impl RtpLogger {
     pub fn new(log_path: PathBuf) -> Self {
-        let (tx, rx) = std::sync::mpsc::sync_channel(1024 * 5);
+        let (tx, rx) = tokio::sync::mpsc::channel(1024 * 5);
         let id = Uuid::new_v4();
         std::thread::spawn(move || {
             if let Err(e) = run(rx, log_path.join(format!("{}.csv", id))) {
@@ -112,12 +111,12 @@ impl RtpLogger {
     }
 }
 
-fn run(ch: Receiver<RtpLoggerCmd>, rtp_log_path: PathBuf) -> Result<()> {
+fn run(mut ch: Receiver<RtpLoggerCmd>, rtp_log_path: PathBuf) -> Result<()> {
     let f = fs::File::create(rtp_log_path)?;
     let mut writer = BufWriter::new(f);
     let mut wrote_header = false;
 
-    while let Ok(cmd) = ch.recv() {
+    while let Some(cmd) = ch.blocking_recv() {
         // write the header first if it doesn't exist
         if !wrote_header {
             wrote_header = true;
