@@ -4,7 +4,6 @@ mod protocol;
 use std::{
     collections::{HashMap, VecDeque},
     iter,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -22,7 +21,7 @@ use rust_ipfs::libp2p::{
     Multiaddr, PeerId,
 };
 use rust_ipfs::NetworkBehaviour;
-use warp::{crypto::DID, multipass::MultiPassEventKind};
+use warp::crypto::DID;
 
 use crate::store::{document::identity::IdentityDocument, DidExt};
 
@@ -70,48 +69,38 @@ pub enum IdentityCommand {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PhoneBookState {
-    Online,
-    Offline,
-}
-
-struct RequestHandle {
-    did: DID,
-    peer_id: PeerId,
-    request_id: RequestId,
-    channel: ResponseChannel<Response>,
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+enum RequestType {
+    Identity,
+    Picture,
+    Banner,
 }
 
 pub struct Behaviour {
     pending_events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>>,
     inner: RequestResponse<IdentityCodec>,
-    event: tokio::sync::broadcast::Sender<MultiPassEventKind>,
     command: futures::channel::mpsc::Receiver<IdentityCommand>,
     request_identity: HashMap<RequestId, OneshotSender<Result<IdentityDocument, Error>>>,
     request_profile_picture: HashMap<RequestId, OneshotSender<Result<Vec<u8>, Error>>>,
     request_profile_banner: HashMap<RequestId, OneshotSender<Result<Vec<u8>, Error>>>,
+    request_type: HashMap<RequestId, RequestType>,
     channels: HashMap<RequestId, ResponseChannel<Response>>,
 }
 
 impl Behaviour {
-    pub fn new(
-        did: Arc<DID>,
-        event: tokio::sync::broadcast::Sender<MultiPassEventKind>,
-        command: futures::channel::mpsc::Receiver<IdentityCommand>,
-    ) -> Self {
+    pub fn new(command: futures::channel::mpsc::Receiver<IdentityCommand>) -> Self {
         let protocols = iter::once((IdentityProtocol, ProtocolSupport::Full));
         let cfg = request_response::Config::default();
         let inner = RequestResponse::new(IdentityCodec, protocols, cfg);
         Behaviour {
             pending_events: Default::default(),
             inner,
-            event,
             command,
             request_identity: Default::default(),
             request_profile_banner: Default::default(),
             request_profile_picture: Default::default(),
             channels: Default::default(),
+            request_type: Default::default(),
         }
     }
 }
@@ -228,17 +217,17 @@ impl NetworkBehaviour for Behaviour {
         cx: &mut Context,
         params: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::OutEvent, THandlerInEvent<Self>>> {
-        if let Some(event) = self.pending_events.pop_front() {
-            return Poll::Ready(event);
-        }
-
         loop {
+            if let Some(event) = self.pending_events.pop_front() {
+                return Poll::Ready(event);
+            }
+
             match self.command.poll_next_unpin(cx) {
                 Poll::Ready(Some(IdentityCommand::RequestIdentity { did, response })) => {
                     let peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
-                        Err(e) => {
-                            let _ = response.send(Err(e));
+                        Err(_) => {
+                            let _ = response.send(Err(Error::PublicKeyInvalid));
                             continue;
                         }
                     };
@@ -248,8 +237,8 @@ impl NetworkBehaviour for Behaviour {
                 Poll::Ready(Some(IdentityCommand::RequestProfileBanner { did, cid, response })) => {
                     let peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
-                        Err(e) => {
-                            let _ = response.send(Err(e));
+                        Err(_) => {
+                            let _ = response.send(Err(Error::PublicKeyInvalid));
                             continue;
                         }
                     };
@@ -264,8 +253,8 @@ impl NetworkBehaviour for Behaviour {
                 })) => {
                     let peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
-                        Err(e) => {
-                            let _ = response.send(Err(e));
+                        Err(_) => {
+                            let _ = response.send(Err(Error::PublicKeyInvalid));
                             continue;
                         }
                     };
@@ -275,39 +264,39 @@ impl NetworkBehaviour for Behaviour {
                 }
                 Poll::Ready(Some(IdentityCommand::SendIdentity {
                     did,
-                    identity,
+                    identity: _,
                     response,
                 })) => {
-                    let peer_id = match did.to_peer_id() {
+                    let _peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
-                        Err(e) => {
-                            let _ = response.send(Err(e));
+                        Err(_) => {
+                            let _ = response.send(Err(Error::PublicKeyInvalid));
                             continue;
                         }
                     };
                 }
                 Poll::Ready(Some(IdentityCommand::SendProfilePicture {
                     did,
-                    picture,
+                    picture: _,
                     response,
                 })) => {
-                    let peer_id = match did.to_peer_id() {
+                    let _peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
-                        Err(e) => {
-                            let _ = response.send(Err(e));
+                        Err(_) => {
+                            let _ = response.send(Err(Error::PublicKeyInvalid));
                             continue;
                         }
                     };
                 }
                 Poll::Ready(Some(IdentityCommand::SendProfileBanner {
                     did,
-                    banner,
+                    banner: _,
                     response,
                 })) => {
-                    let peer_id = match did.to_peer_id() {
+                    let _peer_id = match did.to_peer_id() {
                         Ok(peer_id) => peer_id,
-                        Err(e) => {
-                            let _ = response.send(Err(e));
+                        Err(_) => {
+                            let _ = response.send(Err(Error::PublicKeyInvalid));
                             continue;
                         }
                     };
@@ -327,11 +316,10 @@ impl NetworkBehaviour for Behaviour {
                                 request_id,
                                 request,
                                 channel,
-                            } => match request {
-                                Request::Identity => todo!(),
-                                Request::Picture { cid } => todo!(),
-                                Request::Banner { cid } => todo!(),
-                            },
+                            } => {
+                                self.channels.insert(request_id, channel);
+                                self.request_type.insert(request_id, request.into());
+                            }
                             request_response::Message::Response {
                                 request_id,
                                 response,
@@ -342,14 +330,14 @@ impl NetworkBehaviour for Behaviour {
                                         let _ = channel.send(Ok(identity));
                                     }
                                 }
-                                Response::Banner { cid, data } => {
+                                Response::Banner { cid: _, data } => {
                                     if let Some(channel) =
                                         self.request_profile_banner.remove(&request_id)
                                     {
                                         let _ = channel.send(Ok(data));
                                     }
                                 }
-                                Response::Picture { cid, data } => {
+                                Response::Picture { cid: _, data } => {
                                     if let Some(channel) =
                                         self.request_profile_picture.remove(&request_id)
                                     {
@@ -359,7 +347,7 @@ impl NetworkBehaviour for Behaviour {
                             },
                         },
                         request_response::Event::OutboundFailure {
-                            peer,
+                            peer: _,
                             request_id,
                             error,
                         } => {
@@ -368,7 +356,7 @@ impl NetworkBehaviour for Behaviour {
                             }
                         }
                         request_response::Event::InboundFailure {
-                            peer,
+                            peer: _,
                             request_id,
                             error,
                         } => {
@@ -376,13 +364,17 @@ impl NetworkBehaviour for Behaviour {
                                 let _ = channel.send(Err(Error::Any(anyhow::Error::from(error))));
                             }
                         }
-                        request_response::Event::ResponseSent { peer, request_id } => {
+                        request_response::Event::ResponseSent { peer: _, request_id: _ } => {
                             //TODO: Possibly have any responses set as pending until this event is emitted for ack
                         }
                     }
                     continue;
                 }
-                Poll::Ready(action) => self.pending_events.push_back(action),
+                Poll::Ready(action) => {
+                    self.pending_events
+                        .push_back(action.map_out(|_| unreachable!()));
+                    continue;
+                }
                 Poll::Pending => {}
             }
 

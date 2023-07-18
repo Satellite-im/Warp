@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::document::identity::IdentityDocument;
 
-use super::protocol::IdentityProtocol;
+use super::{protocol::IdentityProtocol, RequestType};
 
 const REQUEST_MAX_BUF: usize = 64 * 1024;
 const RESPONSE_MAX_BUF: usize = 3 * 1024 * 1024;
@@ -16,7 +16,7 @@ const RESPONSE_MAX_BUF: usize = 3 * 1024 * 1024;
 #[derive(Clone)]
 pub struct IdentityCodec;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Request {
     Identity,
@@ -24,10 +24,20 @@ pub enum Request {
     Banner { cid: Cid },
 }
 
+impl From<Request> for RequestType {
+    fn from(req: Request) -> Self {
+        match req {
+            Request::Identity => RequestType::Identity,
+            Request::Banner { .. } => RequestType::Banner,
+            Request::Picture { .. } => RequestType::Picture,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[allow(clippy::large_enum_variant)]
-pub enum Response {
+pub enum Response { 
     Identity { identity: IdentityDocument },
     Picture { cid: Cid, data: Vec<u8> },
     Banner { cid: Cid, data: Vec<u8> },
