@@ -106,25 +106,20 @@ impl RtpLogger {
 
     // for sink tracks
     pub fn log_rtp_sample(&self, sample: &Sample) -> Result<()> {
-        self.log(RtpLoggerCmd::LogSinkTrack(SampleWrapper {
+        self.tx.try_send(RtpLoggerCmd::LogSinkTrack(SampleWrapper {
             timestamp: sample.timestamp,
             duration: sample.duration,
             packet_timestamp: sample.packet_timestamp,
             prev_dropped_packets: sample.prev_dropped_packets,
             prev_padding_packets: sample.prev_padding_packets,
-        }))
+        }))?;
+        Ok(())
     }
 
     // for source tracks
     pub fn log_rtp_header(&self, header: Header) -> Result<()> {
-        self.log(RtpLoggerCmd::LogSourceTrack(HeaderWrapper { val: header }))
-    }
-
-    fn log(&self, cmd: RtpLoggerCmd) -> Result<()> {
-        if !self.should_continue.load(atomic::Ordering::SeqCst) {
-            bail!("logger stopped");
-        }
-        self.tx.try_send(cmd)?;
+        self.tx
+            .try_send(RtpLoggerCmd::LogSourceTrack(HeaderWrapper { val: header }))?;
         Ok(())
     }
 }
