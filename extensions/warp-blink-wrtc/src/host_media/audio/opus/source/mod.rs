@@ -5,6 +5,7 @@ use cpal::{
 };
 use rand::Rng;
 use ringbuf::HeapRb;
+use uuid::Uuid;
 
 use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -16,7 +17,10 @@ use webrtc::{
 };
 
 mod framer;
-use crate::host_media::audio::{speech, SourceTrack};
+use crate::{
+    host_media::audio::{speech, SourceTrack},
+    rtp_logger,
+};
 
 use self::framer::Framer;
 
@@ -138,6 +142,9 @@ fn create_source_track(
         webrtc_codec.sample_rate(),
     );
 
+    let debug_rtp = std::env::var("DEBUG_RTP").is_ok();
+    let debug_uuid = Uuid::new_v4();
+
     // todo: when the input device changes, this needs to change too.
     let track2 = track;
     let join_handle = tokio::spawn(async move {
@@ -159,6 +166,14 @@ fn create_source_track(
                     {
                         Ok(packets) => {
                             for packet in &packets {
+                                if debug_rtp {
+                                    if let Err(e) = rtp_logger::log_rtp_header(
+                                        debug_uuid,
+                                        packet.header.clone(),
+                                    ) {
+                                        log::error!("failed to log rtp header: {e}");
+                                    }
+                                }
                                 if let Err(e) = track2
                                     .write_rtp_with_extensions(
                                         packet,

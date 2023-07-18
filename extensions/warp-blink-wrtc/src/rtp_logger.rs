@@ -9,6 +9,7 @@ use std::{
         mpsc::{Receiver, SyncSender},
         Arc,
     },
+    time::{Duration, SystemTime},
 };
 use warp::sync::Mutex;
 
@@ -17,6 +18,20 @@ use once_cell::sync::Lazy;
 
 use uuid::Uuid;
 use webrtc::{media::Sample, rtp::header::Header};
+
+struct RtpLoggerCmdChannels {
+    pub tx: SyncSender<RtpLoggerCmd>,
+    pub rx: Arc<Mutex<Receiver<RtpLoggerCmd>>>,
+}
+
+static RTP_LOGGER_CMD_CH: Lazy<RtpLoggerCmdChannels> = Lazy::new(|| {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1024);
+    RtpLoggerCmdChannels {
+        tx,
+        rx: Arc::new(Mutex::new(rx)),
+    }
+});
+static mut RTP_LOGGER_STARTED: AtomicBool = AtomicBool::new(false);
 
 enum RtpLoggerCmd {
     LogSinkTrack(Uuid, SampleWrapper),
@@ -32,7 +47,11 @@ trait CsvFormat {
 }
 
 struct SampleWrapper {
-    val: Sample,
+    timestamp: SystemTime,
+    duration: Duration,
+    packet_timestamp: u32,
+    prev_dropped_packets: u16,
+    prev_padding_packets: u16,
 }
 
 struct HeaderWrapper {
@@ -51,11 +70,11 @@ impl CsvFormat for SampleWrapper {
         let _ = writer.write(
             format!(
                 "{:?},{},{},{},{}\n",
-                self.val.timestamp,
-                self.val.duration.as_millis(),
-                self.val.packet_timestamp,
-                self.val.prev_dropped_packets,
-                self.val.prev_padding_packets
+                self.timestamp,
+                self.duration.as_millis(),
+                self.packet_timestamp,
+                self.prev_dropped_packets,
+                self.prev_padding_packets
             )
             .as_bytes(),
         )?;
@@ -77,19 +96,6 @@ impl CsvFormat for HeaderWrapper {
         Ok(())
     }
 }
-struct RtpLoggerCmdChannels {
-    pub tx: SyncSender<RtpLoggerCmd>,
-    pub rx: Arc<Mutex<Receiver<RtpLoggerCmd>>>,
-}
-
-static RTP_LOGGER_CMD_CH: Lazy<RtpLoggerCmdChannels> = Lazy::new(|| {
-    let (tx, rx) = std::sync::mpsc::sync_channel(1024);
-    RtpLoggerCmdChannels {
-        tx,
-        rx: Arc::new(Mutex::new(rx)),
-    }
-});
-static mut RTP_LOGGER_STARTED: AtomicBool = AtomicBool::new(false);
 
 pub fn start() -> anyhow::Result<()> {
     // logger_started is initialized to false. swap() should return false.
@@ -116,10 +122,16 @@ pub fn stop() -> anyhow::Result<()> {
 }
 
 // for sink tracks
-pub fn log_rtp_sample(id: Uuid, sample: Sample) -> Result<()> {
+pub fn log_rtp_sample(id: Uuid, sample: &Sample) -> Result<()> {
     log(RtpLoggerCmd::LogSinkTrack(
         id,
-        SampleWrapper { val: sample },
+        SampleWrapper {
+            timestamp: sample.timestamp,
+            duration: sample.duration,
+            packet_timestamp: sample.packet_timestamp,
+            prev_dropped_packets: sample.prev_dropped_packets,
+            prev_padding_packets: sample.prev_padding_packets,
+        },
     ))
 }
 

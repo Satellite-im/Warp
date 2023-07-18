@@ -6,6 +6,7 @@ use cpal::{
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
+use uuid::Uuid;
 use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
@@ -16,7 +17,10 @@ use webrtc::{
     track::track_remote::TrackRemote, util::Unmarshal,
 };
 
-use crate::host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack};
+use crate::{
+    host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
+    rtp_logger,
+};
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
 
@@ -198,7 +202,6 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     peer_id: DID,
 }
 
-#[allow(clippy::type_complexity)]
 async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<()>
 where
     T: Depacketizer,
@@ -219,6 +222,10 @@ where
     let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
+
+    let debug_rtp = std::env::var("DEBUG_RTP").is_ok();
+    let debug_uuid = Uuid::new_v4();
+
     loop {
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {
@@ -256,6 +263,13 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
+                    if debug_rtp {
+                        if let Err(e) =
+                            rtp_logger::log_rtp_sample(debug_uuid, &media_sample)
+                        {
+                            log::error!("failed to log rtp sample: {e}");
+                        };
+                    }
                     // todo: send Sample to other thread
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
