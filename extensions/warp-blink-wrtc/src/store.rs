@@ -23,7 +23,7 @@ pub trait PeerIdExt {
 
 impl PeerIdExt for ipfs::PeerId {
     fn to_did(&self) -> std::result::Result<DID, anyhow::Error> {
-        let multihash: libipld::Multihash = (*self).into();
+        let multihash = self.as_ref();
         if multihash.code() != 0 {
             anyhow::bail!("PeerId does not contain inline public key");
         }

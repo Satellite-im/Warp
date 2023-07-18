@@ -10,7 +10,7 @@ use crate::{err_fn, StaticArgs, AUDIO_FILE_NAME};
 // needs to be static for a callback
 static mut AUDIO_FILE: Option<File> = None;
 
-pub async fn record_f32(args: StaticArgs) -> anyhow::Result<()> {
+pub async fn raw_f32(args: StaticArgs) -> anyhow::Result<()> {
     let duration_secs = args.audio_duration_secs;
 
     unsafe {

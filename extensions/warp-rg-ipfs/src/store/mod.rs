@@ -6,7 +6,6 @@ pub mod payload;
 
 use ipfs::Keypair;
 use ipfs::PublicKey;
-use libipld::Multihash;
 
 use rust_ipfs as ipfs;
 use std::fmt::{Debug, Display};
@@ -45,7 +44,7 @@ pub trait DidExt {
 
 impl PeerIdExt for PeerId {
     fn to_did(&self) -> Result<DID, anyhow::Error> {
-        let multihash: Multihash = (*self).into();
+        let multihash = self.as_ref();
         if multihash.code() != 0 {
             anyhow::bail!("PeerId does not contain inline public key");
         }
