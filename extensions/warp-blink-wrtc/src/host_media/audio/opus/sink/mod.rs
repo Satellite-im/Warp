@@ -92,6 +92,7 @@ impl OpusSink {
         let sample_builder = SampleBuilder::new(max_late, depacketizer, webrtc_sample_rate);
         let track2 = track.clone();
         let event_ch2 = event_ch.clone();
+        let event_ch3 = event_ch.clone();
         let peer_id2 = peer_id.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
@@ -126,8 +127,17 @@ impl OpusSink {
                 //log::trace!("output stream fell behind: try increasing latency");
             }
         };
-        let output_stream =
-            output_device.build_output_stream(&cpal_config, output_data_fn, err_fn, None)?;
+        let output_stream = output_device.build_output_stream(
+            &cpal_config,
+            output_data_fn,
+            move |err| {
+                log::error!("an error occurred on stream: {}", err);
+                if matches!(err, cpal::StreamError::DeviceNotAvailable) {
+                    let _ = event_ch3.send(BlinkEventKind::AudioOutputDeviceNoLongerAvailable);
+                }
+            },
+            None,
+        )?;
 
         Ok(Self {
             peer_id,
@@ -309,8 +319,4 @@ where
     }
 
     Ok(())
-}
-
-fn err_fn(err: cpal::StreamError) {
-    log::error!("an error occurred on stream: {}", err);
 }

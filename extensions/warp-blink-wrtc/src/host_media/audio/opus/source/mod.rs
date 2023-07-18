@@ -143,6 +143,7 @@ fn create_source_track(
 
     // todo: when the input device changes, this needs to change too.
     let track2 = track;
+    let event_ch2 = event_ch.clone();
     let join_handle = tokio::spawn(async move {
         let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs")).ok();
         // speech_detector should emit at most 1 event per second
@@ -201,7 +202,17 @@ fn create_source_track(
         }
     };
     let input_stream = input_device
-        .build_input_stream(&config, input_data_fn, err_fn, None)
+        .build_input_stream(
+            &config,
+            input_data_fn,
+            move |err| {
+                log::error!("an error occurred on stream: {}", err);
+                if matches!(err, cpal::StreamError::DeviceNotAvailable) {
+                    let _ = event_ch2.send(BlinkEventKind::AudioInputDeviceNoLongerAvailable);
+                }
+            },
+            None,
+        )
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to build input stream: {e}, {}, {}",
@@ -211,10 +222,6 @@ fn create_source_track(
         })?;
 
     Ok((input_stream, join_handle))
-}
-
-fn err_fn(err: cpal::StreamError) {
-    log::error!("an error occurred on stream: {}", err);
 }
 
 #[cfg(test)]
