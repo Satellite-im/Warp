@@ -165,6 +165,7 @@ fn create_source_track(
                             for packet in &packets {
                                 if let Err(e) = logger.log_rtp_header(packet.header.clone()) {
                                     log::error!("failed to log rtp header: {e}");
+                                    panic!();
                                 }
 
                                 if let Err(e) = track2

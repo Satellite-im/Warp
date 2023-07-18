@@ -263,6 +263,7 @@ where
                 while let Some(media_sample) = sample_builder.pop() {
                     if let Err(e) = logger.log_rtp_sample(&media_sample) {
                         log::error!("failed to log rtp sample: {e}");
+                        panic!();
                     };
 
                     // todo: send Sample to other thread
