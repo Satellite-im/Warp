@@ -141,9 +141,32 @@ fn create_source_track(
         webrtc_codec.sample_rate(),
     );
 
-    // todo: when the input device changes, this needs to change too.
-    let track2 = track;
     let event_ch2 = event_ch.clone();
+    let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
+        for sample in data {
+            let _ = producer.push(*sample);
+        }
+    };
+    let input_stream = input_device
+        .build_input_stream(
+            &config,
+            input_data_fn,
+            move |err| {
+                log::error!("an error occurred on stream: {}", err);
+                if matches!(err, cpal::StreamError::DeviceNotAvailable) {
+                    let _ = event_ch2.send(BlinkEventKind::AudioInputDeviceNoLongerAvailable);
+                }
+            },
+            None,
+        )
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to build input stream: {e}, {}, {}",
+                file!(),
+                line!()
+            )
+        })?;
+
     let join_handle = tokio::spawn(async move {
         let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs")).ok();
         // speech_detector should emit at most 1 event per second
@@ -170,7 +193,7 @@ fn create_source_track(
                                     }
                                 }
 
-                                if let Err(e) = track2
+                                if let Err(e) = track
                                     .write_rtp_with_extensions(
                                         packet,
                                         &[rtp::extension::HeaderExtension::AudioLevel(
@@ -195,31 +218,6 @@ fn create_source_track(
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     });
-
-    let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-        for sample in data {
-            let _ = producer.push(*sample);
-        }
-    };
-    let input_stream = input_device
-        .build_input_stream(
-            &config,
-            input_data_fn,
-            move |err| {
-                log::error!("an error occurred on stream: {}", err);
-                if matches!(err, cpal::StreamError::DeviceNotAvailable) {
-                    let _ = event_ch2.send(BlinkEventKind::AudioInputDeviceNoLongerAvailable);
-                }
-            },
-            None,
-        )
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "failed to build input stream: {e}, {}, {}",
-                file!(),
-                line!()
-            )
-        })?;
 
     Ok((input_stream, join_handle))
 }
