@@ -144,7 +144,7 @@ fn create_source_track(
     // todo: when the input device changes, this needs to change too.
     let track2 = track;
     let join_handle = tokio::spawn(async move {
-        let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs"));
+        let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs")).ok();
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {
@@ -163,9 +163,10 @@ fn create_source_track(
                     {
                         Ok(packets) => {
                             for packet in &packets {
-                                if let Err(e) = logger.log_rtp_header(packet.header.clone()) {
-                                    log::error!("failed to log rtp header: {e}");
-                                    panic!();
+                                if let Some(logger) = logger.as_ref() {
+                                    if let Err(e) = logger.log_rtp_header(packet.header.clone()) {
+                                        log::error!("failed to log rtp header: {e}");
+                                    }
                                 }
 
                                 if let Err(e) = track2

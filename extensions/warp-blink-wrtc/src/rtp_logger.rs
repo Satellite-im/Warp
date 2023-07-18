@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 use std::{
-    fs,
+    fs::{self, create_dir_all},
     io::{self, BufWriter, Write},
     path::PathBuf,
     time::{Duration, SystemTime},
@@ -78,9 +78,16 @@ pub struct RtpLogger {
 }
 
 impl RtpLogger {
-    pub fn new(log_path: PathBuf) -> Self {
+    pub fn new(log_path: PathBuf) -> Result<Self> {
+        if !log_path.exists() {
+            if let Err(e) = create_dir_all(&log_path) {
+                log::error!("failed to create directory for rtp_logger: {e}");
+                bail!(e);
+            }
+        }
         let (tx, rx) = tokio::sync::mpsc::channel(1024 * 5);
         let id = Uuid::new_v4();
+
         std::thread::spawn(move || {
             if let Err(e) = run(rx, log_path.join(format!("{}.csv", id))) {
                 log::error!("error running rtp_logger: {e}");
@@ -88,7 +95,7 @@ impl RtpLogger {
             log::debug!("rtp_logger terminating: {}", id);
         });
 
-        Self { tx }
+        Ok(Self { tx })
     }
 
     // for sink tracks

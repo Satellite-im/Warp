@@ -222,7 +222,7 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
 
-    let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs"));
+    let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs")).ok();
 
     loop {
         match track.read(&mut b).await {
@@ -261,10 +261,11 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
-                    if let Err(e) = logger.log_rtp_sample(&media_sample) {
-                        log::error!("failed to log rtp sample: {e}");
-                        panic!();
-                    };
+                    if let Some(logger) = logger.as_ref() {
+                        if let Err(e) = logger.log_rtp_sample(&media_sample) {
+                            log::error!("failed to log rtp sample: {e}");
+                        };
+                    }
 
                     // todo: send Sample to other thread
                     match decoder.decode_float(
