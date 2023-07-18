@@ -91,7 +91,7 @@ impl RtpLogger {
         let should_continue = Arc::new(AtomicBool::new(true));
         let id = Uuid::new_v4();
         let should_continue2 = should_continue.clone();
-        tokio::task::spawn_blocking(move || {
+        std::thread::spawn(move || {
             if let Err(e) = run(rx, should_continue2, log_path.join(format!("{}.csv", id))) {
                 log::error!("error running rtp_logger: {e}");
             }
