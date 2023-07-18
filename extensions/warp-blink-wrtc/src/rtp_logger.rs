@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     fs,
     io::{self, BufWriter, Write},
+    path::Path,
     sync::{
         atomic::{self, AtomicBool},
         mpsc::{Receiver, SyncSender},
@@ -158,12 +159,15 @@ fn run() -> Result<()> {
     // no sense checking RTP_LOGGER_STARTED because writing to that variable won't wake the task while it is waiting for
     // a command to be sent over this channel.
 
+    let rtp_log_path = std::env::var("RTP_LOG_PATH").unwrap_or(".".into());
+    let rtp_log_path = Path::new(&rtp_log_path);
+
     // write the header first if it doesn't exist
     while let Ok(cmd) = ch.recv() {
         match cmd {
             RtpLoggerCmd::LogSinkTrack(id, _) => {
                 if let std::collections::hash_map::Entry::Vacant(e) = writers.entry(id) {
-                    let f = fs::File::create(format!("/tmp/{}.csv", id))?;
+                    let f = fs::File::create(rtp_log_path.join(format!("{}.csv", id)))?;
                     let mut w = BufWriter::new(f);
                     if let Err(e) = SampleWrapper::write_header(&mut w) {
                         log::error!("failed to write header for sink track: {e}");
@@ -173,7 +177,7 @@ fn run() -> Result<()> {
             }
             RtpLoggerCmd::LogSourceTrack(id, _) => {
                 if let std::collections::hash_map::Entry::Vacant(e) = writers.entry(id) {
-                    let f = fs::File::create(format!("/tmp/{}.csv", id))?;
+                    let f = fs::File::create(rtp_log_path.join(format!("{}.csv", id)))?;
                     let mut w = BufWriter::new(f);
                     if let Err(e) = HeaderWrapper::write_header(&mut w) {
                         log::error!("failed to write header for source track: {e}");
