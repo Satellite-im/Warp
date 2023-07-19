@@ -5,7 +5,6 @@ use cpal::{
 };
 use rand::Rng;
 use ringbuf::HeapRb;
-use uuid::Uuid;
 
 use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -169,7 +168,7 @@ fn create_source_track(
         })?;
 
     let join_handle = tokio::spawn(async move {
-        let logger = rtp_logger::get_instance(Uuid::new_v4().to_string());
+        let logger = rtp_logger::get_instance("self-audio".to_string());
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {

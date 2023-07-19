@@ -6,7 +6,6 @@ use cpal::{
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
-use uuid::Uuid;
 use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
@@ -233,7 +232,7 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
 
-    let logger = rtp_logger::get_instance(Uuid::new_v4().to_string());
+    let logger = rtp_logger::get_instance(format!("{}-audio", peer_id));
 
     loop {
         match track.read(&mut b).await {
