@@ -10,7 +10,6 @@
 #![allow(dead_code)]
 
 mod host_media;
-mod rtp_logger;
 mod rtp_logger2;
 mod signaling;
 mod simple_webrtc;
