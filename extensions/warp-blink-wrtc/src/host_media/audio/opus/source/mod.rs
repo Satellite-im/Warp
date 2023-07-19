@@ -19,7 +19,7 @@ use webrtc::{
 mod framer;
 use crate::{
     host_media::audio::{speech, SourceTrack},
-    rtp_logger, rtp_logger2,
+    rtp_logger2,
 };
 
 use self::framer::Framer;

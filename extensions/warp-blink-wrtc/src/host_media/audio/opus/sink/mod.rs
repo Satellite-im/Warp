@@ -19,7 +19,7 @@ use webrtc::{
 
 use crate::{
     host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
-    rtp_logger, rtp_logger2,
+    rtp_logger2,
 };
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
