@@ -35,7 +35,8 @@ pub async fn mesh_connect(nodes: Vec<Ipfs>) -> anyhow::Result<()> {
         for (j, (_, peer_id, addrs)) in nodes.iter().enumerate() {
             if i != j {
                 for addr in addrs {
-                    if let Err(_e) = nodes[i].0.add_peer(*peer_id, Some(addr.clone())).await {}
+                    if let Err(_e) = nodes[i].0.add_peer(*peer_id, addr.clone()).await {}
+                    if let Err(_e) = nodes[i].0.connect(*peer_id).await {}
                 }
             }
         }

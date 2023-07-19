@@ -1,9 +1,10 @@
+mod behaviour;
 pub mod config;
 pub mod store;
 
 use config::MpIpfsConfig;
 use either::Either;
-use futures::channel::mpsc::unbounded;
+use futures::channel::mpsc::{channel, unbounded};
 use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
@@ -248,8 +249,15 @@ impl IpfsIdentity {
 
         let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
+        let (pb_tx, pb_rx) = channel(50);
+
+        let behaviour = behaviour::Behaviour {
+            phonebook: behaviour::phonebook::Behaviour::new(self.tx.clone(), pb_rx),
+        };
+
         info!("Starting ipfs");
         let ipfs = UninitializedIpfs::with_opt(opts)
+            .set_custom_behaviour(behaviour)
             .set_keypair(keypair)
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
@@ -461,6 +469,7 @@ impl IpfsIdentity {
             config.clone(),
             tesseract.clone(),
             self.tx.clone(),
+            pb_tx,
         )
         .await?;
         info!("friends store initialized");

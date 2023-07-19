@@ -809,7 +809,9 @@ impl Constellation for IpfsFileSystem {
                 };
                 return;
             }
+
             if let Err(_e) = fs.export_index().await {}
+
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
