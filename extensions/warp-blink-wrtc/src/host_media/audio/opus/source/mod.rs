@@ -5,6 +5,7 @@ use cpal::{
 };
 use rand::Rng;
 use ringbuf::HeapRb;
+use uuid::Uuid;
 
 use std::{ops::Mul, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -18,7 +19,7 @@ use webrtc::{
 mod framer;
 use crate::{
     host_media::audio::{speech, SourceTrack},
-    rtp_logger,
+    rtp_logger, rtp_logger2,
 };
 
 use self::framer::Framer;
@@ -168,7 +169,7 @@ fn create_source_track(
         })?;
 
     let join_handle = tokio::spawn(async move {
-        let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs")).ok();
+        let logger = rtp_logger2::get_instance(Uuid::new_v4().to_string());
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {
@@ -188,9 +189,7 @@ fn create_source_track(
                         Ok(packets) => {
                             for packet in &packets {
                                 if let Some(logger) = logger.as_ref() {
-                                    if let Err(e) = logger.log_rtp_header(packet.header.clone()) {
-                                        log::error!("failed to log rtp header: {e}");
-                                    }
+                                    logger.log(packet.header.clone())
                                 }
 
                                 if let Err(e) = track

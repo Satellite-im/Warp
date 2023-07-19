@@ -6,6 +6,7 @@ use cpal::{
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, path::PathBuf, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
+use uuid::Uuid;
 use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
@@ -18,7 +19,7 @@ use webrtc::{
 
 use crate::{
     host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
-    rtp_logger,
+    rtp_logger, rtp_logger2,
 };
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
@@ -232,7 +233,7 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
 
-    let logger = rtp_logger::RtpLogger::new(PathBuf::from("/tmp/rtp-logs")).ok();
+    let logger = rtp_logger2::get_instance(Uuid::new_v4().to_string());
 
     loop {
         match track.read(&mut b).await {
@@ -247,6 +248,10 @@ where
                         break;
                     }
                 };
+
+                if let Some(logger) = logger.as_ref() {
+                    logger.log(rtp_packet.header.clone())
+                }
 
                 if let Some(extension) = rtp_packet.header.extensions.first() {
                     // don't yet have the MediaEngine exposed. for now since there's only one extension being used, this way seems to be good enough
@@ -271,12 +276,6 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
-                    if let Some(logger) = logger.as_ref() {
-                        if let Err(e) = logger.log_rtp_sample(&media_sample) {
-                            log::error!("failed to log rtp sample: {e}");
-                        };
-                    }
-
                     // todo: send Sample to other thread
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
