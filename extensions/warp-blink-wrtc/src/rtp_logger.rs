@@ -70,21 +70,25 @@ pub fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
 }
 
 pub fn de_init() {
-    RTP_LOGGER.write().take().map(|r| {
-        r.should_quit.store(true, Ordering::Relaxed);
-        let _ = r.tx.send(RtpHeaderWrapper {
+    if let Some(logger) = RTP_LOGGER.write().take() {
+        logger.should_quit.store(true, Ordering::Relaxed);
+        let _ = logger.tx.blocking_send(RtpHeaderWrapper {
             val: Header::default(),
             id: String::from("end"),
         });
-    });
+    };
 }
 
 pub fn pause_logging() {
-    RTP_LOGGER.write().as_mut().map(|r| r.should_log = false);
+    if let Some(logger) = RTP_LOGGER.write().as_mut() {
+        logger.should_log = false;
+    }
 }
 
 pub fn resume_logging() {
-    RTP_LOGGER.write().as_mut().map(|r| r.should_log = true);
+    if let Some(logger) = RTP_LOGGER.write().as_mut() {
+        logger.should_log = true;
+    }
 }
 
 pub fn get_instance(peer_id: String) -> Option<LoggerInstance> {
@@ -101,7 +105,7 @@ fn run(
 ) -> Result<()> {
     let f = fs::File::create(rtp_log_path)?;
     let mut writer = BufWriter::new(f);
-    writer.write("peer_id,timestamp,sequence_number\n".as_bytes())?;
+    writer.write_all("peer_id,timestamp,sequence_number\n".as_bytes())?;
 
     while !should_quit.load(Ordering::Relaxed) {
         while let Some(wrapper) = ch.blocking_recv() {
@@ -118,7 +122,7 @@ fn run(
                 continue;
             }
 
-            writer.write(
+            writer.write_all(
                 format!(
                     "{},{},{}\n",
                     wrapper.id, wrapper.val.timestamp, wrapper.val.sequence_number

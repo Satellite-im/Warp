@@ -7,7 +7,7 @@ use rand::Rng;
 use ringbuf::HeapRb;
 use uuid::Uuid;
 
-use std::{ops::Mul, path::PathBuf, sync::Arc, time::Duration};
+use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
 use warp::blink::{self, BlinkEventKind};
 

@@ -4,7 +4,7 @@ use cpal::{
     SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{cmp::Ordering, path::PathBuf, sync::Arc};
+use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
 use uuid::Uuid;
 use warp::{
