@@ -19,7 +19,7 @@ use webrtc::{
 
 use crate::{
     host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
-    rtp_logger2,
+    rtp_logger,
 };
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
@@ -233,7 +233,7 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
 
-    let logger = rtp_logger2::get_instance(Uuid::new_v4().to_string());
+    let logger = rtp_logger::get_instance(Uuid::new_v4().to_string());
 
     loop {
         match track.read(&mut b).await {

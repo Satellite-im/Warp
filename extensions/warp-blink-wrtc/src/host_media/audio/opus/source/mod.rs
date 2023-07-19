@@ -19,7 +19,7 @@ use webrtc::{
 mod framer;
 use crate::{
     host_media::audio::{speech, SourceTrack},
-    rtp_logger2,
+    rtp_logger,
 };
 
 use self::framer::Framer;
@@ -169,7 +169,7 @@ fn create_source_track(
         })?;
 
     let join_handle = tokio::spawn(async move {
-        let logger = rtp_logger2::get_instance(Uuid::new_v4().to_string());
+        let logger = rtp_logger::get_instance(Uuid::new_v4().to_string());
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {
