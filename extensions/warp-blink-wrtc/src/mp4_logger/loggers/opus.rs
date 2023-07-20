@@ -10,19 +10,13 @@ const MAX_FRAME_SIZE: usize = 1024 * 10;
 pub struct Opus {
     track_id: u32,
     tx: Sender<Mp4Fragment>,
-    // the time between when the mp4 file was created and the
-    // logger was created
-    offset_ms: u32,
-    // the timestamp of the first rtp packet. used to
-    // transform the timestamp.
-    first_rtp_timestamp: Option<u32>,
 
     sample_buffer: [u8; MAX_FRAME_SIZE],
     sample_lengths: Vec<u32>,
-    fragment_start_time: Option<u32>,
-    previous_sample_time: Option<u32>,
     sample_buffer_len: usize,
 
+    fragment_start_time: u32,
+    elapsed_time: u32,
     fragment_sequence_number: u32,
 }
 
@@ -31,13 +25,13 @@ impl Opus {
         Self {
             tx,
             track_id,
-            offset_ms,
-            first_rtp_timestamp: None,
+
             sample_buffer: [0; MAX_FRAME_SIZE],
             sample_lengths: vec![],
-            fragment_start_time: None,
-            previous_sample_time: None,
+
             sample_buffer_len: 0,
+            fragment_start_time: 0,
+            elapsed_time: 0,
             fragment_sequence_number: 1,
         }
     }
@@ -45,24 +39,15 @@ impl Opus {
 // todo: use num samples written to increment the timestamp unless rtp_start_time is too far ahead...
 impl Mp4LoggerInstance for Opus {
     fn log(&mut self, bytes: bytes::Bytes, num_samples: u32, sample_time: u32, duration: u32) {
-        // only set first_rtp_timestamp once
-        if self.first_rtp_timestamp.is_none() {
-            self.first_rtp_timestamp.replace(sample_time);
-        }
-
-        // set fragment_start_time for every fragment
-        if self.fragment_start_time.is_none() {
-            self.fragment_start_time.replace(sample_time);
-        }
-
+        self.elapsed_time += num_samples;
         if self.sample_buffer.len() - self.sample_buffer_len < bytes.len() {
             self.make_fragment();
+            self.fragment_start_time = self.elapsed_time;
             // don't return - still need to log this sample
         }
 
         // todo: check sample_time - previous_sample_time
 
-        self.previous_sample_time.replace(sample_time);
         self.sample_lengths.push(bytes.len() as u32);
         self.sample_buffer[self.sample_buffer_len..(self.sample_buffer_len + bytes.len())]
             .copy_from_slice(&bytes.slice(..));
@@ -70,18 +55,14 @@ impl Mp4LoggerInstance for Opus {
 
         if self.sample_lengths.len() >= 100 {
             self.make_fragment();
+            self.fragment_start_time = self.elapsed_time;
         }
     }
 }
 
 impl Opus {
     fn make_fragment(&mut self) {
-        let fragment_start_time = self
-            .fragment_start_time
-            .take()
-            .unwrap_or(0)
-            .saturating_sub(self.first_rtp_timestamp.unwrap_or(0))
-            + self.offset_ms;
+        let fragment_start_time = self.fragment_start_time;
 
         let num_samples_in_trun = self.sample_lengths.len() as u32;
         // create a traf and push to moof.trafs for each track fragment
