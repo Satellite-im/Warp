@@ -4,8 +4,9 @@ use anyhow::{bail, Result};
 use bytes::Bytes;
 use mp4::{
     BoxHeader, BoxType, DinfBox, DopsBox, FixedPointI8, FixedPointU16, HdlrBox, MdhdBox, MdiaBox,
-    MinfBox, MoofBox, MoovBox, MvexBox, MvhdBox, OpusBox, SmhdBox, StblBox, StcoBox, StscBox,
-    StsdBox, StszBox, SttsBox, TkhdBox, TrackFlag, TrakBox, TrexBox, WriteBox,
+    MfhdBox, MinfBox, MoofBox, MoovBox, Mp4Box, MvexBox, MvhdBox, OpusBox, SmhdBox, StblBox,
+    StcoBox, StscBox, StsdBox, StszBox, SttsBox, TkhdBox, TrackFlag, TrafBox, TrakBox, TrexBox,
+    WriteBox,
 };
 use once_cell::sync::Lazy;
 use std::{
@@ -33,7 +34,7 @@ pub trait Mp4LoggerInstance: Send {
 }
 
 pub(crate) struct Mp4Fragment {
-    moof: MoofBox,
+    traf: TrafBox,
     mdat: Bytes,
 }
 
@@ -121,7 +122,7 @@ pub async fn deinit() {
         let _ = logger
             .tx
             .send(Mp4Fragment {
-                moof: MoofBox::default(),
+                traf: TrafBox::default(),
                 mdat: Bytes::default(),
             })
             .await;
@@ -168,6 +169,13 @@ fn run(
     internal_config: MpLoggerConfigInternal,
 ) -> Result<()> {
     log::debug!("starting mp4 logger");
+
+    let mut fragment_sequence_number = 1;
+    let mut fragments: Vec<Vec<Mp4Fragment>> = Vec::new();
+    for _ in 0..internal_config.audio_track_ids.len() {
+        fragments.push(vec![]);
+    }
+
     let rtp_log_path = internal_config
         .config
         .log_path
@@ -198,17 +206,56 @@ fn run(
                 continue;
             }
 
-            // want to use the ? operator on a block of code.
-            let mut write_fn = || -> Result<()> {
-                fragment.moof.write_box(&mut writer)?;
-                BoxHeader::new(BoxType::MdatBox, 8_u64 + fragment.mdat.len() as u64)
-                    .write(&mut writer)?;
-                Write::write(&mut writer, &fragment.mdat)?;
-                writer.flush()?;
-                Ok(())
-            };
-            if let Err(e) = write_fn() {
-                log::error!("error writing fragment: {e}");
+            let track_id = fragment.traf.tfhd.track_id;
+            if let Some(v) = fragments.get_mut(track_id as usize - 1) {
+                v.push(fragment);
+            }
+
+            while fragments.iter().fold(true, |acc, x| acc && !x.is_empty()) {
+                // get a track fragment from each track
+                let mut trafs = vec![];
+                let mut mdats = vec![];
+                for f in fragments.iter_mut() {
+                    if let Some(t) = f.pop() {
+                        trafs.push(t.traf);
+                        mdats.push(t.mdat);
+                    }
+                }
+
+                let mut moof = MoofBox {
+                    mfhd: MfhdBox {
+                        version: 0,
+                        flags: 0,
+                        sequence_number: fragment_sequence_number,
+                    },
+                    trafs,
+                };
+
+                fragment_sequence_number += 1;
+
+                let mut data_offset = moof.box_size() + 8;
+                for traf in moof.trafs.iter_mut() {
+                    if let Some(trun) = traf.trun.as_mut() {
+                        trun.data_offset = Some(data_offset as i32);
+                        let data_size = trun.sample_sizes.iter().fold(0, |acc, x| acc + x);
+                        data_offset += data_size as u64;
+                    }
+                }
+                // want to use the ? operator on a block of code.
+                let write_fn = || -> Result<()> {
+                    moof.write_box(&mut writer)?;
+                    let data_size = mdats.iter().fold(0, |acc, x| acc + x.len());
+                    BoxHeader::new(BoxType::MdatBox, 8_u64 + data_size as u64)
+                        .write(&mut writer)?;
+                    for mdat in mdats {
+                        Write::write(&mut writer, &mdat)?;
+                    }
+                    writer.flush()?;
+                    Ok(())
+                };
+                if let Err(e) = write_fn() {
+                    log::error!("error writing fragment: {e}");
+                }
             }
         }
     }

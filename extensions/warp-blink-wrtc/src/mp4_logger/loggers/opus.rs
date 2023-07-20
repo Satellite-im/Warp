@@ -17,7 +17,6 @@ pub struct Opus {
 
     fragment_start_time: u32,
     elapsed_time: u32,
-    fragment_sequence_number: u32,
 }
 
 impl Opus {
@@ -32,7 +31,6 @@ impl Opus {
             sample_buffer_len: 0,
             fragment_start_time: 0,
             elapsed_time: 0,
-            fragment_sequence_number: 1,
         }
     }
 }
@@ -101,28 +99,11 @@ impl Opus {
             }),
         };
 
-        let mut moof = MoofBox {
-            mfhd: MfhdBox {
-                version: 0,
-                flags: 0,
-                sequence_number: self.fragment_sequence_number,
-            },
-            trafs: vec![traf],
-        };
-
-        let moof_size = moof.box_size();
-        if let Some(trun) = moof.trafs[0].trun.as_mut() {
-            trun.data_offset = Some(moof_size as i32 + 8);
-        }
-
         let mdat: Bytes = Bytes::copy_from_slice(&self.sample_buffer[0..self.sample_buffer_len]);
 
         self.sample_buffer_len = 0;
         self.sample_lengths.clear();
-        // self.fragment_start_time was cleared by take()
 
-        self.fragment_sequence_number += 1;
-
-        let _ = self.tx.try_send(Mp4Fragment { moof, mdat });
+        let _ = self.tx.try_send(Mp4Fragment { traf, mdat });
     }
 }
