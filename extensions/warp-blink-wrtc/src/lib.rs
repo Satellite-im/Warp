@@ -657,6 +657,9 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                                     if let Err(e) = webrtc_controller.deinit().await {
                                         log::error!("webrtc deinit failed: {e}");
                                     }
+                                    host_media::reset().await;
+                                    rtp_logger::deinit().await;
+                                    mp4_logger::deinit().await;
                                     // terminate the task on purpose.
                                     return;
                                 }

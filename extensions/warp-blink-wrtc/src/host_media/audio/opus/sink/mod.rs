@@ -259,7 +259,7 @@ where
                     // todo: use the audio codec to determine number of samples and duration
                     writer.log(
                         rtp_packet.payload.clone(),
-                        480,
+                        1,
                         rtp_packet.header.timestamp,
                         10,
                     );

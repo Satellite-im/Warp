@@ -208,7 +208,7 @@ fn create_source_track(
                                     // todo: use the audio codec to determine number of samples and duration
                                     writer.log(
                                         packet.payload.clone(),
-                                        480,
+                                        1,
                                         packet.header.timestamp,
                                         10,
                                     );
