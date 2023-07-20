@@ -65,6 +65,10 @@ impl Behaviour {
             return;
         }
 
+        if let Some(PhoneBookState::Online) = self.entry_state.get(&peer_id) {
+            return;
+        }
+
         let did = match peer_id.to_did() {
             Ok(did) => did,
             Err(_) => {
@@ -84,6 +88,10 @@ impl Behaviour {
     }
 
     fn send_offline_event(&mut self, peer_id: PeerId) {
+        if let Some(PhoneBookState::Online) = self.entry_state.get(&peer_id) {
+            return;
+        }
+
         let did = match peer_id.to_did() {
             Ok(did) => did,
             Err(_) => {
