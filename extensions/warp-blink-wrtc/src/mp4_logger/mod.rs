@@ -136,6 +136,11 @@ pub fn get_audio_logger(peer_id: DID) -> Result<Box<dyn Mp4LoggerInstance>> {
                 .get(&peer_id)
                 .ok_or(anyhow::anyhow!("no audio track found for peer"))?;
             let offset_ms = Instant::now() - logger.start_time;
+            log::debug!(
+                "getting audio logger for peer {} with offset_ms {}",
+                peer_id,
+                offset_ms.as_millis()
+            );
             match logger.config.audio_codec.mime {
                 MimeType::OPUS => loggers::get_opus_logger(
                     logger.tx.clone(),

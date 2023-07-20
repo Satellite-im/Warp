@@ -45,6 +45,12 @@ impl Opus {
 // todo: use num samples written to increment the timestamp unless rtp_start_time is too far ahead...
 impl Mp4LoggerInstance for Opus {
     fn log(&mut self, bytes: bytes::Bytes, num_samples: u32, sample_time: u32, duration: u32) {
+        // only set first_rtp_timestamp once
+        if self.first_rtp_timestamp.is_none() {
+            self.first_rtp_timestamp.replace(sample_time);
+        }
+
+        // set fragment_start_time for every fragment
         if self.fragment_start_time.is_none() {
             self.fragment_start_time.replace(sample_time);
         }
