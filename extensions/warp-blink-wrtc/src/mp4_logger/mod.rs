@@ -204,6 +204,7 @@ fn run(
                 BoxHeader::new(BoxType::MdatBox, 8_u64 + fragment.mdat.len() as u64)
                     .write(&mut writer)?;
                 Write::write(&mut writer, &fragment.mdat)?;
+                writer.flush()?;
                 Ok(())
             };
             if let Err(e) = write_fn() {
