@@ -186,6 +186,9 @@ fn create_source_track(
                         .await
                     {
                         Ok(packets) => {
+                            // todo: get rtp time of first packet and send that plus the
+                            // opus frame (from framer output) to the mp4 writer
+
                             for packet in &packets {
                                 if let Some(logger) = logger.as_ref() {
                                     logger.log(packet.header.clone())

@@ -275,13 +275,15 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
-                    // todo: send Sample to other thread
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
                         &mut decoder_output_buf,
                         false,
                     ) {
                         Ok(siz) => {
+                            // todo: get rtp time of first packet (rtp timestamp of the Sample)
+                            // and send that plus the opus frame (decoded) to the mp4 writer
+
                             let to_send = decoder_output_buf.iter().take(siz);
                             for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample) {

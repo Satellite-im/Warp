@@ -40,7 +40,7 @@ static RTP_LOGGER: Lazy<RwLock<Option<RtpLogger>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
 
 pub fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
-    de_init();
+    deinit();
 
     if !log_path.exists() {
         if let Err(e) = create_dir_all(&log_path) {
@@ -69,7 +69,7 @@ pub fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub fn de_init() {
+pub fn deinit() {
     if let Some(logger) = RTP_LOGGER.write().take() {
         logger.should_quit.store(true, Ordering::Relaxed);
         let _ = logger.tx.blocking_send(RtpHeaderWrapper {

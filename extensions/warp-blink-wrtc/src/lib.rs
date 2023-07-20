@@ -10,6 +10,7 @@
 #![allow(dead_code)]
 
 mod host_media;
+mod mp4_logger;
 mod rtp_logger;
 mod signaling;
 mod simple_webrtc;
@@ -119,7 +120,7 @@ impl Drop for BlinkImpl {
                 log::error!("error in webrtc_controller deinit: {e}");
             }
             host_media::reset().await;
-            rtp_logger::de_init();
+            rtp_logger::deinit();
             log::debug!("deinit finished");
         });
     }
@@ -262,7 +263,8 @@ impl BlinkImpl {
             Some(r) => r,
             None => bail!("blink not initialized"),
         };
-        // todo: don't faile because of this
+        // todo: pass in the log_path when Blink is created
+        // todo: don't fail because of this
         rtp_logger::init(call.call_id(), "/tmp/rtp-logs".into())?;
         self.active_call.write().await.replace(call.clone().into());
         let audio_source_codec = self.audio_source_codec.read().await;
