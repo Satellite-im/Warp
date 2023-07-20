@@ -63,8 +63,8 @@ struct MpLoggerConfigInternal {
     // video_track_ids: HashMap<DID, u32>,
 }
 
-pub fn init(config: Mp4LoggerConfig) -> Result<()> {
-    deinit();
+pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
+    deinit().await;
 
     let call_id = config.call_id;
     let log_path = config.log_path.clone();
@@ -115,13 +115,16 @@ pub fn init(config: Mp4LoggerConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn deinit() {
+pub async fn deinit() {
     if let Some(logger) = MP4_LOGGER.write().take() {
         logger.should_quit.store(true, Ordering::Relaxed);
-        let _ = logger.tx.blocking_send(Mp4Fragment {
-            moof: MoofBox::default(),
-            mdat: Bytes::default(),
-        });
+        let _ = logger
+            .tx
+            .send(Mp4Fragment {
+                moof: MoofBox::default(),
+                mdat: Bytes::default(),
+            })
+            .await;
     };
 }
 

@@ -121,8 +121,8 @@ impl Drop for BlinkImpl {
                 log::error!("error in webrtc_controller deinit: {e}");
             }
             host_media::reset().await;
-            rtp_logger::deinit();
-            mp4_logger::deinit();
+            rtp_logger::deinit().await;
+            mp4_logger::deinit().await;
             log::debug!("deinit finished");
         });
     }
@@ -267,14 +267,15 @@ impl BlinkImpl {
         };
         // todo: pass in the log_path when Blink is created
         // todo: don't fail because of this
-        rtp_logger::init(call.call_id(), "/tmp/rtp-logs".into())?;
+        rtp_logger::init(call.call_id(), "/tmp/rtp-logs".into()).await?;
         // todo: use proper log_path
         mp4_logger::init(Mp4LoggerConfig {
             call_id: call.call_id(),
             participants: call.participants(),
             audio_codec: call.codec(),
             log_path: "/tmp/mp4-files".into(),
-        })?;
+        })
+        .await?;
         self.active_call.write().await.replace(call.clone().into());
         let audio_source_codec = self.audio_source_codec.read().await;
         // ensure there is an audio source track
@@ -922,8 +923,8 @@ impl Blink for BlinkImpl {
 
             let r = self.webrtc_controller.write().await.deinit().await;
             host_media::reset().await;
-            rtp_logger::deinit();
-            mp4_logger::deinit();
+            rtp_logger::deinit().await;
+            mp4_logger::deinit().await;
             let _ = r?;
             Ok(())
         } else {

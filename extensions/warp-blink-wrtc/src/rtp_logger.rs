@@ -39,8 +39,8 @@ struct RtpLogger {
 static RTP_LOGGER: Lazy<RwLock<Option<RtpLogger>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
 
-pub fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
-    deinit();
+pub async fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
+    deinit().await;
 
     if !log_path.exists() {
         if let Err(e) = create_dir_all(&log_path) {
@@ -69,13 +69,16 @@ pub fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub fn deinit() {
+pub async fn deinit() {
     if let Some(logger) = RTP_LOGGER.write().take() {
         logger.should_quit.store(true, Ordering::Relaxed);
-        let _ = logger.tx.blocking_send(RtpHeaderWrapper {
-            val: Header::default(),
-            id: String::from("end"),
-        });
+        let _ = logger
+            .tx
+            .send(RtpHeaderWrapper {
+                val: Header::default(),
+                id: String::from("end"),
+            })
+            .await;
     };
 }
 

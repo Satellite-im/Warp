@@ -58,7 +58,8 @@ impl Mp4LoggerInstance for Opus {
 
         self.previous_sample_time.replace(sample_time);
         self.sample_lengths.push(bytes.len() as u32);
-        self.sample_buffer[self.sample_buffer_len..].copy_from_slice(&bytes.slice(..));
+        self.sample_buffer[self.sample_buffer_len..(self.sample_buffer_len + bytes.len())]
+            .copy_from_slice(&bytes.slice(..));
 
         if self.sample_lengths.len() >= 100 {
             self.make_fragment();
