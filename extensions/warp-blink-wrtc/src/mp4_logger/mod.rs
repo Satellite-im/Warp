@@ -5,12 +5,12 @@ use bytes::Bytes;
 use mp4::{
     BoxHeader, BoxType, DinfBox, DopsBox, FixedPointI8, FixedPointU16, HdlrBox, MdhdBox, MdiaBox,
     MfhdBox, MinfBox, MoofBox, MoovBox, Mp4Box, MvexBox, MvhdBox, OpusBox, SmhdBox, StblBox,
-    StcoBox, StscBox, StsdBox, StszBox, SttsBox, TkhdBox, TrackFlag, TrafBox, TrakBox, TrexBox,
-    WriteBox,
+    StcoBox, StscBox, StsdBox, StszBox, SttsBox, TfhdBox, TkhdBox, TrackFlag, TrafBox, TrakBox,
+    TrexBox, WriteBox,
 };
 use once_cell::sync::Lazy;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, VecDeque},
     fs::{self, create_dir_all, File},
     io::{BufWriter, Write},
     path::PathBuf,
@@ -118,17 +118,17 @@ pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
 }
 
 pub async fn deinit() {
-    if let Some(logger) = MP4_LOGGER.write().take() {
-        logger.should_quit.store(true, Ordering::Relaxed);
-        let _ = logger
-            .tx
-            .send(Mp4Fragment {
-                traf: TrafBox::default(),
-                mdat: Bytes::default(),
-                system_time_ms: 0,
-            })
-            .await;
+    let tx = match MP4_LOGGER.write().take() {
+        Some(logger) => logger.tx.clone(),
+        None => return,
     };
+    let _ = tx
+        .send(Mp4Fragment {
+            traf: TrafBox::default(),
+            mdat: Bytes::default(),
+            system_time_ms: 0,
+        })
+        .await;
 }
 
 pub fn get_audio_logger(peer_id: DID) -> Result<Box<dyn Mp4LoggerInstance>> {
@@ -138,18 +138,10 @@ pub fn get_audio_logger(peer_id: DID) -> Result<Box<dyn Mp4LoggerInstance>> {
                 .audio_track_ids
                 .get(&peer_id)
                 .ok_or(anyhow::anyhow!("no audio track found for peer"))?;
-            let offset_ms = Instant::now() - logger.start_time;
-            log::debug!(
-                "getting audio logger for peer {} with offset_ms {}",
-                peer_id,
-                offset_ms.as_millis()
-            );
+
+            log::debug!("getting audio logger for peer {}", peer_id);
             match logger.config.audio_codec.mime {
-                MimeType::OPUS => loggers::get_opus_logger(
-                    logger.tx.clone(),
-                    *track_id,
-                    offset_ms.as_millis() as u32,
-                ),
+                MimeType::OPUS => loggers::get_opus_logger(logger.tx.clone(), *track_id),
                 _ => {
                     bail!("unsupported audio codec");
                 }
@@ -173,7 +165,10 @@ fn run(
     log::debug!("starting mp4 logger");
 
     let mut fragment_sequence_number = 1;
-    let mut fragments: Vec<Mp4Fragment> = Vec::new();
+    let mut fragments: Vec<VecDeque<Mp4Fragment>> = Vec::new();
+    for _ in 0..internal_config.audio_track_ids.len() {
+        fragments.push(VecDeque::new());
+    }
 
     let rtp_log_path = internal_config
         .config
@@ -184,8 +179,8 @@ fn run(
 
     write_mp4_header(
         &mut writer,
-        internal_config.config.audio_codec,
-        internal_config.audio_track_ids,
+        &internal_config.config.audio_codec,
+        &internal_config.audio_track_ids,
     )
     .map_err(|e| anyhow::anyhow!("failed to write mp4 header: {e}"))?;
 
@@ -207,57 +202,69 @@ fn run(
                 continue;
             }
 
-            if fragment_start_time.is_none() {
-                fragment_start_time.replace(fragment.system_time_ms);
-            }
+            let track_id = fragment.traf.tfhd.track_id;
+            let track_idx = track_id.saturating_sub(1);
+            let fragment_system_time = fragment.system_time_ms;
+            // todo: use get_mut()
+            match fragments.get_mut(track_idx as usize) {
+                Some(v) => {
+                    // only update fragment_start_time for valid track ids
+                    if fragment_start_time.is_none() {
+                        fragment_start_time.replace(fragment.system_time_ms);
+                    }
+                    // queue the fragment
+                    v.push_back(fragment);
+                }
+                None => {
+                    log::error!("invalid track id: {}", track_id);
+                    continue;
+                }
+            };
 
             let time_since_fragment_start =
-                fragment.system_time_ms - fragment_start_time.unwrap_or(fragment.system_time_ms);
-
-            fragments.push(fragment);
+                fragment_system_time - fragment_start_time.unwrap_or(fragment_system_time);
 
             if time_since_fragment_start < 1000 {
                 continue;
             }
 
-            let mut tracks_obtained: HashSet<u32> = HashSet::new();
-            let mut fragments_to_reuse = vec![];
-
             let mut trafs = vec![];
             let mut mdats = vec![];
 
-            while !fragments.is_empty() {
-                // only process the first second of fragments
-                if let Some(fragment) = fragments.first() {
-                    if fragment.system_time_ms
-                        - fragment_start_time.unwrap_or(fragment.system_time_ms)
-                        > 1000
-                    {
-                        break;
+            for track_idx in 0..internal_config.audio_track_ids.len() {
+                let track_id = track_idx + 1;
+
+                // ensure that for every track id, something is appended to trafs and mdats.
+                if let Some(fragments) = fragments.get_mut(track_idx) {
+                    if let Some(fragment) = fragments.pop_front() {
+                        if fragment.system_time_ms
+                            - fragment_start_time.unwrap_or(fragment.system_time_ms)
+                            >= 1000
+                        {
+                            // put the fragment back
+                            fragments.push_front(fragment);
+                        } else {
+                            trafs.push(fragment.traf);
+                            mdats.push(fragment.mdat);
+                            continue;
+                        }
                     }
                 }
 
-                let mut fragment = match fragments.pop() {
-                    Some(f) => f,
-                    None => break,
+                // add empty traf and mdat
+                let traf = TrafBox {
+                    tfhd: TfhdBox {
+                        version: 0,
+                        // default-base-is-moof | duration-is-empty
+                        flags: 0x020000 | 0x010000,
+                        track_id: track_id as u32,
+                        ..Default::default()
+                    },
+                    ..Default::default()
                 };
-
-                let track_id = fragment.traf.tfhd.track_id;
-                // returns true if track_id was not present
-                if !tracks_obtained.insert(track_id) {
-                    fragments_to_reuse.push(fragment);
-                    continue;
-                }
-                if let Some(tfdt) = fragment.traf.tfdt.as_mut() {
-                    // todo: make this configurable. currently 1s of opus audio is put in a moof at once, which consists of 100 opus frames
-                    tfdt.base_media_decode_time = fragment_sequence_number as u64 * 100;
-                }
-                trafs.push(fragment.traf);
-                mdats.push(fragment.mdat);
-            }
-
-            fragments_to_reuse.append(&mut fragments);
-            fragments = std::mem::take(&mut fragments_to_reuse);
+                trafs.push(traf);
+                mdats.push(Bytes::default());
+            } // end for
 
             let mut moof = MoofBox {
                 mfhd: MfhdBox {
@@ -274,7 +281,7 @@ fn run(
             for traf in moof.trafs.iter_mut() {
                 if let Some(trun) = traf.trun.as_mut() {
                     trun.data_offset = Some(data_offset as i32);
-                    let data_size = trun.sample_sizes.iter().fold(0, |acc, x| acc + x);
+                    let data_size: u32 = trun.sample_sizes.iter().sum();
                     data_offset += data_size as u64;
                 }
             }
@@ -301,8 +308,8 @@ fn run(
 
 fn write_mp4_header(
     writer: &mut BufWriter<File>,
-    audio_codec: AudioCodec,
-    audio_track_ids: HashMap<DID, u32>,
+    audio_codec: &AudioCodec,
+    audio_track_ids: &HashMap<DID, u32>,
 ) -> Result<()> {
     let ftyp = mp4::FtypBox {
         major_brand: str::parse("isom")?,

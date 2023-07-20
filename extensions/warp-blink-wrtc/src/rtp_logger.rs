@@ -70,16 +70,16 @@ pub async fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
 }
 
 pub async fn deinit() {
-    if let Some(logger) = RTP_LOGGER.write().take() {
-        logger.should_quit.store(true, Ordering::Relaxed);
-        let _ = logger
-            .tx
-            .send(RtpHeaderWrapper {
-                val: Header::default(),
-                id: String::from("end"),
-            })
-            .await;
+    let tx = match RTP_LOGGER.write().take() {
+        Some(logger) => logger.tx.clone(),
+        None => return,
     };
+    let _ = tx
+        .send(RtpHeaderWrapper {
+            val: Header::default(),
+            id: String::from("end"),
+        })
+        .await;
 }
 
 pub fn pause_logging() {

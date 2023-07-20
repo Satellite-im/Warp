@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use mp4::{MfhdBox, MoofBox, Mp4Box, TfdtBox, TfhdBox, TrafBox, TrunBox};
+use mp4::{TfdtBox, TfhdBox, TrafBox, TrunBox};
 use tokio::sync::mpsc::Sender;
 
 use crate::mp4_logger::{Mp4Fragment, Mp4LoggerInstance};
@@ -22,7 +22,7 @@ pub struct Opus {
 }
 
 impl Opus {
-    pub(crate) fn new(tx: Sender<Mp4Fragment>, track_id: u32, offset_ms: u32) -> Self {
+    pub(crate) fn new(tx: Sender<Mp4Fragment>, track_id: u32) -> Self {
         Self {
             tx,
             track_id,
