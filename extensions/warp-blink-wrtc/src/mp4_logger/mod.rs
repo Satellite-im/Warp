@@ -219,7 +219,7 @@ fn write_mp4_header(
     ftyp.write_box(writer)?;
 
     let mut traks: Vec<TrakBox> = Vec::new();
-    for (_, track_id) in &audio_track_ids {
+    for track_id in audio_track_ids.values() {
         // TrakBox gets added to MoovBox
 
         // this thing goes in TrakBox
@@ -298,7 +298,7 @@ fn write_mp4_header(
     }
 
     let mut trex: Vec<TrexBox> = Vec::new();
-    for (_, track_id) in &audio_track_ids {
+    for track_id in audio_track_ids.values() {
         let audio_trex = TrexBox {
             version: 0,
             // todo: maybe delete this comment. flags is expected to have the most significant byte empty.
