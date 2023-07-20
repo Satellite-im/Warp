@@ -178,7 +178,13 @@ fn create_source_track(
 
     let join_handle = tokio::spawn(async move {
         let logger = rtp_logger::get_instance("self-audio".to_string());
-        let mut mp4_writer = mp4_logger::get_audio_logger(own_id).ok();
+        let mut mp4_writer = match mp4_logger::get_audio_logger(own_id) {
+            Ok(writer) => Some(writer),
+            Err(e) => {
+                log::error!("error getting audio logger for source track: {e}");
+                None
+            }
+        };
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {

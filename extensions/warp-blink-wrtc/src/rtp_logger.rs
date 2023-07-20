@@ -106,34 +106,39 @@ fn run(
     should_quit: Arc<AtomicBool>,
     rtp_log_path: PathBuf,
 ) -> Result<()> {
+    log::debug!("starting rtp logger");
     let f = fs::File::create(rtp_log_path)?;
     let mut writer = BufWriter::new(f);
     writer.write_all("peer_id,timestamp,sequence_number\n".as_bytes())?;
 
-    while !should_quit.load(Ordering::Relaxed) {
-        while let Some(wrapper) = ch.blocking_recv() {
-            if wrapper.id.eq_ignore_ascii_case("end") {
-                break;
-            }
-
-            if !RTP_LOGGER
-                .read()
-                .as_ref()
-                .map(|r| r.should_log)
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
-            writer.write_all(
-                format!(
-                    "{},{},{}\n",
-                    wrapper.id, wrapper.val.timestamp, wrapper.val.sequence_number
-                )
-                .as_bytes(),
-            )?;
+    while let Some(wrapper) = ch.blocking_recv() {
+        if should_quit.load(Ordering::Relaxed) {
+            log::debug!("rtp_logger received quit");
+            break;
         }
+        if wrapper.id.eq_ignore_ascii_case("end") {
+            log::debug!("rtp_logger received end message");
+            break;
+        }
+
+        if !RTP_LOGGER
+            .read()
+            .as_ref()
+            .map(|r| r.should_log)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+
+        writer.write_all(
+            format!(
+                "{},{},{}\n",
+                wrapper.id, wrapper.val.timestamp, wrapper.val.sequence_number
+            )
+            .as_bytes(),
+        )?;
     }
+
     writer.flush()?;
     Ok(())
 }

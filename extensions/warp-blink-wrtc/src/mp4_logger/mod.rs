@@ -162,6 +162,7 @@ fn run(
     should_quit: Arc<AtomicBool>,
     internal_config: MpLoggerConfigInternal,
 ) -> Result<()> {
+    log::debug!("starting mp4 logger");
     let rtp_log_path = internal_config
         .config
         .log_path
@@ -176,34 +177,38 @@ fn run(
     )
     .map_err(|e| anyhow::anyhow!("failed to write mp4 header: {e}"))?;
 
-    while !should_quit.load(Ordering::Relaxed) {
-        while let Some(fragment) = ch.blocking_recv() {
-            if fragment.mdat.is_empty() {
-                break;
-            }
+    while let Some(fragment) = ch.blocking_recv() {
+        if should_quit.load(Ordering::Relaxed) {
+            log::debug!("mp4_logger received quit");
+            break;
+        }
+        if fragment.mdat.is_empty() {
+            log::debug!("mp4_logger received empty mdat fragment");
+            continue;
+        }
 
-            if !MP4_LOGGER
-                .read()
-                .as_ref()
-                .map(|r| r.should_log)
-                .unwrap_or(false)
-            {
-                continue;
-            }
+        if !MP4_LOGGER
+            .read()
+            .as_ref()
+            .map(|r| r.should_log)
+            .unwrap_or(false)
+        {
+            continue;
+        }
 
-            // want to use the ? operator on a block of code.
-            let mut write_fn = || -> Result<()> {
-                fragment.moof.write_box(&mut writer)?;
-                BoxHeader::new(BoxType::MdatBox, 8_u64 + fragment.mdat.len() as u64)
-                    .write(&mut writer)?;
-                Write::write(&mut writer, &fragment.mdat)?;
-                Ok(())
-            };
-            if let Err(e) = write_fn() {
-                log::error!("error writing fragment: {e}");
-            }
+        // want to use the ? operator on a block of code.
+        let mut write_fn = || -> Result<()> {
+            fragment.moof.write_box(&mut writer)?;
+            BoxHeader::new(BoxType::MdatBox, 8_u64 + fragment.mdat.len() as u64)
+                .write(&mut writer)?;
+            Write::write(&mut writer, &fragment.mdat)?;
+            Ok(())
+        };
+        if let Err(e) = write_fn() {
+            log::error!("error writing fragment: {e}");
         }
     }
+
     writer.flush()?;
     Ok(())
 }

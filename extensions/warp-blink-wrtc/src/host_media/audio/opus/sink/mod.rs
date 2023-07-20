@@ -233,7 +233,13 @@ where
     let mut b = [0u8; 2880 * 4];
 
     let logger = rtp_logger::get_instance(format!("{}-audio", peer_id));
-    let mut mp4_writer = mp4_logger::get_audio_logger(peer_id.clone()).ok();
+    let mut mp4_writer = match mp4_logger::get_audio_logger(peer_id.clone()) {
+        Ok(writer) => Some(writer),
+        Err(e) => {
+            log::error!("error getting audio logger for source track: {e}");
+            None
+        }
+    };
 
     loop {
         match track.read(&mut b).await {
