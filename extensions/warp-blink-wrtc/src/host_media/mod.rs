@@ -67,6 +67,7 @@ pub async fn has_audio_source() -> bool {
 // webrtc should remove the old media source before this is called.
 // use AUDIO_SOURCE_ID
 pub async fn create_audio_source_track(
+    own_id: DID,
     event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
@@ -80,9 +81,15 @@ pub async fn create_audio_source_track(
         }
     };
 
-    let source_track =
-        create_source_track(event_ch, input_device, track, webrtc_codec, source_codec)
-            .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
+    let source_track = create_source_track(
+        own_id,
+        event_ch,
+        input_device,
+        track,
+        webrtc_codec,
+        source_codec,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
     source_track
         .play()
         .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;

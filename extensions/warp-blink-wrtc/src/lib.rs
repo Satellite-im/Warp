@@ -17,6 +17,7 @@ mod simple_webrtc;
 mod store;
 
 use async_trait::async_trait;
+use mp4_logger::Mp4LoggerConfig;
 use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
@@ -121,6 +122,7 @@ impl Drop for BlinkImpl {
             }
             host_media::reset().await;
             rtp_logger::deinit();
+            mp4_logger::deinit();
             log::debug!("deinit finished");
         });
     }
@@ -266,6 +268,13 @@ impl BlinkImpl {
         // todo: pass in the log_path when Blink is created
         // todo: don't fail because of this
         rtp_logger::init(call.call_id(), "/tmp/rtp-logs".into())?;
+        // todo: use proper log_path
+        mp4_logger::init(Mp4LoggerConfig {
+            call_id: call.call_id(),
+            participants: call.participants(),
+            audio_codec: call.codec(),
+            log_path: "/tmp/mp4-files".into(),
+        })?;
         self.active_call.write().await.replace(call.clone().into());
         let audio_source_codec = self.audio_source_codec.read().await;
         // ensure there is an audio source track
@@ -282,6 +291,7 @@ impl BlinkImpl {
             .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
             .await?;
         host_media::create_audio_source_track(
+            own_id.clone(),
             self.ui_event_ch.clone(),
             track,
             call.codec(),
@@ -912,6 +922,8 @@ impl Blink for BlinkImpl {
 
             let r = self.webrtc_controller.write().await.deinit().await;
             host_media::reset().await;
+            rtp_logger::deinit();
+            mp4_logger::deinit();
             let _ = r?;
             Ok(())
         } else {

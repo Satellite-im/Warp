@@ -8,7 +8,10 @@ use ringbuf::HeapRb;
 
 use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
-use warp::blink::{self, BlinkEventKind};
+use warp::{
+    blink::{self, BlinkEventKind},
+    crypto::DID,
+};
 
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
@@ -18,12 +21,13 @@ use webrtc::{
 mod framer;
 use crate::{
     host_media::audio::{speech, SourceTrack},
-    rtp_logger,
+    mp4_logger, rtp_logger,
 };
 
 use self::framer::Framer;
 
 pub struct OpusSource {
+    own_id: DID,
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
@@ -43,6 +47,7 @@ impl Drop for OpusSource {
 
 impl SourceTrack for OpusSource {
     fn init(
+        own_id: DID,
         event_ch: broadcast::Sender<BlinkEventKind>,
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
@@ -53,6 +58,7 @@ impl SourceTrack for OpusSource {
         Self: Sized,
     {
         let (input_stream, join_handle) = create_source_track(
+            own_id.clone(),
             input_device,
             track.clone(),
             webrtc_codec.clone(),
@@ -61,6 +67,7 @@ impl SourceTrack for OpusSource {
         )?;
 
         Ok(Self {
+            own_id,
             event_ch,
             track,
             webrtc_codec,
@@ -86,6 +93,7 @@ impl SourceTrack for OpusSource {
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()> {
         self.packetizer_handle.abort();
         let (stream, handle) = create_source_track(
+            self.own_id.clone(),
             input_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
@@ -99,6 +107,7 @@ impl SourceTrack for OpusSource {
 }
 
 fn create_source_track(
+    own_id: DID,
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
@@ -169,6 +178,7 @@ fn create_source_track(
 
     let join_handle = tokio::spawn(async move {
         let logger = rtp_logger::get_instance("self-audio".to_string());
+        let mut mp4_writer = mp4_logger::get_audio_logger(own_id).ok();
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {
@@ -186,8 +196,17 @@ fn create_source_track(
                         .await
                     {
                         Ok(packets) => {
-                            // todo: get rtp time of first packet and send that plus the
-                            // opus frame (from framer output) to the mp4 writer
+                            if let Some(packet) = packets.first() {
+                                if let Some(writer) = mp4_writer.as_mut() {
+                                    // todo: use the audio codec to determine number of samples and duration
+                                    writer.log(
+                                        packet.payload.clone(),
+                                        480,
+                                        packet.header.timestamp,
+                                        10,
+                                    );
+                                }
+                            }
 
                             for packet in &packets {
                                 if let Some(logger) = logger.as_ref() {

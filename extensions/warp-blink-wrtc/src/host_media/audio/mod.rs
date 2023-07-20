@@ -18,6 +18,7 @@ pub use self::opus::source::OpusSource;
 // stores the TrackRemote at least
 pub trait SourceTrack {
     fn init(
+        own_id: DID,
         event_ch: broadcast::Sender<BlinkEventKind>,
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
@@ -52,6 +53,7 @@ pub trait SinkTrack {
 
 /// Uses the MIME type from codec to determine which implementation of SourceTrack to create
 pub fn create_source_track(
+    own_id: DID,
     event_ch: broadcast::Sender<BlinkEventKind>,
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
@@ -63,6 +65,7 @@ pub fn create_source_track(
     }
     match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSource::init(
+            own_id,
             event_ch,
             input_device,
             track,

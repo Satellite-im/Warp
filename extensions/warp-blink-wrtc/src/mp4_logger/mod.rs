@@ -28,7 +28,7 @@ use warp::{
 static MP4_LOGGER: Lazy<RwLock<Option<Mp4Logger>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
 
-pub trait Mp4LoggerInstance {
+pub trait Mp4LoggerInstance: Send {
     fn log(&mut self, bytes: Bytes, num_samples: u32, rtp_start_time: u32, duration: u32);
 }
 
@@ -37,6 +37,7 @@ pub(crate) struct Mp4Fragment {
     mdat: Bytes,
 }
 
+// todo: make log path configurable?
 struct Mp4Logger {
     tx: Sender<Mp4Fragment>,
     start_time: Instant,

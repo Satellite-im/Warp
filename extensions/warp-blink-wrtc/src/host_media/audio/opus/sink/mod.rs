@@ -18,7 +18,7 @@ use webrtc::{
 
 use crate::{
     host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
-    rtp_logger,
+    mp4_logger, rtp_logger,
 };
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
@@ -233,6 +233,7 @@ where
     let mut b = [0u8; 2880 * 4];
 
     let logger = rtp_logger::get_instance(format!("{}-audio", peer_id));
+    let mut mp4_writer = mp4_logger::get_audio_logger(peer_id.clone()).ok();
 
     loop {
         match track.read(&mut b).await {
@@ -247,6 +248,16 @@ where
                         break;
                     }
                 };
+
+                if let Some(writer) = mp4_writer.as_mut() {
+                    // todo: use the audio codec to determine number of samples and duration
+                    writer.log(
+                        rtp_packet.payload.clone(),
+                        480,
+                        rtp_packet.header.timestamp,
+                        10,
+                    );
+                }
 
                 if let Some(logger) = logger.as_ref() {
                     logger.log(rtp_packet.header.clone())
