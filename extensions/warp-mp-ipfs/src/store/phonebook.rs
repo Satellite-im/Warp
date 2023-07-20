@@ -60,10 +60,6 @@ impl PhoneBook {
     }
 
     pub async fn remove_friend(&self, did: &DID) -> Result<(), Error> {
-        if self.discovery.contains(did).await {
-            self.discovery.remove(did).await?;
-        }
-
         let peer_id = did.to_peer_id()?;
 
         let (tx, rx) = oneshot::channel();
