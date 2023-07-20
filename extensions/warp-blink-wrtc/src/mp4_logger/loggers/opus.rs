@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use bytes::Bytes;
 use mp4::{MfhdBox, MoofBox, Mp4Box, TfdtBox, TfhdBox, TrafBox, TrunBox};
 use tokio::sync::mpsc::Sender;
@@ -102,6 +104,13 @@ impl Opus {
         self.sample_lengths.clear();
         self.fragment_start_time += num_samples_in_trun;
 
-        let _ = self.tx.try_send(Mp4Fragment { traf, mdat });
+        let _ = self.tx.try_send(Mp4Fragment {
+            traf,
+            mdat,
+            system_time_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        });
     }
 }

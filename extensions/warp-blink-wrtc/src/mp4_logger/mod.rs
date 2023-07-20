@@ -10,7 +10,7 @@ use mp4::{
 };
 use once_cell::sync::Lazy;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, create_dir_all, File},
     io::{BufWriter, Write},
     path::PathBuf,
@@ -36,6 +36,7 @@ pub trait Mp4LoggerInstance: Send {
 pub(crate) struct Mp4Fragment {
     traf: TrafBox,
     mdat: Bytes,
+    system_time_ms: u128,
 }
 
 // todo: make log path configurable?
@@ -124,6 +125,7 @@ pub async fn deinit() {
             .send(Mp4Fragment {
                 traf: TrafBox::default(),
                 mdat: Bytes::default(),
+                system_time_ms: 0,
             })
             .await;
     };
@@ -171,10 +173,7 @@ fn run(
     log::debug!("starting mp4 logger");
 
     let mut fragment_sequence_number = 1;
-    let mut fragments: Vec<Vec<Mp4Fragment>> = Vec::new();
-    for _ in 0..internal_config.audio_track_ids.len() {
-        fragments.push(vec![]);
-    }
+    let mut fragments: Vec<Mp4Fragment> = Vec::new();
 
     let rtp_log_path = internal_config
         .config
@@ -189,6 +188,8 @@ fn run(
         internal_config.audio_track_ids,
     )
     .map_err(|e| anyhow::anyhow!("failed to write mp4 header: {e}"))?;
+
+    let mut fragment_start_time = None;
 
     while !should_quit.load(Ordering::Relaxed) {
         while let Some(fragment) = ch.blocking_recv() {
@@ -206,56 +207,90 @@ fn run(
                 continue;
             }
 
-            let track_id = fragment.traf.tfhd.track_id;
-            if let Some(v) = fragments.get_mut(track_id as usize - 1) {
-                v.push(fragment);
+            if fragment_start_time.is_none() {
+                fragment_start_time.replace(fragment.system_time_ms);
             }
 
-            while fragments.iter().fold(true, |acc, x| acc && !x.is_empty()) {
-                // get a track fragment from each track
-                let mut trafs = vec![];
-                let mut mdats = vec![];
-                for f in fragments.iter_mut() {
-                    if let Some(t) = f.pop() {
-                        trafs.push(t.traf);
-                        mdats.push(t.mdat);
+            let time_since_fragment_start =
+                fragment.system_time_ms - fragment_start_time.unwrap_or(fragment.system_time_ms);
+
+            fragments.push(fragment);
+
+            if time_since_fragment_start < 1000 {
+                continue;
+            }
+
+            let mut tracks_obtained: HashSet<u32> = HashSet::new();
+            let mut fragments_to_reuse = vec![];
+
+            let mut trafs = vec![];
+            let mut mdats = vec![];
+
+            while !fragments.is_empty() {
+                // only process the first second of fragments
+                if let Some(fragment) = fragments.first() {
+                    if fragment.system_time_ms
+                        - fragment_start_time.unwrap_or(fragment.system_time_ms)
+                        > 1000
+                    {
+                        break;
                     }
                 }
 
-                let mut moof = MoofBox {
-                    mfhd: MfhdBox {
-                        version: 0,
-                        flags: 0,
-                        sequence_number: fragment_sequence_number,
-                    },
-                    trafs,
+                let mut fragment = match fragments.pop() {
+                    Some(f) => f,
+                    None => break,
                 };
 
-                fragment_sequence_number += 1;
+                let track_id = fragment.traf.tfhd.track_id;
+                // returns true if track_id was not present
+                if !tracks_obtained.insert(track_id) {
+                    fragments_to_reuse.push(fragment);
+                    continue;
+                }
+                if let Some(tfdt) = fragment.traf.tfdt.as_mut() {
+                    // todo: make this configurable. currently 1s of opus audio is put in a moof at once, which consists of 100 opus frames
+                    tfdt.base_media_decode_time = fragment_sequence_number as u64 * 100;
+                }
+                trafs.push(fragment.traf);
+                mdats.push(fragment.mdat);
+            }
 
-                let mut data_offset = moof.box_size() + 8;
-                for traf in moof.trafs.iter_mut() {
-                    if let Some(trun) = traf.trun.as_mut() {
-                        trun.data_offset = Some(data_offset as i32);
-                        let data_size = trun.sample_sizes.iter().fold(0, |acc, x| acc + x);
-                        data_offset += data_size as u64;
-                    }
+            fragments_to_reuse.append(&mut fragments);
+            fragments = std::mem::take(&mut fragments_to_reuse);
+
+            let mut moof = MoofBox {
+                mfhd: MfhdBox {
+                    version: 0,
+                    flags: 0,
+                    sequence_number: fragment_sequence_number,
+                },
+                trafs,
+            };
+
+            fragment_sequence_number += 1;
+
+            let mut data_offset = moof.box_size() + 8;
+            for traf in moof.trafs.iter_mut() {
+                if let Some(trun) = traf.trun.as_mut() {
+                    trun.data_offset = Some(data_offset as i32);
+                    let data_size = trun.sample_sizes.iter().fold(0, |acc, x| acc + x);
+                    data_offset += data_size as u64;
                 }
-                // want to use the ? operator on a block of code.
-                let write_fn = || -> Result<()> {
-                    moof.write_box(&mut writer)?;
-                    let data_size = mdats.iter().fold(0, |acc, x| acc + x.len());
-                    BoxHeader::new(BoxType::MdatBox, 8_u64 + data_size as u64)
-                        .write(&mut writer)?;
-                    for mdat in mdats {
-                        Write::write(&mut writer, &mdat)?;
-                    }
-                    writer.flush()?;
-                    Ok(())
-                };
-                if let Err(e) = write_fn() {
-                    log::error!("error writing fragment: {e}");
+            }
+            // want to use the ? operator on a block of code.
+            let write_fn = || -> Result<()> {
+                moof.write_box(&mut writer)?;
+                let data_size = mdats.iter().fold(0, |acc, x| acc + x.len());
+                BoxHeader::new(BoxType::MdatBox, 8_u64 + data_size as u64).write(&mut writer)?;
+                for mdat in mdats {
+                    Write::write(&mut writer, &mdat)?;
                 }
+                writer.flush()?;
+                Ok(())
+            };
+            if let Err(e) = write_fn() {
+                log::error!("error writing fragment: {e}");
             }
         }
     }
