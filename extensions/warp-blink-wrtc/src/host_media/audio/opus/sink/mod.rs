@@ -257,12 +257,7 @@ where
 
                 if let Some(writer) = mp4_writer.as_mut() {
                     // todo: use the audio codec to determine number of samples and duration
-                    writer.log(
-                        rtp_packet.payload.clone(),
-                        1,
-                        rtp_packet.header.timestamp,
-                        10,
-                    );
+                    writer.log(rtp_packet.payload.clone());
                 }
 
                 if let Some(logger) = logger.as_ref() {

@@ -36,11 +36,10 @@ impl Opus {
 }
 // todo: use num samples written to increment the timestamp unless rtp_start_time is too far ahead...
 impl Mp4LoggerInstance for Opus {
-    fn log(&mut self, bytes: bytes::Bytes, num_samples: u32, sample_time: u32, duration: u32) {
-        self.elapsed_time += num_samples;
+    fn log(&mut self, bytes: bytes::Bytes) {
         if self.sample_buffer.len() - self.sample_buffer_len < bytes.len() {
             self.make_fragment();
-            self.fragment_start_time = self.elapsed_time;
+
             // don't return - still need to log this sample
         }
 
@@ -53,7 +52,6 @@ impl Mp4LoggerInstance for Opus {
 
         if self.sample_lengths.len() >= 100 {
             self.make_fragment();
-            self.fragment_start_time = self.elapsed_time;
         }
     }
 }
@@ -61,7 +59,6 @@ impl Mp4LoggerInstance for Opus {
 impl Opus {
     fn make_fragment(&mut self) {
         let fragment_start_time = self.fragment_start_time;
-
         let num_samples_in_trun = self.sample_lengths.len() as u32;
         // create a traf and push to moof.trafs for each track fragment
         let traf = TrafBox {
@@ -103,6 +100,7 @@ impl Opus {
 
         self.sample_buffer_len = 0;
         self.sample_lengths.clear();
+        self.fragment_start_time += num_samples_in_trun;
 
         let _ = self.tx.try_send(Mp4Fragment { traf, mdat });
     }
