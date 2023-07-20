@@ -88,7 +88,7 @@ impl Behaviour {
     }
 
     fn send_offline_event(&mut self, peer_id: PeerId) {
-        if let Some(PhoneBookState::Online) = self.entry_state.get(&peer_id) {
+        if let Some(PhoneBookState::Offline) = self.entry_state.get(&peer_id) {
             return;
         }
 
