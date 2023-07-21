@@ -357,7 +357,7 @@ fn update_duration(mp4_file_path: PathBuf, duration: u32) -> Result<()> {
         .ok_or(anyhow::anyhow!("mvhd not found"))?;
 
     // the mvhd header is 12 bytes. the bytes mvhd are 4 bytes in.
-    let mvhd_data_offset = (mvhd_pos * window_size) + 8;
+    let mvhd_data_offset = mvhd_pos + 8;
     // assumes version 0 of the mvhd box
     let duration_offset = mvhd_data_offset + 12;
 
