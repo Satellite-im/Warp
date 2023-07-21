@@ -304,9 +304,6 @@ where
                         false,
                     ) {
                         Ok(siz) => {
-                            // todo: get rtp time of first packet (rtp timestamp of the Sample)
-                            // and send that plus the opus frame (decoded) to the mp4 writer
-
                             let to_send = decoder_output_buf.iter().take(siz);
                             for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample) {

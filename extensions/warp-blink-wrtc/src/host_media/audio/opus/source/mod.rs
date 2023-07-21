@@ -191,7 +191,7 @@ fn create_source_track(
         })?;
 
     let join_handle = tokio::spawn(async move {
-        // et logger = rtp_logger::get_instance("self-audio".to_string());
+        // let logger = rtp_logger::get_instance("self-audio".to_string());
 
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
