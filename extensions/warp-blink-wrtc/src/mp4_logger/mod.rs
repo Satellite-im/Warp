@@ -307,6 +307,7 @@ fn run(
 
             fragment_sequence_number += 1;
             // todo: currently this is opus specific. depends on the implementation of logger::opus::Opus
+            // need to add the timebase to the audio codec
             frgment_decode_time += 100;
 
             let mut data_offset = moof.box_size() + 8;
