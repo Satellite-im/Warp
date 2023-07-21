@@ -71,7 +71,10 @@ pub async fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
 
 pub async fn deinit() {
     let tx = match RTP_LOGGER.write().take() {
-        Some(logger) => logger.tx.clone(),
+        Some(logger) => {
+            logger.should_quit.store(true, Ordering::Relaxed);
+            logger.tx.clone()
+        }
         None => return,
     };
     let _ = tx

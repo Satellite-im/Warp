@@ -119,7 +119,10 @@ pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
 
 pub async fn deinit() {
     let tx = match MP4_LOGGER.write().take() {
-        Some(logger) => logger.tx.clone(),
+        Some(logger) => {
+            logger.should_quit.store(true, Ordering::Relaxed);
+            logger.tx.clone()
+        }
         None => return,
     };
     let _ = tx
@@ -184,7 +187,12 @@ fn run(
     )
     .map_err(|e| anyhow::anyhow!("failed to write mp4 header: {e}"))?;
 
+    // the timestamp is in system_time_ms
+    // represents the timestamp of the earliest received fragment
     let mut fragment_start_time = None;
+    // this is for traf headers - all track fragment headers need a common
+    // time base.
+    let mut frgment_decode_time = 0;
 
     while !should_quit.load(Ordering::Relaxed) {
         while let Some(fragment) = ch.blocking_recv() {
@@ -236,7 +244,7 @@ fn run(
 
                 // ensure that for every track id, something is appended to trafs and mdats.
                 if let Some(fragments) = fragments.get_mut(track_idx) {
-                    if let Some(fragment) = fragments.pop_front() {
+                    if let Some(mut fragment) = fragments.pop_front() {
                         if fragment.system_time_ms
                             - fragment_start_time.unwrap_or(fragment.system_time_ms)
                             >= 1000
@@ -244,6 +252,9 @@ fn run(
                             // put the fragment back
                             fragments.push_front(fragment);
                         } else {
+                            if let Some(tfdt) = fragment.traf.tfdt.as_mut() {
+                                tfdt.base_media_decode_time = frgment_decode_time;
+                            }
                             trafs.push(fragment.traf);
                             mdats.push(fragment.mdat);
                             continue;
@@ -266,6 +277,25 @@ fn run(
                 mdats.push(Bytes::default());
             } // end for
 
+            // get new fragment start time
+            fragment_start_time.take();
+            for track_idx in 0..internal_config.audio_track_ids.len() {
+                if let Some(fragments) = fragments.get_mut(track_idx) {
+                    if let Some(f) = fragments.front() {
+                        match fragment_start_time {
+                            None => {
+                                fragment_start_time.replace(f.system_time_ms);
+                            }
+                            Some(t) => {
+                                if t > f.system_time_ms {
+                                    fragment_start_time.replace(f.system_time_ms);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut moof = MoofBox {
                 mfhd: MfhdBox {
                     version: 0,
@@ -276,6 +306,8 @@ fn run(
             };
 
             fragment_sequence_number += 1;
+            // todo: currently this is opus specific. depends on the implementation of logger::opus::Opus
+            frgment_decode_time += 100;
 
             let mut data_offset = moof.box_size() + 8;
             for traf in moof.trafs.iter_mut() {
