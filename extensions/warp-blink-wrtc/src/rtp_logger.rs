@@ -1,3 +1,5 @@
+// this module is purposely not included in lib.rs. it might be needed later.
+
 use anyhow::{bail, Result};
 use once_cell::sync::Lazy;
 use std::{
