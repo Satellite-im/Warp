@@ -1,6 +1,6 @@
 mod loggers;
-
 use anyhow::{bail, Result};
+use byteorder::{BigEndian, WriteBytesExt};
 use bytes::Bytes;
 use mp4::{
     BoxHeader, BoxType, DinfBox, DopsBox, FixedPointI8, FixedPointU16, HdlrBox, MdhdBox, MdiaBox,
@@ -11,8 +11,8 @@ use mp4::{
 use once_cell::sync::Lazy;
 use std::{
     collections::{HashMap, VecDeque},
-    fs::{self, create_dir_all, File},
-    io::{BufWriter, Write},
+    fs::{self, create_dir_all, File, OpenOptions},
+    io::{BufWriter, Read, Seek, SeekFrom, Write},
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::Instant,
@@ -173,11 +173,11 @@ fn run(
         fragments.push(VecDeque::new());
     }
 
-    let rtp_log_path = internal_config
+    let mp4_file_path = internal_config
         .config
         .log_path
         .join(format!("{}.mp4", internal_config.config.call_id));
-    let f = fs::File::create(rtp_log_path)?;
+    let f = fs::File::create(mp4_file_path.clone())?;
     let mut writer = BufWriter::new(f);
 
     write_mp4_header(
@@ -192,7 +192,7 @@ fn run(
     let mut fragment_start_time = None;
     // this is for traf headers - all track fragment headers need a common
     // time base.
-    let mut frgment_decode_time = 0;
+    let mut fragment_decode_time = 0;
 
     while !should_quit.load(Ordering::Relaxed) {
         while let Some(fragment) = ch.blocking_recv() {
@@ -213,7 +213,6 @@ fn run(
             let track_id = fragment.traf.tfhd.track_id;
             let track_idx = track_id.saturating_sub(1);
             let fragment_system_time = fragment.system_time_ms;
-            // todo: use get_mut()
             match fragments.get_mut(track_idx as usize) {
                 Some(v) => {
                     // only update fragment_start_time for valid track ids
@@ -253,7 +252,7 @@ fn run(
                             fragments.push_front(fragment);
                         } else {
                             if let Some(tfdt) = fragment.traf.tfdt.as_mut() {
-                                tfdt.base_media_decode_time = frgment_decode_time;
+                                tfdt.base_media_decode_time = fragment_decode_time;
                             }
                             trafs.push(fragment.traf);
                             mdats.push(fragment.mdat);
@@ -308,7 +307,7 @@ fn run(
             fragment_sequence_number += 1;
             // todo: currently this is opus specific. depends on the implementation of logger::opus::Opus
             // need to add the timebase to the audio codec
-            frgment_decode_time += 100;
+            fragment_decode_time += 100;
 
             let mut data_offset = moof.box_size() + 8;
             for traf in moof.trafs.iter_mut() {
@@ -336,6 +335,36 @@ fn run(
     }
 
     writer.flush()?;
+    drop(writer);
+    update_duration(mp4_file_path, fragment_decode_time as u32)
+}
+
+fn update_duration(mp4_file_path: PathBuf, duration: u32) -> Result<()> {
+    let mut mp4 = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(false)
+        .open(mp4_file_path)?;
+
+    let mut buf = [0; 256];
+    let num_read = mp4.read(&mut buf)?;
+    let header = [b'm', b'v', b'h', b'd'];
+    let window_size = header.len();
+
+    let mvhd_pos = buf[0..num_read]
+        .windows(window_size)
+        .position(|window| window == header)
+        .ok_or(anyhow::anyhow!("mvhd not found"))?;
+
+    // the mvhd header is 12 bytes. the bytes mvhd are 4 bytes in.
+    let mvhd_data_offset = (mvhd_pos * window_size) + 8;
+    // assumes version 0 of the mvhd box
+    let duration_offset = mvhd_data_offset + 12;
+
+    mp4.seek(SeekFrom::Start(duration_offset as u64))?;
+    mp4.write_u32::<BigEndian>(duration)?;
+    mp4.flush()?;
+
     Ok(())
 }
 
