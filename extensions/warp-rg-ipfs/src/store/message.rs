@@ -11,7 +11,6 @@ use futures::channel::mpsc::{unbounded, Sender, UnboundedSender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::{FuturesUnordered, SelectAll};
 use futures::{SinkExt, Stream, StreamExt};
-use rust_ipfs::libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
 
 use libipld::Cid;
@@ -46,7 +45,7 @@ use crate::SpamFilter;
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetLocalDag, ToCid};
 use super::keystore::Keystore;
-use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, DidExt, MessagingEvents};
+use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, MessagingEvents};
 
 const PERMIT_AMOUNT: usize = 1;
 
@@ -3495,9 +3494,7 @@ impl MessageStore {
             root.add_file(attachment.clone())?;
         }
 
-        let ipfs = self.ipfs.clone();
         let constellation = constellation.clone();
-        let own_did = self.did.clone();
 
         let progress_stream = async_stream::stream! {
                 yield Progression::CurrentProgress {
@@ -3505,17 +3502,6 @@ impl MessageStore {
                     current: 0,
                     total: Some(attachment.size()),
                 };
-
-                let did = message.sender();
-                if !did.eq(&own_did) {
-                    if let Ok(peer_id) = did.to_peer_id() {
-                        //This is done to insure we can successfully exchange blocks
-                        let opt = DialOpts::peer_id(peer_id).condition(PeerCondition::NotDialing).build();
-                        if let Err(e) = ipfs.connect(opt).await {
-                            warn!("Issue performing a connection to peer: {e}");
-                        }
-                    }
-                }
 
                 let mut file = match tokio::fs::File::create(&path).await {
                     Ok(file) => file,
