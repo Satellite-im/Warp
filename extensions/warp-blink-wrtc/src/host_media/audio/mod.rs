@@ -32,6 +32,8 @@ pub trait SourceTrack {
     fn pause(&self) -> Result<()>;
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()>;
+    fn init_mp4_logger(&mut self) -> Result<()>;
+    fn remove_mp4_logger(&mut self) -> Result<()>;
 }
 
 // stores the TrackRemote at least
@@ -46,9 +48,11 @@ pub trait SinkTrack {
     ) -> Result<Self>
     where
         Self: Sized;
-    fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
+    fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
+    fn init_mp4_logger(&mut self) -> Result<()>;
+    fn remove_mp4_logger(&mut self) -> Result<()>;
 }
 
 /// Uses the MIME type from codec to determine which implementation of SourceTrack to create

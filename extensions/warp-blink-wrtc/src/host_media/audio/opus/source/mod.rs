@@ -21,7 +21,7 @@ use webrtc::{
 mod framer;
 use crate::{
     host_media::audio::{speech, SourceTrack},
-    mp4_logger, rtp_logger,
+    host_media::mp4_logger::{self, Mp4LoggerInstance},
 };
 
 use self::framer::Framer;
@@ -37,6 +37,7 @@ pub struct OpusSource {
     // used to cancel the current packetizer when the input device is changed.
     packetizer_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
+    mp4_logger: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
 }
 
 impl Drop for OpusSource {
@@ -57,13 +58,14 @@ impl SourceTrack for OpusSource {
     where
         Self: Sized,
     {
+        let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
         let (input_stream, join_handle) = create_source_track(
-            own_id.clone(),
             input_device,
             track.clone(),
             webrtc_codec.clone(),
             source_codec.clone(),
             event_ch.clone(),
+            mp4_logger.clone(),
         )?;
 
         Ok(Self {
@@ -74,6 +76,7 @@ impl SourceTrack for OpusSource {
             source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
+            mp4_logger,
         })
     }
 
@@ -93,26 +96,37 @@ impl SourceTrack for OpusSource {
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()> {
         self.packetizer_handle.abort();
         let (stream, handle) = create_source_track(
-            self.own_id.clone(),
             input_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
             self.source_codec.clone(),
             self.event_ch.clone(),
+            self.mp4_logger.clone(),
         )?;
         self.stream = stream;
         self.packetizer_handle = handle;
         Ok(())
     }
+
+    fn init_mp4_logger(&mut self) -> Result<()> {
+        let mp4_logger = mp4_logger::get_audio_logger(&self.own_id)?;
+        self.mp4_logger.write().replace(mp4_logger);
+        Ok(())
+    }
+
+    fn remove_mp4_logger(&mut self) -> Result<()> {
+        self.mp4_logger.write().take();
+        Ok(())
+    }
 }
 
 fn create_source_track(
-    own_id: DID,
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
     source_codec: blink::AudioCodec,
     event_ch: broadcast::Sender<BlinkEventKind>,
+    mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
     let config = cpal::StreamConfig {
         channels: source_codec.channels(),
@@ -177,14 +191,7 @@ fn create_source_track(
         })?;
 
     let join_handle = tokio::spawn(async move {
-        let logger = rtp_logger::get_instance("self-audio".to_string());
-        let mut mp4_writer = match mp4_logger::get_audio_logger(own_id) {
-            Ok(writer) => Some(writer),
-            Err(e) => {
-                log::error!("error getting audio logger for source track: {e}");
-                None
-            }
-        };
+        // et logger = rtp_logger::get_instance("self-audio".to_string());
 
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
@@ -204,16 +211,16 @@ fn create_source_track(
                     {
                         Ok(packets) => {
                             if let Some(packet) = packets.first() {
-                                if let Some(writer) = mp4_writer.as_mut() {
+                                if let Some(writer) = mp4_writer.write().as_mut() {
                                     // todo: use the audio codec to determine number of samples and duration
                                     writer.log(packet.payload.clone());
                                 }
                             }
 
                             for packet in &packets {
-                                if let Some(logger) = logger.as_ref() {
-                                    logger.log(packet.header.clone())
-                                }
+                                // if let Some(logger) = logger.as_ref() {
+                                //     logger.log(packet.header.clone())
+                                // }
 
                                 if let Err(e) = track
                                     .write_rtp_with_extensions(

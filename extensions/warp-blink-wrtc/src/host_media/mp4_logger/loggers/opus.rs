@@ -4,7 +4,7 @@ use bytes::Bytes;
 use mp4::{TfdtBox, TfhdBox, TrafBox, TrunBox};
 use tokio::sync::mpsc::Sender;
 
-use crate::mp4_logger::{Mp4Fragment, Mp4LoggerInstance};
+use crate::host_media::mp4_logger::{Mp4Fragment, Mp4LoggerInstance};
 
 // an opus frame (10ms) is about 65 bytes. only want 50-100 of them
 const MAX_FRAME_SIZE: usize = 1024 * 10;

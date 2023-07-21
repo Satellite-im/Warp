@@ -29,7 +29,7 @@ use warp::{
 static MP4_LOGGER: Lazy<RwLock<Option<Mp4Logger>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
 
-pub trait Mp4LoggerInstance: Send {
+pub trait Mp4LoggerInstance: Send + Sync {
     fn log(&mut self, bytes: Bytes);
 }
 
@@ -47,7 +47,7 @@ struct Mp4Logger {
     audio_track_ids: HashMap<DID, u32>,
     // video_track_ids: HashMap<DID, u32>,
     should_quit: Arc<AtomicBool>,
-    should_log: bool,
+    should_log: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -95,6 +95,7 @@ pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
     };
     let (tx, rx) = tokio::sync::mpsc::channel(1024 * 5);
     let should_quit = Arc::new(AtomicBool::new(false));
+    let should_log = Arc::new(AtomicBool::new(true));
 
     let logger = Mp4Logger {
         tx,
@@ -102,19 +103,31 @@ pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
         audio_track_ids,
         // video_track_ids,
         should_quit: should_quit.clone(),
-        should_log: true,
+        should_log: should_log.clone(),
         config,
     };
     MP4_LOGGER.write().replace(logger);
 
     std::thread::spawn(move || {
-        if let Err(e) = run(rx, should_quit, internal_config) {
+        if let Err(e) = run(rx, should_quit, should_log, internal_config) {
             log::error!("error running mp4_logger: {e}");
         }
         log::debug!("mp4_logger terminating: {}", call_id);
     });
 
     Ok(())
+}
+
+pub fn pause() {
+    if let Some(logger) = MP4_LOGGER.write().as_mut() {
+        logger.should_log.store(false, Ordering::Relaxed);
+    }
+}
+
+pub fn resume() {
+    if let Some(logger) = MP4_LOGGER.write().as_mut() {
+        logger.should_log.store(true, Ordering::Relaxed);
+    }
 }
 
 pub async fn deinit() {
@@ -134,12 +147,12 @@ pub async fn deinit() {
         .await;
 }
 
-pub fn get_audio_logger(peer_id: DID) -> Result<Box<dyn Mp4LoggerInstance>> {
+pub fn get_audio_logger(peer_id: &DID) -> Result<Box<dyn Mp4LoggerInstance>> {
     let logger = match MP4_LOGGER.read().as_ref() {
         Some(logger) => {
             let track_id = logger
                 .audio_track_ids
-                .get(&peer_id)
+                .get(peer_id)
                 .ok_or(anyhow::anyhow!("no audio track found for peer"))?;
 
             log::debug!("getting audio logger for peer {}", peer_id);
@@ -163,6 +176,7 @@ pub fn get_audio_logger(peer_id: DID) -> Result<Box<dyn Mp4LoggerInstance>> {
 fn run(
     mut ch: Receiver<Mp4Fragment>,
     should_quit: Arc<AtomicBool>,
+    should_log: Arc<AtomicBool>,
     internal_config: MpLoggerConfigInternal,
 ) -> Result<()> {
     log::debug!("starting mp4 logger");
@@ -201,12 +215,7 @@ fn run(
                 break;
             }
 
-            if !MP4_LOGGER
-                .read()
-                .as_ref()
-                .map(|r| r.should_log)
-                .unwrap_or(false)
-            {
+            if !should_log.load(Ordering::Relaxed) {
                 continue;
             }
 
