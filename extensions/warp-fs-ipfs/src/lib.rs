@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::io::Cursor;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 use thumbnail::ThumbnailGenerator;
 use tokio_util::io::ReaderStream;
@@ -49,7 +50,7 @@ pub struct IpfsFileSystem {
     path: Arc<RwLock<PathBuf>>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
-    ipfs: Arc<RwLock<Option<Ipfs>>>,
+    ipfs: OnceLock<Ipfs>,
     keypair: Arc<RwLock<Option<Arc<DID>>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
     account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
@@ -132,7 +133,9 @@ impl IpfsFileSystem {
         let ipfs_keypair = ipfs.keypair()?;
         *self.keypair.write() = Some(Arc::new(get_keypair_did(ipfs_keypair)?));
 
-        *self.ipfs.write() = Some(ipfs);
+        self.ipfs
+            .set(ipfs)
+            .expect("Instance is already initialized");
 
         if let Err(_e) = self.import_index().await {
             error!("Error loading index: {_e}");
@@ -297,8 +300,7 @@ impl IpfsFileSystem {
 
     pub fn ipfs(&self) -> Result<Ipfs> {
         self.ipfs
-            .read()
-            .as_ref()
+            .get()
             .cloned()
             .ok_or(Error::ConstellationExtensionUnavailable)
     }

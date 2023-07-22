@@ -8,6 +8,7 @@ use futures::StreamExt;
 use rust_ipfs::Ipfs;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -41,7 +42,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct IpfsMessaging {
     account: Box<dyn MultiPass>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    ipfs: Arc<RwLock<Option<Ipfs>>>,
+    ipfs: OnceLock<Ipfs>,
     direct_store: Arc<RwLock<Option<MessageStore>>>,
     config: Option<RgIpfsConfig>,
     constellation: Option<Box<dyn Constellation>>,
@@ -180,7 +181,7 @@ impl IpfsMessaging {
             .await?,
         );
 
-        *self.ipfs.write() = Some(ipfs);
+        self.ipfs.set(ipfs).expect("Ipfs is already initiralized");
 
         self.initialize.store(true, Ordering::SeqCst);
 
@@ -230,7 +231,7 @@ impl Extension for IpfsMessaging {
 
 impl SingleHandle for IpfsMessaging {
     fn handle(&self) -> std::result::Result<Box<dyn core::any::Any>, warp::error::Error> {
-        Ok(Box::new(self.ipfs.read().clone()))
+        Ok(Box::new(self.ipfs.get().cloned()))
     }
 }
 

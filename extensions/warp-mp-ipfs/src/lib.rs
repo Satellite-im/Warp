@@ -14,6 +14,7 @@ use ipfs::p2p::{
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
@@ -49,7 +50,7 @@ use crate::store::discovery::Discovery;
 pub struct IpfsIdentity {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     config: MpIpfsConfig,
-    ipfs: Arc<RwLock<Option<Ipfs>>>,
+    ipfs: OnceLock<Ipfs>,
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore>>>,
     identity_store: Arc<RwLock<Option<IdentityStore>>>,
@@ -489,7 +490,7 @@ impl IpfsIdentity {
         *self.identity_store.write() = Some(identity_store);
         *self.friend_store.write() = Some(friend_store);
 
-        *self.ipfs.write() = Some(ipfs);
+        self.ipfs.set(ipfs).expect("Ipfs is already initialized");
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
         Ok(())
@@ -526,8 +527,8 @@ impl IpfsIdentity {
 
     pub fn ipfs(&self) -> Result<Ipfs, Error> {
         self.ipfs
-            .read()
-            .clone()
+            .get()
+            .cloned()
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
