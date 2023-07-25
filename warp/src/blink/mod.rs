@@ -122,8 +122,8 @@ pub enum BlinkEventKind {
     #[display(fmt = "SelfSpeaking")]
     SelfSpeaking,
     /// audio packets were dropped for the peer
-    #[display(fmt = "AudioDegredation")]
-    AudioDegredation { peer_id: DID },
+    #[display(fmt = "AudioDegradation")]
+    AudioDegradation { peer_id: DID },
     #[display(fmt = "AudioOutputDeviceNoLongerAvailable")]
     AudioOutputDeviceNoLongerAvailable,
     #[display(fmt = "AudioInputDeviceNoLongerAvailable")]
