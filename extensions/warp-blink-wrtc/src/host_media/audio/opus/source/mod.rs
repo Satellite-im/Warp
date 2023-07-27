@@ -8,7 +8,10 @@ use ringbuf::HeapRb;
 
 use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
-use warp::blink::{self, BlinkEventKind};
+use warp::{
+    blink::{self, BlinkEventKind},
+    crypto::DID,
+};
 
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
@@ -16,11 +19,15 @@ use webrtc::{
 };
 
 mod framer;
-use crate::host_media::audio::{speech, SourceTrack};
+use crate::{
+    host_media::audio::{speech, SourceTrack},
+    host_media::mp4_logger::{self, Mp4LoggerInstance},
+};
 
 use self::framer::Framer;
 
 pub struct OpusSource {
+    own_id: DID,
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
@@ -30,6 +37,7 @@ pub struct OpusSource {
     // used to cancel the current packetizer when the input device is changed.
     packetizer_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
+    mp4_logger: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
 }
 
 impl Drop for OpusSource {
@@ -40,6 +48,7 @@ impl Drop for OpusSource {
 
 impl SourceTrack for OpusSource {
     fn init(
+        own_id: DID,
         event_ch: broadcast::Sender<BlinkEventKind>,
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
@@ -49,21 +58,25 @@ impl SourceTrack for OpusSource {
     where
         Self: Sized,
     {
+        let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
         let (input_stream, join_handle) = create_source_track(
             input_device,
             track.clone(),
             webrtc_codec.clone(),
             source_codec.clone(),
             event_ch.clone(),
+            mp4_logger.clone(),
         )?;
 
         Ok(Self {
+            own_id,
             event_ch,
             track,
             webrtc_codec,
             source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
+            mp4_logger,
         })
     }
 
@@ -88,9 +101,21 @@ impl SourceTrack for OpusSource {
             self.webrtc_codec.clone(),
             self.source_codec.clone(),
             self.event_ch.clone(),
+            self.mp4_logger.clone(),
         )?;
         self.stream = stream;
         self.packetizer_handle = handle;
+        Ok(())
+    }
+
+    fn init_mp4_logger(&mut self) -> Result<()> {
+        let mp4_logger = mp4_logger::get_audio_logger(&self.own_id)?;
+        self.mp4_logger.write().replace(mp4_logger);
+        Ok(())
+    }
+
+    fn remove_mp4_logger(&mut self) -> Result<()> {
+        self.mp4_logger.write().take();
         Ok(())
     }
 }
@@ -101,6 +126,7 @@ fn create_source_track(
     webrtc_codec: blink::AudioCodec,
     source_codec: blink::AudioCodec,
     event_ch: broadcast::Sender<BlinkEventKind>,
+    mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
     let config = cpal::StreamConfig {
         channels: source_codec.channels(),
@@ -138,9 +164,35 @@ fn create_source_track(
         webrtc_codec.sample_rate(),
     );
 
-    // todo: when the input device changes, this needs to change too.
-    let track2 = track;
+    let event_ch2 = event_ch.clone();
+    let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
+        for sample in data {
+            let _ = producer.push(*sample);
+        }
+    };
+    let input_stream = input_device
+        .build_input_stream(
+            &config,
+            input_data_fn,
+            move |err| {
+                log::error!("an error occurred on stream: {}", err);
+                if matches!(err, cpal::StreamError::DeviceNotAvailable) {
+                    let _ = event_ch2.send(BlinkEventKind::AudioInputDeviceNoLongerAvailable);
+                }
+            },
+            None,
+        )
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to build input stream: {e}, {}, {}",
+                file!(),
+                line!()
+            )
+        })?;
+
     let join_handle = tokio::spawn(async move {
+        // let logger = rtp_logger::get_instance("self-audio".to_string());
+
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {
@@ -158,8 +210,19 @@ fn create_source_track(
                         .await
                     {
                         Ok(packets) => {
+                            if let Some(packet) = packets.first() {
+                                if let Some(writer) = mp4_writer.write().as_mut() {
+                                    // todo: use the audio codec to determine number of samples and duration
+                                    writer.log(packet.payload.clone());
+                                }
+                            }
+
                             for packet in &packets {
-                                if let Err(e) = track2
+                                // if let Some(logger) = logger.as_ref() {
+                                //     logger.log(packet.header.clone())
+                                // }
+
+                                if let Err(e) = track
                                     .write_rtp_with_extensions(
                                         packet,
                                         &[rtp::extension::HeaderExtension::AudioLevel(
@@ -185,26 +248,7 @@ fn create_source_track(
         }
     });
 
-    let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-        for sample in data {
-            let _ = producer.push(*sample);
-        }
-    };
-    let input_stream = input_device
-        .build_input_stream(&config, input_data_fn, err_fn, None)
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "failed to build input stream: {e}, {}, {}",
-                file!(),
-                line!()
-            )
-        })?;
-
     Ok((input_stream, join_handle))
-}
-
-fn err_fn(err: cpal::StreamError) {
-    log::error!("an error occurred on stream: {}", err);
 }
 
 #[cfg(test)]

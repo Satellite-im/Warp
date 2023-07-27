@@ -5,8 +5,8 @@ pub mod identity;
 pub mod phonebook;
 pub mod queue;
 
-use std::{fmt::Display, time::Duration};
 use rust_ipfs as ipfs;
+use std::{fmt::Display, time::Duration};
 
 use ipfs::{Multiaddr, PeerId, Protocol, PublicKey};
 use warp::{
