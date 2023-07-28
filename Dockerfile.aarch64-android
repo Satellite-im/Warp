@@ -20,8 +20,9 @@ RUN apt install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-d
 
 WORKDIR /root
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
-RUN . $HOME/.cargo/env && rustup target add aarch64-unknown-linux-gnu 
-RUN . $HOME/.cargo/env && rustup toolchain install stable-aarch64-unknown-linux-gnu
+# pretty sure these next 2 lines aren't needed
+# RUN . $HOME/.cargo/env && rustup target add aarch64-unknown-linux-gnu
+# RUN . $HOME/.cargo/env && rustup toolchain install stable-aarch64-unknown-linux-gnu
 RUN . $HOME/.cargo/env && rustup target add aarch64-linux-android
 RUN . $HOME/.cargo/env && cargo install --git https://github.com/tauri-apps/tauri-mobile
 
