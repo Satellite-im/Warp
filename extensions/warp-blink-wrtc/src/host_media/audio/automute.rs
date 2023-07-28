@@ -59,6 +59,7 @@ async fn run() -> Result<()> {
                             remaining_ms = ms;
                             if !*SHOULD_MUTE.read() {
                                 *SHOULD_MUTE.write() = true;
+                                log::debug!("automute on");
                             }
                         }
                     }
@@ -74,6 +75,7 @@ async fn run() -> Result<()> {
             remaining_ms = remaining_ms.saturating_sub(1);
             if remaining_ms == 0 && *SHOULD_MUTE.read() {
                 *SHOULD_MUTE.write() = false;
+                log::debug!("automute off");
             }
         }
     });
