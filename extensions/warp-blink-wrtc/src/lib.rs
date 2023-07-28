@@ -10,11 +10,13 @@
 #![allow(dead_code)]
 
 mod host_media;
+// mod rtp_logger;
 mod signaling;
 mod simple_webrtc;
 mod store;
 
 use async_trait::async_trait;
+use host_media::mp4_logger::Mp4LoggerConfig;
 use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
@@ -114,7 +116,10 @@ impl Drop for BlinkImpl {
         self.offer_handler.write().abort();
         let webrtc_controller = self.webrtc_controller.clone();
         tokio::spawn(async move {
-            let _ = webrtc_controller.write().await.deinit().await;
+            if let Err(e) = webrtc_controller.write().await.deinit().await {
+                log::error!("error in webrtc_controller deinit: {e}");
+            }
+            host_media::reset().await;
             log::debug!("deinit finished");
         });
     }
@@ -257,6 +262,7 @@ impl BlinkImpl {
             Some(r) => r,
             None => bail!("blink not initialized"),
         };
+
         self.active_call.write().await.replace(call.clone().into());
         let audio_source_codec = self.audio_source_codec.read().await;
         // ensure there is an audio source track
@@ -273,6 +279,7 @@ impl BlinkImpl {
             .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
             .await?;
         host_media::create_audio_source_track(
+            own_id.clone(),
             self.ui_event_ch.clone(),
             track,
             call.codec(),
@@ -637,6 +644,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                                     if let Err(e) = webrtc_controller.deinit().await {
                                         log::error!("webrtc deinit failed: {e}");
                                     }
+                                    host_media::reset().await;
                                     // terminate the task on purpose.
                                     return;
                                 }
@@ -1033,11 +1041,31 @@ impl Blink for BlinkImpl {
     async fn disable_camera(&mut self) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn record_call(&mut self, _output_dir: &str) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+    async fn record_call(&mut self, output_dir: &str) -> Result<(), Error> {
+        match self.active_call.read().await.as_ref() {
+            None => return Err(Error::OtherWithContext("no call to record".into())),
+            Some(ActiveCall { call, .. }) => {
+                host_media::init_recording(Mp4LoggerConfig {
+                    call_id: call.call_id(),
+                    participants: call.participants(),
+                    audio_codec: call.codec(),
+                    log_path: output_dir.into(),
+                })
+                .await?;
+            }
+        }
+
+        Ok(())
     }
     async fn stop_recording(&mut self) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        match self.active_call.read().await.as_ref() {
+            None => return Err(Error::OtherWithContext("no call to pause".into())),
+            Some(_) => {
+                host_media::pause_recording().await?;
+            }
+        }
+
+        Ok(())
     }
 
     async fn get_audio_source_codec(&self) -> AudioCodec {

@@ -65,6 +65,10 @@ impl Behaviour {
             return;
         }
 
+        if let Some(PhoneBookState::Online) = self.entry_state.get(&peer_id) {
+            return;
+        }
+
         let did = match peer_id.to_did() {
             Ok(did) => did,
             Err(_) => {
@@ -84,6 +88,10 @@ impl Behaviour {
     }
 
     fn send_offline_event(&mut self, peer_id: PeerId) {
+        if let Some(PhoneBookState::Offline) = self.entry_state.get(&peer_id) {
+            return;
+        }
+
         let did = match peer_id.to_did() {
             Ok(did) => did,
             Err(_) => {
@@ -211,9 +219,8 @@ impl NetworkBehaviour for Behaviour {
                         let _ = response.send(Err(Error::IdentityExist));
                         continue;
                     }
-                    if self.entry.contains(&peer_id) {
-                        self.send_online_event(peer_id);
-                    }
+
+                    self.send_online_event(peer_id);
                     let _ = response.send(Ok(()));
                 }
                 Poll::Ready(Some(PhoneBookCommand::RemoveEntry { peer_id, response })) => {
@@ -221,9 +228,8 @@ impl NetworkBehaviour for Behaviour {
                         let _ = response.send(Err(Error::IdentityDoesntExist));
                         continue;
                     }
-                    if !self.entry.contains(&peer_id) {
-                        self.send_offline_event(peer_id);
-                    }
+
+                    self.send_offline_event(peer_id);
                     let _ = response.send(Ok(()));
                 }
                 Poll::Ready(None) => unreachable!("Channels are owned"),
