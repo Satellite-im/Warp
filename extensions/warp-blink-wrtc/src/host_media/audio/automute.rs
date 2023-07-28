@@ -26,7 +26,7 @@ pub enum AutoMuteCmd {
 
 pub fn start() {
     let tx = AUDIO_CMD_CH.tx.clone();
-    let _ = tx.send(AutoMuteCmd::Quit);
+    //let _ = tx.send(AutoMuteCmd::Quit);
 
     tokio::spawn(async move {
         if let Err(e) = run().await {
@@ -41,17 +41,22 @@ pub fn stop() {
 }
 
 async fn run() -> Result<()> {
+    log::debug!("starting automute");
     let rx = AUDIO_CMD_CH.rx.clone();
     let mut rx = match rx.try_lock() {
         Some(r) => r,
         None => bail!("mutex not available"),
     };
 
+    // empty the channel
+    //while rx.try_recv().is_ok() {}
+
     let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
 
     tokio::spawn(async move {
+        log::debug!("starting automute helper");
         let mut remaining_ms: u32 = 0;
-        loop {
+        'OUTER_LOOP: loop {
             'FAKE_WHILE: loop {
                 match rx2.try_recv() {
                     Ok(ms) => {
@@ -65,7 +70,7 @@ async fn run() -> Result<()> {
                     }
                     Err(TryRecvError::Disconnected) => {
                         *SHOULD_MUTE.write() = false;
-                        return;
+                        break 'OUTER_LOOP;
                     }
                     _ => break 'FAKE_WHILE,
                 }
@@ -78,6 +83,8 @@ async fn run() -> Result<()> {
                 log::debug!("automute off");
             }
         }
+
+        log::debug!("terminating automute helper");
     });
 
     while let Some(cmd) = rx.recv().await {
