@@ -25,15 +25,15 @@ RUN . $HOME/.cargo/env && rustup toolchain install stable-aarch64-unknown-linux-
 
 WORKDIR /root/cmake
 RUN wget https://github.com/Kitware/CMake/releases/download/v3.23.1/cmake-3.23.1.tar.gz
-RUN     tar -xzvf cmake-3.23.1.tar.gz
+RUN tar -xzvf cmake-3.23.1.tar.gz
 RUN cd cmake-3.23.1 && ./configure
 RUN cd cmake-3.23.1 && make -j$(nproc --ignore=2)
 RUN cd cmake-3.23.1 && make install
 
-# todo: don't need this. the android-sdk docker container already has everything in /opt/android-sdk-linux
-WORKDIR /root/android
-RUN wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
-RUN unzip android-ndk-r25c-linux.zip
+# saving this for reference. the android-sdk docker container already has everything in /opt/android-sdk-linux
+# WORKDIR /root/android
+# RUN wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+# RUN unzip android-ndk-r25c-linux.zip
 
 WORKDIR /root 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
@@ -42,7 +42,7 @@ RUN . $HOME/.cargo/env && rustup target add aarch64-linux-android
 
 RUN . $HOME/.cargo/env && cargo install --git https://github.com/tauri-apps/tauri-mobile
 
-ENV MY_ANDROID_NDK_PATH=/root/android/android-ndk-r25c
+ENV MY_ANDROID_NDK_PATH=/opt/android-sdk-linux/ndk-bundle
 ENV MY_SYSROOT=$MY_ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
  
 ENV TOOLCHAIN_BIN_PATH=$MY_SYSROOT/bin
@@ -103,8 +103,7 @@ RUN make -j12
 ENV OPUS_STATIC=true OPUS_LIB_DIR=/root/opus/.libs
 
 # for tauri mobile
-# todo: use ndk provided by android sdk
-ENV NDK_HOME=/root/android/android-ndk-r25c SDK_HOME=/opt/android-sdk-linux
+ENV NDK_HOME=/opt/android-sdk-linux/ndk-bundle SDK_HOME=/opt/android-sdk-linux
 
 WORKDIR /root/build
 
