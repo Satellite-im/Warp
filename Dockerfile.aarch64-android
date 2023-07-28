@@ -97,7 +97,7 @@ WORKDIR /root/opus
 RUN git checkout 7b05f44f4baadf34d8d1073f4ff69f1806d5cdb4
 RUN ./autogen.sh
 RUN ./configure --host=aarch64-linux-android
-RUN make -j12
+RUN make -j$(nproc --ignore=2)
 
 # for audiopus_sys
 ENV OPUS_STATIC=true OPUS_LIB_DIR=/root/opus/.libs
