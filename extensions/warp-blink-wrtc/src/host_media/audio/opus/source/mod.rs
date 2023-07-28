@@ -197,7 +197,6 @@ fn create_source_track(
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {
             while let Some(sample) = consumer.pop() {
-                // todo: if someone else is speaking, sample = 0.
                 if let Some(output) = framer.frame(sample) {
                     let loudness = match output.loudness.mul(1000.0) {
                         x if x >= 127.0 => 127,
@@ -205,6 +204,10 @@ fn create_source_track(
                     };
                     // discard packet if muted
                     if *muted.read() {
+                        continue;
+                    }
+                    // triggered when someone else is talking
+                    if *crate::host_media::audio::automute::SHOULD_MUTE.read() {
                         continue;
                     }
                     if speech_detector.should_emit_event(loudness) {

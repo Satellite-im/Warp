@@ -18,7 +18,10 @@ use webrtc::{
 
 use crate::{
     host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
-    host_media::mp4_logger::{self, Mp4LoggerInstance},
+    host_media::{
+        self,
+        mp4_logger::{self, Mp4LoggerInstance},
+    },
 };
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
@@ -253,6 +256,8 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
 
+    let automute_tx = host_media::audio::automute::AUDIO_CMD_CH.tx.clone();
+
     // let logger = rtp_logger::get_instance(format!("{}-audio", peer_id));
 
     loop {
@@ -314,6 +319,9 @@ where
                     ) {
                         Ok(siz) => {
                             let to_send = decoder_output_buf.iter().take(siz);
+                            // hopefully each opus packet is still 10ms
+                            let _ = automute_tx
+                                .send(host_media::audio::automute::AutoMuteCmd::MuteFor(10));
                             for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample) {
                                     ChannelMixerOutput::Single(sample) => {

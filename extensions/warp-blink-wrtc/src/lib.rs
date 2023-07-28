@@ -119,6 +119,7 @@ impl Drop for BlinkImpl {
             if let Err(e) = webrtc_controller.write().await.deinit().await {
                 log::error!("error in webrtc_controller deinit: {e}");
             }
+            host_media::audio::automute::stop();
             host_media::reset().await;
             log::debug!("deinit finished");
         });
@@ -248,6 +249,8 @@ impl BlinkImpl {
             }
         });
 
+        // todo: only use this if a headset is not in use
+        host_media::audio::automute::start();
         Ok(Box::new(blink_impl))
     }
 

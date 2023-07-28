@@ -13,7 +13,7 @@ use warp::crypto::DID;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-mod audio;
+pub(crate) mod audio;
 use audio::{create_sink_track, create_source_track};
 
 use self::mp4_logger::Mp4LoggerConfig;
