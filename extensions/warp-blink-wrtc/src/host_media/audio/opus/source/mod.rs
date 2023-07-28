@@ -197,6 +197,7 @@ fn create_source_track(
         let mut speech_detector = speech::Detector::new(10, 100);
         loop {
             while let Some(sample) = consumer.pop() {
+                // todo: if someone else is speaking, sample = 0.
                 if let Some(output) = framer.frame(sample) {
                     let loudness = match output.loudness.mul(1000.0) {
                         x if x >= 127.0 => 127,
@@ -204,6 +205,10 @@ fn create_source_track(
                     };
                     if speech_detector.should_emit_event(loudness) {
                         let _ = event_ch.send(BlinkEventKind::SelfSpeaking);
+                    }
+                    // don't send silent packets
+                    if !speech_detector.is_speaking() {
+                        continue;
                     }
                     match packetizer
                         .packetize(&output.bytes, webrtc_codec.frame_size() as u32)
