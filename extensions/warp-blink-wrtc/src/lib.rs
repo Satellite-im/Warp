@@ -249,7 +249,6 @@ impl BlinkImpl {
             }
         });
 
-        // todo: only use this if a headset is not in use
         host_media::audio::automute::start();
         Ok(Box::new(blink_impl))
     }

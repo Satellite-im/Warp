@@ -2,18 +2,18 @@ use anyhow::{bail, Result};
 use once_cell::sync::Lazy;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::{self, error::TryRecvError};
-use warp::sync::{Mutex, RwLock};
+use warp::sync::RwLock;
 
 // tells the automute module how much longer to delay before unmuting
 pub struct AudioMuteChannels {
     pub tx: mpsc::UnboundedSender<AutoMuteCmd>,
-    pub rx: Arc<Mutex<mpsc::UnboundedReceiver<AutoMuteCmd>>>,
+    pub rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<AutoMuteCmd>>>,
 }
 pub static AUDIO_CMD_CH: Lazy<AudioMuteChannels> = Lazy::new(|| {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     AudioMuteChannels {
         tx,
-        rx: Arc::new(Mutex::new(rx)),
+        rx: Arc::new(tokio::sync::Mutex::new(rx)),
     }
 });
 
@@ -25,9 +25,6 @@ pub enum AutoMuteCmd {
 }
 
 pub fn start() {
-    let tx = AUDIO_CMD_CH.tx.clone();
-    //let _ = tx.send(AutoMuteCmd::Quit);
-
     tokio::spawn(async move {
         if let Err(e) = run().await {
             log::error!("automute error: {e}");
@@ -44,12 +41,9 @@ async fn run() -> Result<()> {
     log::debug!("starting automute");
     let rx = AUDIO_CMD_CH.rx.clone();
     let mut rx = match rx.try_lock() {
-        Some(r) => r,
-        None => bail!("mutex not available"),
+        Ok(r) => r,
+        Err(e) => bail!("mutex not available: {e}"),
     };
-
-    // empty the channel
-    //while rx.try_recv().is_ok() {}
 
     let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
 
