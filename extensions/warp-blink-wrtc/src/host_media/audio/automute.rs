@@ -22,6 +22,8 @@ pub static SHOULD_MUTE: Lazy<RwLock<bool>> = Lazy::new(|| RwLock::new(false));
 pub enum AutoMuteCmd {
     Quit,
     MuteFor(u32),
+    Disable,
+    Enable,
 }
 
 pub fn start() {
@@ -39,6 +41,7 @@ pub fn stop() {
 
 async fn run() -> Result<()> {
     log::debug!("starting automute");
+    let mut enabled = true;
     let rx = AUDIO_CMD_CH.rx.clone();
     let mut rx = match rx.try_lock() {
         Ok(r) => r,
@@ -89,8 +92,15 @@ async fn run() -> Result<()> {
                 break;
             }
             AutoMuteCmd::MuteFor(millis) => {
+                if !enabled {
+                    continue;
+                }
                 let _ = tx2.send(millis);
             }
+            AutoMuteCmd::Disable => {
+                enabled = false;
+            }
+            AutoMuteCmd::Enable => enabled = true,
         }
     }
     Ok(())

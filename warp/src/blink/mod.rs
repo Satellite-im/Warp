@@ -84,6 +84,9 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error>;
     async fn stop_recording(&mut self) -> Result<(), Error>;
 
+    fn enable_automute(&mut self) -> Result<(), Error>;
+    fn disable_automute(&mut self) -> Result<(), Error>;
+
     async fn get_audio_source_codec(&self) -> AudioCodec;
     async fn set_audio_source_codec(&mut self, codec: AudioCodec) -> Result<(), Error>;
     async fn get_audio_sink_codec(&self) -> AudioCodec;
