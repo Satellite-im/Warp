@@ -243,7 +243,11 @@ async fn handle_command(
 
 async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
-        println!("BlinkEvent: {evt}");
+        // get rid of noisy logs
+        if !matches!(evt, BlinkEventKind::ParticipantSpeaking { .. }) {
+            println!("BlinkEvent: {evt}");
+        }
+
         #[allow(clippy::single_match)]
         match evt {
             BlinkEventKind::IncomingCall {
