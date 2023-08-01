@@ -8,11 +8,10 @@ use anyhow::bail;
 
 use bytes::Bytes;
 use mp4::{
-    BoxHeader, BoxType, DopsBox, FixedPointI8, FixedPointU16, HdlrBox,
-    MdhdBox, MdiaBox, MfhdBox, MinfBox, MoofBox, MoovBox, Mp4Box, MvexBox,
-    MvhdBox, OpusBox, SmhdBox, StblBox, StcoBox, StscBox, StsdBox, StszBox, SttsBox, TfdtBox,
-    TfhdBox, TrafBox, TrakBox, TrexBox, TrunBox, WriteBox, {DinfBox},
-    {TkhdBox, TrackFlag},
+    BoxHeader, BoxType, DinfBox, DopsBox, FixedPointI8, FixedPointU16, HdlrBox, MdhdBox, MdiaBox,
+    MfhdBox, MinfBox, MoofBox, MoovBox, Mp4Box, MvexBox, MvhdBox, OpusBox, SmhdBox, StblBox,
+    StcoBox, StscBox, StsdBox, StszBox, SttsBox, TfdtBox, TfhdBox, TrafBox, TrakBox, TrexBox,
+    TrunBox, WriteBox, {TkhdBox, TrackFlag},
 };
 use rand::Rng;
 use webrtc::{
