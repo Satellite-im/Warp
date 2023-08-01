@@ -2,6 +2,8 @@
 pub mod generator;
 pub mod identity;
 
+use std::path::PathBuf;
+
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -17,7 +19,7 @@ use crate::multipass::identity::{Identifier, IdentityUpdate};
 
 use self::identity::{IdentityStatus, Platform, Relationship};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
@@ -38,13 +40,13 @@ pub enum MultiPassEventKind {
     UnblockedBy { did: DID },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportLocation {
     /// Remote location where the identity is stored
     Remote,
 
-    /// Local location where the identity is stored
-    Local,
+    /// Local path where the identity is stored
+    Local { path: PathBuf },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
