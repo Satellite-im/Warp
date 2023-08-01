@@ -73,8 +73,8 @@ async fn run() -> Result<()> {
                 }
             }
 
-            tokio::time::sleep(Duration::from_millis(1)).await;
-            remaining_ms = remaining_ms.saturating_sub(1);
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            remaining_ms = remaining_ms.saturating_sub(5);
             if remaining_ms == 0 && *SHOULD_MUTE.read() {
                 *SHOULD_MUTE.write() = false;
                 log::debug!("automute off");

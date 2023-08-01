@@ -321,7 +321,7 @@ where
                             let to_send = decoder_output_buf.iter().take(siz);
                             // hopefully each opus packet is still 10ms
                             let _ = automute_tx
-                                .send(host_media::audio::automute::AutoMuteCmd::MuteFor(100));
+                                .send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
                             for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample) {
                                     ChannelMixerOutput::Single(sample) => {
