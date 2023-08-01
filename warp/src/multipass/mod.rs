@@ -38,6 +38,26 @@ pub enum MultiPassEventKind {
     UnblockedBy { did: DID },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportLocation {
+    /// Remote location where the identity is stored
+    Remote,
+
+    /// Local location where the identity is stored
+    Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityImportOption {
+    Locate {
+        /// Location of the identity
+        location: ImportLocation,
+
+        /// Passphrase of the identity
+        passphrase: String,
+    },
+}
+
 #[derive(FFIFree)]
 pub struct MultiPassEventStream(pub BoxStream<'static, MultiPassEventKind>);
 
@@ -58,6 +78,10 @@ impl core::ops::DerefMut for MultiPassEventStream {
 pub trait MultiPass:
     Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + DynClone
 {
+    async fn import_identity(&mut self, _: IdentityImportOption) -> Result<Identity, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// Create an [`Identity`]
     async fn create_identity(
         &mut self,
