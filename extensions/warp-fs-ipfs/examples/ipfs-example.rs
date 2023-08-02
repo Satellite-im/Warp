@@ -8,7 +8,7 @@ async fn account() -> anyhow::Result<Box<dyn MultiPass>> {
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let config = MpIpfsConfig::development();
-    let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
+    let mut account = ipfs_identity_temporary(Some(config), tesseract).await?;
     account.create_identity(None, None).await?;
     Ok(Box::new(account))
 }

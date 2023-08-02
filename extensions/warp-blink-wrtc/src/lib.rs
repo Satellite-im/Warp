@@ -20,7 +20,16 @@ use host_media::{
     audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
     mp4_logger::Mp4LoggerConfig,
 };
-use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    any::Any,
+    collections::HashMap,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
 use anyhow::{bail, Context};
@@ -43,7 +52,7 @@ use warp::{
     error::Error,
     module::Module,
     multipass::MultiPass,
-    Extension, SingleHandle,
+    Extension, ExtensionEventKind, SingleHandle,
 };
 
 use crate::{
@@ -73,6 +82,8 @@ pub struct BlinkImpl {
     // handles 3 streams: one for webrtc events and two IPFS topics
     // pertains to the active_call, which is stored in STATIC_DATA
     webrtc_handler: Arc<warp::sync::RwLock<Option<JoinHandle<()>>>>,
+    ready_tx: broadcast::Sender<ExtensionEventKind>,
+    initialized: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -176,6 +187,8 @@ impl BlinkImpl {
         }
 
         let (ui_event_ch, _rx) = broadcast::channel(1024);
+        let (ready_tx, _) = broadcast::channel(25);
+
         let blink_impl = Self {
             ipfs: Arc::new(RwLock::new(None)),
             pending_calls: Arc::new(RwLock::new(HashMap::new())),
@@ -187,6 +200,8 @@ impl BlinkImpl {
             audio_sink_codec: Arc::new(RwLock::new(sink_codec)),
             offer_handler: Arc::new(warp::sync::RwLock::new(tokio::spawn(async {}))),
             webrtc_handler: Arc::new(warp::sync::RwLock::new(None)),
+            initialized: Arc::default(),
+            ready_tx,
         };
 
         let ipfs = blink_impl.ipfs.clone();
@@ -194,17 +209,29 @@ impl BlinkImpl {
         let offer_handler = blink_impl.offer_handler.clone();
         let pending_calls = blink_impl.pending_calls.clone();
         let ui_event_ch = blink_impl.ui_event_ch.clone();
+        let initialized = blink_impl.initialized.clone();
+        let ready_tx = blink_impl.ready_tx.clone();
 
         tokio::spawn(async move {
             let f = async {
-                //Note: This will block the initialization until identity is created or loaded
-                //TODO: Push into separate task if it initially fails
+                debug_assert!(!initialized.load(Ordering::SeqCst));
+
+                if !account.is_ready() {
+                    let mut stream = account.extension_subscribe()?;
+                    while let Some(event) = stream.next().await {
+                        if matches!(event, ExtensionEventKind::Ready) {
+                            break;
+                        }
+                    }
+                }
+
                 let identity = loop {
                     if let Ok(identity) = account.get_own_identity().await {
                         break identity;
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await
                 };
+
                 let ipfs_handle = match account.handle() {
                     Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
                     _ => {
@@ -243,6 +270,11 @@ impl BlinkImpl {
                 // set ipfs last to quickly detect that webrtc hasn't been initialized.
                 ipfs.write().await.replace(_ipfs);
                 log::trace!("finished initializing WebRTC");
+
+                initialized.store(true, Ordering::SeqCst);
+
+                let _ = ready_tx.send(ExtensionEventKind::Ready);
+
                 Ok(())
             };
 
@@ -703,6 +735,27 @@ impl Extension for BlinkImpl {
 
     fn module(&self) -> Module {
         Module::Media
+    }
+
+    fn is_ready(&self) -> bool {
+        self.initialized.load(Ordering::SeqCst)
+    }
+
+    fn extension_subscribe(
+        &self,
+    ) -> Result<futures::stream::BoxStream<'static, ExtensionEventKind>, Error> {
+        let mut rx = self.ready_tx.subscribe();
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(stream.boxed())
     }
 }
 

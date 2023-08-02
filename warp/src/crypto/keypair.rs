@@ -76,7 +76,7 @@ pub fn did_from_mnemonic(mnemonic: &str, passphrase: Option<&str>) -> Result<DID
 }
 
 pub fn mnemonic_into_tesseract(
-    tesseract: &mut Tesseract,
+    tesseract: &Tesseract,
     mnemonic: &str,
     passphrase: Option<&str>,
     save_mnemonic: bool,
@@ -137,7 +137,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn mnemonic_into_tesseract(
-        tesseract: *mut Tesseract,
+        tesseract: *const Tesseract,
         phrase: *const c_char,
         save: bool,
     ) -> FFIResult_Null {
@@ -151,7 +151,7 @@ pub mod ffi {
 
         let phrase = CStr::from_ptr(phrase).to_string_lossy().to_string();
 
-        super::mnemonic_into_tesseract(&mut *tesseract, &phrase, None, save).into()
+        super::mnemonic_into_tesseract(&*tesseract, &phrase, None, save).into()
     }
 }
 
