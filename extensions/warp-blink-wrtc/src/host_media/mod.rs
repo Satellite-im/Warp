@@ -13,14 +13,19 @@ use warp::crypto::DID;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-mod audio;
+pub(crate) mod audio;
 use audio::{create_sink_track, create_source_track};
+
+use self::mp4_logger::Mp4LoggerConfig;
+
+pub(crate) mod mp4_logger;
 
 struct Data {
     audio_input_device: Option<cpal::Device>,
     audio_output_device: Option<cpal::Device>,
     audio_source_track: Option<Box<dyn audio::SourceTrack>>,
     audio_sink_tracks: HashMap<DID, Box<dyn audio::SinkTrack>>,
+    is_recording: bool,
 }
 
 static LOCK: Lazy<RwLock<()>> = Lazy::new(|| RwLock::new(()));
@@ -31,6 +36,7 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
         audio_output_device: cpal_host.default_output_device(),
         audio_source_track: None,
         audio_sink_tracks: HashMap::new(),
+        is_recording: false,
     }
 });
 
@@ -55,7 +61,9 @@ pub async fn reset() {
     unsafe {
         DATA.audio_source_track.take();
         DATA.audio_sink_tracks.clear();
+        DATA.is_recording = false;
     }
+    mp4_logger::deinit().await;
 }
 
 pub async fn has_audio_source() -> bool {
@@ -67,6 +75,7 @@ pub async fn has_audio_source() -> bool {
 // webrtc should remove the old media source before this is called.
 // use AUDIO_SOURCE_ID
 pub async fn create_audio_source_track(
+    own_id: DID,
     event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
@@ -80,15 +89,33 @@ pub async fn create_audio_source_track(
         }
     };
 
-    let source_track =
-        create_source_track(event_ch, input_device, track, webrtc_codec, source_codec)
-            .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
+    let source_track = create_source_track(
+        own_id,
+        event_ch,
+        input_device,
+        track,
+        webrtc_codec,
+        source_codec,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
     source_track
         .play()
         .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;
 
     unsafe {
-        DATA.audio_source_track.replace(source_track);
+        if let Some(mut track) = DATA.audio_source_track.replace(source_track) {
+            // don't want two source tracks logging at the same time
+            if let Err(e) = track.remove_mp4_logger() {
+                log::error!("failed to remove mp4 logger when replacing source track: {e}");
+            }
+        }
+        if DATA.is_recording {
+            if let Some(source_track) = DATA.audio_source_track.as_mut() {
+                if let Err(e) = source_track.init_mp4_logger() {
+                    log::error!("failed to init mp4 logger for sink track: {e}");
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -127,7 +154,19 @@ pub async fn create_audio_sink_track(
     )?;
     sink_track.play()?;
     unsafe {
-        DATA.audio_sink_tracks.insert(peer_id, sink_track);
+        // don't want two tracks logging at the same time
+        if let Some(mut track) = DATA.audio_sink_tracks.insert(peer_id.clone(), sink_track) {
+            if let Err(e) = track.remove_mp4_logger() {
+                log::error!("failed to remove mp4 logger when replacing sink track: {e}");
+            }
+        }
+        if DATA.is_recording {
+            if let Some(sink_track) = DATA.audio_sink_tracks.get_mut(&peer_id) {
+                if let Err(e) = sink_track.init_mp4_logger() {
+                    log::error!("failed to init mp4 logger for sink track: {e}");
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -213,5 +252,52 @@ pub async fn unmute_self() -> anyhow::Result<()> {
             .play()
             .map_err(|e| anyhow::anyhow!("failed to play (unmute) track: {e}"))?;
     }
+    Ok(())
+}
+
+// the source and sink tracks will use mp4_logger::get_instance() regardless of whether init_recording is called.
+// but that instance (when uninitialized) won't do anything.
+// when the user issues the command to begin recording, mp4_logger needs to be initialized and
+// the source and sink tracks need to be told to get a new instance of mp4_logger.
+pub async fn init_recording(config: Mp4LoggerConfig) -> anyhow::Result<()> {
+    let _lock = LOCK.write().await;
+
+    unsafe {
+        if DATA.is_recording {
+            // this function was called twice for the same call. assume they mean to resume
+            mp4_logger::resume();
+            return Ok(());
+        }
+        DATA.is_recording = true;
+    }
+    mp4_logger::init(config).await?;
+
+    unsafe {
+        DATA.is_recording = true;
+    }
+
+    for track in unsafe { DATA.audio_sink_tracks.values_mut() } {
+        if let Err(e) = track.init_mp4_logger() {
+            log::error!("failed to init mp4 logger for sink track: {e}");
+        }
+    }
+
+    if let Some(track) = unsafe { DATA.audio_source_track.as_mut() } {
+        if let Err(e) = track.init_mp4_logger() {
+            log::error!("failed to init mp4 logger for source track: {e}");
+        }
+    }
+    Ok(())
+}
+
+pub async fn pause_recording() -> anyhow::Result<()> {
+    let _lock = LOCK.write().await;
+    mp4_logger::pause();
+    Ok(())
+}
+
+pub async fn resume_recording() -> anyhow::Result<()> {
+    let _lock = LOCK.write().await;
+    mp4_logger::resume();
     Ok(())
 }

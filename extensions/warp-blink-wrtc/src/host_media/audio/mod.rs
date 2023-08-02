@@ -8,6 +8,7 @@ use webrtc::track::{
     track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote,
 };
 
+pub(crate) mod automute;
 mod loudness;
 mod opus;
 mod speech;
@@ -18,6 +19,7 @@ pub use self::opus::source::OpusSource;
 // stores the TrackRemote at least
 pub trait SourceTrack {
     fn init(
+        own_id: DID,
         event_ch: broadcast::Sender<BlinkEventKind>,
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
@@ -31,6 +33,8 @@ pub trait SourceTrack {
     fn pause(&self) -> Result<()>;
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()>;
+    fn init_mp4_logger(&mut self) -> Result<()>;
+    fn remove_mp4_logger(&mut self) -> Result<()>;
 }
 
 // stores the TrackRemote at least
@@ -45,13 +49,16 @@ pub trait SinkTrack {
     ) -> Result<Self>
     where
         Self: Sized;
-    fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
+    fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
+    fn init_mp4_logger(&mut self) -> Result<()>;
+    fn remove_mp4_logger(&mut self) -> Result<()>;
 }
 
 /// Uses the MIME type from codec to determine which implementation of SourceTrack to create
 pub fn create_source_track(
+    own_id: DID,
     event_ch: broadcast::Sender<BlinkEventKind>,
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
@@ -63,6 +70,7 @@ pub fn create_source_track(
     }
     match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSource::init(
+            own_id,
             event_ch,
             input_device,
             track,
