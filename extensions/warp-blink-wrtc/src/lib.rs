@@ -16,7 +16,10 @@ mod simple_webrtc;
 mod store;
 
 use async_trait::async_trait;
-use host_media::mp4_logger::Mp4LoggerConfig;
+use host_media::{
+    audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
+    mp4_logger::Mp4LoggerConfig,
+};
 use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
@@ -119,6 +122,7 @@ impl Drop for BlinkImpl {
             if let Err(e) = webrtc_controller.write().await.deinit().await {
                 log::error!("error in webrtc_controller deinit: {e}");
             }
+            host_media::audio::automute::stop();
             host_media::reset().await;
             log::debug!("deinit finished");
         });
@@ -248,6 +252,7 @@ impl BlinkImpl {
             }
         });
 
+        host_media::audio::automute::start();
         Ok(Box::new(blink_impl))
     }
 
@@ -1066,6 +1071,17 @@ impl Blink for BlinkImpl {
         }
 
         Ok(())
+    }
+
+    fn enable_automute(&mut self) -> Result<(), Error> {
+        let tx = AUDIO_CMD_CH.tx.clone();
+        tx.send(AutoMuteCmd::Enable)
+            .map_err(|e| Error::OtherWithContext(format!("failed to enable automute: {e}")))
+    }
+    fn disable_automute(&mut self) -> Result<(), Error> {
+        let tx = AUDIO_CMD_CH.tx.clone();
+        tx.send(AutoMuteCmd::Disable)
+            .map_err(|e| Error::OtherWithContext(format!("failed to disable automute: {e}")))
     }
 
     async fn get_audio_source_codec(&self) -> AudioCodec {

@@ -18,7 +18,10 @@ use webrtc::{
 
 use crate::{
     host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
-    host_media::mp4_logger::{self, Mp4LoggerInstance},
+    host_media::{
+        self,
+        mp4_logger::{self, Mp4LoggerInstance},
+    },
 };
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
@@ -36,6 +39,7 @@ pub struct OpusSink {
     decoder_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_logger: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
+    muted: Arc<warp::sync::RwLock<bool>>,
 }
 
 impl Drop for OpusSink {
@@ -97,6 +101,8 @@ impl OpusSink {
         let event_ch2 = event_ch.clone();
         let event_ch3 = event_ch.clone();
         let peer_id2 = peer_id.clone();
+        let muted = Arc::new(warp::sync::RwLock::new(false));
+        let muted2 = muted.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
                 track: track2,
@@ -108,6 +114,7 @@ impl OpusSink {
                 event_ch: event_ch2,
                 peer_id: peer_id2,
                 mp4_writer: mp4_logger2,
+                muted: muted2,
             })
             .await
             {
@@ -152,6 +159,7 @@ impl OpusSink {
             decoder_handle: join_handle,
             event_ch,
             mp4_logger,
+            muted,
         })
     }
 }
@@ -177,15 +185,11 @@ impl SinkTrack for OpusSink {
     }
 
     fn play(&self) -> Result<()> {
-        if let Err(e) = self.stream.play() {
-            return Err(e.into());
-        }
+        *self.muted.write() = false;
         Ok(())
     }
     fn pause(&self) -> Result<()> {
-        if let Err(e) = self.stream.pause() {
-            return Err(e.into());
-        }
+        *self.muted.write() = true;
         Ok(())
     }
     fn change_output_device(&mut self, output_device: &cpal::Device) -> Result<()> {
@@ -226,6 +230,7 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
     mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
+    muted: Arc<warp::sync::RwLock<bool>>,
 }
 
 async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<()>
@@ -242,6 +247,7 @@ where
         event_ch,
         peer_id,
         mp4_writer,
+        muted,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -249,6 +255,8 @@ where
     let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
+
+    let automute_tx = host_media::audio::automute::AUDIO_CMD_CH.tx.clone();
 
     // let logger = rtp_logger::get_instance(format!("{}-audio", peer_id));
 
@@ -266,9 +274,11 @@ where
                     }
                 };
 
-                if let Some(writer) = mp4_writer.write().as_mut() {
-                    // todo: use the audio codec to determine number of samples and duration
-                    writer.log(rtp_packet.payload.clone());
+                if !*muted.read() {
+                    if let Some(writer) = mp4_writer.write().as_mut() {
+                        // todo: use the audio codec to determine number of samples and duration
+                        writer.log(rtp_packet.payload.clone());
+                    }
                 }
 
                 // if let Some(logger) = logger.as_ref() {
@@ -298,6 +308,10 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
+                    // discard samples if muted
+                    if *muted.read() {
+                        continue;
+                    }
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
                         &mut decoder_output_buf,
@@ -305,6 +319,9 @@ where
                     ) {
                         Ok(siz) => {
                             let to_send = decoder_output_buf.iter().take(siz);
+                            // hopefully each opus packet is still 10ms
+                            let _ = automute_tx
+                                .send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
                             for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample) {
                                     ChannelMixerOutput::Single(sample) => {

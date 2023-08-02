@@ -1,8 +1,5 @@
 use anyhow::Result;
-use cpal::{
-    traits::{DeviceTrait, StreamTrait},
-    SampleRate,
-};
+use cpal::{traits::DeviceTrait, SampleRate};
 use rand::Rng;
 use ringbuf::HeapRb;
 
@@ -38,6 +35,7 @@ pub struct OpusSource {
     packetizer_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_logger: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
+    muted: Arc<warp::sync::RwLock<bool>>,
 }
 
 impl Drop for OpusSource {
@@ -59,6 +57,8 @@ impl SourceTrack for OpusSource {
         Self: Sized,
     {
         let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
+        let muted = Arc::new(warp::sync::RwLock::new(false));
+        let muted2 = muted.clone();
         let (input_stream, join_handle) = create_source_track(
             input_device,
             track.clone(),
@@ -66,6 +66,7 @@ impl SourceTrack for OpusSource {
             source_codec.clone(),
             event_ch.clone(),
             mp4_logger.clone(),
+            muted2,
         )?;
 
         Ok(Self {
@@ -77,19 +78,16 @@ impl SourceTrack for OpusSource {
             stream: input_stream,
             packetizer_handle: join_handle,
             mp4_logger,
+            muted,
         })
     }
 
     fn play(&self) -> Result<()> {
-        if let Err(e) = self.stream.play() {
-            return Err(e.into());
-        }
+        *self.muted.write() = false;
         Ok(())
     }
     fn pause(&self) -> Result<()> {
-        if let Err(e) = self.stream.pause() {
-            return Err(e.into());
-        }
+        *self.muted.write() = true;
         Ok(())
     }
     // should not require RTP renegotiation
@@ -102,6 +100,7 @@ impl SourceTrack for OpusSource {
             self.source_codec.clone(),
             self.event_ch.clone(),
             self.mp4_logger.clone(),
+            self.muted.clone(),
         )?;
         self.stream = stream;
         self.packetizer_handle = handle;
@@ -127,6 +126,7 @@ fn create_source_track(
     source_codec: blink::AudioCodec,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
+    muted: Arc<warp::sync::RwLock<bool>>,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
     let config = cpal::StreamConfig {
         channels: source_codec.channels(),
@@ -202,8 +202,20 @@ fn create_source_track(
                         x if x >= 127.0 => 127,
                         x => x as u8,
                     };
+                    // discard packet if muted
+                    if *muted.read() {
+                        continue;
+                    }
+                    // triggered when someone else is talking
+                    if *crate::host_media::audio::automute::SHOULD_MUTE.read() {
+                        continue;
+                    }
                     if speech_detector.should_emit_event(loudness) {
                         let _ = event_ch.send(BlinkEventKind::SelfSpeaking);
+                    }
+                    // don't send silent packets
+                    if !speech_detector.is_speaking() {
+                        continue;
                     }
                     match packetizer
                         .packetize(&output.bytes, webrtc_codec.frame_size() as u32)

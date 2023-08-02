@@ -75,6 +75,10 @@ enum Repl {
     MuteSelf,
     /// unmute self
     UnmuteSelf,
+    /// enable automute (enabled by default)
+    EnableAutomute,
+    /// disable automute
+    DisableAutomute,
     /// show currently connected audio I/O devices
     ShowSelectedDevices,
     /// show available audio I/O devices
@@ -140,6 +144,12 @@ async fn handle_command(
         }
         Repl::UnmuteSelf => {
             blink.unmute_self().await?;
+        }
+        Repl::EnableAutomute => {
+            blink.enable_automute()?;
+        }
+        Repl::DisableAutomute => {
+            blink.disable_automute()?;
         }
         Repl::ShowSelectedDevices => {
             println!("microphone: {:?}", blink.get_current_microphone().await);
@@ -233,7 +243,11 @@ async fn handle_command(
 
 async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
-        println!("BlinkEvent: {evt}");
+        // get rid of noisy logs
+        if !matches!(evt, BlinkEventKind::ParticipantSpeaking { .. }) {
+            println!("BlinkEvent: {evt}");
+        }
+
         #[allow(clippy::single_match)]
         match evt {
             BlinkEventKind::IncomingCall {
