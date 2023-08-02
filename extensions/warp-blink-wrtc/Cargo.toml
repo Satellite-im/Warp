@@ -23,7 +23,7 @@ libipld = { workspace = true }
 log = "0.4.17"
 mp4 = { workspace = true }
 once_cell = { workspace = true }
-opus = "0.3.0"
+opus = { git = "https://github.com/sdwoodbury/opus-rs", rev="f3bd37d1f81293f6c2204e59ce896d5d09b77f8f" }
 uuid = { workspace = true }
 rand = { workspace = true }
 ringbuf = "0.3"

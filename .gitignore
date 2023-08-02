@@ -20,3 +20,5 @@ Cargo.lock
 .vscode
 
 /data
+
+.bash_history

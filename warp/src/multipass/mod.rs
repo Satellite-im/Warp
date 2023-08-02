@@ -2,6 +2,8 @@
 pub mod generator;
 pub mod identity;
 
+use std::path::PathBuf;
+
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -17,7 +19,7 @@ use crate::multipass::identity::{Identifier, IdentityUpdate};
 
 use self::identity::{IdentityStatus, Platform, Relationship};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
@@ -36,6 +38,26 @@ pub enum MultiPassEventKind {
     BlockedBy { did: DID },
     Unblocked { did: DID },
     UnblockedBy { did: DID },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportLocation {
+    /// Remote location where the identity is stored
+    Remote,
+
+    /// Local path where the identity is stored
+    Local { path: PathBuf },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityImportOption {
+    Locate {
+        /// Location of the identity
+        location: ImportLocation,
+
+        /// Passphrase of the identity
+        passphrase: String,
+    },
 }
 
 #[derive(FFIFree)]
@@ -58,6 +80,10 @@ impl core::ops::DerefMut for MultiPassEventStream {
 pub trait MultiPass:
     Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + DynClone
 {
+    async fn import_identity(&mut self, _: IdentityImportOption) -> Result<Identity, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// Create an [`Identity`]
     async fn create_identity(
         &mut self,
