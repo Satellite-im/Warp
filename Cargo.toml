@@ -71,6 +71,7 @@ derive_more = "0.99"
 paste = "1.0"
 libc = "0.2"
 mp4 = { git="https://github.com/sdwoodbury/mp4-rust", rev="9887024513f59e5fcda9f44442b2a3a2cdfe9706" }
+opus = { git = "https://github.com/sdwoodbury/opus-rs", rev="d05dbfef21f3687b648b7f5389b1906e7610a5ff" }
 sata = { git = "https://github.com/Satellite-im/Sata", rev = "9b5a5d441c816968bc75ea8b99335f728be259ef" }
 tracing = { version = "0.1" }
 tracing-futures = { version = "0.2" }
