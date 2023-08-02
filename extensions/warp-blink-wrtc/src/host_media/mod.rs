@@ -301,3 +301,15 @@ pub async fn resume_recording() -> anyhow::Result<()> {
     mp4_logger::resume();
     Ok(())
 }
+
+pub async fn set_peer_audio_gain(peer_id: DID, multiplier: f32) -> anyhow::Result<()> {
+    let _lock = LOCK.write().await;
+
+    if let Some(track) = unsafe { DATA.audio_sink_tracks.get_mut(&peer_id) } {
+        track.set_audio_multiplier(multiplier)?;
+    } else {
+        bail!("peer not found in call");
+    }
+
+    Ok(())
+}

@@ -9,6 +9,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
+    sync::RwLock,
 };
 
 use webrtc::{
@@ -38,8 +39,9 @@ pub struct OpusSink {
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
-    mp4_logger: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
-    muted: Arc<warp::sync::RwLock<bool>>,
+    mp4_logger: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
+    muted: Arc<RwLock<bool>>,
+    audio_multiplier: Arc<RwLock<f32>>,
 }
 
 impl Drop for OpusSink {
@@ -103,6 +105,8 @@ impl OpusSink {
         let peer_id2 = peer_id.clone();
         let muted = Arc::new(warp::sync::RwLock::new(false));
         let muted2 = muted.clone();
+        let audio_multiplier = Arc::new(RwLock::new(1.0));
+        let audio_multiplier2 = audio_multiplier.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
                 track: track2,
@@ -115,6 +119,7 @@ impl OpusSink {
                 peer_id: peer_id2,
                 mp4_writer: mp4_logger2,
                 muted: muted2,
+                audio_multiplier: audio_multiplier2,
             })
             .await
             {
@@ -160,6 +165,7 @@ impl OpusSink {
             event_ch,
             mp4_logger,
             muted,
+            audio_multiplier,
         })
     }
 }
@@ -218,6 +224,11 @@ impl SinkTrack for OpusSink {
         self.mp4_logger.write().take();
         Ok(())
     }
+
+    fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<()> {
+        *self.audio_multiplier.write() = multiplier;
+        Ok(())
+    }
 }
 
 struct DecodeMediaStreamArgs<T: Depacketizer> {
@@ -229,8 +240,9 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
-    mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
-    muted: Arc<warp::sync::RwLock<bool>>,
+    mp4_writer: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
+    muted: Arc<RwLock<bool>>,
+    audio_multiplier: Arc<RwLock<f32>>,
 }
 
 async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<()>
@@ -248,6 +260,7 @@ where
         peer_id,
         mp4_writer,
         muted,
+        audio_multiplier,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -318,12 +331,13 @@ where
                         false,
                     ) {
                         Ok(siz) => {
+                            let multiplier = *audio_multiplier.read();
                             let to_send = decoder_output_buf.iter().take(siz);
                             // hopefully each opus packet is still 10ms
                             let _ = automute_tx
                                 .send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
                             for audio_sample in to_send {
-                                match channel_mixer.process(*audio_sample) {
+                                match channel_mixer.process(*audio_sample * multiplier) {
                                     ChannelMixerOutput::Single(sample) => {
                                         resampler.process(sample, &mut raw_samples);
                                     }
@@ -333,7 +347,6 @@ where
                                     }
                                     ChannelMixerOutput::None => {}
                                 }
-
                                 for sample in raw_samples.drain(..) {
                                     if let Err(e) = producer.push(sample) {
                                         log::error!("failed to send sample: {}", e);
