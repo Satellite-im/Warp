@@ -26,7 +26,7 @@ use warp::sync::{Arc, RwLock};
 
 use warp::module::Module;
 use warp::tesseract::{Tesseract, TesseractEvent};
-use warp::{Extension, ExtensionEventKind, SingleHandle};
+use warp::{Extension, SingleHandle};
 
 use ipfs::{
     Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
@@ -51,7 +51,6 @@ pub struct IpfsIdentity {
     identity_store: Arc<RwLock<Option<IdentityStore>>>,
     initialized: Arc<AtomicBool>,
     tx: broadcast::Sender<MultiPassEventKind>,
-    ready_tx: broadcast::Sender<ExtensionEventKind>,
 }
 
 pub async fn ipfs_identity_persistent(
@@ -78,10 +77,9 @@ pub async fn ipfs_identity_temporary(
 impl IpfsIdentity {
     pub async fn new(config: MpIpfsConfig, tesseract: Tesseract) -> anyhow::Result<IpfsIdentity> {
         let (tx, _) = broadcast::channel(1024);
-        let (ready_tx, _) = broadcast::channel(25);
         trace!("Initializing Multipass");
 
-        let identity = IpfsIdentity {
+        let mut identity = IpfsIdentity {
             config,
             tesseract,
             ipfs: Default::default(),
@@ -89,23 +87,21 @@ impl IpfsIdentity {
             identity_store: Default::default(),
             initialized: Default::default(),
             tx,
-            ready_tx,
         };
 
-        tokio::spawn({
-            let mut identity = identity.clone();
-            async move {
-                if !identity.tesseract.is_unlock() {
-                    let mut stream = identity.tesseract.subscribe();
-                    while let Some(event) = stream.next().await {
-                        if matches!(event, TesseractEvent::Unlocked) {
-                            break;
-                        }
+        if !identity.tesseract.is_unlock() {
+            let mut inner = identity.clone();
+            tokio::spawn(async move {
+                let mut stream = inner.tesseract.subscribe();
+                while let Some(event) = stream.next().await {
+                    if matches!(event, TesseractEvent::Unlocked) {
+                        break;
                     }
                 }
-                if let Err(_e) = identity.initialize_store(false).await {}
-            }
-        });
+                if let Err(_e) = inner.initialize_store(false).await {}
+            });
+        } else if let Err(_e) = identity.initialize_store(false).await {
+        }
 
         Ok(identity)
     }
@@ -143,7 +139,10 @@ impl IpfsIdentity {
             _ => anyhow::bail!("Unable to initialize store"),
         };
 
-        info!("Peer ID: {}", keypair.public().to_peer_id());
+        info!(
+            "Have keypair with peer id: {}",
+            keypair.public().to_peer_id()
+        );
 
         let config = self.config.clone();
 
@@ -482,7 +481,6 @@ impl IpfsIdentity {
         *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
-        let _ = self.ready_tx.send(ExtensionEventKind::Ready);
         Ok(())
     }
 
@@ -549,27 +547,6 @@ impl Extension for IpfsIdentity {
     fn module(&self) -> Module {
         Module::Accounts
     }
-
-    fn is_ready(&self) -> bool {
-        self.initialized.load(Ordering::SeqCst)
-    }
-
-    fn extension_subscribe(
-        &self,
-    ) -> Result<futures::stream::BoxStream<'static, ExtensionEventKind>, warp::error::Error> {
-        let mut rx = self.ready_tx.subscribe();
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-
-        Ok(stream.boxed())
-    }
 }
 
 impl SingleHandle for IpfsIdentity {
@@ -585,6 +562,11 @@ impl MultiPass for IpfsIdentity {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
+        info!(
+            "create_identity with username: {username:?} and containing passphrase: {}",
+            passphrase.is_some()
+        );
+
         if self.is_store_initialized().await {
             info!("Store is initialized with existing identity");
             return Err(Error::IdentityExist);
@@ -605,11 +587,11 @@ impl MultiPass for IpfsIdentity {
 
         if let Some(phrase) = passphrase {
             info!("Passphrase exist");
-            let tesseract = self.tesseract.clone();
+            let mut tesseract = self.tesseract.clone();
             if !tesseract.exist("keypair") {
                 warn!("Loading keypair generated from mnemonic phrase into tesseract");
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &tesseract,
+                    &mut tesseract,
                     phrase,
                     None,
                     self.config.save_phrase,
@@ -626,7 +608,6 @@ impl MultiPass for IpfsIdentity {
             .create_identity(username)
             .await?;
         info!("Identity with {} has been created", identity.did_key());
-
         Ok(identity.did_key())
     }
 

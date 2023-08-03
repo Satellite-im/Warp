@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 use store::message::MessageStore;
-use tokio::sync::broadcast;
 use tokio::sync::broadcast::Sender;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream};
@@ -32,7 +32,6 @@ use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, Reacti
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
 use warp::sync::RwLock;
 use warp::Extension;
-use warp::ExtensionEventKind;
 use warp::SingleHandle;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -46,7 +45,6 @@ pub struct IpfsMessaging {
     constellation: Option<Box<dyn Constellation>>,
     initialize: Arc<AtomicBool>,
     tx: Sender<RayGunEventKind>,
-    ready_tx: Sender<ExtensionEventKind>,
     //TODO: GroupManager
     //      * Create, Join, and Leave GroupChats
     //      * Send message
@@ -61,9 +59,8 @@ impl IpfsMessaging {
         constellation: Option<Box<dyn Constellation>>,
     ) -> anyhow::Result<Self> {
         let (tx, _) = tokio::sync::broadcast::channel(1024);
-        let (ready_tx, _) = tokio::sync::broadcast::channel(25);
         trace!("Initializing Raygun Extension");
-        let messaging = IpfsMessaging {
+        let mut messaging = IpfsMessaging {
             account,
             config,
             ipfs: Default::default(),
@@ -71,33 +68,23 @@ impl IpfsMessaging {
             constellation,
             initialize: Default::default(),
             tx,
-            ready_tx,
         };
 
-        tokio::spawn({
+        if messaging.account.get_own_identity().await.is_err() {
+            trace!("Identity doesnt exist. Waiting for it to load or to be created");
             let mut messaging = messaging.clone();
-            async move {
-                if !messaging.account.is_ready() {
-                    trace!("Identity doesnt exist. Waiting for it to load or to be created");
-                    let mut stream = match messaging.account.extension_subscribe() {
-                        Ok(stream) => stream,
-                        Err(e) => {
-                            error!("Error while getting extensions stream: {e}");
-                            return;
-                        }
-                    };
-
-                    while let Some(event) = stream.next().await {
-                        if matches!(event, ExtensionEventKind::Ready) {
-                            break;
-                        }
-                    }
+            tokio::spawn(async move {
+                while messaging.account.get_own_identity().await.is_err() {
+                    tokio::time::sleep(Duration::from_millis(100)).await
                 }
+                trace!("Identity found. Initializing store");
                 if let Err(e) = messaging.initialize().await {
                     error!("Error initializing store: {e}");
                 }
-            }
-        });
+            });
+        } else {
+            messaging.initialize().await?;
+        }
 
         Ok(messaging)
     }
@@ -114,9 +101,7 @@ impl IpfsMessaging {
 
         let ipfs = match ipfs_handle {
             Some(ipfs) => ipfs,
-            None => {
-                anyhow::bail!("Unable to use IPFS Handle");
-            }
+            None => anyhow::bail!("Unable to use IPFS Handle"),
         };
 
         *self.direct_store.write() = Some(
@@ -141,7 +126,7 @@ impl IpfsMessaging {
         *self.ipfs.write() = Some(ipfs);
 
         self.initialize.store(true, Ordering::SeqCst);
-        let _ = self.ready_tx.send(ExtensionEventKind::Ready);
+
         Ok(())
     }
 
@@ -163,27 +148,6 @@ impl Extension for IpfsMessaging {
 
     fn module(&self) -> Module {
         Module::Messaging
-    }
-
-    fn is_ready(&self) -> bool {
-        self.initialize.load(Ordering::SeqCst)
-    }
-
-    fn extension_subscribe(
-        &self,
-    ) -> Result<futures::stream::BoxStream<'static, ExtensionEventKind>> {
-        let mut rx = self.ready_tx.subscribe();
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-
-        Ok(stream.boxed())
     }
 }
 

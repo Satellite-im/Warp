@@ -13,9 +13,8 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use thumbnail::ThumbnailGenerator;
-use tokio::sync::broadcast;
 use tokio_util::io::ReaderStream;
 use utils::ExtensionType;
 use warp::constellation::file::FileType;
@@ -38,7 +37,7 @@ use ipfs::{Ipfs, IpfsPath, Keypair};
 
 use warp::constellation::{directory::Directory, Constellation};
 use warp::error::Error;
-use warp::{Extension, ExtensionEventKind, SingleHandle};
+use warp::{Extension, SingleHandle};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -52,10 +51,8 @@ pub struct IpfsFileSystem {
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     keypair: Arc<RwLock<Option<Arc<DID>>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
-    initialized: Arc<AtomicBool>,
     account: Box<dyn MultiPass>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
-    ready_tx: tokio::sync::broadcast::Sender<ExtensionEventKind>,
     thumbnail_store: ThumbnailGenerator,
 }
 
@@ -65,46 +62,46 @@ impl IpfsFileSystem {
         config: Option<FsIpfsConfig>,
     ) -> anyhow::Result<Self> {
         let (tx, _) = tokio::sync::broadcast::channel(1024);
-        let (ready_tx, _) = tokio::sync::broadcast::channel(1024);
+
         let filesystem = IpfsFileSystem {
             index: Directory::new("root"),
             path: Arc::new(Default::default()),
             modified: Utc::now(),
             config,
             index_cid: Default::default(),
-            initialized: Arc::default(),
             account,
             keypair: Default::default(),
             ipfs: Default::default(),
             broadcast: tx,
             thumbnail_store: ThumbnailGenerator::default(),
-            ready_tx,
         };
 
-        tokio::spawn({
+        if filesystem.account.get_own_identity().await.is_err() {
+            debug!("Identity doesnt exist. Waiting for it to load or to be created");
             let mut filesystem = filesystem.clone();
-            let account = filesystem.account.clone();
-            async move {
-                if !account.is_ready() {
-                    let mut stream = match account.extension_subscribe() {
-                        Ok(stream) => stream,
-                        Err(e) => {
-                            error!("Error while getting extensions stream: {e}");
-                            return;
-                        }
-                    };
 
-                    while let Some(event) = stream.next().await {
-                        if matches!(event, ExtensionEventKind::Ready) {
-                            break;
+            tokio::spawn({
+                let account = filesystem.account.clone();
+                async move {
+                    loop {
+                        match account.get_own_identity().await {
+                            Ok(_) => break,
+                            _ => {
+                                //TODO: have a flag that would tell is it been an error other than it not being available
+                                //      so we dont try to extract ipfs
+                                tokio::time::sleep(Duration::from_millis(100)).await
+                            }
                         }
                     }
+                    if let Err(e) = filesystem.initialize().await {
+                        error!("Error initializing filesystem: {e}");
+                    }
                 }
-                if let Err(e) = filesystem.initialize().await {
-                    error!("Error initializing filesystem: {e}");
-                }
-            }
-        });
+            });
+        } else {
+            let mut filesystem = filesystem.clone();
+            filesystem.initialize().await?;
+        }
 
         Ok(filesystem)
     }
@@ -141,9 +138,6 @@ impl IpfsFileSystem {
             }
         });
 
-        self.initialized.store(true, Ordering::SeqCst);
-
-        let _ = self.ready_tx.send(ExtensionEventKind::Ready);
         Ok(())
     }
 
@@ -152,7 +146,6 @@ impl IpfsFileSystem {
         let index = self.export(ConstellationDataType::Json)?;
 
         let key = self.keypair()?;
-
         let data = ecdh_encrypt(&key, None, index.as_bytes())?;
 
         let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
@@ -282,6 +275,10 @@ impl IpfsFileSystem {
         Ok(kp)
     }
 
+    pub async fn account(&self) -> Result<Box<dyn MultiPass>> {
+        Ok(self.account.clone())
+    }
+
     pub fn ipfs(&self) -> Result<Ipfs> {
         self.ipfs
             .read()
@@ -301,27 +298,6 @@ impl Extension for IpfsFileSystem {
 
     fn module(&self) -> Module {
         Module::FileSystem
-    }
-
-    fn is_ready(&self) -> bool {
-        self.initialized.load(Ordering::SeqCst)
-    }
-
-    fn extension_subscribe(
-        &self,
-    ) -> Result<futures::stream::BoxStream<'static, ExtensionEventKind>> {
-        let mut rx = self.ready_tx.subscribe();
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-
-        Ok(stream.boxed())
     }
 }
 
