@@ -61,10 +61,10 @@ pub async fn create_account_and_chat(
     config.bootstrap = Bootstrap::None;
 
     let mut account =
-        Box::new(IpfsIdentity::new(config, tesseract, None).await?) as Box<dyn MultiPass>;
+        Box::new(IpfsIdentity::new(config, tesseract).await?) as Box<dyn MultiPass>;
     let did = account.create_identity(username, passphrase).await?;
     let identity = account.get_own_identity().await?;
-    let raygun = Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?) as Box<_>;
+    let raygun = Box::new(IpfsMessaging::new(None, account.clone(), None).await?) as Box<_>;
     Ok((account, raygun, did, identity))
 }
 

@@ -28,7 +28,7 @@ use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::{DIDKey, Ed25519KeyPair, KeyMaterial, DID};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
-use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use warp::sync::{Arc, RwLock};
 
 use warp::module::Module;
 
@@ -37,7 +37,6 @@ use ipfs::{Ipfs, IpfsPath, Keypair};
 
 use warp::constellation::{directory::Directory, Constellation};
 use warp::error::Error;
-use warp::pocket_dimension::PocketDimension;
 use warp::{Extension, SingleHandle};
 
 type Result<T> = std::result::Result<T, Error>;
@@ -54,7 +53,6 @@ pub struct IpfsFileSystem {
     index_cid: Arc<RwLock<Option<Cid>>>,
     account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     thumbnail_store: ThumbnailGenerator,
 }
 
@@ -75,7 +73,6 @@ impl IpfsFileSystem {
             keypair: Default::default(),
             ipfs: Default::default(),
             broadcast: tx,
-            cache: None,
             thumbnail_store: ThumbnailGenerator::default(),
         };
 
@@ -301,26 +298,6 @@ impl IpfsFileSystem {
             .as_ref()
             .cloned()
             .ok_or(Error::ConstellationExtensionUnavailable)
-    }
-
-    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
-        let cache = self
-            .cache
-            .as_ref()
-            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
-
-        let inner = cache.read();
-        Ok(inner)
-    }
-
-    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
-        let cache = self
-            .cache
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
-
-        let inner = cache.write();
-        Ok(inner)
     }
 }
 

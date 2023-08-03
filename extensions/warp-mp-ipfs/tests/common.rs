@@ -57,7 +57,7 @@ pub async fn create_account(
     config.ipfs_setting.bootstrap = false;
     config.bootstrap = Bootstrap::None;
 
-    let mut account = IpfsIdentity::new(config, tesseract, None).await?;
+    let mut account = IpfsIdentity::new(config, tesseract).await?;
     let did = account.create_identity(username, passphrase).await?;
     let identity = account.get_own_identity().await?;
     Ok((Box::new(account), did, identity))
