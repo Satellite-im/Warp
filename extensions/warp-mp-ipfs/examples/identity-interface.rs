@@ -95,10 +95,10 @@ async fn account(
     config.ipfs_setting.mdns.enable = opt.mdns;
 
     let mut account = match path.is_some() {
-        false => Box::new(ipfs_identity_temporary(Some(config), tesseract).await?)
-            as Box<dyn MultiPass>,
-        true => Box::new(ipfs_identity_persistent(config, tesseract).await?)
-            as Box<dyn MultiPass>,
+        false => {
+            Box::new(ipfs_identity_temporary(Some(config), tesseract).await?) as Box<dyn MultiPass>
+        }
+        true => Box::new(ipfs_identity_persistent(config, tesseract).await?) as Box<dyn MultiPass>,
     };
 
     if account.get_own_identity().await.is_err() {
