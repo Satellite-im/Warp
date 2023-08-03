@@ -52,6 +52,7 @@ pub trait SinkTrack {
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
     fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
+    fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<()>;
     fn init_mp4_logger(&mut self) -> Result<()>;
     fn remove_mp4_logger(&mut self) -> Result<()>;
 }

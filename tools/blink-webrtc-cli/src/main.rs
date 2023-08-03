@@ -107,6 +107,9 @@ enum Repl {
     RecordAudio { output_dir: String },
     /// stop recording audio
     StopRecording,
+    /// change the loudness of the peer for the call
+    /// can only make it louder because multiplier can't be a float for the CLI
+    SetGain { peer: DID, multiplier: u32 },
 }
 
 async fn handle_command(
@@ -237,6 +240,9 @@ async fn handle_command(
         }
         Repl::RecordAudio { output_dir } => blink.record_call(&output_dir).await?,
         Repl::StopRecording => blink.stop_recording().await?,
+        Repl::SetGain { peer, multiplier } => {
+            blink.set_peer_audio_gain(peer, multiplier as f32).await?
+        }
     }
     Ok(())
 }
