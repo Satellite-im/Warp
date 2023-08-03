@@ -36,6 +36,7 @@ use warp::SingleHandle;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Clone)]
 pub struct IpfsMessaging {
     account: Box<dyn MultiPass>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
@@ -49,20 +50,6 @@ pub struct IpfsMessaging {
     //      * Send message
     //      * Assign permissions to peers
     //      * TBD
-}
-
-impl Clone for IpfsMessaging {
-    fn clone(&self) -> Self {
-        Self {
-            account: self.account.clone(),
-            ipfs: self.ipfs.clone(),
-            direct_store: self.direct_store.clone(),
-            config: self.config.clone(),
-            constellation: self.constellation.clone(),
-            initialize: self.initialize.clone(),
-            tx: self.tx.clone(),
-        }
-    }
 }
 
 impl IpfsMessaging {
