@@ -51,7 +51,7 @@ pub struct IpfsFileSystem {
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     keypair: Arc<RwLock<Option<Arc<DID>>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
-    account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
+    account: Box<dyn MultiPass>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
     thumbnail_store: ThumbnailGenerator,
 }
@@ -69,42 +69,38 @@ impl IpfsFileSystem {
             modified: Utc::now(),
             config,
             index_cid: Default::default(),
-            account: Default::default(),
+            account,
             keypair: Default::default(),
             ipfs: Default::default(),
             broadcast: tx,
             thumbnail_store: ThumbnailGenerator::default(),
         };
 
-        *filesystem.account.write().await = Some(account);
+        if filesystem.account.get_own_identity().await.is_err() {
+            debug!("Identity doesnt exist. Waiting for it to load or to be created");
+            let mut filesystem = filesystem.clone();
 
-        if let Some(account) = filesystem.account.read().await.clone() {
-            if account.get_own_identity().await.is_err() {
-                debug!("Identity doesnt exist. Waiting for it to load or to be created");
-                let mut filesystem = filesystem.clone();
-
-                tokio::spawn({
-                    let account = account.clone();
-                    async move {
-                        loop {
-                            match account.get_own_identity().await {
-                                Ok(_) => break,
-                                _ => {
-                                    //TODO: have a flag that would tell is it been an error other than it not being available
-                                    //      so we dont try to extract ipfs
-                                    tokio::time::sleep(Duration::from_millis(100)).await
-                                }
+            tokio::spawn({
+                let account = filesystem.account.clone();
+                async move {
+                    loop {
+                        match account.get_own_identity().await {
+                            Ok(_) => break,
+                            _ => {
+                                //TODO: have a flag that would tell is it been an error other than it not being available
+                                //      so we dont try to extract ipfs
+                                tokio::time::sleep(Duration::from_millis(100)).await
                             }
                         }
-                        if let Err(e) = filesystem.initialize().await {
-                            error!("Error initializing filesystem: {e}");
-                        }
                     }
-                });
-            } else {
-                let mut filesystem = filesystem.clone();
-                filesystem.initialize().await?;
-            }
+                    if let Err(e) = filesystem.initialize().await {
+                        error!("Error initializing filesystem: {e}");
+                    }
+                }
+            });
+        } else {
+            let mut filesystem = filesystem.clone();
+            filesystem.initialize().await?;
         }
 
         Ok(filesystem)
@@ -113,12 +109,7 @@ impl IpfsFileSystem {
     async fn initialize(&mut self) -> Result<()> {
         debug!("Initializing or fetch ipfs");
 
-        let account = self
-            .account
-            .read()
-            .await
-            .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)?;
+        let account = self.account.clone();
 
         let ipfs_handle = match account.handle() {
             Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
@@ -285,11 +276,7 @@ impl IpfsFileSystem {
     }
 
     pub async fn account(&self) -> Result<Box<dyn MultiPass>> {
-        self.account
-            .read()
-            .await
-            .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
+        Ok(self.account.clone())
     }
 
     pub fn ipfs(&self) -> Result<Ipfs> {
