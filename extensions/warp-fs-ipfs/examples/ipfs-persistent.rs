@@ -71,7 +71,7 @@ async fn account_persistent<P: AsRef<Path>>(
     let mut config = MpIpfsConfig::production(path, opt.experimental_node);
 
     config.ipfs_setting.mdns.enable = opt.mdns;
-    let mut account = ipfs_identity_persistent(config, tesseract).await?;
+    let mut account = ipfs_identity_persistent(config, tesseract, None).await?;
     if account.get_own_identity().await.is_err() {
         account.create_identity(username, None).await?;
     }

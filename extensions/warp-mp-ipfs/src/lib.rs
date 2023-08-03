@@ -22,11 +22,14 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::debug;
 use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::zeroize::Zeroizing;
-use warp::sync::{Arc, RwLock};
+use warp::data::DataType;
+use warp::sata::Sata;
+use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
+use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::{Tesseract, TesseractEvent};
-use warp::{Extension, ExtensionEventKind, SingleHandle};
+use warp::{Extension, SingleHandle};
 
 use ipfs::{
     Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
@@ -44,6 +47,7 @@ use crate::store::discovery::Discovery;
 
 #[derive(Clone)]
 pub struct IpfsIdentity {
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     config: MpIpfsConfig,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
@@ -51,37 +55,42 @@ pub struct IpfsIdentity {
     identity_store: Arc<RwLock<Option<IdentityStore>>>,
     initialized: Arc<AtomicBool>,
     tx: broadcast::Sender<MultiPassEventKind>,
-    ready_tx: broadcast::Sender<ExtensionEventKind>,
 }
 
 pub async fn ipfs_identity_persistent(
     config: MpIpfsConfig,
     tesseract: Tesseract,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 ) -> anyhow::Result<IpfsIdentity> {
     if config.path.is_none() {
         anyhow::bail!("Path is required for identity to be persistent")
     }
-    IpfsIdentity::new(config, tesseract).await
+    IpfsIdentity::new(config, tesseract, cache).await
 }
 pub async fn ipfs_identity_temporary(
     config: Option<MpIpfsConfig>,
     tesseract: Tesseract,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 ) -> anyhow::Result<IpfsIdentity> {
     if let Some(config) = &config {
         if config.path.is_some() {
             anyhow::bail!("Path cannot be set")
         }
     }
-    IpfsIdentity::new(config.unwrap_or_default(), tesseract).await
+    IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
 }
 
 impl IpfsIdentity {
-    pub async fn new(config: MpIpfsConfig, tesseract: Tesseract) -> anyhow::Result<IpfsIdentity> {
+    pub async fn new(
+        config: MpIpfsConfig,
+        tesseract: Tesseract,
+        cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    ) -> anyhow::Result<IpfsIdentity> {
         let (tx, _) = broadcast::channel(1024);
-        let (ready_tx, _) = broadcast::channel(25);
         trace!("Initializing Multipass");
 
-        let identity = IpfsIdentity {
+        let mut identity = IpfsIdentity {
+            cache,
             config,
             tesseract,
             ipfs: Default::default(),
@@ -89,23 +98,21 @@ impl IpfsIdentity {
             identity_store: Default::default(),
             initialized: Default::default(),
             tx,
-            ready_tx,
         };
 
-        tokio::spawn({
-            let mut identity = identity.clone();
-            async move {
-                if !identity.tesseract.is_unlock() {
-                    let mut stream = identity.tesseract.subscribe();
-                    while let Some(event) = stream.next().await {
-                        if matches!(event, TesseractEvent::Unlocked) {
-                            break;
-                        }
+        if !identity.tesseract.is_unlock() {
+            let mut inner = identity.clone();
+            tokio::spawn(async move {
+                let mut stream = inner.tesseract.subscribe();
+                while let Some(event) = stream.next().await {
+                    if matches!(event, TesseractEvent::Unlocked) {
+                        break;
                     }
                 }
-                if let Err(_e) = identity.initialize_store(false).await {}
-            }
-        });
+                if let Err(_e) = inner.initialize_store(false).await {}
+            });
+        } else if let Err(_e) = identity.initialize_store(false).await {
+        }
 
         Ok(identity)
     }
@@ -143,7 +150,10 @@ impl IpfsIdentity {
             _ => anyhow::bail!("Unable to initialize store"),
         };
 
-        info!("Peer ID: {}", keypair.public().to_peer_id());
+        info!(
+            "Have keypair with peer id: {}",
+            keypair.public().to_peer_id()
+        );
 
         let config = self.config.clone();
 
@@ -482,7 +492,6 @@ impl IpfsIdentity {
         *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
-        let _ = self.ready_tx.send(ExtensionEventKind::Ready);
         Ok(())
     }
 
@@ -522,6 +531,26 @@ impl IpfsIdentity {
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
+    pub fn get_cache(&self) -> Result<RwLockReadGuard<Box<dyn PocketDimension>>, Error> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
+
+        let inner = cache.read();
+        Ok(inner)
+    }
+
+    pub fn get_cache_mut(&self) -> Result<RwLockWriteGuard<Box<dyn PocketDimension>>, Error> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
+
+        let inner = cache.write();
+        Ok(inner)
+    }
+
     async fn is_store_initialized(&self) -> bool {
         if !self.initialized.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -549,27 +578,6 @@ impl Extension for IpfsIdentity {
     fn module(&self) -> Module {
         Module::Accounts
     }
-
-    fn is_ready(&self) -> bool {
-        self.initialized.load(Ordering::SeqCst)
-    }
-
-    fn extension_subscribe(
-        &self,
-    ) -> Result<futures::stream::BoxStream<'static, ExtensionEventKind>, warp::error::Error> {
-        let mut rx = self.ready_tx.subscribe();
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-
-        Ok(stream.boxed())
-    }
 }
 
 impl SingleHandle for IpfsIdentity {
@@ -585,6 +593,11 @@ impl MultiPass for IpfsIdentity {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
+        info!(
+            "create_identity with username: {username:?} and containing passphrase: {}",
+            passphrase.is_some()
+        );
+
         if self.is_store_initialized().await {
             info!("Store is initialized with existing identity");
             return Err(Error::IdentityExist);
@@ -605,11 +618,11 @@ impl MultiPass for IpfsIdentity {
 
         if let Some(phrase) = passphrase {
             info!("Passphrase exist");
-            let tesseract = self.tesseract.clone();
+            let mut tesseract = self.tesseract.clone();
             if !tesseract.exist("keypair") {
                 warn!("Loading keypair generated from mnemonic phrase into tesseract");
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &tesseract,
+                    &mut tesseract,
                     phrase,
                     None,
                     self.config.save_phrase,
@@ -627,6 +640,14 @@ impl MultiPass for IpfsIdentity {
             .await?;
         info!("Identity with {} has been created", identity.did_key());
 
+        if let Ok(mut cache) = self.get_cache_mut() {
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                identity.clone(),
+            )?;
+            cache.add_data(DataType::from(Module::Accounts), &object)?;
+        }
         Ok(identity.did_key())
     }
 
@@ -1056,11 +1077,13 @@ pub mod ffi {
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
+    use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::tesseract::Tesseract;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_ipfs_temporary(
+        pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
         config: *const MpIpfsConfig,
     ) -> FFIResult<MultiPassAdapter> {
@@ -1079,7 +1102,13 @@ pub mod ffi {
 
         config.path = None;
 
-        let future = async move { IpfsIdentity::new(config, tesseract).await };
+        let cache = match pocketdimension.is_null() {
+            true => None,
+            false => Some(&*pocketdimension),
+        };
+
+        let future =
+            async move { IpfsIdentity::new(config, tesseract, cache.map(|c| c.inner())).await };
 
         let account = match async_on_block(future) {
             Ok(identity) => identity,
@@ -1092,6 +1121,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_ipfs_persistent(
+        pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
         config: *const MpIpfsConfig,
     ) -> FFIResult<MultiPassAdapter> {
@@ -1110,7 +1140,16 @@ pub mod ffi {
             false => (*config).clone(),
         };
 
-        let account = match async_on_block(IpfsIdentity::new(config, tesseract)) {
+        let cache = match pocketdimension.is_null() {
+            true => None,
+            false => Some(&*pocketdimension),
+        };
+
+        let account = match async_on_block(IpfsIdentity::new(
+            config,
+            tesseract,
+            cache.map(|c| c.inner()),
+        )) {
             Ok(identity) => identity,
             Err(e) => return FFIResult::err(Error::from(e)),
         };

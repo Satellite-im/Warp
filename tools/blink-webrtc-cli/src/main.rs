@@ -303,7 +303,7 @@ async fn main() -> anyhow::Result<()> {
     config.store_setting.share_platform = true;
     config.store_setting.update_events = UpdateEvents::Enabled;
 
-    let mut multipass = warp_mp_ipfs::ipfs_identity_persistent(config, tesseract.clone())
+    let mut multipass = warp_mp_ipfs::ipfs_identity_persistent(config, tesseract.clone(), None)
         .await
         .map(|mp| Box::new(mp) as Box<dyn MultiPass>)?;
 
