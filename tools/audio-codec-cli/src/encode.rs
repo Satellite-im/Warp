@@ -133,11 +133,11 @@ pub fn f32_mp4(
             // todo: maybe delete this comment. flags is expected to have the most significant byte empty.
             // see page 45 of the spec. says: not leading sample,
             // sample does not depend on others,
-            // no other samples depend on thsi one,
+            // no other samples depend on this one,
             // there is no redundant coding in this sample
             // padding: 0
             // sample_is_non_sync_sample ... set this to 1?
-            // sample_degredation_priority
+            // sample_degradation_priority
             flags: 0, //(2 << 26) | (2 << 24) | (2 << 22) | (2 << 20),
             track_id: 1,
             // stsd entry 1 is for Opus

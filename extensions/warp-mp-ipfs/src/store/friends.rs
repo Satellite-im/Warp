@@ -235,7 +235,7 @@ impl FriendsStore {
                     };
 
                     let Ok(did) = peer_id.to_did() else {
-                        //Note: The peer id is embeded with ed25519 public key, therefore we can decode it into a did key
+                        //Note: The peer id is embedded with ed25519 public key, therefore we can decode it into a did key
                         //      otherwise we can ignore
                         continue;
                     };

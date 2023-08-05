@@ -104,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     let rg = rg(opt.path.clone(), account.clone(), Some(fs.clone())).await?;
     let end_time = start_time.elapsed();
-    println!("Took {}ms to load the messenging", end_time.as_millis());
+    println!("Took {}ms to load the messaging", end_time.as_millis());
 
     let start_time = Instant::now();
     let identity = account.get_own_identity().await?;
