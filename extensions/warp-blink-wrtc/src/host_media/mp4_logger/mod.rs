@@ -476,7 +476,7 @@ fn write_mp4_header(
             // todo: maybe delete this comment. flags is expected to have the most significant byte empty.
             // see page 45 of the spec. says: not leading sample,
             // sample does not depend on others,
-            // no other samples depend on thsi one,
+            // no other samples depend on this one,
             // there is no redundant coding in this sample
             // padding: 0
             // sample_is_non_sync_sample ... set this to 1?

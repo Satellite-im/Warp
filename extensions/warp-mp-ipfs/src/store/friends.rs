@@ -235,7 +235,7 @@ impl FriendsStore {
                     };
 
                     let Ok(did) = peer_id.to_did() else {
-                        //Note: The peer id is embeded with ed25519 public key, therefore we can decode it into a did key
+                        //Note: The peer id is embedded with ed25519 public key, therefore we can decode it into a did key
                         //      otherwise we can ignore
                         continue;
                     };
@@ -928,7 +928,7 @@ impl FriendsStore {
 
         let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
 
-        log::trace!("Rquest Payload size: {} bytes", bytes.len());
+        log::trace!("Request Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {recipient}");
 
