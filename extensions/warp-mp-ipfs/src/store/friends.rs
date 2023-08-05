@@ -928,7 +928,7 @@ impl FriendsStore {
 
         let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
 
-        log::trace!("Rquest Payload size: {} bytes", bytes.len());
+        log::trace!("Request Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {recipient}");
 
