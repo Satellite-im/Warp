@@ -71,10 +71,12 @@ fn main() -> anyhow::Result<()> {
             let s = std::ptr::slice_from_raw_parts(p, len);
 
             let plane = x264::Plane {
-                stride: frame_width,
+                // todo: try to get stride from opencv
+                stride: frame_width * 3,
                 data: unsafe { &*s },
             };
-            let img = x264::Image::rgb(frame_width, frame_height, &plane.data);
+            let planes = vec![plane];
+            let img = x264::Image::new(x264::Colorspace::RGB, frame_width, frame_height, &planes);
             let (data, _) = encoder
                 .encode(fps as i64 * idx as i64, img)
                 .expect("failed to encode frame");
