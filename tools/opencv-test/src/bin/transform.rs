@@ -135,14 +135,14 @@ impl YUVSource for YuvWrapper {
     }
 
     fn y_stride(&self) -> i32 {
-        self.width * self.height
+        self.width
     }
 
     fn u_stride(&self) -> i32 {
-        self.width * self.height
+       self.width
     }
 
     fn v_stride(&self) -> i32 {
-        self.width * self.height
+        self.width
     }
 }
