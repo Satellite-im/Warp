@@ -62,39 +62,19 @@ fn main() -> anyhow::Result<()> {
         // let mut xformed = Mat::default();
         // opencv::core::transform(&frame, &mut xformed, &m)?;
         let sz = frame.size()?;
-        println!("sz: {sz:?}");
         if sz.width > 0 {
             let p = frame.data_mut();
-            let cols = frame.cols();
-            let rows = frame.rows();
-            let len = cols * rows;
+            let len = sz.width * sz.height;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
-
-            println!("rows: {rows}, cols: {cols}, len: {len}");
-
-            let width = cols;
-            let height= rows;
 
             let plane = x264::Plane {
                 // todo: try to get stride from opencv
-                stride: width,
+                stride: sz.width,
                 data: unsafe { &*s },
             };
             let planes = vec![plane];
 
-
-            // Check that the number of planes matches pc.
-            assert!(planes.len() == 1);
-            // Check that the width and the height are multiples of wm and hm.
-            for (i, plane) in planes.iter().enumerate() {
-                println!("plane: stride: {}, len: {}", plane.stride, plane.data.len());
-                // Check that the plane's stride is at least depth * wq * ws[i].
-                assert!(1 * width * 3 <= plane.stride);
-                // Check that there are at least hq * hs[i] rows in the plane.
-                assert!(height * 1 <= plane.data.len() as i32 / plane.stride);
-            }
-
-            let img = x264::Image::rgb(sz.width, sz.height, unsafe{&*s});
+            let img = x264::Image::rgb(sz.width, sz.height, unsafe { &*s });
             let (data, _) = encoder
                 .encode(fps as i64 * idx as i64, img)
                 .expect("failed to encode frame");
