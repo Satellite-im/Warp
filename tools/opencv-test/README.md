@@ -7,6 +7,7 @@ opencv
 ## Linux
 libopencv-dev
 libstdc++-12-dev
+libclang (clang-15)
 
 ## video file extensions and codecs known to work with opencv
 - .avi / MJPG
