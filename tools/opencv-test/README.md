@@ -14,3 +14,6 @@ libclang-dev
 - .avi / MJPG
 - .mkv / H264
 - .mp4 / avc1
+
+## testing a .mov file
+ffmpeg -i <filename.mov> output_%04d.png
