@@ -1,6 +1,7 @@
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
+    iter::zip,
 };
 
 use clap::Parser;
@@ -79,19 +80,23 @@ impl YuvWrapper {
         // RGB dot my = Y'
         // RGB dot mu = U
         // RGB dot mv = V
-        let my = VecN::<f32, 3>([0.299, 0.587, 0.114]);
-        let mu = VecN::<f32, 3>([-0.14713, -0.28886, 0.436]);
-        let mv = VecN::<f32, 3>([0.615, -0.51499, -0.10001]);
+        let my = VecN::<f32, 3>([0.257, 0.504, 0.098]); //([0.299, 0.587, 0.114]);
+        let mu = VecN::<f32, 3>([-0.148, -0.291, 0.439]); //([-0.14713, -0.28886, 0.436]);
+        let mv = VecN::<f32, 3>([0.439, -0.368, -0.071]); //([0.615, -0.51499, -0.10001]);
 
         let clamp = |x| if x > 255.0 { 255 } else { x as u8 };
 
-        let it: opencv::core::MatIter<'_, opencv::core::VecN<f32, 3>> =
+        let it: opencv::core::MatIter<'_, opencv::core::VecN<u8, 3>> =
             frame.iter().expect("couldn't get iter");
         for (_pos, pixel) in it {
-            // the * 255.0 is to scale it to fill a u8
-            let _y: f32 = pixel.mul(my).0.iter().fold(0.0, |acc, x| acc + *x) * 255.0;
-            let _u: f32 = pixel.mul(mu).0.iter().fold(0.0, |acc, x| acc + *x) * 255.0;
-            let _v: f32 = pixel.mul(mv).0.iter().fold(0.0, |acc, x| acc + *x) * 255.0;
+            let dot_with_pixel = |itx| -> f32 {
+                let itp = pixel.0.iter().map(|x| *x as f32);
+                let z = zip(itx, itp).map(|(a, b)| a * b);
+                z.fold(0.0, |acc, x| acc + x as f32)
+            };
+            let _y: f32 = dot_with_pixel(my.iter()) + 16.0;
+            let _u: f32 = dot_with_pixel(mu.iter()) + 128.0;
+            let _v: f32 = dot_with_pixel(mv.iter()) + 128.0;
 
             y.push(clamp(_y));
             u.push(clamp(_u));
