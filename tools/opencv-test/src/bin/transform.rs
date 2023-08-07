@@ -43,14 +43,26 @@ fn main() -> anyhow::Result<()> {
     let mut writer = BufWriter::new(output_file);
     let encoder_config = EncoderConfig::new(frame_width as u32, frame_height as u32);
     let mut h264_encoder = Encoder::with_config(encoder_config)?;
+
+    let m: [[f32; 3]; 3] = [
+        [0.183, 0.614, 0.062],
+        [-0.101, -0.339, 0.439],
+        [0.439, -0.399, -0.040],
+    ];
+    let p = m.as_ptr() as *mut std::ffi::c_void;
+    let m = unsafe {
+        Mat::new_rows_cols_with_data(3, 3, opencv::core::CV_32F, p, opencv::core::Mat_AUTO_STEP)
+    }?;
+
     loop {
         let mut frame = Mat::default();
         if !cam.read(&mut frame)? {
             println!("read entire video file");
             break;
         }
-
-        let wrapper = YuvWrapper::new(frame_width, frame_height, &frame);
+        let mut xformed = Mat::default();
+        opencv::core::transform(&frame, &mut xformed, &m)?;
+        let wrapper = YuvWrapper::new(frame_width, frame_height, &xformed);
         if frame.size()?.width > 0 {
             let encoded = h264_encoder.encode(&wrapper)?;
             writer.write(&encoded.to_vec())?;
@@ -80,27 +92,31 @@ impl YuvWrapper {
         // RGB dot my = Y'
         // RGB dot mu = U
         // RGB dot mv = V
-        let my = VecN::<f32, 3>([0.257, 0.504, 0.098]); //([0.299, 0.587, 0.114]);
-        let mu = VecN::<f32, 3>([-0.148, -0.291, 0.439]); //([-0.14713, -0.28886, 0.436]);
-        let mv = VecN::<f32, 3>([0.439, -0.368, -0.071]); //([0.615, -0.51499, -0.10001]);
+        //let my = VecN::<f32, 3>([0.257, 0.504, 0.098]); //([0.299, 0.587, 0.114]);
+        //let mu = VecN::<f32, 3>([-0.148, -0.291, 0.439]); //([-0.14713, -0.28886, 0.436]);
+        //let mv = VecN::<f32, 3>([0.439, -0.368, -0.071]); //([0.615, -0.51499, -0.10001]);
 
-        let clamp = |x| if x > 255.0 { 255 } else { x as u8 };
+        //let clamp = |x| if x > 255.0 { 255 } else { x as u8 };
 
         let it: opencv::core::MatIter<'_, opencv::core::VecN<u8, 3>> =
             frame.iter().expect("couldn't get iter");
         for (_pos, pixel) in it {
-            let dot_with_pixel = |itx| -> f32 {
-                let itp = pixel.0.iter().map(|x| *x as f32);
-                let z = zip(itx, itp).map(|(a, b)| a * b);
-                z.fold(0.0, |acc, x| acc + x as f32)
-            };
-            let _y: f32 = dot_with_pixel(my.iter()) + 16.0;
-            let _u: f32 = dot_with_pixel(mu.iter()) + 128.0;
-            let _v: f32 = dot_with_pixel(mv.iter()) + 128.0;
+            //let dot_with_pixel = |itx| -> f32 {
+            //    let itp = pixel.0.iter().map(|x| *x as f32);
+            //    let z = zip(itx, itp).map(|(a, b)| a * b);
+            //    z.fold(0.0, |acc, x| acc + x as f32)
+            //};
+            //let _y: f32 = dot_with_pixel(my.iter()) + 16.0;
+            //let _u: f32 = dot_with_pixel(mu.iter()) + 128.0;
+            //let _v: f32 = dot_with_pixel(mv.iter()) + 128.0;
+            //
+            //y.push(clamp(_y));
+            //u.push(clamp(_u));
+            //v.push(clamp(_v));
 
-            y.push(clamp(_y));
-            u.push(clamp(_u));
-            v.push(clamp(_v));
+            y.push(pixel.0[0] + 16);
+            u.push(pixel.0[1] + 128);
+            v.push(pixel.0[2] + 128);
         }
 
         Self {
@@ -135,14 +151,14 @@ impl YUVSource for YuvWrapper {
     }
 
     fn y_stride(&self) -> i32 {
-        self.width * self.height
+        self.width
     }
 
     fn u_stride(&self) -> i32 {
-        self.width * self.height
+        self.width
     }
 
     fn v_stride(&self) -> i32 {
-        self.width * self.height
+        self.width
     }
 }
