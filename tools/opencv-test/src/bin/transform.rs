@@ -1,5 +1,5 @@
 use clap::Parser;
-use opencv::{prelude::*, videoio};
+use opencv::{prelude::*, videoio, core::{CV_32F, Mat_AUTO_STEP}};
 
 // https://softron.zendesk.com/hc/en-us/articles/207695697-List-of-FourCC-codes-for-video-codecs
 #[derive(Parser, Debug)]
@@ -47,8 +47,14 @@ async fn main() -> anyhow::Result<()> {
             println!("read entire video file");
             break;
         }
+        // supposedly [M][RGB]=[YUV]
+        let mut m: [[f32; 3]; 3] = [[0.299, 0.587, 0.114], [-0.14713, -0.28886, 0.436], [0.615, -0.51499, -0.10001]];
+        let p = m.as_ptr() as *mut std::ffi::c_void;
+        let M = unsafe {Mat::new_rows_cols_with_data(3,3,CV_32F, p, Mat_AUTO_STEP)}?; // may need to .inv() this
+        let mut xformed = Mat::default();
+        opencv::core::transform(&frame, &mut xformed, &M)?;
         if frame.size()?.width > 0 {
-            writer.write(&frame)?;
+            writer.write(&xformed)?;
         }
     }
     writer.release()?;
