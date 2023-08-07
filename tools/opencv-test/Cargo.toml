@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.71"
 clap = { version = "4.3.9", features=["derive"] }
-opencv = "0.82.1"
+opencv = { version = "0.82", features=["clang-runtime"] }
 tokio = { version = "1.29.0", features = ["full"] }
