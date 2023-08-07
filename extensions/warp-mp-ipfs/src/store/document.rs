@@ -131,13 +131,10 @@ impl RootDocument {
             .get(IpfsPath::from(self.identity), &[], true)
             .await
         {
-            Ok(ipld) => {
-                from_ipld::<IdentityDocument>(ipld)
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)?
-                    .resolve(ipfs, true, None)
-                    .await?
-            }
+            Ok(ipld) => from_ipld::<IdentityDocument>(ipld)
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from)?
+                .resolve()?,
             Err(_) => return Err(Error::IdentityInvalid),
         };
 

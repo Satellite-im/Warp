@@ -15,6 +15,7 @@ use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
+use crate::behaviour::phonebook::PhoneBookCommand;
 use crate::config::MpIpfsConfig;
 use crate::store::{ecdh_decrypt, ecdh_encrypt, PeerIdExt, PeerTopic};
 
@@ -123,6 +124,7 @@ impl FriendsStore {
         config: MpIpfsConfig,
         tesseract: Tesseract,
         tx: broadcast::Sender<MultiPassEventKind>,
+        pb_tx: futures::channel::mpsc::Sender<PhoneBookCommand>,
     ) -> anyhow::Result<Self> {
         let did_key = Arc::new(did_keypair(&tesseract)?);
 
@@ -138,6 +140,7 @@ impl FriendsStore {
             discovery.clone(),
             tx.clone(),
             config.store_setting.emit_online_event,
+            pb_tx,
         ));
 
         let signal = Default::default();
@@ -164,10 +167,6 @@ impl FriendsStore {
                 });
 
                 if let Some(phonebook) = store.phonebook.as_ref() {
-                    for addr in store.identity.relays() {
-                        if let Err(_e) = phonebook.add_relay(addr).await {}
-                    }
-
                     log::info!("Loading friends list into phonebook");
                     if let Ok(friends) = store.friends_list().await {
                         if let Err(_e) = phonebook.add_friend_list(friends).await {
@@ -177,6 +176,9 @@ impl FriendsStore {
                 }
 
                 // autoban the blocklist
+                // TODO: implement configuration open to autoban at the libp2p level
+                // Note: If this is done, we would need to attempt reconnection if the user
+                //       is ever unblocked
                 // match store.block_list().await {
                 //     Ok(list) => {
                 //         for pubkey in list {
@@ -233,7 +235,7 @@ impl FriendsStore {
                     };
 
                     let Ok(did) = peer_id.to_did() else {
-                        //Note: The peer id is embeded with ed25519 public key, therefore we can decode it into a did key
+                        //Note: The peer id is embedded with ed25519 public key, therefore we can decode it into a did key
                         //      otherwise we can ignore
                         continue;
                     };
@@ -926,7 +928,7 @@ impl FriendsStore {
 
         let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
 
-        log::trace!("Rquest Payload size: {} bytes", bytes.len());
+        log::trace!("Request Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {recipient}");
 

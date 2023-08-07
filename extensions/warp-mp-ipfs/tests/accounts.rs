@@ -123,7 +123,7 @@ mod test {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
-        let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
+        let mut account = ipfs_identity_temporary(None, tesseract).await?;
         account
             .create_identity(
                 Some("JohnDoe"),
@@ -149,7 +149,7 @@ mod test {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
-        let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
+        let mut account = ipfs_identity_temporary(None, tesseract).await?;
         account
             .create_identity(
                 Some("JohnDoe"),

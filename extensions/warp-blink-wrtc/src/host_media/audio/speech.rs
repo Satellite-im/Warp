@@ -8,6 +8,7 @@ pub struct Detector {
     min_delay_between_events: usize,
     remaining_delay: usize,
     speech_threshold: u8,
+    is_speaking: bool,
 }
 
 impl Detector {
@@ -16,6 +17,7 @@ impl Detector {
             min_delay_between_events: min_delay,
             remaining_delay: 0,
             speech_threshold,
+            is_speaking: false,
         }
     }
 
@@ -25,11 +27,16 @@ impl Detector {
             return false;
         }
 
-        if sample >= self.speech_threshold {
+        self.is_speaking = if sample >= self.speech_threshold {
             self.remaining_delay = self.min_delay_between_events;
             true
         } else {
             false
-        }
+        };
+        self.is_speaking
+    }
+
+    pub fn is_speaking(&self) -> bool {
+        self.is_speaking
     }
 }

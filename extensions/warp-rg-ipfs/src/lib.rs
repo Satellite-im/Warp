@@ -22,7 +22,6 @@ use warp::logging::tracing::log::error;
 use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
-use warp::pocket_dimension::PocketDimension;
 use warp::raygun::AttachmentEventStream;
 use warp::raygun::Messages;
 use warp::raygun::{
@@ -32,15 +31,14 @@ use warp::raygun::{
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
 use warp::sync::RwLock;
-use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
 use warp::Extension;
 use warp::SingleHandle;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Clone)]
 pub struct IpfsMessaging {
     account: Box<dyn MultiPass>,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     direct_store: Arc<RwLock<Option<MessageStore>>>,
     config: Option<RgIpfsConfig>,
@@ -54,34 +52,17 @@ pub struct IpfsMessaging {
     //      * TBD
 }
 
-impl Clone for IpfsMessaging {
-    fn clone(&self) -> Self {
-        Self {
-            account: self.account.clone(),
-            cache: self.cache.clone(),
-            ipfs: self.ipfs.clone(),
-            direct_store: self.direct_store.clone(),
-            config: self.config.clone(),
-            constellation: self.constellation.clone(),
-            initialize: self.initialize.clone(),
-            tx: self.tx.clone(),
-        }
-    }
-}
-
 impl IpfsMessaging {
     pub async fn new(
         config: Option<RgIpfsConfig>,
         account: Box<dyn MultiPass>,
         constellation: Option<Box<dyn Constellation>>,
-        cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
         let (tx, _) = tokio::sync::broadcast::channel(1024);
         trace!("Initializing Raygun Extension");
         let mut messaging = IpfsMessaging {
             account,
             config,
-            cache,
             ipfs: Default::default(),
             direct_store: Default::default(),
             constellation,
@@ -120,45 +101,7 @@ impl IpfsMessaging {
 
         let ipfs = match ipfs_handle {
             Some(ipfs) => ipfs,
-            None => {
-                // discovery = config.store_setting.discovery;
-                anyhow::bail!("Unable to use IPFS Handle");
-                // // trace!("Unable to get ipfs handle from multipass");
-                // let keypair = {
-                //     let prikey = self.account.read().decrypt_private_key(None)?;
-                //     let mut sec_key = prikey.as_ref().private_key_bytes();
-                //     let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
-                //     Keypair::Ed25519(id_secret.into())
-                // };
-
-                // let mut opts = IpfsOptions {
-                //     keypair,
-                //     bootstrap: config.bootstrap,
-                //     mdns: config.ipfs_setting.mdns.enable,
-                //     listening_addrs: config.listen_on,
-                //     dcutr: config.ipfs_setting.dcutr.enable,
-                //     relay: config.ipfs_setting.relay_client.enable,
-                //     relay_server: config.ipfs_setting.relay_server.enable,
-                //     ..Default::default()
-                // };
-
-                // if std::any::TypeId::of::() == std::any::TypeId::of::<Persistent>() {
-                //     // Create directory if it doesnt exist
-                //     let path = config
-                //         .path
-                //         .as_ref()
-                //         .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
-                //     opts.ipfs_path = path.clone();
-                //     if !opts.ipfs_path.exists() {
-                //         tokio::fs::create_dir(path).await?;
-                //     }
-                // }
-
-                // let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
-                // tokio::task::spawn(fut);
-
-                // ipfs
-            }
+            None => anyhow::bail!("Unable to use IPFS Handle"),
         };
 
         *self.direct_store.write() = Some(
@@ -185,26 +128,6 @@ impl IpfsMessaging {
         self.initialize.store(true, Ordering::SeqCst);
 
         Ok(())
-    }
-
-    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
-        let cache = self
-            .cache
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
-
-        let inner = cache.read();
-        Ok(inner)
-    }
-
-    pub fn get_cache_mut(&mut self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
-        let cache = self
-            .cache
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
-
-        let inner = cache.write();
-        Ok(inner)
     }
 
     pub fn messaging_store(&self) -> std::result::Result<MessageStore, Error> {
@@ -459,24 +382,17 @@ pub mod ffi {
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
-    use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::raygun::RayGunAdapter;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn warp_rg_ipfs_temporary_new(
         account: *const MultiPassAdapter,
-        cache: *const PocketDimensionAdapter,
         config: *const RgIpfsConfig,
     ) -> FFIResult<RayGunAdapter> {
         if account.is_null() {
             return FFIResult::err(Error::MultiPassExtensionUnavailable);
         }
-
-        let cache = match cache.is_null() {
-            true => None,
-            false => Some(&*cache),
-        };
 
         let config = match config.is_null() {
             true => None,
@@ -485,12 +401,7 @@ pub mod ffi {
 
         let account = &*account;
 
-        match async_on_block(IpfsMessaging::new(
-            config,
-            account.object(),
-            None,
-            cache.map(|p| p.inner()),
-        )) {
+        match async_on_block(IpfsMessaging::new(config, account.object(), None)) {
             Ok(a) => FFIResult::ok(RayGunAdapter::new(Box::new(a))),
             Err(e) => FFIResult::err(Error::from(e)),
         }
@@ -500,17 +411,11 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn warp_rg_ipfs_persistent_new(
         account: *const MultiPassAdapter,
-        cache: *const PocketDimensionAdapter,
         config: *const RgIpfsConfig,
     ) -> FFIResult<RayGunAdapter> {
         if account.is_null() {
             return FFIResult::err(Error::MultiPassExtensionUnavailable);
         }
-
-        let cache = match cache.is_null() {
-            true => None,
-            false => Some(&*cache),
-        };
 
         let config = match config.is_null() {
             true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is needed"))),
@@ -519,12 +424,7 @@ pub mod ffi {
 
         let account = &*account;
 
-        match async_on_block(IpfsMessaging::new(
-            config,
-            account.object(),
-            None,
-            cache.map(|p| p.inner()),
-        )) {
+        match async_on_block(IpfsMessaging::new(config, account.object(), None)) {
             Ok(a) => FFIResult::ok(RayGunAdapter::new(Box::new(a))),
             Err(e) => FFIResult::err(Error::from(e)),
         }

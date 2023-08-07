@@ -2,6 +2,8 @@
 pub mod generator;
 pub mod identity;
 
+use std::path::PathBuf;
+
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -17,7 +19,7 @@ use crate::multipass::identity::{Identifier, IdentityUpdate};
 
 use self::identity::{IdentityStatus, Platform, Relationship};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
@@ -36,6 +38,26 @@ pub enum MultiPassEventKind {
     BlockedBy { did: DID },
     Unblocked { did: DID },
     UnblockedBy { did: DID },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportLocation {
+    /// Remote location where the identity is stored
+    Remote,
+
+    /// Local path where the identity is stored
+    Local { path: PathBuf },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityImportOption {
+    Locate {
+        /// Location of the identity
+        location: ImportLocation,
+
+        /// Passphrase of the identity
+        passphrase: String,
+    },
 }
 
 #[derive(FFIFree)]
@@ -58,6 +80,10 @@ impl core::ops::DerefMut for MultiPassEventStream {
 pub trait MultiPass:
     Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + DynClone
 {
+    async fn import_identity(&mut self, _: IdentityImportOption) -> Result<Identity, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// Create an [`Identity`]
     async fn create_identity(
         &mut self,
@@ -77,12 +103,6 @@ pub trait MultiPass:
 
     /// Update your own [`Identity`] using [`IdentityUpdate`]
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
-
-    /// Decrypt and provide private key for [`Identity`]
-    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error>;
-
-    /// Clear out cache related to [`Module::Accounts`]
-    fn refresh_cache(&mut self) -> Result<(), Error>;
 }
 
 dyn_clone::clone_trait_object!(MultiPass);
@@ -175,6 +195,16 @@ pub trait FriendsEvent: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait IdentityInformation: Send + Sync {
+    /// Profile picture belonging to the `Identity`
+    async fn identity_picture(&self, _: &DID) -> Result<String, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Profile banner belonging to the `Identity`
+    async fn identity_banner(&self, _: &DID) -> Result<String, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// Identity status to determine if they are online or offline
     async fn identity_status(&self, _: &DID) -> Result<IdentityStatus, Error> {
         Err(Error::Unimplemented)
@@ -330,40 +360,6 @@ pub mod ffi {
         let mp = &mut *(ctx);
         let option = &*option;
         async_on_block(async { mp.update_identity(option.clone()).await }).into()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_decrypt_private_key(
-        ctx: *mut MultiPassAdapter,
-        passphrase: *const c_char,
-    ) -> FFIResult<DID> {
-        if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
-        }
-        let passphrase = match passphrase.is_null() {
-            false => {
-                let passphrase = CStr::from_ptr(passphrase).to_string_lossy().to_string();
-                Some(passphrase)
-            }
-            true => None,
-        };
-        let mp = &*(ctx);
-        match async_on_block(async { mp.decrypt_private_key(passphrase.as_deref()) }) {
-            Ok(key) => FFIResult::ok(key),
-            Err(e) => FFIResult::err(e),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_refresh_cache(ctx: *mut MultiPassAdapter) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
-
-        let mp = &mut *(ctx);
-        async_on_block(async { mp.refresh_cache() }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

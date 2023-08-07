@@ -35,7 +35,8 @@ pub async fn mesh_connect(nodes: Vec<Ipfs>) -> anyhow::Result<()> {
         for (j, (_, peer_id, addrs)) in nodes.iter().enumerate() {
             if i != j {
                 for addr in addrs {
-                    if let Err(_e) = nodes[i].0.add_peer(*peer_id, Some(addr.clone())).await {}
+                    if let Err(_e) = nodes[i].0.add_peer(*peer_id, addr.clone()).await {}
+                    if let Err(_e) = nodes[i].0.connect(*peer_id).await {}
                 }
             }
         }
@@ -59,11 +60,10 @@ pub async fn create_account_and_chat(
     config.ipfs_setting.bootstrap = false;
     config.bootstrap = Bootstrap::None;
 
-    let mut account =
-        Box::new(IpfsIdentity::new(config, tesseract, None).await?) as Box<dyn MultiPass>;
+    let mut account = Box::new(IpfsIdentity::new(config, tesseract).await?) as Box<dyn MultiPass>;
     let did = account.create_identity(username, passphrase).await?;
     let identity = account.get_own_identity().await?;
-    let raygun = Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?) as Box<_>;
+    let raygun = Box::new(IpfsMessaging::new(None, account.clone(), None).await?) as Box<_>;
     Ok((account, raygun, did, identity))
 }
 

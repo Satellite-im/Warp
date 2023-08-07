@@ -23,7 +23,7 @@ pub trait PeerIdExt {
 
 impl PeerIdExt for ipfs::PeerId {
     fn to_did(&self) -> std::result::Result<DID, anyhow::Error> {
-        let multihash: libipld::Multihash = (*self).into();
+        let multihash = self.as_ref();
         if multihash.code() != 0 {
             anyhow::bail!("PeerId does not contain inline public key");
         }
@@ -32,7 +32,7 @@ impl PeerIdExt for ipfs::PeerId {
     }
 }
 
-// uses asymetric encryption
+// uses asymmetric encryption
 pub async fn send_signal_ecdh<T: Serialize + Display>(
     ipfs: &Ipfs,
     own_did: &DID,

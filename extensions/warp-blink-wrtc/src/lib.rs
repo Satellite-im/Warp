@@ -10,11 +10,16 @@
 #![allow(dead_code)]
 
 mod host_media;
+// mod rtp_logger;
 mod signaling;
 mod simple_webrtc;
 mod store;
 
 use async_trait::async_trait;
+use host_media::{
+    audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
+    mp4_logger::Mp4LoggerConfig,
+};
 use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
@@ -22,7 +27,7 @@ use anyhow::{bail, Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 
-use rust_ipfs::{Ipfs, SubscriptionStream};
+use rust_ipfs::{Ipfs, Keypair, SubscriptionStream};
 
 use tokio::{
     sync::{
@@ -34,7 +39,7 @@ use tokio::{
 use uuid::Uuid;
 use warp::{
     blink::{self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
-    crypto::{Fingerprint, DID},
+    crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     module::Module,
     multipass::MultiPass,
@@ -114,7 +119,11 @@ impl Drop for BlinkImpl {
         self.offer_handler.write().abort();
         let webrtc_controller = self.webrtc_controller.clone();
         tokio::spawn(async move {
-            let _ = webrtc_controller.write().await.deinit().await;
+            if let Err(e) = webrtc_controller.write().await.deinit().await {
+                log::error!("error in webrtc_controller deinit: {e}");
+            }
+            host_media::audio::automute::stop();
+            host_media::reset().await;
             log::debug!("deinit finished");
         });
     }
@@ -219,7 +228,7 @@ impl BlinkImpl {
                     }
                 };
 
-                let _own_id = account.decrypt_private_key(None)?;
+                let _own_id = get_keypair_did(_ipfs.keypair()?)?;
                 own_id.write().await.replace(_own_id);
 
                 let own_id2 = own_id.clone();
@@ -243,6 +252,7 @@ impl BlinkImpl {
             }
         });
 
+        host_media::audio::automute::start();
         Ok(Box::new(blink_impl))
     }
 
@@ -257,6 +267,7 @@ impl BlinkImpl {
             Some(r) => r,
             None => bail!("blink not initialized"),
         };
+
         self.active_call.write().await.replace(call.clone().into());
         let audio_source_codec = self.audio_source_codec.read().await;
         // ensure there is an audio source track
@@ -273,6 +284,7 @@ impl BlinkImpl {
             .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
             .await?;
         host_media::create_audio_source_track(
+            own_id.clone(),
             self.ui_event_ch.clone(),
             track,
             call.codec(),
@@ -637,6 +649,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                                     if let Err(e) = webrtc_controller.deinit().await {
                                         log::error!("webrtc deinit failed: {e}");
                                     }
+                                    host_media::reset().await;
                                     // terminate the task on purpose.
                                     return;
                                 }
@@ -1033,11 +1046,47 @@ impl Blink for BlinkImpl {
     async fn disable_camera(&mut self) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn record_call(&mut self, _output_dir: &str) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+    async fn record_call(&mut self, output_dir: &str) -> Result<(), Error> {
+        match self.active_call.read().await.as_ref() {
+            None => return Err(Error::OtherWithContext("no call to record".into())),
+            Some(ActiveCall { call, .. }) => {
+                host_media::init_recording(Mp4LoggerConfig {
+                    call_id: call.call_id(),
+                    participants: call.participants(),
+                    audio_codec: call.codec(),
+                    log_path: output_dir.into(),
+                })
+                .await?;
+            }
+        }
+
+        Ok(())
     }
     async fn stop_recording(&mut self) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        match self.active_call.read().await.as_ref() {
+            None => return Err(Error::OtherWithContext("no call to pause".into())),
+            Some(_) => {
+                host_media::pause_recording().await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn enable_automute(&mut self) -> Result<(), Error> {
+        let tx = AUDIO_CMD_CH.tx.clone();
+        tx.send(AutoMuteCmd::Enable)
+            .map_err(|e| Error::OtherWithContext(format!("failed to enable automute: {e}")))
+    }
+    fn disable_automute(&mut self) -> Result<(), Error> {
+        let tx = AUDIO_CMD_CH.tx.clone();
+        tx.send(AutoMuteCmd::Disable)
+            .map_err(|e| Error::OtherWithContext(format!("failed to disable automute: {e}")))
+    }
+
+    async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error> {
+        host_media::set_peer_audio_gain(peer_id, multiplier).await?;
+        Ok(())
     }
 
     async fn get_audio_source_codec(&self) -> AudioCodec {
@@ -1069,4 +1118,11 @@ impl Blink for BlinkImpl {
             .as_ref()
             .map(|x| x.call.clone())
     }
+}
+
+pub fn get_keypair_did(keypair: &Keypair) -> anyhow::Result<DID> {
+    let kp = Zeroizing::new(keypair.clone().try_into_ed25519()?.to_bytes());
+    let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+    Ok(did.into())
 }

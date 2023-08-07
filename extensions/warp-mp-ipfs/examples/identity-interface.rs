@@ -10,13 +10,9 @@ use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
-use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{Discovery, MpIpfsConfig};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
-use warp_pd_flatfile::FlatfileStorage;
-use warp_pd_stretto::StrettoClient;
 
 #[derive(Debug, Parser)]
 #[clap(name = "identity-interface")]
@@ -49,22 +45,9 @@ struct Opt {
     wait: Option<u64>,
 }
 
-//Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
-#[allow(dead_code)]
-fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
-    if let Some(root) = root {
-        let storage =
-            FlatfileStorage::new_with_index_file(root.join("cache"), PathBuf::from("cache-index"))?;
-        return Ok(Arc::new(RwLock::new(Box::new(storage))));
-    }
-    let storage = StrettoClient::new()?;
-    Ok(Arc::new(RwLock::new(Box::new(storage))))
-}
-
 async fn account(
     path: Option<PathBuf>,
     username: Option<&str>,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = match path.as_ref() {
@@ -112,10 +95,10 @@ async fn account(
     config.ipfs_setting.mdns.enable = opt.mdns;
 
     let mut account = match path.is_some() {
-        false => Box::new(ipfs_identity_temporary(Some(config), tesseract, cache).await?)
-            as Box<dyn MultiPass>,
-        true => Box::new(ipfs_identity_persistent(config, tesseract, cache).await?)
-            as Box<dyn MultiPass>,
+        false => {
+            Box::new(ipfs_identity_temporary(Some(config), tesseract).await?) as Box<dyn MultiPass>
+        }
+        true => Box::new(ipfs_identity_persistent(config, tesseract).await?) as Box<dyn MultiPass>,
     };
 
     if account.get_own_identity().await.is_err() {
@@ -144,9 +127,7 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let cache = None; //cache_setup(opt.path.clone()).ok();
-
-    let mut account = account(opt.path.clone(), None, cache, &opt).await?;
+    let mut account = account(opt.path.clone(), None, &opt).await?;
 
     println!("Obtaining identity....");
     let own_identity = account.get_own_identity().await?;
@@ -719,12 +700,14 @@ async fn main() -> anyhow::Result<()> {
                             for identity in idents {
                                 let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
                                 let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
+                                let profile_picture = account.identity_picture(&identity.did_key()).await.unwrap_or_default();
+                                let profile_banner = account.identity_banner(&identity.did_key()).await.unwrap_or_default();
                                 table.add_row(vec![
                                     identity.username(),
                                     identity.did_key().to_string(),
                                     identity.status_message().unwrap_or_default(),
-                                    (!identity.profile_banner().is_empty()).to_string(),
-                                    (!identity.profile_picture().is_empty()).to_string(),
+                                    (!profile_banner.is_empty()).to_string(),
+                                    (!profile_picture.is_empty()).to_string(),
                                     platform.to_string(),
                                     format!("{status:?}"),
                                 ]);

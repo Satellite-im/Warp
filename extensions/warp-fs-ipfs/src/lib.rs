@@ -25,19 +25,18 @@ use warp::constellation::{
 use warp::crypto::cipher::Cipher;
 use warp::crypto::did_key::{Generate, ECDH};
 use warp::crypto::zeroize::Zeroizing;
-use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
+use warp::crypto::{DIDKey, Ed25519KeyPair, KeyMaterial, DID};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
-use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use warp::sync::{Arc, RwLock};
 
 use warp::module::Module;
 
 use chrono::{DateTime, Utc};
-use ipfs::{Ipfs, IpfsPath};
+use ipfs::{Ipfs, IpfsPath, Keypair};
 
 use warp::constellation::{directory::Directory, Constellation};
 use warp::error::Error;
-use warp::pocket_dimension::PocketDimension;
 use warp::{Extension, SingleHandle};
 
 type Result<T> = std::result::Result<T, Error>;
@@ -50,10 +49,10 @@ pub struct IpfsFileSystem {
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
+    keypair: Arc<RwLock<Option<Arc<DID>>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
-    account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
+    account: Box<dyn MultiPass>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     thumbnail_store: ThumbnailGenerator,
 }
 
@@ -70,42 +69,38 @@ impl IpfsFileSystem {
             modified: Utc::now(),
             config,
             index_cid: Default::default(),
-            account: Default::default(),
+            account,
+            keypair: Default::default(),
             ipfs: Default::default(),
             broadcast: tx,
-            cache: None,
             thumbnail_store: ThumbnailGenerator::default(),
         };
 
-        *filesystem.account.write().await = Some(account);
+        if filesystem.account.get_own_identity().await.is_err() {
+            debug!("Identity doesnt exist. Waiting for it to load or to be created");
+            let mut filesystem = filesystem.clone();
 
-        if let Some(account) = filesystem.account.read().await.clone() {
-            if account.get_own_identity().await.is_err() {
-                debug!("Identity doesnt exist. Waiting for it to load or to be created");
-                let mut filesystem = filesystem.clone();
-
-                tokio::spawn({
-                    let account = account.clone();
-                    async move {
-                        loop {
-                            match account.get_own_identity().await {
-                                Ok(_) => break,
-                                _ => {
-                                    //TODO: have a flag that would tell is it been an error other than it not being available
-                                    //      so we dont try to extract ipfs
-                                    tokio::time::sleep(Duration::from_millis(100)).await
-                                }
+            tokio::spawn({
+                let account = filesystem.account.clone();
+                async move {
+                    loop {
+                        match account.get_own_identity().await {
+                            Ok(_) => break,
+                            _ => {
+                                //TODO: have a flag that would tell is it been an error other than it not being available
+                                //      so we dont try to extract ipfs
+                                tokio::time::sleep(Duration::from_millis(100)).await
                             }
                         }
-                        if let Err(e) = filesystem.initialize().await {
-                            error!("Error initializing filesystem: {e}");
-                        }
                     }
-                });
-            } else {
-                let mut filesystem = filesystem.clone();
-                filesystem.initialize().await?;
-            }
+                    if let Err(e) = filesystem.initialize().await {
+                        error!("Error initializing filesystem: {e}");
+                    }
+                }
+            });
+        } else {
+            let mut filesystem = filesystem.clone();
+            filesystem.initialize().await?;
         }
 
         Ok(filesystem)
@@ -114,12 +109,7 @@ impl IpfsFileSystem {
     async fn initialize(&mut self) -> Result<()> {
         debug!("Initializing or fetch ipfs");
 
-        let account = self
-            .account
-            .read()
-            .await
-            .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)?;
+        let account = self.account.clone();
 
         let ipfs_handle = match account.handle() {
             Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
@@ -127,6 +117,8 @@ impl IpfsFileSystem {
         };
 
         let ipfs = ipfs_handle.ok_or(Error::ConstellationExtensionUnavailable)?;
+        let ipfs_keypair = ipfs.keypair()?;
+        *self.keypair.write() = Some(Arc::new(get_keypair_did(ipfs_keypair)?));
 
         *self.ipfs.write() = Some(ipfs);
 
@@ -152,9 +144,8 @@ impl IpfsFileSystem {
     pub async fn export_index(&self) -> Result<()> {
         let ipfs = self.ipfs()?;
         let index = self.export(ConstellationDataType::Json)?;
-        let account = self.account().await?;
 
-        let key = account.decrypt_private_key(None)?;
+        let key = self.keypair()?;
         let data = ecdh_encrypt(&key, None, index.as_bytes())?;
 
         let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
@@ -265,9 +256,8 @@ impl IpfsFileSystem {
                     let mut bytes = result.map_err(anyhow::Error::from)?;
                     data.append(&mut bytes);
                 }
-                let account = self.account().await?;
 
-                let key = account.decrypt_private_key(None)?;
+                let key = self.keypair()?;
 
                 let index_bytes = ecdh_decrypt(&key, None, data)?;
 
@@ -280,12 +270,13 @@ impl IpfsFileSystem {
         Ok(())
     }
 
+    pub fn keypair(&self) -> Result<Arc<DID>> {
+        let kp = self.keypair.read().clone().ok_or(Error::Other)?;
+        Ok(kp)
+    }
+
     pub async fn account(&self) -> Result<Box<dyn MultiPass>> {
-        self.account
-            .read()
-            .await
-            .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
+        Ok(self.account.clone())
     }
 
     pub fn ipfs(&self) -> Result<Ipfs> {
@@ -294,26 +285,6 @@ impl IpfsFileSystem {
             .as_ref()
             .cloned()
             .ok_or(Error::ConstellationExtensionUnavailable)
-    }
-
-    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
-        let cache = self
-            .cache
-            .as_ref()
-            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
-
-        let inner = cache.read();
-        Ok(inner)
-    }
-
-    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
-        let cache = self
-            .cache
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
-
-        let inner = cache.write();
-        Ok(inner)
     }
 }
 
@@ -365,9 +336,6 @@ impl Constellation for IpfsFileSystem {
         }
 
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let path = PathBuf::from(path);
         if !path.is_file() {
@@ -541,9 +509,6 @@ impl Constellation for IpfsFileSystem {
 
     async fn get(&self, name: &str, path: &str) -> Result<()> {
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
@@ -589,9 +554,6 @@ impl Constellation for IpfsFileSystem {
         }
 
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         if self.current_directory()?.get_item_by_path(name).is_ok() {
             return Err(Error::FileExist);
@@ -670,9 +632,6 @@ impl Constellation for IpfsFileSystem {
 
     async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
@@ -826,7 +785,9 @@ impl Constellation for IpfsFileSystem {
                 };
                 return;
             }
+
             if let Err(_e) = fs.export_index().await {}
+
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
@@ -878,10 +839,6 @@ impl Constellation for IpfsFileSystem {
     /// Used to remove data from the filesystem
     async fn remove(&mut self, name: &str, _: bool) -> Result<()> {
         let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
-
         //TODO: Recursively delete directory but for now only support deleting a file
         let directory = self.current_directory()?;
 
@@ -953,9 +910,6 @@ impl Constellation for IpfsFileSystem {
     async fn rename(&mut self, current: &str, new: &str) -> Result<()> {
         //Used as guard in the event its not available but will be used in the future
         let _ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         //Note: This will only support renaming the file or directory in the index
         let directory = self.current_directory()?;
@@ -979,9 +933,6 @@ impl Constellation for IpfsFileSystem {
     async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<()> {
         //Used as guard in the event its not available but will be used in the future
         let _ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let directory = self.current_directory()?;
 
@@ -1002,8 +953,6 @@ impl Constellation for IpfsFileSystem {
 
     async fn sync_ref(&mut self, path: &str) -> Result<()> {
         let ipfs = self.ipfs()?;
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let directory = self.current_directory()?;
         let file = directory
@@ -1172,4 +1121,11 @@ pub(crate) fn to_file_type(name: &str) -> FileType {
         .unwrap_or(ExtensionType::Other);
 
     extension.into()
+}
+
+pub fn get_keypair_did(keypair: &Keypair) -> anyhow::Result<DID> {
+    let kp = Zeroizing::new(keypair.clone().try_into_ed25519()?.to_bytes());
+    let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+    Ok(did.into())
 }
