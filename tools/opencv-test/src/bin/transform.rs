@@ -52,7 +52,6 @@ fn main() -> anyhow::Result<()> {
         let wrapper = YuvWrapper::new(frame_width, frame_height, &frame);
         if frame.size()?.width > 0 {
             let encoded = h264_encoder.encode(&wrapper)?;
-            // todo: make h264 packets
             writer.write(&encoded.to_vec())?;
         }
     }
@@ -76,20 +75,27 @@ impl YuvWrapper {
         let mut u = y.clone();
         let mut v = y.clone();
 
+        // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
+        // RGB dot my = Y'
+        // RGB dot mu = U
+        // RGB dot mv = V
         let my = VecN::<f32, 3>([0.299, 0.587, 0.114]);
         let mu = VecN::<f32, 3>([-0.14713, -0.28886, 0.436]);
         let mv = VecN::<f32, 3>([0.615, -0.51499, -0.10001]);
 
+        let clamp = |x| if x > 255.0 { 255 } else { x as u8 };
+
         let it: opencv::core::MatIter<'_, opencv::core::VecN<f32, 3>> =
             frame.iter().expect("couldn't get iter");
         for (_pos, pixel) in it {
-            let _y: f32 = pixel.mul(my).0.iter().fold(0.0, |acc, x| acc + *x);
-            let _u: f32 = pixel.mul(mu).0.iter().fold(0.0, |acc, x| acc + *x);
-            let _v: f32 = pixel.mul(mv).0.iter().fold(0.0, |acc, x| acc + *x);
+            // the * 255.0 is to scale it to fill a u8
+            let _y: f32 = pixel.mul(my).0.iter().fold(0.0, |acc, x| acc + *x) * 255.0;
+            let _u: f32 = pixel.mul(mu).0.iter().fold(0.0, |acc, x| acc + *x) * 255.0;
+            let _v: f32 = pixel.mul(mv).0.iter().fold(0.0, |acc, x| acc + *x) * 255.0;
 
-            y.push((_y * 256.0) as u8);
-            u.push((_u * 256.0) as u8);
-            v.push((_v * 256.0) as u8);
+            y.push(clamp(_y));
+            u.push(clamp(_u));
+            v.push(clamp(_v));
         }
 
         Self {
