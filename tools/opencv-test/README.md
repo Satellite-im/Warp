@@ -9,6 +9,7 @@ libopencv-dev
 libstdc++-12-dev
 clang
 libclang-dev
+libx264-dev
 
 ## video file extensions and codecs known to work with opencv
 - .avi / MJPG

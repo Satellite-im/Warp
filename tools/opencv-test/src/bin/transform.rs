@@ -5,11 +5,8 @@ use std::{
 };
 
 use clap::Parser;
+use opencv::core::ToInputArray;
 use opencv::{core::VecN, prelude::*, videoio};
-use openh264::{
-    encoder::{Encoder, EncoderConfig},
-    formats::YUVSource,
-};
 
 // transforms the input file to h264
 #[derive(Parser, Debug)]
@@ -32,7 +29,7 @@ fn main() -> anyhow::Result<()> {
     // https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html
     let frame_width = cam.get(3)? as i32;
     let frame_height = cam.get(4)? as i32;
-    let _fps = cam.get(5)?;
+    let fps = cam.get(5)?;
 
     let output_file = OpenOptions::new()
         .read(false)
@@ -41,9 +38,11 @@ fn main() -> anyhow::Result<()> {
         .truncate(true)
         .open(args.output)?;
     let mut writer = BufWriter::new(output_file);
-    let encoder_config = EncoderConfig::new(frame_width as u32, frame_height as u32);
-    let mut h264_encoder = Encoder::with_config(encoder_config)?;
-
+    let mut encoder = x264::Encoder::builder()
+        .fps(fps as _, 1)
+        .build(x264::Colorspace::RGB, frame_width as _, frame_height as _)
+        .expect("failed to make builder");
+    let mut idx = 0;
     // let m: [[f32; 3]; 3] = [
     //     [0.183, 0.614, 0.062],
     //     [-0.101, -0.339, 0.439],
@@ -62,99 +61,27 @@ fn main() -> anyhow::Result<()> {
         }
         // let mut xformed = Mat::default();
         // opencv::core::transform(&frame, &mut xformed, &m)?;
-        let wrapper = YuvWrapper::new(frame_width, frame_height, &frame);
+
         if frame.size()?.width > 0 {
-            let encoded = h264_encoder.encode(&wrapper)?;
-            writer.write(&encoded.to_vec())?;
+            let ia = frame.input_array().expect("failed to get input array");
+            let sz = ia.get_sz().expect("failed to get InputArray size");
+            let len = sz.width as usize * sz.height as usize;
+            let raw = ia.as_raw();
+            let p = raw as *const u8;
+            let s = std::ptr::slice_from_raw_parts(p, len);
+
+            let plane = x264::Plane {
+                stride: frame_width,
+                data: unsafe { &*s },
+            };
+            let img = x264::Image::rgb(frame_width, frame_height, &plane.data);
+            let (data, _) = encoder
+                .encode(fps as i64 * idx as i64, img)
+                .expect("failed to encode frame");
+            idx += 1;
+            writer.write(data.entirety())?;
         }
     }
     writer.flush()?;
     Ok(())
-}
-
-// each pixel is a 3-tuple
-struct YuvWrapper {
-    width: i32,
-    height: i32,
-    y: Vec<u8>,
-    u: Vec<u8>,
-    v: Vec<u8>,
-}
-
-impl YuvWrapper {
-    fn new(width: i32, height: i32, frame: &Mat) -> Self {
-        let mut y = Vec::new();
-        y.reserve(width as usize * height as usize);
-        let mut u = y.clone();
-        let mut v = y.clone();
-
-        // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
-        // RGB dot my = Y'
-        // RGB dot mu = U
-        // RGB dot mv = V
-        let my = VecN::<f32, 3>([0.183, 0.614, 0.062]);
-        let mu = VecN::<f32, 3>([-0.101, -0.339, 0.439]);
-        let mv = VecN::<f32, 3>([0.439, -0.399, -0.040]);
-
-        let clamp = |x| if x > 255.0 { 255 } else { x as u8 };
-
-        let it: opencv::core::MatIter<'_, opencv::core::VecN<u8, 3>> =
-            frame.iter().expect("couldn't get iter");
-        for (_pos, pixel) in it {
-            let dot_with_pixel = |itx| -> f32 {
-                let itp = pixel.0.iter().map(|x| *x as f32);
-                let z = zip(itx, itp).map(|(a, b)| a * b);
-                z.fold(0.0, |acc, x| acc + x as f32)
-            };
-            let _y: f32 = dot_with_pixel(my.iter()) + 16.0;
-            let _u: f32 = dot_with_pixel(mu.iter()) + 128.0;
-            let _v: f32 = dot_with_pixel(mv.iter()) + 128.0;
-
-            y.push(clamp(_y));
-            u.push(clamp(_u));
-            v.push(clamp(_v));
-        }
-
-        Self {
-            width,
-            height,
-            y,
-            u,
-            v,
-        }
-    }
-}
-
-impl YUVSource for YuvWrapper {
-    fn width(&self) -> i32 {
-        self.width
-    }
-
-    fn height(&self) -> i32 {
-        self.height
-    }
-
-    fn y(&self) -> &[u8] {
-        &self.y
-    }
-
-    fn u(&self) -> &[u8] {
-        &self.u
-    }
-
-    fn v(&self) -> &[u8] {
-        &self.v
-    }
-
-    fn y_stride(&self) -> i32 {
-        self.width
-    }
-
-    fn u_stride(&self) -> i32 {
-        self.width
-    }
-
-    fn v_stride(&self) -> i32 {
-        self.width
-    }
 }
