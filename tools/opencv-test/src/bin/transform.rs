@@ -1,8 +1,14 @@
-use std::{fs::OpenOptions, io::{BufWriter, Write}};
+use std::{
+    fs::OpenOptions,
+    io::{BufWriter, Write},
+};
 
 use clap::Parser;
-use opencv::{prelude::*, videoio, core::{CV_32F, Mat_AUTO_STEP, DecompTypes}};
-use openh264::{encoder::{Encoder, EncoderConfig}, formats::YUVSource};
+use opencv::{core::VecN, prelude::*, videoio};
+use openh264::{
+    encoder::{Encoder, EncoderConfig},
+    formats::YUVSource,
+};
 
 // transforms the input file to h264
 #[derive(Parser, Debug)]
@@ -13,7 +19,7 @@ struct Args {
     output: String,
 }
 
- fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let mut cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
@@ -25,31 +31,29 @@ struct Args {
     // https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html
     let frame_width = cam.get(3)? as i32;
     let frame_height = cam.get(4)? as i32;
-    let fps = cam.get(5)?;
+    let _fps = cam.get(5)?;
 
-    let output_file = OpenOptions::new().read(false).write(true).create(true).truncate(true).open(args.output)?;
+    let output_file = OpenOptions::new()
+        .read(false)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(args.output)?;
     let mut writer = BufWriter::new(output_file);
     let encoder_config = EncoderConfig::new(frame_width as u32, frame_height as u32);
-    let h264_encoder = Encoder::with_config(encoder_config)?;
+    let mut h264_encoder = Encoder::with_config(encoder_config)?;
     loop {
         let mut frame = Mat::default();
         if !cam.read(&mut frame)? {
             println!("read entire video file");
             break;
         }
-        // supposedly [M][RGB]=[YUV]
-        let mut m: [[f32; 3]; 3] = [[0.299, 0.587, 0.114], [-0.14713, -0.28886, 0.436], [0.615, -0.51499, -0.10001]];
-        let p = m.as_ptr() as *mut std::ffi::c_void;
-        let M = unsafe {Mat::new_rows_cols_with_data(3,3,CV_32F, p, Mat_AUTO_STEP)}?; // may need to .inv() this
-        // shows how to invert a matrix
-        // let M = M.inv(DecompTypes::DECOMP_SVD as i32)?;
-        let mut xformed = Mat::default();
-        opencv::core::transform(&frame, &mut xformed, &M)?;
-        let wrapper = YuvWrapper::new(frame_width , frame_height , Box::new(xformed));
+
+        let wrapper = YuvWrapper::new(frame_width, frame_height, &frame);
         if frame.size()?.width > 0 {
             let encoded = h264_encoder.encode(&wrapper)?;
-            writer.write(&encoded.to_vec());
-           // writer.write(&xformed)?;
+            // todo: make h264 packets
+            writer.write(&encoded.to_vec())?;
         }
     }
     writer.flush()?;
@@ -60,15 +64,40 @@ struct Args {
 struct YuvWrapper {
     width: i32,
     height: i32,
-    data: Box<dyn opencv::core::ToOutputArray>
+    y: Vec<u8>,
+    u: Vec<u8>,
+    v: Vec<u8>,
 }
 
 impl YuvWrapper {
-    fn new(width: i32, height: i32, data: Box<dyn opencv::core::ToOutputArray>)  -> Self {
+    fn new(width: i32, height: i32, frame: &Mat) -> Self {
+        let mut y = Vec::new();
+        y.reserve(width as usize * height as usize);
+        let mut u = y.clone();
+        let mut v = y.clone();
+
+        let my = VecN::<f32, 3>([0.299, 0.587, 0.114]);
+        let mu = VecN::<f32, 3>([-0.14713, -0.28886, 0.436]);
+        let mv = VecN::<f32, 3>([0.615, -0.51499, -0.10001]);
+
+        let it: opencv::core::MatIter<'_, opencv::core::VecN<f32, 3>> =
+            frame.iter().expect("couldn't get iter");
+        for (_pos, pixel) in it {
+            let _y: f32 = pixel.mul(my).0.iter().fold(0.0, |acc, x| acc + *x);
+            let _u: f32 = pixel.mul(mu).0.iter().fold(0.0, |acc, x| acc + *x);
+            let _v: f32 = pixel.mul(mv).0.iter().fold(0.0, |acc, x| acc + *x);
+
+            y.push((_y * 256.0) as u8);
+            u.push((_u * 256.0) as u8);
+            v.push((_v * 256.0) as u8);
+        }
+
         Self {
             width,
             height,
-            data
+            y,
+            u,
+            v,
         }
     }
 }
@@ -83,27 +112,26 @@ impl YUVSource for YuvWrapper {
     }
 
     fn y(&self) -> &[u8] {
-        todo!()
+        &self.y
     }
 
     fn u(&self) -> &[u8] {
-        todo!()
+        &self.u
     }
 
     fn v(&self) -> &[u8] {
-        todo!()
+        &self.v
     }
 
     fn y_stride(&self) -> i32 {
-        todo!()
+        self.width * self.height
     }
 
     fn u_stride(&self) -> i32 {
-        todo!()
+        self.width * self.height
     }
 
     fn v_stride(&self) -> i32 {
-        todo!()
+        self.width * self.height
     }
-    
 }
