@@ -56,10 +56,16 @@ fn main() -> anyhow::Result<()> {
     // ];
 
     // hopefully converts from bgr to yuv.
+    // let m: [[f32; 3]; 3] = [
+    //     [0.062, 0.614, 0.183],
+    //     [0.439, -0.339, -0.101],
+    //     [-0.040, -0.399, 0.439],
+    // ];
+
     let m: [[f32; 3]; 3] = [
-        [0.062, 0.614, 0.183],
-        [0.439, -0.339, -0.101],
-        [-0.040, -0.399, 0.439],
+        [0.114, 0.587, 0.299],
+        [0.50, -0.331, -0.169],
+        [-0.801, -0.419, 0.500],
     ];
 
     let p = m.as_ptr() as *mut std::ffi::c_void;
@@ -90,7 +96,7 @@ fn main() -> anyhow::Result<()> {
             let mut offset = 0;
             for (idx, val) in frame.data_bytes()?.iter().enumerate() {
                 match idx % 3 {
-                    0 => v[y_offset + offset] = *val + 16,
+                    0 => v[y_offset + offset] = *val + 0,
                     1 => v[u_offset + offset] = *val + 128,
                     2 => {
                         v[v_offset + offset] = *val + 128;
