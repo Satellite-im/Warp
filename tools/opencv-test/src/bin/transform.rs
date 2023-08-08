@@ -129,9 +129,9 @@ fn main() -> anyhow::Result<()> {
                         (s[idx + 0] as f32, s[idx + 1] as f32, s[idx + 2] as f32)
                     };
 
-                    let y = (0.2578125 * r + 0.50390625 * g + 0.09765625 * b + 16.0) as u8;
-                    let u = (-0.1484375 * r + -0.2890625 * g + 0.4375 * b + 128.0) as u8;
-                    let v = (0.4375 * r + -0.3671875 * g + -0.0703125 * b + 128.0) as u8;
+                    let y = (0.299 * r + 0.587 * g + 0.114 * b + 0.0) as u8;
+                    let u = (-0.169 * r + -0.331 * g + 0.500 * b + 128.0) as u8;
+                    let v = (0.500 * r + -0.419 * g + -0.081 * b + 128.0) as u8;
 
                     yuv[y_offset + offset] = y;
                     yuv[u_offset + offset] = u;
