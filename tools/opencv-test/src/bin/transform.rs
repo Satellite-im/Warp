@@ -90,7 +90,7 @@ fn main() -> anyhow::Result<()> {
             let len = sz.width * sz.height * 3;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
 
-            let rgba = opencv_test::utils::rgb_to_rgba(unsafe { &*s });
+            let rgba = opencv_test::utils::bgr_to_rgba(unsafe { &*s });
             let yuv = opencv_test::utils::rgba_to_yuv(&rgba, sz.width as _, sz.height as _);
             //
             // let mut v = Vec::new();
