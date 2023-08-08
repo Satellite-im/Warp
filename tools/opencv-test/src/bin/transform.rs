@@ -1,8 +1,6 @@
 use std::{
-    ffi::c_uchar,
     fs::OpenOptions,
     io::{BufWriter, Write},
-    ptr::null_mut,
 };
 
 use clap::Parser;
@@ -39,37 +37,35 @@ fn main() -> anyhow::Result<()> {
         .open(args.output)?;
     let mut writer = BufWriter::new(output_file);
 
-    let config = openh264::encoder::EncoderConfig {
-        width: frame_width,
-        height: frame_height,
-        enable_skip_frame: true,
-        // todo: fix/verify this
-        target_bitrate: 120_000,
-        enable_denoise: false,
-        debug: 0,
-        data_format: openh264::encoder::videoFormatBGR,
-        max_frame_rate: fps,
-        rate_control_mode: openh264::encoder::RateControlMode::Timestamp,
-    };
-
-    let mut idx = 0;
+    let config =
+        openh264::encoder::EncoderConfig::new(frame_width, frame_height).max_frame_rate(fps); //.rate_control_mode(openh264::encoder::RateControlMode::Timestamp);
 
     let mut encoder = openh264::encoder::Encoder::with_config(config)?;
 
+    // works great but is GPL :(
     // let mut encoder = x264::Encoder::builder()
     //     .fps(fps as _, 1)
     //     .build(x264::Colorspace::BGR, frame_width as _, frame_height as _)
     //     .expect("failed to make builder");
 
+    // converts from rgb to yuv
     // let m: [[f32; 3]; 3] = [
     //     [0.183, 0.614, 0.062],
     //     [-0.101, -0.339, 0.439],
     //     [0.439, -0.399, -0.040],
     // ];
-    // let p = m.as_ptr() as *mut std::ffi::c_void;
-    // let m = unsafe {
-    //     Mat::new_rows_cols_with_data(3, 3, opencv::core::CV_32F, p, opencv::core::Mat_AUTO_STEP)
-    // }?;
+
+    // hopefully converts from bgr to yuv.
+    let m: [[f32; 3]; 3] = [
+        [0.062, 0.614, 0.183],
+        [0.439, -0.339, -0.101],
+        [-0.040, -0.399, 0.439],
+    ];
+
+    let p = m.as_ptr() as *mut std::ffi::c_void;
+    let m = unsafe {
+        Mat::new_rows_cols_with_data(3, 3, opencv::core::CV_32F, p, opencv::core::Mat_AUTO_STEP)
+    }?;
 
     loop {
         let mut frame = Mat::default();
@@ -77,26 +73,42 @@ fn main() -> anyhow::Result<()> {
             println!("read entire video file");
             break;
         }
-        // let mut xformed = Mat::default();
-        // opencv::core::transform(&frame, &mut xformed, &m)?;
+        let mut xformed = Mat::default();
+        opencv::core::transform(&frame, &mut xformed, &m)?;
         let sz = frame.size()?;
         if sz.width > 0 {
             let p = frame.data_mut();
             let len = sz.width * sz.height * 3;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
 
-            let src = openh264::encoder::SSourcePicture {
-                iColorFormat: openh264::encoder::videoFormatBGR,
-                iStride: [len / sz.height, 0, 0, 0],
-                pData: [s as *mut c_uchar, null_mut(), null_mut(), null_mut()],
-                iPicWidth: sz.width,
-                iPicHeight: sz.height,
-                uiTimeStamp: idx * 60,
+            let mut v = Vec::new();
+            v.reserve(len as _);
+            let y_offset = 0;
+            let u_offset = (len / 3) as usize;
+            let v_offset = u_offset * 2;
+
+            let mut offset = 0;
+            for (idx, val) in frame.data_bytes()?.iter().enumerate() {
+                match idx % 3 {
+                    0 => v[y_offset + offset] = *val + 16,
+                    1 => v[u_offset + offset] = *val + 128,
+                    2 => {
+                        v[v_offset + offset] = *val + 128;
+                        offset += 1;
+                    }
+                    _ => {
+                        panic!("should never happen");
+                    }
+                }
+            }
+
+            let yuv_buf = opencv_test::utils::YUVBuf {
+                yuv: v,
+                width: sz.width as _,
+                height: sz.height as _,
             };
 
-            idx += 1;
-
-            let encoded_stream = encoder.encode(src)?;
+            let encoded_stream = encoder.encode(&yuv_buf)?;
             encoded_stream.write(&mut writer)?;
 
             // let img = x264::Image::bgr(sz.width, sz.height, unsafe { &*s });
