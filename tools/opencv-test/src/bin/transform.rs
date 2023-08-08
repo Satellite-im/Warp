@@ -65,17 +65,17 @@ fn main() -> anyhow::Result<()> {
     //     [-0.040, -0.399, 0.439],
     // ];
 
-    //let m: [[f32; 3]; 3] = [
-    //    [0.114, 0.587, 0.299],
-    //    [0.50, -0.331, -0.169],
-    //    [-0.801, -0.419, 0.500],
-    //];
-
     let m: [[f32; 3]; 3] = [
-        [0.09765625, 0.50390625, 0.2578125],
-        [0.4375, -0.2890625, -0.1484375],
-        [-0.0703125, -0.3671875, 0.4375],
+        [0.114, 0.587, 0.299],
+        [0.50, -0.331, -0.169],
+        [-0.081, -0.419, 0.500],
     ];
+
+    // let m: [[f32; 3]; 3] = [
+    //     [0.09765625, 0.50390625, 0.2578125],
+    //     [0.4375, -0.2890625, -0.1484375],
+    //     [-0.0703125, -0.3671875, 0.4375],
+    // ];
 
     let p = m.as_ptr() as *mut std::ffi::c_void;
     let m = unsafe {
@@ -108,7 +108,7 @@ fn main() -> anyhow::Result<()> {
             let mut offset = 0;
             for (idx, val) in xformed.data_bytes()?.iter().enumerate() {
                 match idx % 3 {
-                    0 => yuv[y_offset + offset] = (*val).saturating_add(16),
+                    0 => yuv[y_offset + offset] = (*val).saturating_add(0),
                     1 => yuv[u_offset + offset] = (*val).saturating_add(128),
                     2 => {
                         yuv[v_offset + offset] = (*val).saturating_add(128);
