@@ -9,5 +9,5 @@ edition = "2021"
 anyhow = "1.0.71"
 clap = { version = "4.3.9", features=["derive"] }
 opencv = { version = "0.82", features=["clang-runtime"] }
-x264 = { git="https://github.com/sdwoodbury/x264", rev="3a84fdc88705859f988bc4b1f10494cc2d91e21e" }
+x264 = { git="https://github.com/sdwoodbury/x264", rev="21234f65d8043d471d7baaab79149376ada0ffe1" }
 tokio = { version = "1.29.0", features = ["full"] }
