@@ -96,17 +96,15 @@ fn main() -> anyhow::Result<()> {
             let len = sz.width * sz.height * 3;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
             let s: &[u8] = unsafe { &*s };
+
+            let yuv_len: f32 = len as _;
+            let yuv_len = yuv_len * 3.0 / 2.0;
             //
             //// let rgba = opencv_test::utils::bgr_to_rgba(unsafe { &*s });
             //// let yuv = opencv_test::utils::rgba_to_yuv(&rgba, sz.width as _, sz.height as _);
             ////
             let mut yuv: Vec<u8> = Vec::new();
-            yuv.resize(len as _, 0);
-            let y_offset = 0;
-            let u_offset = (len / 3) as usize;
-            let v_offset = u_offset * 2;
-            //
-            let mut offset = 0;
+            yuv.resize(yuv_len as usize, 0);
             //for (idx, val) in xformed.data_bytes()?.iter().enumerate() {
             //    match idx % 3 {
             //        0 => yuv[y_offset + offset] = (*val).saturating_add(0),
@@ -121,24 +119,54 @@ fn main() -> anyhow::Result<()> {
             //    }
             //}
 
-            for j in 0..sz.height {
-                for i in 0..sz.width {
-                    let (b, g, r) = {
-                        let idx = (j * sz.width) + i;
-                        let idx = idx as usize * 3;
-                        (s[idx + 0] as f32, s[idx + 1] as f32, s[idx + 2] as f32)
-                    };
+            let mut y_offset = 0;
+            let mut uv_offset: usize = 0;
+            let u_base: usize = (sz.width * sz.height) as _;
+            let v_base: usize = u_base + (u_base / 4);
+            for chunk in s.chunks_exact(6) {
+                let b1 = chunk[0] as f32;
+                let g1 = chunk[1] as f32;
+                let r1 = chunk[2] as f32;
+                let b2 = chunk[3] as f32;
+                let g2 = chunk[4] as f32;
+                let r2 = chunk[5] as f32;
 
-                    let y = (0.2578125 * r + 0.50390625 * g + 0.09765625 * b + 16.0) as u8;
-                    let u = (-0.1484375 * r + -0.2890625 * g + 0.4375 * b + 128.0) as u8;
-                    let v = (0.4375 * r + -0.3671875 * g + -0.0703125 * b + 128.0) as u8;
+                let y1 = 0.299 * r1 + 0.587 * g1 + 0.114 * b1;
+                let y2 = 0.299 * r2 + 0.587 * g2 + 0.114 * b2;
+                let u1 = b1 - y1;
+                let u2 = b2 - y2;
+                let v1 = r1 - y1;
+                let v2 = r2 - y2;
+                let u = 0.492 * 0.5 * (u1 + u2);
+                let v = 0.877 * 0.5 * (v1 + v2);
 
-                    yuv[y_offset + offset] = y;
-                    yuv[u_offset + offset] = u;
-                    yuv[v_offset + offset] = v;
-                    offset += 1;
-                }
+                yuv[y_offset] = y1 as u8;
+                yuv[y_offset + 1] = y2 as u8;
+                yuv[u_base + uv_offset] = u as u8;
+                yuv[v_base + uv_offset] = v as u8;
+
+                y_offset += 2;
+                uv_offset += 1;
             }
+
+            // for j in 0..sz.height {
+            //     for i in 0..sz.width {
+            //         let (b, g, r) = {
+            //             let idx = (j * sz.width) + i;
+            //             let idx = idx as usize * 3;
+            //             (s[idx + 0] as f32, s[idx + 1] as f32, s[idx + 2] as f32)
+            //         };
+            //
+            //         let y = (0.2578125 * r + 0.50390625 * g + 0.09765625 * b + 16.0) as u8;
+            //         let u = (-0.1484375 * r + -0.2890625 * g + 0.4375 * b + 128.0) as u8;
+            //         let v = (0.4375 * r + -0.3671875 * g + -0.0703125 * b + 128.0) as u8;
+            //
+            //         yuv[y_offset + offset] = y;
+            //         yuv[u_offset + offset] = u;
+            //         yuv[v_offset + offset] = v;
+            //         offset += 1;
+            //     }
+            // }
 
             let yuv_buf = opencv_test::utils::YUVBuf {
                 yuv,

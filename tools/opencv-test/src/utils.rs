@@ -103,16 +103,6 @@ pub struct YUVBuf {
     pub height: usize,
 }
 
-impl YUVBuf {
-    fn len(&self) -> usize {
-        self.width * self.height * 3
-    }
-
-    fn stride(&self) -> usize {
-        self.width
-    }
-}
-
 impl YUVSource for YUVBuf {
     fn width(&self) -> i32 {
         self.width as i32
@@ -123,29 +113,29 @@ impl YUVSource for YUVBuf {
     }
 
     fn y(&self) -> &[u8] {
-        let end = self.len() / 3;
-        &self.yuv[0..end]
+        &self.yuv[0..self.width * self.height]
     }
 
     fn u(&self) -> &[u8] {
-        let end = self.len() / 3;
-        &self.yuv[end..end * 2]
+        let base = self.width * self.height;
+        &self.yuv[base..base + base / 4]
     }
 
     fn v(&self) -> &[u8] {
-        let end = self.len() / 3;
-        &self.yuv[end * 2..]
+        let base_u = self.width * self.height;
+        let base_v = base_u + (base_u / 4);
+        &self.yuv[base_v..]
     }
 
     fn y_stride(&self) -> i32 {
-        self.stride() as _
+        self.width as _
     }
 
     fn u_stride(&self) -> i32 {
-        self.stride() as _
+        self.width as i32 / 2
     }
 
     fn v_stride(&self) -> i32 {
-        self.stride() as _
+        self.width as i32 / 2
     }
 }
