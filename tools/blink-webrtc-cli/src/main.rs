@@ -60,6 +60,7 @@ struct Args {
 
 /// test warp-blink-webrtc via command line
 #[derive(Parser, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 enum Repl {
     /// show your DID
     ShowDid,

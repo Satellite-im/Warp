@@ -360,7 +360,7 @@ pub async fn f32_opus_rtp(
     // variables for parsing RTP packets
     let max_late = 512;
     // this thing just copies bytes without modifying them. it in no way decodes opus data.
-    let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
+    let depacketizer = webrtc::rtp::codecs::opus::OpusPacket;
     // this thing doesn't actually build Opus samples. it just reconstructs a payload.
     let mut rtp_sample_builder = SampleBuilder::new(max_late, depacketizer, decoded_sample_rate);
 
