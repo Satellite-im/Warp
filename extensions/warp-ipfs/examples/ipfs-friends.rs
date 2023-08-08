@@ -48,15 +48,20 @@ async fn main() -> anyhow::Result<()> {
     println!();
 
     account_a.send_request(&ident_b.did_key()).await?;
+    let mut sent = false;
+    let mut received = false;
 
-    while let Some(event) = subscribe_a.next().await {
-        if matches!(event, MultiPassEventKind::FriendRequestSent { .. }) {
-            break;
+    loop {
+        tokio::select! {
+            Some(MultiPassEventKind::FriendRequestSent { .. }) = subscribe_a.next() => {
+                sent = true;
+            }
+            Some(MultiPassEventKind::FriendRequestReceived { .. }) = subscribe_b.next() => {
+                received = true;
+            }
         }
-    }
 
-    while let Some(event) = subscribe_b.next().await {
-        if matches!(event, MultiPassEventKind::FriendRequestReceived { .. }) {
+        if sent && received {
             break;
         }
     }
