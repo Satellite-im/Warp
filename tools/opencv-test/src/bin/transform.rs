@@ -5,7 +5,7 @@ use std::{
 
 use clap::Parser;
 use opencv::{prelude::*, videoio};
-use opencv_test::utils::rgb_to_yuv;
+use opencv_test::utils::bgr_to_yuv;
 
 // transforms the input file to h264
 #[derive(Parser, Debug)]
@@ -60,7 +60,7 @@ fn main() -> anyhow::Result<()> {
             let s = std::ptr::slice_from_raw_parts(p, len as _);
             let s: &[u8] = unsafe { &*s };
 
-            let yuv = rgb_to_yuv(s, sz.width as _, sz.height as _);
+            let yuv = bgr_to_yuv(s, sz.width as _, sz.height as _);
             let yuv_buf = opencv_test::utils::YUVBuf {
                 yuv,
                 width: sz.width as _,

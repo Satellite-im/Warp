@@ -37,7 +37,7 @@ pub fn yuyv422_to_rgb_(data: &[u8], rgba: bool) -> Vec<u8> {
     rgb
 }
 
-pub fn rgb_to_yuv(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
+pub fn bgr_to_yuv(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
     let size = (3 * width * height) / 2;
     let mut yuv = vec![0; size];
 
@@ -50,9 +50,9 @@ pub fn rgb_to_yuv(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
         // two dim to single dim
         let base_pos = (x + y * width) * 3;
         (
-            rgba[base_pos] as f32,
-            rgba[base_pos + 1] as f32,
             rgba[base_pos + 2] as f32,
+            rgba[base_pos + 1] as f32,
+            rgba[base_pos + 0] as f32,
         )
     };
 
