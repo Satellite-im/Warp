@@ -543,7 +543,7 @@ impl WarpIpfs {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
-            discovery,
+            discovery.clone(),
             config.clone(),
             tesseract.clone(),
             self.multipass_tx.clone(),
@@ -554,8 +554,8 @@ impl WarpIpfs {
 
         identity_store.set_friend_store(friend_store.clone()).await;
 
-        *self.identity_store.write() = Some(identity_store);
-        *self.friend_store.write() = Some(friend_store);
+        *self.identity_store.write() = Some(identity_store.clone());
+        *self.friend_store.write() = Some(friend_store.clone());
 
         if let Err(_e) = self.import_index().await {
             error!("Error loading index: {_e}");
@@ -577,7 +577,9 @@ impl WarpIpfs {
             MessageStore::new(
                 ipfs.clone(),
                 config.path.map(|path| path.join("messages")),
-                Box::new(self.clone()) as Box<dyn MultiPass>,
+                identity_store,
+                friend_store,
+                discovery,
                 Some(Box::new(self.clone()) as Box<dyn Constellation>),
                 false,
                 1000,

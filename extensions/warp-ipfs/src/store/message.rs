@@ -27,8 +27,6 @@ use warp::crypto::{generate, DID};
 use warp::error::Error;
 use warp::logging::tracing::log::{debug, error, info, trace};
 use warp::logging::tracing::warn;
-use warp::multipass::identity::Identifier;
-use warp::multipass::MultiPass;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState, Location,
     Message, MessageEvent, MessageEventKind, MessageOptions, MessageStatus, MessageStream,
@@ -36,15 +34,18 @@ use warp::raygun::{
 };
 use warp::sync::Arc;
 
+use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;
 use crate::store::{
     connected_to_peer, ecdh_decrypt, ecdh_encrypt, get_keypair_did, sign_serde,
     ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, PeerTopic,
 };
-use crate::spam_filter::SpamFilter;
 
 use super::conversation::{ConversationDocument, MessageDocument};
+use super::discovery::Discovery;
 use super::document::utils::{GetLocalDag, ToCid};
+use super::friends::FriendsStore;
+use super::identity::IdentityStore;
 use super::keystore::Keystore;
 use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, DidExt, MessagingEvents};
 
@@ -60,6 +61,7 @@ enum ConversationEventHandle {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct MessageStore {
     // ipfs instance
     ipfs: Ipfs,
@@ -76,8 +78,15 @@ pub struct MessageStore {
     conversation_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationSender>>>,
     conversation_task_tx: Arc<tokio::sync::RwLock<HashMap<Uuid, Sender<ConversationEventHandle>>>>,
 
-    // account instance
-    account: Box<dyn MultiPass>,
+    // identity store
+    // Note: Not used for now;
+    identity: IdentityStore,
+
+    // friend store
+    friends: FriendsStore,
+
+    // discovery
+    discovery: Discovery,
 
     // filesystem instance
     filesystem: Option<Box<dyn Constellation>>,
@@ -109,7 +118,9 @@ impl MessageStore {
     pub async fn new(
         ipfs: Ipfs,
         path: Option<PathBuf>,
-        account: Box<dyn MultiPass>,
+        identity: IdentityStore,
+        friends: FriendsStore,
+        discovery: Discovery,
         filesystem: Option<Box<dyn Constellation>>,
         _: bool,
         interval_ms: u64,
@@ -156,7 +167,9 @@ impl MessageStore {
             conversation_lock,
             conversation_sender,
             conversation_task_tx,
-            account,
+            identity,
+            friends,
+            discovery,
             filesystem,
             queue,
             did,
@@ -1249,14 +1262,9 @@ impl MessageStore {
                     return Err(Error::IdentityExist);
                 }
 
-                // used to kind of bootstrap the connections internally in case the recipient isnt connected
-                tokio::spawn({
-                    let account = self.account.clone();
-                    let recipient = recipient.clone();
-                    async move {
-                        if let Ok(_list) = account.get_identity(Identifier::DID(recipient)).await {}
-                    }
-                });
+                if !self.discovery.contains(&recipient).await {
+                    let _ = self.discovery.insert(&recipient).await.ok();
+                }
 
                 document.recipients = list;
                 document.signature = Some(signature);
@@ -1426,7 +1434,8 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                if let Ok(true) = self.account.is_blocked(&recipient).await {
+                if let Ok(true) = self.friends.is_blocked(&recipient).await {
+                    //TODO: Signal back to close conversation
                     warn!("{recipient} is blocked");
                     return Ok(());
                 }
@@ -1484,14 +1493,14 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                // used to kind of bootstrap the connections internally in case the recipients arent connected
                 tokio::spawn({
-                    let account = self.account.clone();
+                    let discovery = self.discovery.clone();
                     let recipients = list.clone();
                     async move {
-                        if let Ok(_list) =
-                            account.get_identity(Identifier::DIDList(recipients)).await
-                        {
+                        for recipient in recipients {
+                            if !discovery.contains(&recipient).await {
+                                let _ = discovery.insert(recipient).await.ok();
+                            }
                         }
                     }
                 });
@@ -1794,11 +1803,11 @@ impl MessageStore {
 
 impl MessageStore {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
-        if self.with_friends.load(Ordering::SeqCst) {
-            self.account.has_friend(did_key).await?;
+        if self.with_friends.load(Ordering::SeqCst) && !self.friends.is_friend(did_key).await? {
+            return Err(Error::FriendDoesntExist);
         }
 
-        if let Ok(true) = self.account.is_blocked(did_key).await {
+        if let Ok(true) = self.friends.is_blocked(did_key).await {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -1828,17 +1837,9 @@ impl MessageStore {
             return Err(Error::ConversationLimitReached);
         }
 
-        tokio::spawn({
-            let account = self.account.clone();
-            let did = did_key.clone();
-            async move {
-                if let Ok(list) = account.get_identity(did.into()).await {
-                    if list.is_empty() {
-                        warn!("Unable to find identity. Creating conversation anyway");
-                    }
-                }
-            }
-        });
+        if !self.discovery.contains(did_key).await {
+            self.discovery.insert(did_key).await?;
+        }
 
         let conversation =
             ConversationDocument::new_direct(own_did, [own_did.clone(), did_key.clone()])?;
@@ -1915,8 +1916,14 @@ impl MessageStore {
     pub async fn create_group_conversation(
         &mut self,
         name: Option<String>,
-        did_key: HashSet<DID>,
+        mut recipients: HashSet<DID>,
     ) -> Result<Conversation, Error> {
+        let own_did = &*(self.did.clone());
+
+        if recipients.contains(own_did) {
+            return Err(Error::CannotCreateConversation);
+        }
+
         if let Some(name) = name.as_ref() {
             let name_length = name.trim().len();
 
@@ -1930,22 +1937,22 @@ impl MessageStore {
             }
         }
 
-        if self.with_friends.load(Ordering::SeqCst) {
-            for did in did_key.iter() {
-                self.account.has_friend(did).await?;
+        let mut removal = vec![];
+
+        for did in recipients.iter() {
+            if self.with_friends.load(Ordering::SeqCst) && !self.friends.is_friend(did).await? {
+                info!("{did} is not on the friends list.. removing from list");
+                removal.push(did.clone());
+            }
+
+            if let Ok(true) = self.friends.is_blocked(did).await {
+                info!("{did} is blocked.. removing from list");
+                removal.push(did.clone());
             }
         }
 
-        for did in did_key.iter() {
-            if let Ok(true) = self.account.is_blocked(did).await {
-                return Err(Error::PublicKeyIsBlocked);
-            }
-        }
-
-        let own_did = &*(self.did.clone());
-
-        if did_key.contains(own_did) {
-            return Err(Error::CannotCreateConversation);
+        for did in removal {
+            recipients.remove(&did);
         }
 
         //Temporary limit
@@ -1953,23 +1960,14 @@ impl MessageStore {
             return Err(Error::ConversationLimitReached);
         }
 
-        tokio::spawn({
-            let account = self.account.clone();
-            let did_list = Vec::from_iter(did_key.clone());
-            async move {
-                if let Ok(list) = account
-                    .get_identity(warp::multipass::identity::Identifier::DIDList(did_list))
-                    .await
-                {
-                    if list.is_empty() {
-                        warn!("Unable to find identities. Creating conversation anyway");
-                    }
-                }
+        for recipient in &recipients {
+            if !self.discovery.contains(recipient).await {
+                let _ = self.discovery.insert(recipient).await.ok();
             }
-        });
+        }
 
         let conversation =
-            ConversationDocument::new_group(own_did, name, &Vec::from_iter(did_key))?;
+            ConversationDocument::new_group(own_did, name, &Vec::from_iter(recipients))?;
 
         let recipient = conversation.recipients();
 
@@ -2293,7 +2291,11 @@ impl MessageStore {
                                 store.conversation_cid.write().await.insert(id, cid);
                                 let recipients = conversation.recipients();
 
-                                let _ = store.account.get_identity(recipients.into()).await.ok();
+                                for recipient in recipients {
+                                    if !store.discovery.contains(&recipient).await {
+                                        let _ = store.discovery.insert(recipient).await.ok();
+                                    }
+                                }
 
                                 let stream =
                                     store.ipfs.pubsub_subscribe(conversation.topic()).await?;
@@ -2750,7 +2752,7 @@ impl MessageStore {
             return Err(Error::PublicKeyInvalid);
         }
 
-        if self.account.is_blocked(did_key).await? {
+        if self.friends.is_blocked(did_key).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
 
