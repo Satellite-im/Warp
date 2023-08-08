@@ -1,12 +1,10 @@
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
-    iter::zip,
 };
 
 use clap::Parser;
-use opencv::core::{ToInputArray, ToOutputArray};
-use opencv::{core::VecN, prelude::*, videoio};
+use opencv::{prelude::*, videoio};
 
 // transforms the input file to h264
 #[derive(Parser, Debug)]
@@ -66,13 +64,6 @@ fn main() -> anyhow::Result<()> {
             let p = frame.data_mut();
             let len = sz.width * sz.height * 3;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
-
-            let plane = x264::Plane {
-                // todo: try to get stride from opencv
-                stride: sz.width,
-                data: unsafe { &*s },
-            };
-            let planes = vec![plane];
 
             let img = x264::Image::rgb(sz.width, sz.height, unsafe { &*s });
             let (data, _) = encoder
