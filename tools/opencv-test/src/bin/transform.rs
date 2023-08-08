@@ -60,7 +60,34 @@ fn main() -> anyhow::Result<()> {
             let s = std::ptr::slice_from_raw_parts(p, len as _);
             let s: &[u8] = unsafe { &*s };
 
-            let yuv = bgr_to_yuv(s, sz.width as _, sz.height as _);
+            let new_len = len * 4;
+            let mut s2 = Vec::new();
+            s2.resize(new_len as _, 0);
+
+            let mut set_pixel = |row: usize, col: usize, b, g, r| {
+                let base_pos = (row + col * sz.width as usize * 2) as usize;
+                s2[base_pos] = b;
+                s2[base_pos + 1] = g;
+                s2[base_pos + 2] = r;
+            };
+
+            for col in 0..sz.height {
+                for row in 0..sz.width {
+                    let base_pos = (row + col * sz.width) as usize;
+                    let b = s[base_pos];
+                    let g = s[base_pos + 1];
+                    let r = s[base_pos + 2];
+
+                    let new_col = col as usize * 2;
+                    let new_row = row as usize * 2;
+                    set_pixel(new_row, new_col, b, g, r);
+                    set_pixel(new_row + 1, new_col, b, g, r);
+                    set_pixel(new_row, new_col + 1, b, g, r);
+                    set_pixel(new_row + 1, new_col + 1, b, g, r);
+                }
+            }
+
+            let yuv = bgr_to_yuv(&s2, sz.width as usize * 2, sz.height as usize * 2);
             let yuv_buf = opencv_test::utils::YUVBuf {
                 yuv,
                 width: sz.width as _,
