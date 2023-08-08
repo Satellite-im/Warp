@@ -190,6 +190,7 @@ impl ThumbnailGenerator {
         id
     }
 
+    #[allow(dead_code)]
     pub async fn cancel(&self, id: ThumbnailId) {
         let task = self.task.lock().await.remove(&id);
         if let Some(task) = task {
@@ -203,6 +204,7 @@ impl ThumbnailGenerator {
         task.await.map_err(anyhow::Error::from)?
     }
 
+    #[allow(dead_code)]
     pub async fn is_finished(&self, id: ThumbnailId) -> Result<bool, Error> {
         if let Some(task) = self.task.lock().await.get(&id) {
             return Ok(task.is_finished());

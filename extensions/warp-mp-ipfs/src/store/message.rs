@@ -41,10 +41,10 @@ use crate::store::{
     connected_to_peer, ecdh_decrypt, ecdh_encrypt, get_keypair_did, sign_serde,
     ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, PeerTopic,
 };
-use crate::SpamFilter;
+use crate::spam_filter::SpamFilter;
 
 use super::conversation::{ConversationDocument, MessageDocument};
-use super::document::{GetLocalDag, ToCid};
+use super::document::utils::{GetLocalDag, ToCid};
 use super::keystore::Keystore;
 use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, DidExt, MessagingEvents};
 
@@ -1727,7 +1727,7 @@ impl MessageStore {
         let mut list = self.queue.read().await.clone();
         for (did, items) in list.iter_mut() {
             if let Ok(crate::store::PeerConnectionType::Connected) =
-                connected_to_peer(self.ipfs.clone(), did.clone()).await
+                connected_to_peer(&self.ipfs, did.clone()).await
             {
                 for item in items.iter_mut() {
                     let Queue::Direct {

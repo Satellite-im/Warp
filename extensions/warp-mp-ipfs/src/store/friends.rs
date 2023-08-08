@@ -16,7 +16,7 @@ use warp::sync::Arc;
 use warp::tesseract::Tesseract;
 
 use crate::behaviour::phonebook::PhoneBookCommand;
-use crate::config::MpIpfsConfig;
+use crate::config::Config as MpIpfsConfig;
 use crate::store::{ecdh_decrypt, ecdh_encrypt, PeerIdExt, PeerTopic};
 
 use super::identity::{IdentityStore, LookupBy, RequestOption};

@@ -23,7 +23,7 @@ use warp::{
 use crate::store::ecdh_encrypt;
 
 use super::{
-    document::{GetIpldDag, GetLocalDag, ToCid},
+    document::utils::{GetIpldDag, GetLocalDag, ToCid},
     ecdh_decrypt,
     keystore::Keystore,
     verify_serde_sig,
