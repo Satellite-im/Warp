@@ -48,6 +48,9 @@ fn main() -> anyhow::Result<()> {
     //     .build(x264::Colorspace::BGR, frame_width as _, frame_height as _)
     //     .expect("failed to make builder");
 
+    // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
+    // be sure to pick the full-scale conversion
+
     // converts from rgb to yuv
     // let m: [[f32; 3]; 3] = [
     //     [0.183, 0.614, 0.062],
@@ -55,7 +58,7 @@ fn main() -> anyhow::Result<()> {
     //     [0.439, -0.399, -0.040],
     // ];
 
-    // hopefully converts from bgr to yuv.
+    // converts from bgr to yuv.
     // let m: [[f32; 3]; 3] = [
     //     [0.062, 0.614, 0.183],
     //     [0.439, -0.339, -0.101],
