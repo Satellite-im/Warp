@@ -124,8 +124,8 @@ fn main() -> anyhow::Result<()> {
             for j in 0..sz.height {
                 for i in 0..sz.width {
                     let (b, g, r) = {
-                        let idx = (j * sz.width * 3) + i;
-                        let idx = idx as usize;
+                        let idx = (j * sz.width) + i;
+                        let idx = idx as usize * 3;
                         (s[idx + 0] as f32, s[idx + 1] as f32, s[idx + 2] as f32)
                     };
 
