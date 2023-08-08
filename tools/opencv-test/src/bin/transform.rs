@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
     let mut writer = BufWriter::new(output_file);
     let mut encoder = x264::Encoder::builder()
         .fps(fps as _, 1)
-        .build(x264::Colorspace::RGB, frame_width as _, frame_height as _)
+        .build(x264::Colorspace::BGR, frame_width as _, frame_height as _)
         .expect("failed to make builder");
     let mut idx = 0;
     // let m: [[f32; 3]; 3] = [
@@ -65,7 +65,7 @@ fn main() -> anyhow::Result<()> {
             let len = sz.width * sz.height * 3;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
 
-            let img = x264::Image::rgb(sz.width, sz.height, unsafe { &*s });
+            let img = x264::Image::bgr(sz.width, sz.height, unsafe { &*s });
             let (data, _) = encoder
                 .encode(fps as i64 * idx as i64, img)
                 .expect("failed to encode frame");
