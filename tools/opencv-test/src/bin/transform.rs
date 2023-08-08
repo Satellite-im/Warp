@@ -1,6 +1,8 @@
 use std::{
+    ffi::c_uchar,
     fs::OpenOptions,
     io::{BufWriter, Write},
+    ptr::null_mut,
 };
 
 use clap::Parser;
@@ -25,9 +27,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     // https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html
-    let frame_width = cam.get(3)? as i32;
-    let frame_height = cam.get(4)? as i32;
-    let fps = cam.get(5)?;
+    let frame_width = cam.get(3)? as _;
+    let frame_height = cam.get(4)? as _;
+    let fps = cam.get(5)? as _;
 
     let output_file = OpenOptions::new()
         .read(false)
@@ -36,11 +38,29 @@ fn main() -> anyhow::Result<()> {
         .truncate(true)
         .open(args.output)?;
     let mut writer = BufWriter::new(output_file);
-    let mut encoder = x264::Encoder::builder()
-        .fps(fps as _, 1)
-        .build(x264::Colorspace::BGR, frame_width as _, frame_height as _)
-        .expect("failed to make builder");
+
+    let config = openh264::encoder::EncoderConfig {
+        width: frame_width,
+        height: frame_height,
+        enable_skip_frame: true,
+        // todo: fix/verify this
+        target_bitrate: 120_000,
+        enable_denoise: false,
+        debug: 0,
+        data_format: openh264::encoder::videoFormatBGR,
+        max_frame_rate: fps,
+        rate_control_mode: openh264::encoder::RateControlMode::Timestamp,
+    };
+
     let mut idx = 0;
+
+    let mut encoder = openh264::encoder::Encoder::with_config(config)?;
+
+    // let mut encoder = x264::Encoder::builder()
+    //     .fps(fps as _, 1)
+    //     .build(x264::Colorspace::BGR, frame_width as _, frame_height as _)
+    //     .expect("failed to make builder");
+
     // let m: [[f32; 3]; 3] = [
     //     [0.183, 0.614, 0.062],
     //     [-0.101, -0.339, 0.439],
@@ -65,12 +85,26 @@ fn main() -> anyhow::Result<()> {
             let len = sz.width * sz.height * 3;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
 
-            let img = x264::Image::bgr(sz.width, sz.height, unsafe { &*s });
-            let (data, _) = encoder
-                .encode(fps as i64 * idx as i64, img)
-                .expect("failed to encode frame");
+            let src = openh264::encoder::SSourcePicture {
+                iColorFormat: openh264::encoder::videoFormatBGR,
+                iStride: [len / sz.height, 0, 0, 0],
+                pData: [s as *mut c_uchar, null_mut(), null_mut(), null_mut()],
+                iPicWidth: sz.width,
+                iPicHeight: sz.height,
+                uiTimeStamp: idx * 60,
+            };
+
             idx += 1;
-            writer.write(data.entirety())?;
+
+            let encoded_stream = encoder.encode(src)?;
+            encoded_stream.write(&mut writer)?;
+
+            // let img = x264::Image::bgr(sz.width, sz.height, unsafe { &*s });
+            // let (data, _) = encoder
+            //     .encode(fps as i64 * idx as i64, img)
+            //     .expect("failed to encode frame");
+            // idx += 1;
+            // writer.write(data.entirety())?;
         }
     }
     writer.flush()?;
