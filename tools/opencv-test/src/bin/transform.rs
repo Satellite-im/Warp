@@ -67,15 +67,15 @@ fn main() -> anyhow::Result<()> {
             s2.resize(new_len as _, 0);
 
             let mut set_pixel = |row: usize, col: usize, b, g, r| {
-                let base_pos = row + col * width * 2 * 3;
+                let base_pos = (row + col * width * 2) * 3;
                 s2[base_pos] = b;
                 s2[base_pos + 1] = g;
                 s2[base_pos + 2] = r;
             };
 
-            for col in 0..height {
-                for row in 0..width {
-                    let base_pos = row + col * width;
+            for row in 0..height {
+                for col in 0..width {
+                    let base_pos = (row + col * width) * 3;
                     let b = s[base_pos];
                     let g = s[base_pos + 1];
                     let r = s[base_pos + 2];
