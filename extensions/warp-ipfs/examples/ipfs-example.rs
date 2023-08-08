@@ -1,5 +1,5 @@
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::WarpIpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

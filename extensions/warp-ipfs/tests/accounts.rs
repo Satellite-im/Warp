@@ -6,7 +6,7 @@ mod test {
     use crate::common::{create_account, create_accounts};
     use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
     use warp::tesseract::Tesseract;
-    use warp_mp_ipfs::WarpIpfsBuilder;
+    use warp_ipfs::WarpIpfsBuilder;
 
     #[tokio::test]
     async fn create_identity() -> anyhow::Result<()> {

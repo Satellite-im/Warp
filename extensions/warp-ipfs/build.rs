@@ -4,7 +4,7 @@ static CONFIG: &str = r#"
 language = "C"
 
 cpp_compat = true
-include_guard = "_WARP_MP_IPFS_H_"
+include_guard = "_WARP_IPFS_H_"
 
 [export]
 
@@ -16,7 +16,7 @@ clean = false
 include = ["warp"]
 
 [parse.expand]
-crates = ["warp", "warp-mp-ipfs"]
+crates = ["warp", "warp-ipfs"]
 
 
 "#;
@@ -33,7 +33,7 @@ fn main() {
             "-c",
             "cbindgen.toml",
             "-o",
-            "warp-mp-ipfs.h",
+            "warp-ipfs.h",
         ])
         .stdout(std::process::Stdio::inherit())
         .output()

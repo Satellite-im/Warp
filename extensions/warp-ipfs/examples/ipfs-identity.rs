@@ -1,7 +1,7 @@
 use warp::multipass::identity::IdentityUpdate;
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::WarpIpfsBuilder;
 
 async fn update_name(account: &mut Box<dyn MultiPass>, name: &str) -> anyhow::Result<()> {
     account

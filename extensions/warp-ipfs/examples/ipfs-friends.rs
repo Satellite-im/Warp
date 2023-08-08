@@ -6,8 +6,8 @@ use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::{MultiPass, MultiPassEventKind};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::Config;
-use warp_mp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::config::Config;
+use warp_ipfs::WarpIpfsBuilder;
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = Tesseract::default();

@@ -3,9 +3,10 @@ use rust_ipfs::{Ipfs, Multiaddr, PeerId};
 use warp::{
     crypto::DID,
     multipass::{identity::Identity, MultiPass},
-    tesseract::Tesseract, raygun::RayGun,
+    raygun::RayGun,
+    tesseract::Tesseract,
 };
-use warp_mp_ipfs::{
+use warp_ipfs::{
     config::{Bootstrap, Discovery},
     WarpIpfsBuilder,
 };
@@ -50,7 +51,7 @@ pub async fn create_account(
 ) -> anyhow::Result<(Box<dyn MultiPass>, DID, Identity)> {
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
-    let mut config = warp_mp_ipfs::config::Config::development();
+    let mut config = warp_ipfs::config::Config::development();
     config.listen_on = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
     config.store_setting.discovery = Discovery::Provider(context);
     config.store_setting.share_platform = true;
@@ -99,7 +100,7 @@ pub async fn create_account_and_chat(
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, DID, Identity)> {
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
-    let mut config = warp_mp_ipfs::config::Config::development();
+    let mut config = warp_ipfs::config::Config::development();
     config.listen_on = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
     config.store_setting.discovery = Discovery::Provider(context);
     config.store_setting.share_platform = true;
@@ -107,7 +108,7 @@ pub async fn create_account_and_chat(
     config.ipfs_setting.bootstrap = false;
     config.bootstrap = Bootstrap::None;
 
-    let (mut account, mut raygun, _) = WarpIpfsBuilder::default()
+    let (mut account, raygun, _) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()

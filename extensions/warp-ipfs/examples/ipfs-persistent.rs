@@ -11,7 +11,7 @@ use warp::{
     multipass::MultiPass,
     tesseract::Tesseract,
 };
-use warp_mp_ipfs::{config::Config, WarpIpfsBuilder};
+use warp_ipfs::{config::Config, WarpIpfsBuilder};
 
 #[derive(Debug, Parser)]
 #[clap(name = "")]

@@ -22,8 +22,8 @@ use warp::raygun::{
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::Discovery;
-use warp_mp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::config::Discovery;
+use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
 #[clap(name = "messenger")]
@@ -81,8 +81,8 @@ async fn setup<P: AsRef<Path>>(
     tesseract.unlock(passphrase.as_bytes())?;
 
     let mut config = match path.as_ref() {
-        Some(path) => warp_mp_ipfs::config::Config::production(path, experimental),
-        None => warp_mp_ipfs::config::Config::testing(experimental),
+        Some(path) => warp_ipfs::config::Config::production(path, experimental),
+        None => warp_ipfs::config::Config::testing(experimental),
     };
 
     if !opt.direct || !opt.no_discovery {
