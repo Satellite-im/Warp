@@ -97,9 +97,9 @@ fn main() -> anyhow::Result<()> {
             for (idx, val) in frame.data_bytes()?.iter().enumerate() {
                 match idx % 3 {
                     0 => v[y_offset + offset] = *val + 0,
-                    1 => v[u_offset + offset] = *val + 128,
+                    1 => v[u_offset + offset] = (*val).saturating_add(128),
                     2 => {
-                        v[v_offset + offset] = *val + 128;
+                        v[v_offset + offset] = (*val).saturating_add(128);
                         offset += 1;
                     }
                     _ => {
