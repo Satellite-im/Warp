@@ -64,7 +64,7 @@ fn main() -> anyhow::Result<()> {
         let sz = frame.size()?;
         if sz.width > 0 {
             let p = frame.data_mut();
-            let len = sz.width * sz.height;
+            let len = sz.width * sz.height * 3;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
 
             let plane = x264::Plane {
