@@ -5,10 +5,7 @@ use warp::{
     multipass::{identity::Identity, MultiPass},
     tesseract::Tesseract,
 };
-use warp_mp_ipfs::{
-    config::{Bootstrap, Discovery},
-    IpfsIdentity,
-};
+use warp_mp_ipfs::{config::{Bootstrap, Discovery}, WarpIpfsBuilder};
 
 pub async fn node_info(nodes: Vec<Ipfs>) -> Vec<(Ipfs, PeerId, Vec<Multiaddr>)> {
     stream::iter(nodes)
@@ -49,7 +46,7 @@ pub async fn create_account(
 ) -> anyhow::Result<(Box<dyn MultiPass>, DID, Identity)> {
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
-    let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
+    let mut config = warp_mp_ipfs::config::Config::development();
     config.listen_on = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
     config.store_setting.discovery = Discovery::Provider(context);
     config.store_setting.share_platform = true;
@@ -57,10 +54,14 @@ pub async fn create_account(
     config.ipfs_setting.bootstrap = false;
     config.bootstrap = Bootstrap::None;
 
-    let mut account = IpfsIdentity::new(config, tesseract).await?;
+    let (mut account, _, _) = WarpIpfsBuilder::default()
+        .set_tesseract(tesseract)
+        .set_config(config)
+        .finalize()
+        .await?;
     let did = account.create_identity(username, passphrase).await?;
     let identity = account.get_own_identity().await?;
-    Ok((Box::new(account), did, identity))
+    Ok((account, did, identity))
 }
 
 pub async fn create_accounts(

@@ -93,6 +93,54 @@ pub struct WarpIpfs {
     constellation_tx: broadcast::Sender<ConstellationEventKind>,
 }
 
+#[derive(Default)]
+pub struct WarpIpfsBuilder {
+    config: Config,
+    // use_multipass: bool,
+    // use_raygun: bool,
+    // use_constellation: bool,
+    tesseract: Tesseract,
+}
+
+impl WarpIpfsBuilder {
+    pub fn set_config(mut self, config: Config) -> Self {
+        self.config = config;
+        self
+    }
+
+    pub fn set_tesseract(mut self, tesseract: Tesseract) -> Self {
+        self.tesseract = tesseract;
+        self
+    }
+
+    // pub fn use_multipass(mut self) -> Self {
+    //     self.use_multipass = true;
+    //     self
+    // }
+
+    // pub fn use_constellation(mut self) -> Self {
+    //     self.use_constellation = true;
+    //     self
+    // }
+
+    // pub fn use_raygun(mut self) -> Self {
+    //     self.use_raygun = true;
+    //     self
+    // }
+
+    pub async fn finalize(
+        self,
+    ) -> Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>), Error> {
+        let instance = WarpIpfs::new(self.config, self.tesseract).await?;
+
+        let mp = Box::new(instance.clone()) as Box<_>;
+        let rg = Box::new(instance.clone()) as Box<_>;
+        let fs = Box::new(instance.clone()) as Box<_>;
+
+        Ok((mp, rg, fs))
+    }
+}
+
 impl WarpIpfs {
     pub async fn new(config: Config, tesseract: Tesseract) -> anyhow::Result<WarpIpfs> {
         let (multipass_tx, _) = broadcast::channel(1024);

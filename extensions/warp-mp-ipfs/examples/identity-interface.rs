@@ -2,6 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
+use warp_mp_ipfs::WarpIpfsBuilder;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -11,8 +12,7 @@ use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::{Discovery, MpIpfsConfig};
-use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
+use warp_mp_ipfs::config::{Config, Discovery};
 
 #[derive(Debug, Parser)]
 #[clap(name = "identity-interface")]
@@ -59,8 +59,8 @@ async fn account(
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let mut config = match path.as_ref() {
-        Some(path) => MpIpfsConfig::production(path, opt.experimental_node),
-        None => MpIpfsConfig::testing(opt.experimental_node),
+        Some(path) => Config::production(path, opt.experimental_node),
+        None => Config::testing(opt.experimental_node),
     };
 
     if !opt.direct || !opt.no_discovery {
@@ -94,12 +94,11 @@ async fn account(
 
     config.ipfs_setting.mdns.enable = opt.mdns;
 
-    let mut account = match path.is_some() {
-        false => {
-            Box::new(ipfs_identity_temporary(Some(config), tesseract).await?) as Box<dyn MultiPass>
-        }
-        true => Box::new(ipfs_identity_persistent(config, tesseract).await?) as Box<dyn MultiPass>,
-    };
+    let (mut account, _, _) = WarpIpfsBuilder::default()
+        .set_tesseract(tesseract)
+        .set_config(config)
+        .finalize()
+        .await?;
 
     if account.get_own_identity().await.is_err() {
         account.create_identity(username, None).await?;

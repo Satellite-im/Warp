@@ -6,18 +6,23 @@ use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::{MultiPass, MultiPassEventKind};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::MpIpfsConfig;
-use warp_mp_ipfs::ipfs_identity_temporary;
+use warp_mp_ipfs::config::Config;
+use warp_mp_ipfs::WarpIpfsBuilder;
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let config = MpIpfsConfig::development();
-    let mut account = ipfs_identity_temporary(Some(config), tesseract).await?;
+    let config = Config::development();
+    let (mut account, _, _) = WarpIpfsBuilder::default()
+        .set_tesseract(tesseract)
+        .set_config(config)
+        .finalize()
+        .await?;
+
     account.create_identity(username, None).await?;
-    Ok(Box::new(account))
+    Ok(account)
 }
 
 fn username(ident: &Identity) -> String {

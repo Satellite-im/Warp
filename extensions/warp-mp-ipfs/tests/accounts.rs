@@ -5,9 +5,8 @@ mod test {
 
     use crate::common::{create_account, create_accounts};
     use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
-    use warp::multipass::MultiPass;
     use warp::tesseract::Tesseract;
-    use warp_mp_ipfs::ipfs_identity_temporary;
+    use warp_mp_ipfs::WarpIpfsBuilder;
 
     #[tokio::test]
     async fn create_identity() -> anyhow::Result<()> {
@@ -123,7 +122,11 @@ mod test {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
-        let mut account = ipfs_identity_temporary(None, tesseract).await?;
+        let (mut account, _, _) = WarpIpfsBuilder::default()
+            .set_tesseract(tesseract)
+            .finalize()
+            .await?;
+
         account
             .create_identity(
                 Some("JohnDoe"),
@@ -149,7 +152,11 @@ mod test {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
-        let mut account = ipfs_identity_temporary(None, tesseract).await?;
+        let (mut account, _, _) = WarpIpfsBuilder::default()
+            .set_tesseract(tesseract)
+            .finalize()
+            .await?;
+
         account
             .create_identity(
                 Some("JohnDoe"),
