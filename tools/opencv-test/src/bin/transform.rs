@@ -77,12 +77,12 @@ fn main() -> anyhow::Result<()> {
         opencv::core::transform(&frame, &mut xformed, &m)?;
         let sz = frame.size()?;
         if sz.width > 0 {
-            let p = frame.data_mut();
+            // let p = frame.data_mut();
             let len = sz.width * sz.height * 3;
-            let s = std::ptr::slice_from_raw_parts(p, len as _);
+            // let s = std::ptr::slice_from_raw_parts(p, len as _);
 
             let mut v = Vec::new();
-            v.reserve(len as _);
+            v.resize(len as _, 0);
             let y_offset = 0;
             let u_offset = (len / 3) as usize;
             let v_offset = u_offset * 2;
