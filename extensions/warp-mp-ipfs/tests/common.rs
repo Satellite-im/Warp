@@ -3,9 +3,12 @@ use rust_ipfs::{Ipfs, Multiaddr, PeerId};
 use warp::{
     crypto::DID,
     multipass::{identity::Identity, MultiPass},
-    tesseract::Tesseract,
+    tesseract::Tesseract, raygun::RayGun,
 };
-use warp_mp_ipfs::{config::{Bootstrap, Discovery}, WarpIpfsBuilder};
+use warp_mp_ipfs::{
+    config::{Bootstrap, Discovery},
+    WarpIpfsBuilder,
+};
 
 pub async fn node_info(nodes: Vec<Ipfs>) -> Vec<(Ipfs, PeerId, Vec<Multiaddr>)> {
     stream::iter(nodes)
@@ -39,6 +42,7 @@ pub async fn mesh_connect(nodes: Vec<Ipfs>) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn create_account(
     username: Option<&str>,
     passphrase: Option<&str>,
@@ -64,6 +68,7 @@ pub async fn create_account(
     Ok((account, did, identity))
 }
 
+#[allow(dead_code)]
 pub async fn create_accounts(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
 ) -> anyhow::Result<Vec<(Box<dyn MultiPass>, DID, Identity)>> {
@@ -71,6 +76,55 @@ pub async fn create_accounts(
     let mut nodes = vec![];
     for (username, passphrase, context) in infos {
         let account = create_account(username, passphrase, context).await?;
+        let ipfs = account
+            .0
+            .handle()
+            .expect("Handle accessible")
+            .downcast_ref::<Ipfs>()
+            .cloned()
+            .unwrap();
+        nodes.push(ipfs);
+        accounts.push(account);
+    }
+
+    mesh_connect(nodes).await?;
+
+    Ok(accounts)
+}
+
+pub async fn create_account_and_chat(
+    username: Option<&str>,
+    passphrase: Option<&str>,
+    context: Option<String>,
+) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, DID, Identity)> {
+    let tesseract = Tesseract::default();
+    tesseract.unlock(b"internal pass").unwrap();
+    let mut config = warp_mp_ipfs::config::Config::development();
+    config.listen_on = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
+    config.store_setting.discovery = Discovery::Provider(context);
+    config.store_setting.share_platform = true;
+    config.ipfs_setting.relay_client.relay_address = vec![];
+    config.ipfs_setting.bootstrap = false;
+    config.bootstrap = Bootstrap::None;
+
+    let (mut account, mut raygun, _) = WarpIpfsBuilder::default()
+        .set_tesseract(tesseract)
+        .set_config(config)
+        .finalize()
+        .await?;
+
+    let did = account.create_identity(username, passphrase).await?;
+    let identity = account.get_own_identity().await?;
+    Ok((account, raygun, did, identity))
+}
+
+pub async fn create_accounts_and_chat(
+    infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
+) -> anyhow::Result<Vec<(Box<dyn MultiPass>, Box<dyn RayGun>, DID, Identity)>> {
+    let mut accounts = vec![];
+    let mut nodes = vec![];
+    for (username, passphrase, context) in infos {
+        let account = create_account_and_chat(username, passphrase, context).await?;
         let ipfs = account
             .0
             .handle()

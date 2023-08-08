@@ -22,12 +22,8 @@ use warp::raygun::{
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_fs_ipfs::config::FsIpfsConfig;
-use warp_fs_ipfs::IpfsFileSystem;
 use warp_mp_ipfs::config::Discovery;
-use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
-use warp_rg_ipfs::config::RgIpfsConfig;
-use warp_rg_ipfs::IpfsMessaging;
+use warp_mp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
 #[clap(name = "messenger")]
@@ -65,12 +61,12 @@ struct Opt {
     wait: Option<u64>,
 }
 
-async fn create_account<P: AsRef<Path>>(
+async fn setup<P: AsRef<Path>>(
     path: Option<P>,
     passphrase: Zeroizing<String>,
     experimental: bool,
     opt: &Opt,
-) -> anyhow::Result<Box<dyn MultiPass>> {
+) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>)> {
     let tesseract = match path.as_ref() {
         Some(path) => {
             let path = path.as_ref();
@@ -85,8 +81,8 @@ async fn create_account<P: AsRef<Path>>(
     tesseract.unlock(passphrase.as_bytes())?;
 
     let mut config = match path.as_ref() {
-        Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path, experimental),
-        None => warp_mp_ipfs::config::MpIpfsConfig::testing(experimental),
+        Some(path) => warp_mp_ipfs::config::Config::production(path, experimental),
+        None => warp_mp_ipfs::config::Config::testing(experimental),
     };
 
     if !opt.direct || !opt.no_discovery {
@@ -117,59 +113,19 @@ async fn create_account<P: AsRef<Path>>(
     }
 
     config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
-
+    config.store_setting.disable_sender_event_emit = opt.disable_sender_emitter;
     config.ipfs_setting.mdns.enable = opt.mdns;
 
-    let mut account: Box<dyn MultiPass> = match path.is_some() {
-        true => Box::new(ipfs_identity_persistent(config, tesseract).await?),
-        false => Box::new(ipfs_identity_temporary(Some(config), tesseract).await?),
-    };
+    let (mut account, raygun, filesystem) = WarpIpfsBuilder::default()
+        .set_tesseract(tesseract)
+        .set_config(config)
+        .finalize()
+        .await?;
 
     if account.get_own_identity().await.is_err() {
         account.create_identity(None, None).await?;
     }
-    Ok(account)
-}
-
-async fn create_fs<P: AsRef<Path>>(
-    account: Box<dyn MultiPass>,
-    path: Option<P>,
-) -> anyhow::Result<Box<dyn Constellation>> {
-    let config = match path.as_ref() {
-        Some(path) => FsIpfsConfig::production(path),
-        None => FsIpfsConfig::testing(),
-    };
-
-    let filesystem: Box<dyn Constellation> = match path.is_some() {
-        true => Box::new(IpfsFileSystem::new(account, Some(config)).await?),
-        false => Box::new(IpfsFileSystem::new(account, Some(config)).await?),
-    };
-
-    Ok(filesystem)
-}
-
-#[allow(dead_code)]
-async fn create_rg(
-    path: Option<PathBuf>,
-    account: Box<dyn MultiPass>,
-    filesystem: Option<Box<dyn Constellation>>,
-    disable_sender_emitter: bool,
-) -> anyhow::Result<Box<dyn RayGun>> {
-    let mut config = match path.as_ref() {
-        None => RgIpfsConfig::testing(),
-        Some(path) => RgIpfsConfig::production(path),
-    };
-
-    config.store_setting.disable_sender_event_emit = disable_sender_emitter;
-
-    let chat = match path.as_ref() {
-        Some(_) => Box::new(IpfsMessaging::new(Some(config), account, filesystem).await?)
-            as Box<dyn RayGun>,
-        None => Box::new(IpfsMessaging::new(Some(config), account, filesystem).await?)
-            as Box<dyn RayGun>,
-    };
-
-    Ok(chat)
+    Ok((account, raygun, filesystem))
 }
 
 #[allow(clippy::clone_on_copy)]
@@ -203,23 +159,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Creating or obtaining account...");
-    let new_account = create_account(
+    let (new_account, mut chat, _) = setup(
         opt.path.clone(),
         Zeroizing::new(password),
         opt.experimental_node,
         &opt,
-    )
-    .await?;
-
-    println!("Initializing Constellation");
-    let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
-
-    println!("Initializing RayGun");
-    let mut chat = create_rg(
-        opt.path.clone(),
-        new_account.clone(),
-        Some(fs.clone()),
-        opt.disable_sender_emitter,
     )
     .await?;
 

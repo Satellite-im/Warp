@@ -11,8 +11,7 @@ use warp::{
     multipass::MultiPass,
     tesseract::Tesseract,
 };
-use warp_fs_ipfs::{config::FsIpfsConfig, IpfsFileSystem};
-use warp_mp_ipfs::{config::MpIpfsConfig, ipfs_identity_persistent};
+use warp_mp_ipfs::{config::Config, WarpIpfsBuilder};
 
 #[derive(Debug, Parser)]
 #[clap(name = "")]
@@ -56,11 +55,11 @@ enum Command {
     },
 }
 
-async fn account_persistent<P: AsRef<Path>>(
+async fn setup_persistent<P: AsRef<Path>>(
     username: Option<&str>,
     path: P,
     opt: &Opt,
-) -> anyhow::Result<Box<dyn MultiPass>> {
+) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn Constellation>)> {
     let path = path.as_ref();
 
     let tesseract = Tesseract::open_or_create(path, "tdatastore")?;
@@ -68,14 +67,20 @@ async fn account_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let mut config = MpIpfsConfig::production(path, opt.experimental_node);
+    let mut config = Config::production(path, opt.experimental_node);
 
     config.ipfs_setting.mdns.enable = opt.mdns;
-    let mut account = ipfs_identity_persistent(config, tesseract).await?;
+
+    let (mut account, _, filesystem) = WarpIpfsBuilder::default()
+        .set_tesseract(tesseract)
+        .set_config(config)
+        .finalize()
+        .await?;
+
     if account.get_own_identity().await.is_err() {
         account.create_identity(username, None).await?;
     }
-    Ok(Box::new(account))
+    Ok((account, filesystem))
 }
 
 #[tokio::main]
@@ -83,10 +88,7 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     if fdlimit::raise_fd_limit().is_none() {}
 
-    let account = account_persistent(None, opt.path.clone(), &opt).await?;
-
-    let config = FsIpfsConfig::production(opt.path);
-    let mut filesystem = IpfsFileSystem::new(account.clone(), Some(config)).await?;
+    let (_, mut filesystem) = setup_persistent(None, opt.path.clone(), &opt).await?;
 
     match opt.command {
         Command::UploadFile { local, remote } => {

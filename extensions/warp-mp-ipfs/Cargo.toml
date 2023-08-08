@@ -51,6 +51,9 @@ tracing-appender = "0.2"
 clap = { version = "4.0", features = ["derive"] }
 dirs = "4.0"
 
+rpassword = "7.2"
+
+
 [features]
 default = []
 build-header = []
