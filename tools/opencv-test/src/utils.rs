@@ -2,7 +2,7 @@
 
 use openh264::formats::YUVSource;
 
-fn rgb_to_rgba(data: &[u8]) -> Vec<u8> {
+pub fn rgb_to_rgba(data: &[u8]) -> Vec<u8> {
     let mut rgba = Vec::with_capacity(data.len() * 2);
     for chunk in data.chunks_exact(3) {
         rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
@@ -10,7 +10,7 @@ fn rgb_to_rgba(data: &[u8]) -> Vec<u8> {
     rgba
 }
 
-fn yuyv422_to_rgb_(data: &[u8], rgba: bool) -> Vec<u8> {
+pub fn yuyv422_to_rgb_(data: &[u8], rgba: bool) -> Vec<u8> {
     let mut rgb = Vec::with_capacity(data.len() * 2);
     for chunk in data.chunks_exact(4) {
         let y0 = chunk[0] as f32;
