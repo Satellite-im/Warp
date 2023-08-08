@@ -65,10 +65,16 @@ fn main() -> anyhow::Result<()> {
     //     [-0.040, -0.399, 0.439],
     // ];
 
+    //let m: [[f32; 3]; 3] = [
+    //    [0.114, 0.587, 0.299],
+    //    [0.50, -0.331, -0.169],
+    //    [-0.801, -0.419, 0.500],
+    //];
+
     let m: [[f32; 3]; 3] = [
-        [0.114, 0.587, 0.299],
-        [0.50, -0.331, -0.169],
-        [-0.801, -0.419, 0.500],
+        [0.09765625, 0.50390625, 0.2578125],
+        [0.4375, -0.2890625, -0.1484375],
+        [-0.0703125, -0.3671875, 0.4375],
     ];
 
     let p = m.as_ptr() as *mut std::ffi::c_void;
@@ -82,37 +88,37 @@ fn main() -> anyhow::Result<()> {
             println!("read entire video file");
             break;
         }
-        // let mut xformed = Mat::default();
-        // opencv::core::transform(&frame, &mut xformed, &m)?;
+        let mut xformed = Mat::default();
+        opencv::core::transform(&frame, &mut xformed, &m)?;
         let sz = frame.size()?;
         if sz.width > 0 {
             let p = frame.data_mut();
             let len = sz.width * sz.height * 3;
             let s = std::ptr::slice_from_raw_parts(p, len as _);
 
-            let rgba = opencv_test::utils::bgr_to_rgba(unsafe { &*s });
-            let yuv = opencv_test::utils::rgba_to_yuv(&rgba, sz.width as _, sz.height as _);
+            // let rgba = opencv_test::utils::bgr_to_rgba(unsafe { &*s });
+            // let yuv = opencv_test::utils::rgba_to_yuv(&rgba, sz.width as _, sz.height as _);
             //
-            // let mut v = Vec::new();
-            // v.resize(len as _, 0);
-            // let y_offset = 0;
-            // let u_offset = (len / 3) as usize;
-            // let v_offset = u_offset * 2;
-            //
-            // let mut offset = 0;
-            // for (idx, val) in frame.data_bytes()?.iter().enumerate() {
-            //     match idx % 3 {
-            //         0 => v[y_offset + offset] = *val + 0,
-            //         1 => v[u_offset + offset] = (*val).saturating_add(128),
-            //         2 => {
-            //             v[v_offset + offset] = (*val).saturating_add(128);
-            //             offset += 1;
-            //         }
-            //         _ => {
-            //             panic!("should never happen");
-            //         }
-            //     }
-            // }
+            let mut yuv: Vec<u8> = Vec::new();
+            yuv.resize(len as _, 0);
+            let y_offset = 0;
+            let u_offset = (len / 3) as usize;
+            let v_offset = u_offset * 2;
+
+            let mut offset = 0;
+            for (idx, val) in xformed.data_bytes()?.iter().enumerate() {
+                match idx % 3 {
+                    0 => yuv[y_offset + offset] = (*val).saturating_add(16),
+                    1 => yuv[u_offset + offset] = (*val).saturating_add(128),
+                    2 => {
+                        yuv[v_offset + offset] = (*val).saturating_add(128);
+                        offset += 1;
+                    }
+                    _ => {
+                        panic!("should never happen");
+                    }
+                }
+            }
 
             let yuv_buf = opencv_test::utils::YUVBuf {
                 yuv,

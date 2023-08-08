@@ -118,12 +118,12 @@ impl YUVSource for YUVBuf {
 
     fn u(&self) -> &[u8] {
         let base_u = self.width * self.height;
-        &self.yuv[base_u..base_u + base_u / 4]
+        &self.yuv[base_u..base_u + base_u * 2]
     }
 
     fn v(&self) -> &[u8] {
         let base_u = self.width * self.height;
-        let base_v = base_u + base_u / 4;
+        let base_v = base_u * 2;
         &self.yuv[base_v..]
     }
 
@@ -132,10 +132,10 @@ impl YUVSource for YUVBuf {
     }
 
     fn u_stride(&self) -> i32 {
-        (self.width / 2) as i32
+        (self.width / 1) as i32
     }
 
     fn v_stride(&self) -> i32 {
-        (self.width / 2) as i32
+        (self.width / 1) as i32
     }
 }
