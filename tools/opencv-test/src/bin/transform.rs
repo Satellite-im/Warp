@@ -43,11 +43,13 @@ fn main() -> anyhow::Result<()> {
     let mut encoder = openh264::encoder::Encoder::with_config(config)?;
 
     // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
-    // be sure to pick the full-scale conversion
 
     let get_y = |rgb: (f32, f32, f32)| {
+        // best. appears to be from the wikipedia page on YCbCr
         (0.2578125 * rgb.0 + 0.50390625 * rgb.1 + 0.09765625 * rgb.2 + 16.0) as u8
+        // full scale
         //(0.299 * rgb.0 + 0.587 * rgb.1 + 0.114 * rgb.2 + 0.0) as u8
+        // hdtv
         //(0.183 * rgb.0 + 0.614 * rgb.1 + 0.062 * rgb.2 + 16.0) as u8
     };
 
