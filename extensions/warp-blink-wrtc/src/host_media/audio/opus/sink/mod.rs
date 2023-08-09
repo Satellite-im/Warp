@@ -97,7 +97,7 @@ impl OpusSink {
         let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
         let (producer, mut consumer) = ring.split();
 
-        let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
+        let depacketizer = webrtc::rtp::codecs::opus::OpusPacket;
         let sample_builder = SampleBuilder::new(max_late, depacketizer, webrtc_sample_rate);
         let track2 = track.clone();
         let event_ch2 = event_ch.clone();
