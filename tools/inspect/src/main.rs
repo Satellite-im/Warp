@@ -8,12 +8,8 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::RayGun;
 use warp::tesseract::Tesseract;
-use warp_fs_ipfs::config::FsIpfsConfig;
-use warp_fs_ipfs::IpfsFileSystem;
-use warp_mp_ipfs::config::Discovery;
-use warp_mp_ipfs::ipfs_identity_persistent;
-use warp_rg_ipfs::config::RgIpfsConfig;
-use warp_rg_ipfs::IpfsMessaging;
+use warp_ipfs::config::Discovery;
+use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
 #[clap(name = "inspect")]
@@ -31,52 +27,32 @@ struct Opt {
     password: Option<String>,
 }
 
-async fn account<P: AsRef<Path>>(
+async fn setup<P: AsRef<Path>>(
     path: P,
     keystore: Option<String>,
     passphrase: Zeroizing<String>,
-) -> anyhow::Result<Box<dyn MultiPass>> {
+) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>)> {
     let path = path.as_ref();
     let keystore_path = path.join(keystore.unwrap_or("tesseract_store".into()));
 
     let tesseract = Tesseract::from_file(keystore_path)?;
     tesseract.unlock(passphrase.as_bytes())?;
 
-    let mut config = warp_mp_ipfs::config::MpIpfsConfig::production(path, false);
+    let mut config = warp_ipfs::config::Config::production(path, false);
     config.store_setting.discovery = Discovery::None;
     config.ipfs_setting.bootstrap = false;
     config.ipfs_setting.mdns.enable = false;
     config.ipfs_setting.relay_client.enable = false;
 
-    let account: Box<dyn MultiPass> = Box::new(ipfs_identity_persistent(config, tesseract).await?);
+    let (identity, raygun, constellation) = WarpIpfsBuilder::default()
+        .set_tesseract(tesseract)
+        .set_config(config)
+        .finalize()
+        .await?;
 
     //validating that account exist
-    let _ = account.get_own_identity().await?;
-    Ok(account)
-}
-
-async fn fs<P: AsRef<Path>>(
-    account: Box<dyn MultiPass>,
-    path: P,
-) -> anyhow::Result<Box<dyn Constellation>> {
-    let config = FsIpfsConfig::production(path);
-    let filesystem: Box<dyn Constellation> =
-        Box::new(IpfsFileSystem::new(account, Some(config)).await?);
-    Ok(filesystem)
-}
-
-#[allow(dead_code)]
-async fn rg(
-    path: PathBuf,
-    account: Box<dyn MultiPass>,
-    filesystem: Option<Box<dyn Constellation>>,
-) -> anyhow::Result<Box<dyn RayGun>> {
-    let config = RgIpfsConfig::production(path);
-
-    let chat =
-        Box::new(IpfsMessaging::new(Some(config), account, filesystem).await?) as Box<dyn RayGun>;
-
-    Ok(chat)
+    let _ = identity.get_own_identity().await?;
+    Ok((identity, raygun, constellation))
 }
 
 #[tokio::main]
@@ -92,19 +68,12 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let start_time = Instant::now();
-    let account = account(&opt.path, opt.keystore.clone(), password).await?;
+    let (account, rg, _) = setup(&opt.path, opt.keystore.clone(), password).await?;
     let end_time = start_time.elapsed();
-    println!("Took {}ms to load the account", end_time.as_millis());
-
-    let start_time = Instant::now();
-    let fs = fs(account.clone(), &opt.path).await?;
-    let end_time = start_time.elapsed();
-    println!("Took {}ms to load the filesystem", end_time.as_millis());
-
-    let start_time = Instant::now();
-    let rg = rg(opt.path.clone(), account.clone(), Some(fs.clone())).await?;
-    let end_time = start_time.elapsed();
-    println!("Took {}ms to load the messaging", end_time.as_millis());
+    println!(
+        "Took {}ms to load the account, messaging and filesystem",
+        end_time.as_millis()
+    );
 
     let start_time = Instant::now();
     let identity = account.get_own_identity().await?;
