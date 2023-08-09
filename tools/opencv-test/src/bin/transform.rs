@@ -5,7 +5,6 @@ use std::{
 
 use clap::Parser;
 use opencv::{prelude::*, videoio};
-use opencv_test::utils::bgr_to_yuv;
 
 // transforms the input file to h264
 #[derive(Parser, Debug)]
@@ -46,6 +45,21 @@ fn main() -> anyhow::Result<()> {
     // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
     // be sure to pick the full-scale conversion
 
+    let get_y = |rgb: (f32, f32, f32)| {
+        (0.2578125 * rgb.0 + 0.50390625 * rgb.1 + 0.09765625 * rgb.2 + 16.0) as u8
+    };
+
+    let get_u = |rgb: (f32, f32, f32)| {
+        (-0.1484375 * rgb.0 + -0.2890625 * rgb.1 + 0.4375 * rgb.2 + 128.0) as u8
+    };
+
+    let get_v = |rgb: (f32, f32, f32)| {
+        (0.4375 * rgb.0 + -0.3671875 * rgb.1 + -0.0703125 * rgb.2 + 128.0) as u8
+    };
+
+    // for y
+    let y_rc_2_idx = |row: usize, col: usize| (row * frame_width as usize * 2) + col;
+
     loop {
         let mut frame = Mat::default();
         if !cam.read(&mut frame)? {
@@ -62,17 +76,13 @@ fn main() -> anyhow::Result<()> {
             let s = std::ptr::slice_from_raw_parts(p, len as _);
             let s: &[u8] = unsafe { &*s };
 
-            let new_len = len * 4;
-            let mut s2 = Vec::new();
-            s2.resize(new_len as _, 0);
-
-            let mut set_pixel = |row: usize, col: usize, b, g, r| {
-                let base_pos = (row + col * width * 2) * 3;
-                s2[base_pos] = b;
-                s2[base_pos + 1] = g;
-                s2[base_pos + 2] = r;
-            };
-
+            // width x height for u and v. and 4 times witdh x height for y
+            let yuv_len = (width * height) * 6;
+            let mut yuv: Vec<u8> = Vec::new();
+            yuv.resize(yuv_len, 0);
+            let u_base = (width * height) * 4;
+            let v_base = u_base + (width * height);
+            let mut uv_idx = 0;
             for row in 0..height {
                 for col in 0..width {
                     let base_pos = (row + col * width) * 3;
@@ -80,20 +90,30 @@ fn main() -> anyhow::Result<()> {
                     let g = s[base_pos + 1];
                     let r = s[base_pos + 2];
 
-                    let new_col = col * 2;
-                    let new_row = row * 2;
-                    set_pixel(new_row, new_col, b, g, r);
-                    set_pixel(new_row + 1, new_col, b, g, r);
-                    set_pixel(new_row, new_col + 1, b, g, r);
-                    set_pixel(new_row + 1, new_col + 1, b, g, r);
+                    let rgb = (r as _, g as _, b as _);
+                    let (y, u, v) = (get_y(rgb), get_u(rgb), get_v(rgb));
+
+                    // each byte in the u/v plane corresponds to a 4x4 square on the y plane
+                    let y_row = row * 2;
+                    let y_col = col * 2;
+
+                    let idx = y_rc_2_idx(y_row, y_col);
+                    yuv[idx] = y;
+                    yuv[idx + 1] = y;
+                    let idx = y_rc_2_idx(y_row + 1, y_col);
+                    yuv[idx] = y;
+                    yuv[idx + 1] = y;
+
+                    yuv[u_base + uv_idx] = u;
+                    yuv[v_base + uv_idx] = v;
+                    uv_idx += 1;
                 }
             }
 
-            let yuv = bgr_to_yuv(&s2, width * 2, height * 2);
             let yuv_buf = opencv_test::utils::YUVBuf {
                 yuv,
-                width: sz.width as _,
-                height: sz.height as _,
+                width: width * 2,
+                height: height * 2,
             };
 
             let encoded_stream = encoder.encode(&yuv_buf)?;
