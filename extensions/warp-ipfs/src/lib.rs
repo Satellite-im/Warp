@@ -34,7 +34,7 @@ use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tokio_util::io::ReaderStream;
 use tracing::debug;
-use tracing::log::{self, error, info, trace, warn};
+use tracing::log::{self, error, info, warn};
 use utils::ExtensionType;
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
@@ -146,7 +146,6 @@ impl WarpIpfs {
         let (multipass_tx, _) = broadcast::channel(1024);
         let (raygun_tx, _) = tokio::sync::broadcast::channel(1024);
         let (constellation_tx, _) = tokio::sync::broadcast::channel(1024);
-        trace!("Initializing Multipass");
 
         let mut identity = WarpIpfs {
             index: Directory::new("root"),
@@ -594,13 +593,15 @@ impl WarpIpfs {
             .await?,
         );
 
+        info!("Messaging store initialized");
+
         *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
         Ok(())
     }
 
-    pub async fn friend_store(&self) -> Result<FriendsStore, Error> {
+    pub(crate) async fn friend_store(&self) -> Result<FriendsStore, Error> {
         self.identity_store(true).await?;
         self.friend_store
             .read()
@@ -608,7 +609,7 @@ impl WarpIpfs {
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub async fn identity_store(&self, created: bool) -> Result<IdentityStore, Error> {
+    pub(crate) async fn identity_store(&self, created: bool) -> Result<IdentityStore, Error> {
         let store = self.identity_store_sync()?;
         if created && !store.local_id_created().await {
             return Err(Error::IdentityNotCreated);
@@ -616,14 +617,14 @@ impl WarpIpfs {
         Ok(store)
     }
 
-    pub fn messaging_store(&self) -> std::result::Result<MessageStore, Error> {
+    pub(crate) fn messaging_store(&self) -> std::result::Result<MessageStore, Error> {
         self.message_store
             .read()
             .clone()
             .ok_or(Error::RayGunExtensionUnavailable)
     }
 
-    pub fn identity_store_sync(&self) -> Result<IdentityStore, Error> {
+    pub(crate) fn identity_store_sync(&self) -> Result<IdentityStore, Error> {
         if !self.tesseract.is_unlock() {
             return Err(Error::TesseractLocked);
         }
@@ -636,7 +637,7 @@ impl WarpIpfs {
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub fn ipfs(&self) -> Result<Ipfs, Error> {
+    pub(crate) fn ipfs(&self) -> Result<Ipfs, Error> {
         self.ipfs
             .read()
             .clone()
@@ -658,7 +659,7 @@ impl WarpIpfs {
         friends.is_blocked_by(pubkey).await
     }
 
-    pub async fn export_index(&self) -> Result<(), Error> {
+    pub(crate) async fn export_index(&self) -> Result<(), Error> {
         let ipfs = self.ipfs()?;
         let index = self.export(ConstellationDataType::Json)?;
 
@@ -747,7 +748,7 @@ impl WarpIpfs {
         Ok(())
     }
 
-    pub async fn import_index(&mut self) -> Result<(), Error> {
+    pub(crate) async fn import_index(&mut self) -> Result<(), Error> {
         let ipfs = self.ipfs()?;
         if let Some(path) = self.config.path.as_ref() {
             let cid_str = tokio::fs::read(path.join(".index_id"))
