@@ -25,8 +25,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     // https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html
-    let frame_width = cam.get(3)? as _;
-    let frame_height = cam.get(4)? as _;
+    let frame_width = cam.get(3)? as u32;
+    let frame_height = cam.get(4)? as u32;
     let fps = cam.get(5)? as _;
 
     let output_file = OpenOptions::new()
@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
     let mut writer = BufWriter::new(output_file);
 
     let config =
-        openh264::encoder::EncoderConfig::new(frame_width, frame_height).max_frame_rate(fps); //.rate_control_mode(openh264::encoder::RateControlMode::Timestamp);
+        openh264::encoder::EncoderConfig::new(frame_width * 2, frame_height * 2).max_frame_rate(fps); //.rate_control_mode(openh264::encoder::RateControlMode::Timestamp);
 
     let mut encoder = openh264::encoder::Encoder::with_config(config)?;
 
@@ -70,55 +70,56 @@ fn main() -> anyhow::Result<()> {
         let sz = frame.size()?;
         let width = sz.width as usize;
         let height = sz.height as usize;
-        if width > 0 {
-            let p = frame.data_mut();
-            let len = width * height * 3;
-            let s = std::ptr::slice_from_raw_parts(p, len as _);
-            let s: &[u8] = unsafe { &*s };
-
-            // width x height for u and v. and 4 times witdh x height for y
-            let yuv_len = (width * height) * 6;
-            let mut yuv: Vec<u8> = Vec::new();
-            yuv.resize(yuv_len, 0);
-            let u_base = (width * height) * 4;
-            let v_base = u_base + (width * height);
-            let mut uv_idx = 0;
-            for row in 0..height {
-                for col in 0..width {
-                    let base_pos = (row + col * width) * 3;
-                    let b = s[base_pos];
-                    let g = s[base_pos + 1];
-                    let r = s[base_pos + 2];
-
-                    let rgb = (r as _, g as _, b as _);
-                    let (y, u, v) = (get_y(rgb), get_u(rgb), get_v(rgb));
-
-                    // each byte in the u/v plane corresponds to a 4x4 square on the y plane
-                    let y_row = row * 2;
-                    let y_col = col * 2;
-
-                    let idx = y_rc_2_idx(y_row, y_col);
-                    yuv[idx] = y;
-                    yuv[idx + 1] = y;
-                    let idx = y_rc_2_idx(y_row + 1, y_col);
-                    yuv[idx] = y;
-                    yuv[idx + 1] = y;
-
-                    yuv[u_base + uv_idx] = u;
-                    yuv[v_base + uv_idx] = v;
-                    uv_idx += 1;
-                }
-            }
-
-            let yuv_buf = opencv_test::utils::YUVBuf {
-                yuv,
-                width: width * 2,
-                height: height * 2,
-            };
-
-            let encoded_stream = encoder.encode(&yuv_buf)?;
-            encoded_stream.write(&mut writer)?;
+        if width == 0 {
+            continue;
         }
+        let p = frame.data_mut();
+        let len = width * height * 3;
+        let s = std::ptr::slice_from_raw_parts(p, len as _);
+        let s: &[u8] = unsafe { &*s };
+
+        // width x height for u and v. and 4 times witdh x height for y
+        let yuv_len = (width * height) * 6;
+        let mut yuv: Vec<u8> = Vec::new();
+        yuv.resize(yuv_len, 0);
+        let u_base = (width * height) * 4;
+        let v_base = u_base + (width * height);
+        let mut uv_idx = 0;
+        for row in 0..height {
+            for col in 0..width {
+                let base_pos = (col + row * width) * 3;
+                let b = s[base_pos];
+                let g = s[base_pos + 1];
+                let r = s[base_pos + 2];
+
+                let rgb = (r as _, g as _, b as _);
+                let (y, u, v) = (get_y(rgb), get_u(rgb), get_v(rgb));
+
+                // each byte in the u/v plane corresponds to a 4x4 square on the y plane
+                let y_row = row * 2;
+                let y_col = col * 2;
+
+                let idx = y_rc_2_idx(y_row, y_col);
+                yuv[idx] = y;
+                yuv[idx + 1] = y;
+                let idx = y_rc_2_idx(y_row + 1, y_col);
+                yuv[idx] = y;
+                yuv[idx + 1] = y;
+
+                yuv[u_base + uv_idx] = u;
+                yuv[v_base + uv_idx] = v;
+                uv_idx += 1;
+            }
+        }
+
+        let yuv_buf = opencv_test::utils::YUVBuf {
+            yuv,
+            width: width * 2,
+            height: height * 2,
+        };
+
+        let encoded_stream = encoder.encode(&yuv_buf)?;
+        encoded_stream.write(&mut writer)?;
     }
     writer.flush()?;
     Ok(())
