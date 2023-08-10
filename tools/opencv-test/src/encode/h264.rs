@@ -46,7 +46,7 @@ pub fn encode_h264(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
-        let yuv = crate::utils::bgr_to_yuv_lossy(s, width, height);
+        let yuv = crate::utils::bgr_to_yuv_lossy_full_scale(s, width, height);
 
         let yuv_buf = crate::utils::YUVBuf {
             yuv,

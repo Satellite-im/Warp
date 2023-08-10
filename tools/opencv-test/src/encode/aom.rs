@@ -68,7 +68,7 @@ pub fn encode_aom(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
-        let yuv = bgr_to_yuv_limited(s, width, height);
+        let yuv = bgr_to_yuv_lossy_limited_scale(s, width, height);
         let yuv_buf = YUVBuf {
             yuv,
             width: width * 2,
