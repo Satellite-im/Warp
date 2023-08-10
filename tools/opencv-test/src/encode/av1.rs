@@ -17,9 +17,9 @@ pub fn encode_av1(args: Args) -> Result<()> {
     }
 
     // https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html
-    let frame_width = cam.get(3)? as u32;
-    let frame_height = cam.get(4)? as u32;
-    let fps = cam.get(5)? as f32;
+    let frame_width = cam.get(3)? as usize;
+    let frame_height = cam.get(4)? as usize;
+    let _fps = cam.get(5)? as f32;
 
     let output_file = OpenOptions::new()
         .read(false)
@@ -30,8 +30,8 @@ pub fn encode_av1(args: Args) -> Result<()> {
     let mut writer = BufWriter::new(output_file);
 
     let enc = EncoderConfig {
-        width: frame_width * 2 as _,
-        height: frame_height * 2 as _,
+        width: frame_width * 2,
+        height: frame_height * 2,
         ..Default::default()
     };
 
@@ -73,6 +73,6 @@ pub fn encode_av1(args: Args) -> Result<()> {
             writer.write(&packet.data)?;
         }
     }
-    writer.flush();
+    writer.flush()?;
     Ok(())
 }
