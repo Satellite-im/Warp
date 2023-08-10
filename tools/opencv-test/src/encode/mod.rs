@@ -1,5 +1,7 @@
+mod av1;
 mod h264;
 mod x264;
+pub use crate::encode::av1::encode_av1;
 pub use crate::encode::h264::encode_h264;
 pub use crate::encode::x264::encode_x264;
 
@@ -22,4 +24,6 @@ pub enum CodecTypes {
     H264,
     /// x264
     X264,
+    /// av1
+    AV1,
 }
