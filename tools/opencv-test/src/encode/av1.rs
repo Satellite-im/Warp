@@ -1,6 +1,6 @@
 use super::Args;
 use anyhow::Result;
-use rav1e::*;
+use rav1e::{*, prelude::ChromaSampling};
 
 use std::{
     fs::OpenOptions,
@@ -32,6 +32,8 @@ pub fn encode_av1(args: Args) -> Result<()> {
     let enc = EncoderConfig {
         width: frame_width * 2,
         height: frame_height * 2,
+        // todo: try using 444
+        chroma_sampling: ChromaSampling::Cs420,
         ..Default::default()
     };
 
