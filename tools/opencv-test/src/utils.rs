@@ -37,7 +37,7 @@ pub fn yuyv422_to_rgb_(data: &[u8], rgba: bool) -> Vec<u8> {
     rgb
 }
 
-pub fn bgr_to_yuv(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
+pub fn bgr_to_yuv420_lossy(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
     let size = (3 * width * height) / 2;
     let mut yuv = vec![0; size];
 
@@ -178,7 +178,7 @@ impl YUVSource for YUVBuf {
 
 // attempts to avoid the loss when converting from BGR to YUV420 by quadrupling the size of the output. this ensures no UV samples are discarded/averaged
 // unfortunately is still lossy
-pub fn bgr_to_yuv_lossy_full_scale(s: &[u8], width: usize, height: usize) -> Vec<u8> {
+pub fn bgr_to_yuv420_full_scale(s: &[u8], width: usize, height: usize) -> Vec<u8> {
     // for y
     let y_rc_2_idx = |row: usize, col: usize| (row * width * 2) + col;
 
@@ -241,7 +241,7 @@ pub fn bgr_to_yuv_lossy_full_scale(s: &[u8], width: usize, height: usize) -> Vec
 
 // attempts to avoid the loss when converting from BGR to YUV420 by quadrupling the size of the output. this ensures no UV samples are discarded/averaged
 // unfortunately is still lossy
-pub fn bgr_to_yuv_lossy_limited_scale(s: &[u8], width: usize, height: usize) -> Vec<u8> {
+pub fn bgr_to_yuv420_limited_scale(s: &[u8], width: usize, height: usize) -> Vec<u8> {
     // for y
     let y_rc_2_idx = |row: usize, col: usize| (row * width * 2) + col;
 

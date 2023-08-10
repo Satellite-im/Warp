@@ -58,7 +58,7 @@ pub fn encode_rav1e(args: Args) -> Result<()> {
 
         println!("converting format");
         // note that width and height have doubled
-        let yuv = crate::utils::bgr_to_yuv_lossy_full_scale(s, width, height);
+        let yuv = crate::utils::bgr_to_yuv420_full_scale(s, width, height);
         println!("done converting");
 
         // create a frame
