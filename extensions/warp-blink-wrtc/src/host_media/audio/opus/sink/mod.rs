@@ -9,6 +9,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use warp::{
     blink::{self, BlinkEventKind},
     crypto::DID,
+    sync::RwLock,
 };
 
 use webrtc::{
@@ -16,7 +17,13 @@ use webrtc::{
     track::track_remote::TrackRemote, util::Unmarshal,
 };
 
-use crate::host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack};
+use crate::{
+    host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
+    host_media::{
+        self,
+        mp4_logger::{self, Mp4LoggerInstance},
+    },
+};
 
 use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
 
@@ -32,6 +39,9 @@ pub struct OpusSink {
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
+    mp4_logger: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
+    muted: Arc<RwLock<bool>>,
+    audio_multiplier: Arc<RwLock<f32>>,
 }
 
 impl Drop for OpusSink {
@@ -50,6 +60,8 @@ impl OpusSink {
         webrtc_codec: blink::AudioCodec,
         sink_codec: blink::AudioCodec,
     ) -> Result<Self> {
+        let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
+        let mp4_logger2 = mp4_logger.clone();
         let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_codec.sample_rate()) {
             Ordering::Equal => ResamplerConfig::None,
             Ordering::Greater => {
@@ -85,11 +97,16 @@ impl OpusSink {
         let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
         let (producer, mut consumer) = ring.split();
 
-        let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
+        let depacketizer = webrtc::rtp::codecs::opus::OpusPacket;
         let sample_builder = SampleBuilder::new(max_late, depacketizer, webrtc_sample_rate);
         let track2 = track.clone();
         let event_ch2 = event_ch.clone();
+        let event_ch3 = event_ch.clone();
         let peer_id2 = peer_id.clone();
+        let muted = Arc::new(warp::sync::RwLock::new(false));
+        let muted2 = muted.clone();
+        let audio_multiplier = Arc::new(RwLock::new(1.0));
+        let audio_multiplier2 = audio_multiplier.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
                 track: track2,
@@ -100,6 +117,9 @@ impl OpusSink {
                 channel_mixer,
                 event_ch: event_ch2,
                 peer_id: peer_id2,
+                mp4_writer: mp4_logger2,
+                muted: muted2,
+                audio_multiplier: audio_multiplier2,
             })
             .await
             {
@@ -123,8 +143,17 @@ impl OpusSink {
                 //log::trace!("output stream fell behind: try increasing latency");
             }
         };
-        let output_stream =
-            output_device.build_output_stream(&cpal_config, output_data_fn, err_fn, None)?;
+        let output_stream = output_device.build_output_stream(
+            &cpal_config,
+            output_data_fn,
+            move |err| {
+                log::error!("an error occurred on stream: {}", err);
+                if matches!(err, cpal::StreamError::DeviceNotAvailable) {
+                    let _ = event_ch3.send(BlinkEventKind::AudioOutputDeviceNoLongerAvailable);
+                }
+            },
+            None,
+        )?;
 
         Ok(Self {
             peer_id,
@@ -134,6 +163,9 @@ impl OpusSink {
             sink_codec,
             decoder_handle: join_handle,
             event_ch,
+            mp4_logger,
+            muted,
+            audio_multiplier,
         })
     }
 }
@@ -159,15 +191,11 @@ impl SinkTrack for OpusSink {
     }
 
     fn play(&self) -> Result<()> {
-        if let Err(e) = self.stream.play() {
-            return Err(e.into());
-        }
+        *self.muted.write() = false;
         Ok(())
     }
     fn pause(&self) -> Result<()> {
-        if let Err(e) = self.stream.pause() {
-            return Err(e.into());
-        }
+        *self.muted.write() = true;
         Ok(())
     }
     fn change_output_device(&mut self, output_device: &cpal::Device) -> Result<()> {
@@ -185,6 +213,22 @@ impl SinkTrack for OpusSink {
         *self = new_sink;
         Ok(())
     }
+
+    fn init_mp4_logger(&mut self) -> Result<()> {
+        let mp4_logger = mp4_logger::get_audio_logger(&self.peer_id)?;
+        self.mp4_logger.write().replace(mp4_logger);
+        Ok(())
+    }
+
+    fn remove_mp4_logger(&mut self) -> Result<()> {
+        self.mp4_logger.write().take();
+        Ok(())
+    }
+
+    fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<()> {
+        *self.audio_multiplier.write() = multiplier;
+        Ok(())
+    }
 }
 
 struct DecodeMediaStreamArgs<T: Depacketizer> {
@@ -196,9 +240,11 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
+    mp4_writer: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
+    muted: Arc<RwLock<bool>>,
+    audio_multiplier: Arc<RwLock<f32>>,
 }
 
-#[allow(clippy::type_complexity)]
 async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<()>
 where
     T: Depacketizer,
@@ -212,6 +258,9 @@ where
         mut channel_mixer,
         event_ch,
         peer_id,
+        mp4_writer,
+        muted,
+        audio_multiplier,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -219,6 +268,11 @@ where
     let mut decoder_output_buf = [0_f32; 2880 * 4];
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
+
+    let automute_tx = host_media::audio::automute::AUDIO_CMD_CH.tx.clone();
+
+    // let logger = rtp_logger::get_instance(format!("{}-audio", peer_id));
+
     loop {
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {
@@ -232,6 +286,17 @@ where
                         break;
                     }
                 };
+
+                if !*muted.read() {
+                    if let Some(writer) = mp4_writer.write().as_mut() {
+                        // todo: use the audio codec to determine number of samples and duration
+                        writer.log(rtp_packet.payload.clone());
+                    }
+                }
+
+                // if let Some(logger) = logger.as_ref() {
+                //     logger.log(rtp_packet.header.clone())
+                // }
 
                 if let Some(extension) = rtp_packet.header.extensions.first() {
                     // don't yet have the MediaEngine exposed. for now since there's only one extension being used, this way seems to be good enough
@@ -256,16 +321,23 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
-                    // todo: send Sample to other thread
+                    // discard samples if muted
+                    if *muted.read() {
+                        continue;
+                    }
                     match decoder.decode_float(
                         media_sample.data.as_ref(),
                         &mut decoder_output_buf,
                         false,
                     ) {
                         Ok(siz) => {
+                            let multiplier = *audio_multiplier.read();
                             let to_send = decoder_output_buf.iter().take(siz);
+                            // hopefully each opus packet is still 10ms
+                            let _ = automute_tx
+                                .send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
                             for audio_sample in to_send {
-                                match channel_mixer.process(*audio_sample) {
+                                match channel_mixer.process(*audio_sample * multiplier) {
                                     ChannelMixerOutput::Single(sample) => {
                                         resampler.process(sample, &mut raw_samples);
                                     }
@@ -275,7 +347,6 @@ where
                                     }
                                     ChannelMixerOutput::None => {}
                                 }
-
                                 for sample in raw_samples.drain(..) {
                                     if let Err(e) = producer.push(sample) {
                                         log::error!("failed to send sample: {}", e);
@@ -298,8 +369,4 @@ where
     }
 
     Ok(())
-}
-
-fn err_fn(err: cpal::StreamError) {
-    log::error!("an error occurred on stream: {}", err);
 }
