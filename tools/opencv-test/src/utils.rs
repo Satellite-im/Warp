@@ -118,18 +118,17 @@ pub fn bgr_to_yuv_limited(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
     };
 
     let write_y = |yuv: &mut [u8], x: usize, y: usize, rgb: (f32, f32, f32)| {
-        yuv[x + y * width] =
-            (0.2578125 * rgb.0 + 0.50390625 * rgb.1 + 0.09765625 * rgb.2 + 16.0) as u8;
+        yuv[x + y * width] = (0.183 * rgb.0 + 0.614 * rgb.1 + 0.062 * rgb.2 + 16.0) as u8;
     };
 
     let write_u = |yuv: &mut [u8], x: usize, y: usize, rgb: (f32, f32, f32)| {
         yuv[u_base + x + y * half_width] =
-            (-0.1484375 * rgb.0 + -0.2890625 * rgb.1 + 0.4375 * rgb.2 + 128.0) as u8;
+            (-0.101 * rgb.0 + -0.339 * rgb.1 + 0.439 * rgb.2 + 128.0) as u8;
     };
 
     let write_v = |yuv: &mut [u8], x: usize, y: usize, rgb: (f32, f32, f32)| {
         yuv[v_base + x + y * half_width] =
-            (0.4375 * rgb.0 + -0.3671875 * rgb.1 + -0.0703125 * rgb.2 + 128.0) as u8;
+            (0.439 * rgb.0 + -0.399 * rgb.1 + -0.040 * rgb.2 + 128.0) as u8;
     };
     for i in 0..width / 2 {
         for j in 0..height / 2 {
