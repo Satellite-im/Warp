@@ -9,6 +9,6 @@ fn main() -> Result<()> {
     match args.codec {
         CodecTypes::H264 => encode_h264(args),
         CodecTypes::X264 => encode_x264(args),
-        CodecTypes::AV1 => encode_av1(args),
+        CodecTypes::RAV1E => encode_rav1e(args),
     }
 }

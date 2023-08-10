@@ -1,6 +1,6 @@
 use super::Args;
 use anyhow::Result;
-use rav1e::{*, prelude::ChromaSampling};
+use rav1e::{prelude::ChromaSampling, *};
 
 use std::{
     fs::OpenOptions,
@@ -9,7 +9,7 @@ use std::{
 
 use opencv::{prelude::*, videoio};
 
-pub fn encode_av1(args: Args) -> Result<()> {
+pub fn encode_rav1e(args: Args) -> Result<()> {
     let cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
     let opened = videoio::VideoCapture::is_opened(&cam)?;
     if !opened {
@@ -91,7 +91,6 @@ pub fn encode_av1(args: Args) -> Result<()> {
                 }
             }
         }
-       
     }
     writer.flush()?;
     Ok(())

@@ -1,8 +1,8 @@
-mod av1;
 mod h264;
+mod rav1e;
 mod x264;
-pub use crate::encode::av1::encode_av1;
 pub use crate::encode::h264::encode_h264;
+pub use crate::encode::rav1e::encode_rav1e;
 pub use crate::encode::x264::encode_x264;
 
 use clap::Parser;
@@ -24,6 +24,6 @@ pub enum CodecTypes {
     H264,
     /// x264
     X264,
-    /// av1
-    AV1,
+    /// av1 (rav1e)
+    RAV1E,
 }
