@@ -121,7 +121,7 @@ impl av_data::frame::FrameBuffer for YUVBuf {
         let base_v = base_u + (base_u / 4);
         match idx {
             0 => Ok(&self.yuv[0..self.width * self.height]),
-            1 => Ok(&self.yuv[base_u..base_u + base_u / 4]),
+            1 => Ok(&self.yuv[base_u..base_v]),
             2 => Ok(&self.yuv[base_v..]),
             _ => Err(av_data::frame::FrameError::InvalidIndex),
         }
@@ -132,7 +132,7 @@ impl av_data::frame::FrameBuffer for YUVBuf {
         let base_v = base_u + (base_u / 4);
         match idx {
             0 => Ok(&mut self.yuv[0..self.width * self.height]),
-            1 => Ok(&mut self.yuv[base_u..base_u + base_u / 4]),
+            1 => Ok(&mut self.yuv[base_u..base_v]),
             2 => Ok(&mut self.yuv[base_v..]),
             _ => Err(av_data::frame::FrameError::InvalidIndex),
         }

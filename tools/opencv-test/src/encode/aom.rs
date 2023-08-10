@@ -75,7 +75,7 @@ pub fn encode_aom(args: Args) -> Result<()> {
                 width * 2,
                 height * 2,
                 false,
-                FrameType::I,
+                FrameType::OTHER,
                 pixel_format.clone(),
             )),
             buf: Box::new(yuv_buf),
@@ -87,10 +87,12 @@ pub fn encode_aom(args: Args) -> Result<()> {
 
         idx += 1;
 
+        println!("encoding");
         if let Err(e) = encoder.encode(&frame) {
             bail!("encoding error: {e}");
         }
 
+        println!("calling get_packet");
         while let Some(packet) = encoder.get_packet() {
             if let AOMPacket::Packet(p) = packet {
                 writer.write(&p.data)?;
