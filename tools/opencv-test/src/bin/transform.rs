@@ -18,7 +18,7 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let mut cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
+    let cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
     let opened = videoio::VideoCapture::is_opened(&cam)?;
     if !opened {
         panic!("Unable to open video file!");
@@ -37,8 +37,8 @@ fn main() -> anyhow::Result<()> {
         .open(args.output)?;
     let mut writer = BufWriter::new(output_file);
 
-    let config =
-        openh264::encoder::EncoderConfig::new(frame_width * 2, frame_height * 2).max_frame_rate(fps); //.rate_control_mode(openh264::encoder::RateControlMode::Timestamp);
+    let config = openh264::encoder::EncoderConfig::new(frame_width * 2, frame_height * 2)
+        .max_frame_rate(fps); //.rate_control_mode(openh264::encoder::RateControlMode::Timestamp);
 
     let mut encoder = openh264::encoder::Encoder::with_config(config)?;
 
@@ -68,13 +68,8 @@ fn main() -> anyhow::Result<()> {
     // for y
     let y_rc_2_idx = |row: usize, col: usize| (row * frame_width as usize * 2) + col;
 
-    loop {
-        let mut frame = Mat::default();
-        if !cam.read(&mut frame)? {
-            println!("read entire video file");
-            break;
-        }
-
+    let mut iter = opencv_test::VideoFileIter::new(cam);
+    while let Some(mut frame) = iter.next() {
         let sz = frame.size()?;
         let width = sz.width as usize;
         let height = sz.height as usize;

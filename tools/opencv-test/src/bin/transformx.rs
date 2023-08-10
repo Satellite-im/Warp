@@ -18,7 +18,7 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let mut cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
+    let cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
     let opened = videoio::VideoCapture::is_opened(&cam)?;
     if !opened {
         panic!("Unable to open video file!");
@@ -42,13 +42,8 @@ fn main() -> anyhow::Result<()> {
         .expect("failed to make builder");
     let mut idx = 0;
 
-    loop {
-        let mut frame = Mat::default();
-        if !cam.read(&mut frame)? {
-            println!("read entire video file");
-            break;
-        }
-
+    let mut iter = opencv_test::VideoFileIter::new(cam);
+    while let Some(mut frame) = iter.next() {
         let sz = frame.size()?;
         if sz.width > 0 {
             let p = frame.data_mut();
