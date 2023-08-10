@@ -1,5 +1,6 @@
 use super::Args;
 use anyhow::Result;
+use rav1e::*;
 
 use std::{
     fs::OpenOptions,
@@ -28,5 +29,50 @@ pub fn encode_av1(args: Args) -> Result<()> {
         .open(args.output)?;
     let mut writer = BufWriter::new(output_file);
 
-    todo!()
+    let enc = EncoderConfig {
+        width: frame_width * 2 as _,
+        height: frame_height * 2 as _,
+        ..Default::default()
+    };
+
+    let cfg = Config::new().with_encoder_config(enc);
+    let mut ctx: Context<u8> = cfg
+        .new_context()
+        .map_err(|e| anyhow::anyhow!(format!("couldn't make context: {e:?}")))?;
+
+    let mut iter = crate::VideoFileIter::new(cam);
+    while let Some(mut frame) = iter.next() {
+        let sz = frame.size()?;
+        let width = sz.width as usize;
+        let height = sz.height as usize;
+        if width == 0 {
+            continue;
+        }
+        let p = frame.data_mut();
+        let len = width * height * 3;
+        let s = std::ptr::slice_from_raw_parts(p, len as _);
+        let s: &[u8] = unsafe { &*s };
+
+        // note that width and height have doubled
+        let yuv = crate::utils::bgr_to_yuv_lossy(s, width, height);
+
+        // create a frame
+        let mut f1 = ctx.new_frame();
+        let mut start = 0;
+        let mut end = 4 * width * height;
+        f1.planes[0].copy_from_raw_u8(&yuv[start..end], width * 2, 1);
+        start = end;
+        end = start + (width * height);
+        f1.planes[1].copy_from_raw_u8(&yuv[start..end], width, 1);
+        start = end;
+        f1.planes[2].copy_from_raw_u8(&yuv[start..], width, 1);
+
+        ctx.send_frame(f1)?;
+
+        while let Ok(packet) = ctx.receive_packet() {
+            writer.write(&packet.data)?;
+        }
+    }
+    writer.flush();
+    Ok(())
 }
