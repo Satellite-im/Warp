@@ -9,7 +9,12 @@ edition = "2021"
 anyhow = "1.0"
 clap = { version = "4.0", features=["derive"] }
 opencv = { version = "0.82", features=["clang-runtime"] }
-openh264 = { git="https://github.com/sdwoodbury/openh264-rs", rev="36abe7e7349c890684457fabaf5d90cb4b716cec" }
-rav1e = { version = "0.6", default-features =false }
 tokio = { version = "1.29.0", features = ["full"] }
+
+openh264 = { git="https://github.com/sdwoodbury/openh264-rs", rev="36abe7e7349c890684457fabaf5d90cb4b716cec" }
+
 x264 = { version = "0.5" }
+
+rav1e = { version = "0.6", default-features =false }
+av-data = "*"
+libaom = { git="https://github.com/rust-av/aom-rs", branch="master" }

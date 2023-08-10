@@ -1,6 +1,8 @@
+mod aom;
 mod h264;
 mod rav1e;
 mod x264;
+pub use crate::encode::aom::encode_aom;
 pub use crate::encode::h264::encode_h264;
 pub use crate::encode::rav1e::encode_rav1e;
 pub use crate::encode::x264::encode_x264;
@@ -26,4 +28,6 @@ pub enum CodecTypes {
     X264,
     /// av1 (rav1e)
     RAV1E,
+    /// av1 (aom)
+    AOM,
 }

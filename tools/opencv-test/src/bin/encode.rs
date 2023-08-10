@@ -10,5 +10,6 @@ fn main() -> Result<()> {
         CodecTypes::H264 => encode_h264(args),
         CodecTypes::X264 => encode_x264(args),
         CodecTypes::RAV1E => encode_rav1e(args),
+        CodecTypes::AOM => encode_aom(args),
     }
 }
