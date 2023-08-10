@@ -19,7 +19,7 @@ use ipfs::{Multiaddr, PeerId, Protocol, PublicKey};
 use warp::{
     crypto::{
         cipher::Cipher,
-        did_key::{Generate, ECDH, CoreSign},
+        did_key::{CoreSign, Generate, ECDH},
         hash::sha256_hash,
         zeroize::Zeroizing,
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,

@@ -1,4 +1,4 @@
-use crate::utils::RGBBuf;
+use crate::utils::{bgr_to_yuv_lossy,  YUVBuf};
 
 use super::Args;
 use anyhow::{bail, Result};
@@ -41,13 +41,13 @@ pub fn encode_aom(args: Args) -> Result<()> {
         Ok(r) => r,
         Err(e) => bail!("failed to get Av1EncoderConfig: {e:?}"),
     };
-    encoder_config.g_h = frame_height;
-    encoder_config.g_w = frame_width;
+    encoder_config.g_h = frame_height * 2;
+    encoder_config.g_w = frame_width * 2;
     let mut encoder = match encoder_config.get_encoder() {
         Ok(r) => r,
         Err(e) => bail!("failed to get Av1Encoder: {e:?}"),
     };
-    let pixel_format = Arc::new(pixel::formats::RGB24.clone());
+    let pixel_format = Arc::new(pixel::formats::YUV420.clone());
     let mut idx = 0;
     let mut iter = crate::VideoFileIter::new(cam);
     while let Some(mut frame) = iter.next() {
@@ -63,18 +63,22 @@ pub fn encode_aom(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
-        let buf = Box::new(RGBBuf::from_gbr(s, width, height));
+        let yuv = bgr_to_yuv_lossy(s, width, height);
+        let yuv_buf = YUVBuf {
+            yuv,
+            width: width * 2,
+            height: height * 2,
+        };
 
         let frame = av_data::frame::Frame {
-            kind: av_data::frame::MediaKind::Video(av_data::frame::VideoInfo {
-                width,
-                height,
-                flipped: false,
-                bits: 24,
-                frame_type: FrameType::I,
-                format: pixel_format.clone(),
-            }),
-            buf,
+            kind: av_data::frame::MediaKind::Video(av_data::frame::VideoInfo::new(
+                width * 2,
+                height * 2,
+                false,
+                FrameType::I,
+                pixel_format.clone(),
+            )),
+            buf: Box::new(yuv_buf),
             t: TimeInfo {
                 pts: Some(idx * 60),
                 ..Default::default()
