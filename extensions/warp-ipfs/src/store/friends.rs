@@ -15,6 +15,7 @@ use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
+use crate::behaviour::friend_queue::FriendQueueCommand;
 use crate::behaviour::phonebook::PhoneBookCommand;
 use crate::config::Config as MpIpfsConfig;
 use crate::store::{ecdh_decrypt, ecdh_encrypt, PeerIdExt, PeerTopic};
@@ -117,6 +118,7 @@ pub enum RequestType {
 }
 
 impl FriendsStore {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ipfs: Ipfs,
         identity: IdentityStore,
@@ -125,6 +127,7 @@ impl FriendsStore {
         tesseract: Tesseract,
         tx: broadcast::Sender<MultiPassEventKind>,
         pb_tx: futures::channel::mpsc::Sender<PhoneBookCommand>,
+        friend_tx: futures::channel::mpsc::Sender<FriendQueueCommand>,
     ) -> anyhow::Result<Self> {
         let did_key = Arc::new(did_keypair(&tesseract)?);
 
@@ -132,6 +135,7 @@ impl FriendsStore {
             ipfs.clone(),
             did_key.clone(),
             config.path.clone(),
+            friend_tx,
             discovery.clone(),
         );
 
@@ -954,7 +958,7 @@ impl FriendsStore {
                     .is_err())
                 && queue_broadcast
         {
-            self.queue.insert(recipient, payload.clone()).await;
+            self.queue.insert(recipient, payload.clone()).await?;
             queued = true;
             self.signal.write().await.remove(recipient);
         }

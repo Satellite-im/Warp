@@ -327,9 +327,10 @@ impl WarpIpfs {
         let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
         let (pb_tx, pb_rx) = channel(50);
-
+        let (friend_tx, friend_rx) = channel(50);
         let behaviour = behaviour::Behaviour {
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
+            friend_queue: behaviour::friend_queue::Behaviour::new(keypair.clone(), friend_rx),
         };
 
         info!("Starting ipfs");
@@ -547,6 +548,7 @@ impl WarpIpfs {
             tesseract.clone(),
             self.multipass_tx.clone(),
             pb_tx,
+            friend_tx,
         )
         .await?;
         info!("friends store initialized");

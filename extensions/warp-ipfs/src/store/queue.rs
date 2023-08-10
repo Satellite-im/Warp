@@ -1,14 +1,11 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use futures::{channel::mpsc, StreamExt};
+use futures::{
+    channel::{mpsc, oneshot},
+    SinkExt, StreamExt,
+};
 use rust_ipfs::Ipfs;
-use tokio::{sync::RwLock, task::JoinHandle};
-use tracing::log::{self, error};
+use tracing::log::error;
 use warp::{
     crypto::{
         cipher::Cipher,
@@ -19,39 +16,33 @@ use warp::{
     error::Error,
 };
 
-use crate::store::{ecdh_encrypt, PeerIdExt, PeerTopic};
+use crate::{behaviour::friend_queue::FriendQueueCommand, store::PeerIdExt};
 
-use super::{connected_to_peer, discovery::Discovery, friends::RequestResponsePayload};
+use super::{discovery::Discovery, friends::RequestResponsePayload, DidExt};
 
+#[derive(Clone)]
 pub struct Queue {
     path: Option<PathBuf>,
     ipfs: Ipfs,
-    entries: Arc<RwLock<HashMap<DID, QueueEntry>>>,
+    command: futures::channel::mpsc::Sender<FriendQueueCommand>,
     removal: mpsc::UnboundedSender<DID>,
     did: Arc<DID>,
     discovery: Discovery,
 }
 
-impl Clone for Queue {
-    fn clone(&self) -> Self {
-        Self {
-            path: self.path.clone(),
-            ipfs: self.ipfs.clone(),
-            entries: self.entries.clone(),
-            removal: self.removal.clone(),
-            did: self.did.clone(),
-            discovery: self.discovery.clone(),
-        }
-    }
-}
-
 impl Queue {
-    pub fn new(ipfs: Ipfs, did: Arc<DID>, path: Option<PathBuf>, discovery: Discovery) -> Queue {
+    pub fn new(
+        ipfs: Ipfs,
+        did: Arc<DID>,
+        path: Option<PathBuf>,
+        command: futures::channel::mpsc::Sender<FriendQueueCommand>,
+        discovery: Discovery,
+    ) -> Queue {
         let (tx, mut rx) = mpsc::unbounded();
         let queue = Queue {
             path,
             ipfs,
-            entries: Default::default(),
+            command,
             removal: tx,
             did,
             discovery,
@@ -61,6 +52,23 @@ impl Queue {
             let queue = queue.clone();
 
             async move {
+                let (i_tx, i_rx) = oneshot::channel();
+
+                queue
+                    .command
+                    .clone()
+                    .send(FriendQueueCommand::Initialize {
+                        ipfs: queue.ipfs.clone(),
+                        removal: queue.removal.clone(),
+                        response: i_tx,
+                    })
+                    .await
+                    .ok();
+
+                i_rx.await
+                    .expect("Shouldnt dropped")
+                    .expect("Already initialized");
+
                 while let Some(did) = rx.next().await {
                     let _ = queue.remove(&did).await;
                 }
@@ -72,56 +80,92 @@ impl Queue {
 
     #[tracing::instrument(skip(self))]
     pub async fn get(&self, did: &DID) -> Option<RequestResponsePayload> {
-        let entry = self.entries.read().await.get(did).cloned()?;
-        Some(entry.event())
+        let peer_id = did.to_peer_id().ok()?;
+        let (tx, rx) = oneshot::channel();
+
+        self.command
+            .clone()
+            .send(FriendQueueCommand::GetEntry {
+                peer_id,
+                response: tx,
+            })
+            .await
+            .ok()?;
+
+        rx.await.ok()?
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn insert(&self, did: &DID, payload: RequestResponsePayload) {
+    pub async fn insert(&self, did: &DID, payload: RequestResponsePayload) -> Result<(), Error> {
         if let Err(_e) = self.discovery.insert(did).await {}
-        self.raw_insert(did, payload).await;
+        self.raw_insert(did, payload).await?;
         self.save().await;
+
+        Ok(())
     }
 
-    async fn raw_insert(&self, did: &DID, payload: RequestResponsePayload) {
-        let entry = QueueEntry::new(
-            self.ipfs.clone(),
-            did.clone(),
-            payload,
-            self.did.clone(),
-            self.removal.clone(),
-        )
-        .await;
+    async fn raw_insert(&self, did: &DID, payload: RequestResponsePayload) -> Result<(), Error> {
+        let peer_id = did.to_peer_id()?;
+        let (tx, rx) = oneshot::channel();
 
-        let entry = self.entries.write().await.insert(did.clone(), entry);
+        self.command
+            .clone()
+            .send(FriendQueueCommand::SetEntry {
+                peer_id,
+                item: payload,
+                response: tx,
+            })
+            .await
+            .map_err(anyhow::Error::from)?;
 
-        if let Some(entry) = entry {
-            entry.cancel().await;
-        }
-    }
-
-    pub async fn entries_recipients(&self) -> Vec<DID> {
-        self.entries.read().await.keys().cloned().collect()
+        let _ = rx.await.map_err(anyhow::Error::from)?;
+        Ok(())
     }
 
     pub async fn map(&self) -> HashMap<DID, RequestResponsePayload> {
-        let mut map = HashMap::new();
-        for recipient in self.entries_recipients().await {
-            if let Some(event) = self.get(&recipient).await {
-                map.insert(recipient, event);
-            }
+        let (tx, rx) = oneshot::channel();
+        let Ok(_) = self
+            .command
+            .clone()
+            .send(FriendQueueCommand::GetEntries { response: tx })
+            .await else {
+                return Default::default();
+            };
+
+        let map = rx.await.unwrap_or_default();
+
+        let mut new_map = HashMap::new();
+
+        for (k, v) in map {
+            let Ok(did) = k.to_did() else {
+                continue;
+            };
+
+            new_map.insert(did, v);
         }
-        map
+
+        new_map
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn remove(&self, did: &DID) -> Option<RequestResponsePayload> {
-        let entry = self.entries.write().await.remove(did).clone();
+        let peer_id = did.to_peer_id().ok()?;
+        let (tx, rx) = oneshot::channel();
+
+        self.command
+            .clone()
+            .send(FriendQueueCommand::RemoveEntry {
+                peer_id,
+                response: tx,
+            })
+            .await
+            .ok()?;
+
+        let entry = rx.await.map(|r| r.ok()).ok().flatten()?;
 
         if let Some(entry) = entry {
-            entry.cancel().await;
             self.save().await;
-            return Some(entry.event());
+            return Some(entry);
         }
         None
     }
@@ -145,7 +189,9 @@ impl Queue {
             let map: HashMap<DID, RequestResponsePayload> = serde_json::from_slice(&data)?;
 
             for (did, payload) in map {
-                self.raw_insert(&did, payload).await;
+                if let Err(_e) = self.raw_insert(&did, payload).await {
+                    continue;
+                }
             }
         }
         Ok(())
@@ -184,133 +230,6 @@ impl Queue {
 
             if let Err(e) = tokio::fs::write(path.join(".request_queue"), data).await {
                 error!("Error saving queue: {e}");
-            }
-        }
-    }
-}
-
-pub struct QueueEntry {
-    ipfs: Ipfs,
-    recipient: DID,
-    did: Arc<DID>,
-    item: RequestResponsePayload,
-    task: Arc<RwLock<Option<JoinHandle<()>>>>,
-}
-
-impl Clone for QueueEntry {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            recipient: self.recipient.clone(),
-            did: self.did.clone(),
-            item: self.item.clone(),
-            task: self.task.clone(),
-        }
-    }
-}
-
-impl QueueEntry {
-    pub async fn new(
-        ipfs: Ipfs,
-        recipient: DID,
-        item: RequestResponsePayload,
-        did: Arc<DID>,
-        tx: mpsc::UnboundedSender<DID>,
-    ) -> QueueEntry {
-        let entry = QueueEntry {
-            ipfs,
-            recipient,
-            did,
-            item,
-            task: Default::default(),
-        };
-
-        let task = tokio::spawn({
-            let entry = entry.clone();
-            async move {
-                let mut retry = 10;
-                loop {
-                    let entry = entry.clone();
-                    //TODO: Replace with future event to detect connection/disconnection from peer as well as pubsub subscribing event
-                    let (connection_result, peers_result) = futures::join!(
-                        connected_to_peer(&entry.ipfs, entry.recipient.clone()),
-                        entry.ipfs.pubsub_peers(Some(entry.recipient.inbox()))
-                    );
-
-                    if matches!(
-                        connection_result,
-                        Ok(crate::store::PeerConnectionType::Connected)
-                    ) && peers_result
-                        .map(|list| {
-                            list.iter()
-                                .filter_map(|peer_id| peer_id.to_did().ok())
-                                .any(|did| did.eq(&entry.recipient))
-                        })
-                        .unwrap_or_default()
-                    {
-                        log::info!(
-                            "{} is connected. Attempting to send request",
-                            entry.recipient.clone()
-                        );
-                        let entry = entry.clone();
-
-                        let recipient = entry.recipient.clone();
-
-                        let res = async move {
-                            let kp = &*entry.did;
-                            let payload_bytes = serde_json::to_vec(&entry.item)?;
-
-                            let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
-
-                            log::trace!("Payload size: {} bytes", bytes.len());
-
-                            log::info!("Sending request to {}", recipient);
-
-                            let time = Instant::now();
-
-                            entry.ipfs.pubsub_publish(recipient.inbox(), bytes).await?;
-
-                            let elapsed = time.elapsed();
-
-                            log::info!("took {}ms to send", elapsed.as_millis());
-
-                            Ok::<_, anyhow::Error>(())
-                        };
-
-                        match res.await {
-                            Ok(_) => {
-                                let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
-                                break;
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "Error sending request for {}: {e}. Retrying in {}s",
-                                    &entry.recipient,
-                                    retry
-                                );
-                                tokio::time::sleep(Duration::from_secs(retry)).await;
-                                retry += 5;
-                            }
-                        }
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }
-        });
-
-        *entry.task.write().await = Some(task);
-
-        entry
-    }
-
-    pub fn event(&self) -> RequestResponsePayload {
-        self.item.clone()
-    }
-
-    pub async fn cancel(&self) {
-        if let Some(task) = std::mem::take(&mut *self.task.write().await) {
-            if !task.is_finished() {
-                task.abort()
             }
         }
     }
