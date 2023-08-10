@@ -84,7 +84,13 @@ pub fn encode_aom(args: Args) -> Result<()> {
         idx += 1;
 
         if let Err(e) = encoder.encode(&frame) {
-            println!("encoding error: {e}");
+            bail!("encoding error: {e}");
+        }
+
+        while let Some(packet) = encoder.get_packet() {
+            if let AOMPacket::Packet(p) = packet {
+                writer.write(&p.data)?;
+            }
         }
     }
     writer.flush()?;
