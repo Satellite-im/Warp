@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.71"
-clap = { version = "4.3.9", features=["derive"] }
+clap = { version = "4.0", features=["derive"] }
 opencv = { version = "0.82", features=["clang-runtime"] }
 openh264 = { git="https://github.com/sdwoodbury/openh264-rs", rev="36abe7e7349c890684457fabaf5d90cb4b716cec" }
 x264 = { version = "0.5" }

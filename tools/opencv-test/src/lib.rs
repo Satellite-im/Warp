@@ -3,6 +3,7 @@ use opencv::{
     videoio::{VideoCapture, VideoCaptureTrait},
 };
 
+pub mod encode;
 pub mod utils;
 
 pub struct VideoFileIter {
