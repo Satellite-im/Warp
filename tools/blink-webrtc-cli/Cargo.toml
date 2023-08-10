@@ -12,12 +12,12 @@ cpal = "0.15.0"
 log = { version = "0.4.17", features = ["std"]}
 warp = { path = "../../warp" }
 warp-blink-wrtc = { path = "../../extensions/warp-blink-wrtc" }
-warp-mp-ipfs = { path = "../../extensions/warp-mp-ipfs" }
+warp-ipfs = { path = "../../extensions/warp-ipfs" }
 
 uuid = { workspace = true, features = ["serde", "v4"] }
 tokio = { workspace = true, features = ["full"] }
 
-rand = "0.8.5"
+rand= { workspace = true }
 
 
 anyhow.workspace = true

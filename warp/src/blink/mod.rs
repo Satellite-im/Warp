@@ -84,6 +84,13 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error>;
     async fn stop_recording(&mut self) -> Result<(), Error>;
 
+    fn enable_automute(&mut self) -> Result<(), Error>;
+    fn disable_automute(&mut self) -> Result<(), Error>;
+
+    // for the current call, multiply all audio samples for the given peer by `multiplier`.
+    // large values make them sound louder. values less than 1 make them sound quieter.
+    async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error>;
+
     async fn get_audio_source_codec(&self) -> AudioCodec;
     async fn set_audio_source_codec(&mut self, codec: AudioCodec) -> Result<(), Error>;
     async fn get_audio_sink_codec(&self) -> AudioCodec;
@@ -124,6 +131,10 @@ pub enum BlinkEventKind {
     /// audio packets were dropped for the peer
     #[display(fmt = "AudioDegradation")]
     AudioDegradation { peer_id: DID },
+    #[display(fmt = "AudioOutputDeviceNoLongerAvailable")]
+    AudioOutputDeviceNoLongerAvailable,
+    #[display(fmt = "AudioInputDeviceNoLongerAvailable")]
+    AudioInputDeviceNoLongerAvailable,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

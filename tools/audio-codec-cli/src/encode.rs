@@ -8,11 +8,10 @@ use anyhow::bail;
 
 use bytes::Bytes;
 use mp4::{
-    BoxHeader, BoxType, DopsBox, FixedPointI8, FixedPointU16, HdlrBox,
-    MdhdBox, MdiaBox, MfhdBox, MinfBox, MoofBox, MoovBox, Mp4Box, MvexBox,
-    MvhdBox, OpusBox, SmhdBox, StblBox, StcoBox, StscBox, StsdBox, StszBox, SttsBox, TfdtBox,
-    TfhdBox, TrafBox, TrakBox, TrexBox, TrunBox, WriteBox, {DinfBox},
-    {TkhdBox, TrackFlag},
+    BoxHeader, BoxType, DinfBox, DopsBox, FixedPointI8, FixedPointU16, HdlrBox, MdhdBox, MdiaBox,
+    MfhdBox, MinfBox, MoofBox, MoovBox, Mp4Box, MvexBox, MvhdBox, OpusBox, SmhdBox, StblBox,
+    StcoBox, StscBox, StsdBox, StszBox, SttsBox, TfdtBox, TfhdBox, TrafBox, TrakBox, TrexBox,
+    TrunBox, WriteBox, {TkhdBox, TrackFlag},
 };
 use rand::Rng;
 use webrtc::{
@@ -134,7 +133,7 @@ pub fn f32_mp4(
             // todo: maybe delete this comment. flags is expected to have the most significant byte empty.
             // see page 45 of the spec. says: not leading sample,
             // sample does not depend on others,
-            // no other samples depend on thsi one,
+            // no other samples depend on this one,
             // there is no redundant coding in this sample
             // padding: 0
             // sample_is_non_sync_sample ... set this to 1?
@@ -361,7 +360,7 @@ pub async fn f32_opus_rtp(
     // variables for parsing RTP packets
     let max_late = 512;
     // this thing just copies bytes without modifying them. it in no way decodes opus data.
-    let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
+    let depacketizer = webrtc::rtp::codecs::opus::OpusPacket;
     // this thing doesn't actually build Opus samples. it just reconstructs a payload.
     let mut rtp_sample_builder = SampleBuilder::new(max_late, depacketizer, decoded_sample_rate);
 

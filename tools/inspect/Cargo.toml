@@ -11,9 +11,7 @@ comfy-table = "6.1"
 clap = { version = "4.0", features = ["derive"] }
 rpassword = "7.2"
 warp = { path = "../../warp" }
-warp-mp-ipfs = { path = "../../extensions/warp-mp-ipfs" }
-warp-rg-ipfs = { path = "../../extensions/warp-rg-ipfs" }
-warp-fs-ipfs = { path = "../../extensions/warp-fs-ipfs" }
+warp-ipfs = { path = "../../extensions/warp-ipfs" }
 
 uuid = { workspace = true, features = ["serde", "v4"] }
 tokio = { workspace = true, features = ["full"] }

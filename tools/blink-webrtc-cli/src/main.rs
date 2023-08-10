@@ -18,10 +18,9 @@ use std::str::FromStr;
 
 use warp::crypto::DID;
 use warp::multipass::identity::Identity;
-use warp::multipass::MultiPass;
 
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::{MpIpfsConfig, UpdateEvents};
+use warp_ipfs::{config::{Config, UpdateEvents}, WarpIpfsBuilder};
 
 mod logger;
 
@@ -61,6 +60,7 @@ struct Args {
 
 /// test warp-blink-webrtc via command line
 #[derive(Parser, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 enum Repl {
     /// show your DID
     ShowDid,
@@ -75,6 +75,10 @@ enum Repl {
     MuteSelf,
     /// unmute self
     UnmuteSelf,
+    /// enable automute (enabled by default)
+    EnableAutomute,
+    /// disable automute
+    DisableAutomute,
     /// show currently connected audio I/O devices
     ShowSelectedDevices,
     /// show available audio I/O devices
@@ -103,6 +107,9 @@ enum Repl {
     RecordAudio { output_dir: String },
     /// stop recording audio
     StopRecording,
+    /// change the loudness of the peer for the call
+    /// can only make it louder because multiplier can't be a float for the CLI
+    SetGain { peer: DID, multiplier: u32 },
 }
 
 async fn handle_command(
@@ -140,6 +147,12 @@ async fn handle_command(
         }
         Repl::UnmuteSelf => {
             blink.unmute_self().await?;
+        }
+        Repl::EnableAutomute => {
+            blink.enable_automute()?;
+        }
+        Repl::DisableAutomute => {
+            blink.disable_automute()?;
         }
         Repl::ShowSelectedDevices => {
             println!("microphone: {:?}", blink.get_current_microphone().await);
@@ -227,13 +240,20 @@ async fn handle_command(
         }
         Repl::RecordAudio { output_dir } => blink.record_call(&output_dir).await?,
         Repl::StopRecording => blink.stop_recording().await?,
+        Repl::SetGain { peer, multiplier } => {
+            blink.set_peer_audio_gain(peer, multiplier as f32).await?
+        }
     }
     Ok(())
 }
 
 async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
-        println!("BlinkEvent: {evt}");
+        // get rid of noisy logs
+        if !matches!(evt, BlinkEventKind::ParticipantSpeaking { .. }) {
+            println!("BlinkEvent: {evt}");
+        }
+
         #[allow(clippy::single_match)]
         match evt {
             BlinkEventKind::IncomingCall {
@@ -276,16 +296,18 @@ async fn main() -> anyhow::Result<()> {
     tesseract.set_autosave();
     tesseract.unlock("abcdefghik".as_bytes())?;
 
-    let mut config = MpIpfsConfig::production(multipass_dir, false);
+    let mut config = Config::production(multipass_dir, false);
     config.ipfs_setting.portmapping = true;
     config.ipfs_setting.agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
     config.store_setting.emit_online_event = true;
     config.store_setting.share_platform = true;
     config.store_setting.update_events = UpdateEvents::Enabled;
 
-    let mut multipass = warp_mp_ipfs::ipfs_identity_persistent(config, tesseract.clone(), None)
-        .await
-        .map(|mp| Box::new(mp) as Box<dyn MultiPass>)?;
+    let (mut multipass, _, _) = WarpIpfsBuilder::default()
+        .set_tesseract(tesseract.clone())
+        .set_config(config)
+        .finalize()
+        .await?;
 
     if new_account {
         let random_name: String = rand::thread_rng()
