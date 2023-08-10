@@ -1,10 +1,11 @@
-use crate::utils::{bgr_to_yuv_lossy,  YUVBuf};
+use crate::utils::{bgr_to_yuv_lossy, YUVBuf};
 
 use super::Args;
 use anyhow::{bail, Result};
 use av_data::{
     frame::FrameType,
-    pixel::{self},
+    //pixel::{self, ColorModel, TrichromaticEncodingSystem, YUVSystem, YUVRange},
+    pixel,
     timeinfo::TimeInfo,
 };
 use std::{
@@ -47,7 +48,11 @@ pub fn encode_aom(args: Args) -> Result<()> {
         Ok(r) => r,
         Err(e) => bail!("failed to get Av1Encoder: {e:?}"),
     };
-    let pixel_format = Arc::new(pixel::formats::YUV420.clone());
+    // would use formats::RBG24 but it is not implemented
+    let pixel_format = pixel::formats::YUV420.clone();
+    // sadly not implemented
+    // pixel_format.model = ColorModel::Trichromatic(TrichromaticEncodingSystem::YUV(YUVSystem::YCbCr(YUVRange::Full)));
+    let pixel_format = Arc::new(pixel_format);
     let mut idx = 0;
     let mut iter = crate::VideoFileIter::new(cam);
     while let Some(mut frame) = iter.next() {
