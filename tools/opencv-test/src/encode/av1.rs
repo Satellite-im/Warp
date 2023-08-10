@@ -42,6 +42,7 @@ pub fn encode_av1(args: Args) -> Result<()> {
 
     let mut iter = crate::VideoFileIter::new(cam);
     while let Some(mut frame) = iter.next() {
+        println!("read new frame");
         let sz = frame.size()?;
         let width = sz.width as usize;
         let height = sz.height as usize;
@@ -53,8 +54,10 @@ pub fn encode_av1(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
+        println!("converting format");
         // note that width and height have doubled
         let yuv = crate::utils::bgr_to_yuv_lossy(s, width, height);
+        println!("done converting");
 
         // create a frame
         let mut f1 = ctx.new_frame();
@@ -67,11 +70,26 @@ pub fn encode_av1(args: Args) -> Result<()> {
         start = end;
         f1.planes[2].copy_from_raw_u8(&yuv[start..], width, 1);
 
+        println!("sending frame");
         ctx.send_frame(f1)?;
 
-        while let Ok(packet) = ctx.receive_packet() {
-            writer.write(&packet.data)?;
+        loop {
+            println!("requesting packet");
+            match ctx.receive_packet() {
+                Ok(packet) => {
+                    println!("got packet");
+                    writer.write(&packet.data)?;
+                }
+                Err(EncoderStatus::Encoded) => {
+                    println!("frame encoded");
+                }
+                Err(e) => {
+                    println!("got err: {e:?}");
+                    break;
+                }
+            }
         }
+       
     }
     writer.flush()?;
     Ok(())
