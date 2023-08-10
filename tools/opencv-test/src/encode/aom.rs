@@ -80,7 +80,7 @@ pub fn encode_aom(args: Args) -> Result<()> {
                 width * 2,
                 height * 2,
                 false,
-                FrameType::OTHER,
+                FrameType::I,
                 pixel_format.clone(),
             )),
             buf: Box::new(yuv_buf),
