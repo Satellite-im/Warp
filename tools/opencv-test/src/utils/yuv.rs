@@ -1,9 +1,7 @@
 // shamelessly stolen from here: https://github.com/hanguk0726/Avatar-Vision/blob/main/rust/src/tools/image_processing.rs
 
-use std::ffi::c_void;
-
 use opencv::{
-    core::{Mat_AUTO_STEP, CV_32F, CV_32FC3},
+    core::CV_32FC3,
     prelude::{Mat, MatTrait, MatTraitConst},
 };
 use openh264::formats::YUVSource;
