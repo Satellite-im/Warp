@@ -2,6 +2,57 @@
 
 use openh264::formats::YUVSource;
 
+pub enum ColorScale {
+    // coeffecients taken from https://github.com/hanguk0726/Avatar-Vision/blob/main/rust/src/tools/image_processing.rs
+    Av,
+    // full scale: https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
+    Full,
+    // HdTv scale: // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
+    HdTv,
+}
+fn rgb_to_yuv(rgb: (f32, f32, f32), color_scale: ColorScale) -> (u8, u8, u8) {
+    let y_scale: [[f32; 3]; 3] = [
+        [0.2578125, 0.50390625, 0.09765625],
+        [0.299, 0.587, 0.114],
+        [0.183, 0.614, 0.062],
+    ];
+    let y_offset: [f32; 3] = [16.0, 0.0, 16.0];
+
+    let u_scale: [[f32; 3]; 3] = [
+        [-0.1484375, -0.2890625, 0.4375],
+        [-0.169, -0.331, 0.500],
+        [-0.101, -0.339, 0.439],
+    ];
+    let u_offset: [f32; 3] = [128.0, 128.0, 128.0];
+
+    let v_scale: [[f32; 3]; 3] = [
+        [0.4375, -0.3671875, -0.0703125],
+        [0.500, -0.419, -0.081],
+        [0.439, -0.399, -0.040],
+    ];
+    let v_offset: [f32; 3] = [128.0, 128.0, 128.0];
+
+    let idx = match color_scale {
+        ColorScale::Av => 0,
+        ColorScale::Full => 1,
+        ColorScale::HdTv => 2,
+    };
+
+    let y_scale: &[f32; 3] = &y_scale[idx];
+    let u_scale: &[f32; 3] = &u_scale[idx];
+    let v_scale: &[f32; 3] = &v_scale[idx];
+
+    let y_offset = y_offset[idx];
+    let u_offset = u_offset[idx];
+    let v_offset = v_offset[idx];
+
+    let y = y_scale[0] * rgb.0 + y_scale[1] * rgb.1 + y_scale[2] * rgb.2 + y_offset;
+    let u = u_scale[0] * rgb.0 + u_scale[1] * rgb.1 + u_scale[2] * rgb.2 + u_offset;
+    let v = v_scale[0] * rgb.0 + v_scale[1] * rgb.1 + v_scale[2] * rgb.2 + v_offset;
+
+    (y as u8, u as u8, v as u8)
+}
+
 pub fn bgr_to_rgba(data: &[u8]) -> Vec<u8> {
     let mut rgba = Vec::with_capacity(data.len() * 2);
     for chunk in data.chunks_exact(3) {
@@ -46,32 +97,12 @@ pub fn bgr_to_yuv444(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
     let v_base = u_base + u_base;
     let mut idx = 0;
 
-    let get_y = |rgb: (f32, f32, f32)| {
-        // best. appears to be from the wikipedia page on YCbCr
-        (0.2578125 * rgb.0 + 0.50390625 * rgb.1 + 0.09765625 * rgb.2 + 16.0) as u8
-        // full scale:   // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
-        //(0.299 * rgb.0 + 0.587 * rgb.1 + 0.114 * rgb.2 + 0.0) as u8
-        // hdtv
-        //(0.183 * rgb.0 + 0.614 * rgb.1 + 0.062 * rgb.2 + 16.0) as u8
-    };
-
-    let get_u = |rgb: (f32, f32, f32)| {
-        (-0.1484375 * rgb.0 + -0.2890625 * rgb.1 + 0.4375 * rgb.2 + 128.0) as u8
-        //(-0.169 * rgb.0 + -0.331 * rgb.1 + 0.500 * rgb.2 + 128.0) as u8
-        //(-0.101 * rgb.0 + -0.339 * rgb.1 + 0.439 * rgb.2 + 128.0) as u8
-    };
-
-    let get_v = |rgb: (f32, f32, f32)| {
-        (0.4375 * rgb.0 + -0.3671875 * rgb.1 + -0.0703125 * rgb.2 + 128.0) as u8
-        //(0.500 * rgb.0 + -0.419 * rgb.1 + -0.081 * rgb.2 + 128.0) as u8
-        //(0.439 * rgb.0 + -0.399 * rgb.1 + -0.040 * rgb.2 + 128.0) as u8
-    };
-
     for chunk in rgb.chunks_exact(3) {
         let rgb = (chunk[2] as f32, chunk[1] as f32, chunk[0] as f32);
-        yuv[y_base + idx] = get_y(rgb);
-        yuv[u_base + idx] = get_u(rgb);
-        yuv[v_base + idx] = get_v(rgb);
+        let (y, u, v) = rgb_to_yuv(rgb, ColorScale::Av);
+        yuv[y_base + idx] = y;
+        yuv[u_base + idx] = u;
+        yuv[v_base + idx] = v;
         idx += 1;
     }
 
@@ -145,27 +176,6 @@ pub fn bgr_to_yuv420_full_scale(s: &[u8], width: usize, height: usize) -> Vec<u8
     // for y
     let y_rc_2_idx = |row: usize, col: usize| (row * width * 2) + col;
 
-    let get_y = |rgb: (f32, f32, f32)| {
-        // best. appears to be from the wikipedia page on YCbCr
-        (0.2578125 * rgb.0 + 0.50390625 * rgb.1 + 0.09765625 * rgb.2 + 16.0) as u8
-        // full scale:   // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
-        //(0.299 * rgb.0 + 0.587 * rgb.1 + 0.114 * rgb.2 + 0.0) as u8
-        // hdtv
-        //(0.183 * rgb.0 + 0.614 * rgb.1 + 0.062 * rgb.2 + 16.0) as u8
-    };
-
-    let get_u = |rgb: (f32, f32, f32)| {
-        (-0.1484375 * rgb.0 + -0.2890625 * rgb.1 + 0.4375 * rgb.2 + 128.0) as u8
-        //(-0.169 * rgb.0 + -0.331 * rgb.1 + 0.500 * rgb.2 + 128.0) as u8
-        //(-0.101 * rgb.0 + -0.339 * rgb.1 + 0.439 * rgb.2 + 128.0) as u8
-    };
-
-    let get_v = |rgb: (f32, f32, f32)| {
-        (0.4375 * rgb.0 + -0.3671875 * rgb.1 + -0.0703125 * rgb.2 + 128.0) as u8
-        //(0.500 * rgb.0 + -0.419 * rgb.1 + -0.081 * rgb.2 + 128.0) as u8
-        //(0.439 * rgb.0 + -0.399 * rgb.1 + -0.040 * rgb.2 + 128.0) as u8
-    };
-
     let yuv_len = (width * height) * 6;
     let mut yuv: Vec<u8> = Vec::new();
     yuv.resize(yuv_len, 0);
@@ -180,7 +190,7 @@ pub fn bgr_to_yuv420_full_scale(s: &[u8], width: usize, height: usize) -> Vec<u8
             let r = s[base_pos + 2];
 
             let rgb = (r as _, g as _, b as _);
-            let (y, u, v) = (get_y(rgb), get_u(rgb), get_v(rgb));
+            let (y, u, v) = rgb_to_yuv(rgb, ColorScale::Av);
 
             // each byte in the u/v plane corresponds to a 4x4 square on the y plane
             let y_row = row * 2;
@@ -208,27 +218,6 @@ pub fn bgr_to_yuv420_limited_scale(s: &[u8], width: usize, height: usize) -> Vec
     // for y
     let y_rc_2_idx = |row: usize, col: usize| (row * width * 2) + col;
 
-    let get_y = |rgb: (f32, f32, f32)| {
-        // best. appears to be from the wikipedia page on YCbCr
-        //(0.2578125 * rgb.0 + 0.50390625 * rgb.1 + 0.09765625 * rgb.2 + 16.0) as u8
-        // full scale:   // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
-        //(0.299 * rgb.0 + 0.587 * rgb.1 + 0.114 * rgb.2 + 0.0) as u8
-        // hdtv
-        (0.183 * rgb.0 + 0.614 * rgb.1 + 0.062 * rgb.2 + 16.0) as u8
-    };
-
-    let get_u = |rgb: (f32, f32, f32)| {
-        //(-0.1484375 * rgb.0 + -0.2890625 * rgb.1 + 0.4375 * rgb.2 + 128.0) as u8
-        //(-0.169 * rgb.0 + -0.331 * rgb.1 + 0.500 * rgb.2 + 128.0) as u8
-        (-0.101 * rgb.0 + -0.339 * rgb.1 + 0.439 * rgb.2 + 128.0) as u8
-    };
-
-    let get_v = |rgb: (f32, f32, f32)| {
-        //(0.4375 * rgb.0 + -0.3671875 * rgb.1 + -0.0703125 * rgb.2 + 128.0) as u8
-        //(0.500 * rgb.0 + -0.419 * rgb.1 + -0.081 * rgb.2 + 128.0) as u8
-        (0.439 * rgb.0 + -0.399 * rgb.1 + -0.040 * rgb.2 + 128.0) as u8
-    };
-
     let yuv_len = (width * height) * 6;
     let mut yuv: Vec<u8> = Vec::new();
     yuv.resize(yuv_len, 0);
@@ -243,7 +232,7 @@ pub fn bgr_to_yuv420_limited_scale(s: &[u8], width: usize, height: usize) -> Vec
             let r = s[base_pos + 2];
 
             let rgb = (r as _, g as _, b as _);
-            let (y, u, v) = (get_y(rgb), get_u(rgb), get_v(rgb));
+            let (y, u, v) = rgb_to_yuv(rgb, ColorScale::HdTv);
 
             // each byte in the u/v plane corresponds to a 4x4 square on the y plane
             let y_row = row * 2;
