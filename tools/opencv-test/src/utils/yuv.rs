@@ -39,10 +39,11 @@ pub fn yuyv422_to_rgb_(data: &[u8], rgba: bool) -> Vec<u8> {
 
 pub fn bgr_to_yuv444(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
     let size = width * height * 3;
-    let mut yuv = vec![0; size];
+    let mut yuv = Vec::new();
+    yuv.resize(size, 0_u8);
     let y_base = 0;
     let u_base = width * height;
-    let v_base = u_base << 2;
+    let v_base = u_base + u_base;
     let mut idx = 0;
 
     let get_y = |rgb: (f32, f32, f32)| {
@@ -147,7 +148,7 @@ impl av_data::frame::FrameBuffer for YUV420Buf {
     fn linesize(&self, idx: usize) -> Result<usize, av_data::frame::FrameError> {
         match idx {
             0 => Ok(self.width),
-            1 | 2 => Ok(self.width >> 2),
+            1 | 2 => Ok(self.width / 2),
             _ => Err(av_data::frame::FrameError::InvalidIndex),
         }
     }
@@ -225,7 +226,8 @@ pub struct YUV444Buf {
 impl av_data::frame::FrameBuffer for YUV444Buf {
     fn linesize(&self, idx: usize) -> Result<usize, av_data::frame::FrameError> {
         match idx {
-            0..=2 => Ok(self.width),
+            0 => Ok(self.width),
+            1..=2 => Ok(self.width),
             _ => Err(av_data::frame::FrameError::InvalidIndex),
         }
     }
@@ -236,7 +238,7 @@ impl av_data::frame::FrameBuffer for YUV444Buf {
 
     fn as_slice_inner(&self, idx: usize) -> Result<&[u8], av_data::frame::FrameError> {
         let base_u = self.width * self.height;
-        let base_v = base_u << 2;
+        let base_v = base_u * 2;
         match idx {
             0 => Ok(&self.yuv[0..base_u]),
             1 => Ok(&self.yuv[base_u..base_v]),
@@ -247,51 +249,13 @@ impl av_data::frame::FrameBuffer for YUV444Buf {
 
     fn as_mut_slice_inner(&mut self, idx: usize) -> Result<&mut [u8], av_data::frame::FrameError> {
         let base_u = self.width * self.height;
-        let base_v = base_u << 2;
+        let base_v = base_u * 2;
         match idx {
             0 => Ok(&mut self.yuv[0..self.width * self.height]),
             1 => Ok(&mut self.yuv[base_u..base_v]),
             2 => Ok(&mut self.yuv[base_v..]),
             _ => Err(av_data::frame::FrameError::InvalidIndex),
         }
-    }
-}
-
-impl YUVSource for YUV444Buf {
-    fn width(&self) -> i32 {
-        self.width as i32
-    }
-
-    fn height(&self) -> i32 {
-        self.height as i32
-    }
-
-    fn y(&self) -> &[u8] {
-        &self.yuv[0..self.width * self.height]
-    }
-
-    fn u(&self) -> &[u8] {
-        let base_u = self.width * self.height;
-        let base_v = base_u << 2;
-        &self.yuv[base_u..base_v]
-    }
-
-    fn v(&self) -> &[u8] {
-        let base_u = self.width * self.height;
-        let base_v = base_u << 2;
-        &self.yuv[base_v..]
-    }
-
-    fn y_stride(&self) -> i32 {
-        self.width as _
-    }
-
-    fn u_stride(&self) -> i32 {
-        self.width as _
-    }
-
-    fn v_stride(&self) -> i32 {
-        self.width as _
     }
 }
 

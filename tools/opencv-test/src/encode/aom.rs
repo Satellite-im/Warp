@@ -71,8 +71,8 @@ pub fn encode_aom(args: Args) -> Result<()> {
         let yuv = bgr_to_yuv444(s, width, height);
         let yuv_buf = YUV444Buf {
             yuv,
-            width: width,
-            height: height,
+            width,
+            height,
         };
 
         let frame = av_data::frame::Frame {
