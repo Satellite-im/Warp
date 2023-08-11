@@ -1,26 +1,23 @@
 // shamelessly stolen from here: https://github.com/hanguk0726/Avatar-Vision/blob/main/rust/src/tools/image_processing.rs
 
-use opencv::{
-    core::{Mat_AUTO_STEP, CV_32F},
-    prelude::{Mat, MatTrait},
-};
+use opencv::prelude::{Mat, MatTrait};
 use openh264::formats::YUVSource;
 
-const Y_SCALE: [[f32; 3]; 3] = [
+pub const Y_SCALE: [[f32; 3]; 3] = [
     [0.2578125, 0.50390625, 0.09765625],
     [0.299, 0.587, 0.114],
     [0.183, 0.614, 0.062],
 ];
-const Y_OFFSET: [f32; 3] = [16.0, 0.0, 16.0];
+pub const Y_OFFSET: [f32; 3] = [16.0, 0.0, 16.0];
 
-const U_SCALE: [[f32; 3]; 3] = [
+pub const U_SCALE: [[f32; 3]; 3] = [
     [-0.1484375, -0.2890625, 0.4375],
     [-0.169, -0.331, 0.500],
     [-0.101, -0.339, 0.439],
 ];
 const U_OFFSET: [f32; 3] = [128.0, 128.0, 128.0];
 
-const V_SCALE: [[f32; 3]; 3] = [
+pub const V_SCALE: [[f32; 3]; 3] = [
     [0.4375, -0.3671875, -0.0703125],
     [0.500, -0.419, -0.081],
     [0.439, -0.399, -0.040],
@@ -38,7 +35,7 @@ pub enum ColorScale {
 }
 
 impl ColorScale {
-    fn to_idx(self) -> usize {
+    pub fn to_idx(self) -> usize {
         match self {
             ColorScale::Av => 0,
             ColorScale::Full => 1,
@@ -162,23 +159,12 @@ pub fn bgr_to_yuv420(s: &[u8], width: usize, height: usize, color_scale: ColorSc
 /// use opencv matrix transformation to convert from BGR to YUV
 pub fn bgr_to_yuv420_lossy_faster(
     frame: Mat,
+    m: &Mat,
     width: usize,
     height: usize,
     color_scale: ColorScale,
 ) -> Vec<u8> {
     let color_scale_idx = color_scale.to_idx();
-    let mut m = [
-        // these scales are for turning RGB to YUV. but the input is in BGR.
-        Y_SCALE[color_scale_idx].clone(),
-        U_SCALE[color_scale_idx].clone(),
-        V_SCALE[color_scale_idx].clone(),
-    ];
-    m[0].reverse();
-    m[1].reverse();
-    m[2].reverse();
-    let p = m.as_ptr() as *mut std::ffi::c_void;
-    let m = unsafe { Mat::new_rows_cols_with_data(3, 3, CV_32F, p, Mat_AUTO_STEP) }
-        .expect("failed to make xform matrix");
 
     let offsets = [
         Y_OFFSET[color_scale_idx],
@@ -192,12 +178,6 @@ pub fn bgr_to_yuv420_lossy_faster(
     let len = width * height * 3;
     let s = std::ptr::slice_from_raw_parts_mut(p, len as _);
     let s: &mut [f32] = unsafe { &mut *s };
-
-    for chunk in s.chunks_exact_mut(3) {
-        chunk[0] += offsets[0];
-        chunk[1] += offsets[1];
-        chunk[2] += offsets[2];
-    }
 
     //////////////////
 
@@ -213,11 +193,12 @@ pub fn bgr_to_yuv420_lossy_faster(
     let get_yuv = |x: usize, y: usize| -> (u8, u8, u8) {
         // two dim to single dim
         let base_pos = (x + y * width) * 3;
-        (
-            s[base_pos] as u8,
-            s[base_pos + 1] as u8,
-            s[base_pos + 2] as u8,
-        )
+        let yuv = (
+            s[base_pos] + offsets[0],
+            s[base_pos + 1] + offsets[1],
+            s[base_pos + 2] + offsets[2],
+        );
+        (yuv.0 as u8, yuv.1 as u8, yuv.2 as u8)
     };
 
     let write_y = |yuv: &mut [u8], x: usize, y: usize, y_| {

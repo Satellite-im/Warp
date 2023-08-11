@@ -18,7 +18,11 @@ use std::{
 
 use libaom::encoder::*;
 
-use opencv::{prelude::*, videoio};
+use opencv::{
+    core::{Mat_AUTO_STEP, CV_32F},
+    prelude::*,
+    videoio,
+};
 
 pub fn encode_aom(args: Args) -> Result<()> {
     let color_scale = args.color_scale.unwrap_or(ColorScale::HdTv);
@@ -59,6 +63,21 @@ pub fn encode_aom(args: Args) -> Result<()> {
         Err(e) => bail!("failed to get Av1Encoder: {e:?}"),
     };
 
+    // this is for testing an optimized version
+    let color_scale_idx = color_scale.to_idx();
+    let mut m = [
+        // these scales are for turning RGB to YUV. but the input is in BGR.
+        Y_SCALE[color_scale_idx].clone(),
+        U_SCALE[color_scale_idx].clone(),
+        V_SCALE[color_scale_idx].clone(),
+    ];
+    m[0].reverse();
+    m[1].reverse();
+    m[2].reverse();
+    let p = m.as_ptr() as *mut std::ffi::c_void;
+    let m = unsafe { Mat::new_rows_cols_with_data(3, 3, CV_32F, p, Mat_AUTO_STEP) }
+        .expect("failed to make xform matrix");
+
     let pixel_format = *av_data::pixel::formats::YUV420;
     let pixel_format = Arc::new(pixel_format);
     for (idx, mut frame) in crate::VideoFileIter::new(cam).enumerate() {
@@ -71,7 +90,7 @@ pub fn encode_aom(args: Args) -> Result<()> {
         }
 
         let yuv = match optimized_mode {
-            Mode::Faster => bgr_to_yuv420_lossy_faster(frame, width, height, color_scale),
+            Mode::Faster => bgr_to_yuv420_lossy_faster(frame, &m, width, height, color_scale),
             _ => {
                 let p = frame.data_mut();
                 let len = width * height * 3;
