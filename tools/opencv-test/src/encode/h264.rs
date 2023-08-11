@@ -49,7 +49,7 @@ pub fn encode_h264(args: Args) -> Result<()> {
         let yuv = bgr_to_yuv420_full_scale(s, width, height);
 
         let yuv_buf = YUV420Buf {
-            yuv,
+            data: yuv,
             width: width * 2,
             height: height * 2,
         };

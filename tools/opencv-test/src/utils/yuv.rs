@@ -266,7 +266,7 @@ pub fn bgr_to_yuv420_limited_scale(s: &[u8], width: usize, height: usize) -> Vec
 }
 
 pub struct YUV420Buf {
-    pub yuv: Vec<u8>,
+    pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,
 }
@@ -288,9 +288,9 @@ impl av_data::frame::FrameBuffer for YUV420Buf {
         let base_u = self.width * self.height;
         let base_v = base_u + (base_u / 4);
         match idx {
-            0 => Ok(&self.yuv[0..self.width * self.height]),
-            1 => Ok(&self.yuv[base_u..base_v]),
-            2 => Ok(&self.yuv[base_v..]),
+            0 => Ok(&self.data[0..self.width * self.height]),
+            1 => Ok(&self.data[base_u..base_v]),
+            2 => Ok(&self.data[base_v..]),
             _ => Err(av_data::frame::FrameError::InvalidIndex),
         }
     }
@@ -299,9 +299,9 @@ impl av_data::frame::FrameBuffer for YUV420Buf {
         let base_u = self.width * self.height;
         let base_v = base_u + (base_u / 4);
         match idx {
-            0 => Ok(&mut self.yuv[0..self.width * self.height]),
-            1 => Ok(&mut self.yuv[base_u..base_v]),
-            2 => Ok(&mut self.yuv[base_v..]),
+            0 => Ok(&mut self.data[0..self.width * self.height]),
+            1 => Ok(&mut self.data[base_u..base_v]),
+            2 => Ok(&mut self.data[base_v..]),
             _ => Err(av_data::frame::FrameError::InvalidIndex),
         }
     }
@@ -317,18 +317,18 @@ impl YUVSource for YUV420Buf {
     }
 
     fn y(&self) -> &[u8] {
-        &self.yuv[0..self.width * self.height]
+        &self.data[0..self.width * self.height]
     }
 
     fn u(&self) -> &[u8] {
         let base = self.width * self.height;
-        &self.yuv[base..base + base / 4]
+        &self.data[base..base + base / 4]
     }
 
     fn v(&self) -> &[u8] {
         let base_u = self.width * self.height;
         let base_v = base_u + (base_u / 4);
-        &self.yuv[base_v..]
+        &self.data[base_v..]
     }
 
     fn y_stride(&self) -> i32 {
