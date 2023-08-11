@@ -78,6 +78,7 @@ pub fn bgr_to_yuv444(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
     yuv
 }
 
+// u and v are calculated by averaging a 4-pixel square
 pub fn bgr_to_yuv420_lossy(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
     let size = (3 * width * height) / 2;
     let mut yuv = vec![0; size];
