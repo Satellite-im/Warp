@@ -44,8 +44,8 @@ pub fn encode_aom(args: Args) -> Result<()> {
         Ok(r) => r,
         Err(e) => bail!("failed to get Av1EncoderConfig: {e:?}"),
     };
-    encoder_config.g_h = frame_height * 2;
-    encoder_config.g_w = frame_width * 2;
+    encoder_config.g_h = frame_height ;
+    encoder_config.g_w = frame_width ;
     let mut encoder = match encoder_config.get_encoder() {
         Ok(r) => r,
         Err(e) => bail!("failed to get Av1Encoder: {e:?}"),
@@ -68,11 +68,11 @@ pub fn encode_aom(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
-        let yuv = bgr_to_yuv420_limited_scale(s, width, height);
+        let yuv = bgr_to_yuv420_lossy(s, width, height);
         let yuv_buf = YUV420Buf {
             data: yuv,
-            width: width * 2,
-            height: height * 2,
+            width: width ,
+            height: height ,
         };
 
         let frame = av_data::frame::Frame {
