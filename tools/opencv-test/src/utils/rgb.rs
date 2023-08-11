@@ -18,7 +18,7 @@ pub struct RGBBuf {
 impl av_data::frame::FrameBuffer for RGBBuf {
     fn linesize(&self, idx: usize) -> Result<usize, av_data::frame::FrameError> {
         match idx {
-            0 | 1 | 2 => Ok(self.width * 3),
+            0 | 1 | 2 => Ok(self.width),
             _ => Err(av_data::frame::FrameError::InvalidIndex),
         }
     }
