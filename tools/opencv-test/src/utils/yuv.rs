@@ -1,6 +1,11 @@
 // shamelessly stolen from here: https://github.com/hanguk0726/Avatar-Vision/blob/main/rust/src/tools/image_processing.rs
 
-use opencv::prelude::{Mat, MatTrait};
+use std::ffi::c_void;
+
+use opencv::{
+    core::{Mat_AUTO_STEP, CV_32F},
+    prelude::{Mat, MatTrait},
+};
 use openh264::formats::YUVSource;
 
 pub const Y_SCALE: [[f32; 3]; 3] = [
@@ -158,12 +163,26 @@ pub fn bgr_to_yuv420(s: &[u8], width: usize, height: usize, color_scale: ColorSc
 
 /// use opencv matrix transformation to convert from BGR to YUV
 pub fn bgr_to_yuv420_lossy_faster(
-    frame: Mat,
+    mut frame: Mat,
     m: &Mat,
     width: usize,
     height: usize,
     color_scale: ColorScale,
 ) -> Vec<u8> {
+    let len = width * height * 3;
+
+    // the frame is in u8 format. can't very well multiply by a negative number and expect it to work.
+    // instead have to convert to a float first.
+    let p = frame.data_mut();
+    let u8_input = std::ptr::slice_from_raw_parts_mut(p, len as _);
+    let u8_input = unsafe { &*u8_input };
+    let float_input: Vec<f32> = u8_input.iter().map(|x| *x as f32).collect();
+    let p = float_input.as_ptr() as *mut c_void;
+
+    let frame =
+        unsafe { Mat::new_rows_cols_with_data(height as _, width as _, CV_32F, p, Mat_AUTO_STEP) }
+            .expect("failed to make input matrix");
+
     let color_scale_idx = color_scale.to_idx();
 
     let offsets = [
@@ -175,7 +194,6 @@ pub fn bgr_to_yuv420_lossy_faster(
     opencv::core::transform(&frame, &mut xformed, &m).expect("failed to transform matrix");
 
     let p = xformed.data_mut() as *mut f32;
-    let len = width * height * 3;
     let s = std::ptr::slice_from_raw_parts_mut(p, len as _);
     let s: &mut [f32] = unsafe { &mut *s };
 
@@ -210,6 +228,7 @@ pub fn bgr_to_yuv420_lossy_faster(
     };
     let write_v = |yuv: &mut [u8], x: usize, y: usize, v_| yuv[v_base + x + y * half_width] = v_;
 
+    // todo: use rayon to do this in parallel?
     for i in 0..width / 2 {
         for j in 0..height / 2 {
             let px = i * 2;
