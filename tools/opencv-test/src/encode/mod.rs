@@ -18,6 +18,10 @@ pub struct Args {
     pub output: String,
     /// The codec to use
     pub codec: CodecTypes,
+    /// Optional parameter. defaults to Lossy.
+    /// NotLossy doubles the size of each frame so that converting to YUV420
+    /// doesn't lose any chromiance information.
+    pub encoding_type: Option<EncodingType>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -30,4 +34,10 @@ pub enum CodecTypes {
     RAV1E,
     /// av1 (aom)
     AOM,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum EncodingType {
+    Lossy,
+    NotLossy,
 }

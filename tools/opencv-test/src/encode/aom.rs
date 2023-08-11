@@ -1,6 +1,6 @@
 use crate::utils::yuv::*;
 
-use super::Args;
+use super::{Args, EncodingType};
 use anyhow::{bail, Result};
 use av_data::{
     frame::FrameType,
@@ -21,6 +21,12 @@ use libaom::encoder::*;
 use opencv::{prelude::*, videoio};
 
 pub fn encode_aom(args: Args) -> Result<()> {
+    let is_lossy = args
+        .encoding_type
+        .map(|t| matches!(t, EncodingType::Lossy))
+        .unwrap_or(true);
+    let multiplier: usize = if is_lossy { 1 } else { 2 };
+
     let cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
     let opened = videoio::VideoCapture::is_opened(&cam)?;
     if !opened {
@@ -44,8 +50,8 @@ pub fn encode_aom(args: Args) -> Result<()> {
         Ok(r) => r,
         Err(e) => bail!("failed to get Av1EncoderConfig: {e:?}"),
     };
-    encoder_config.g_h = frame_height ;
-    encoder_config.g_w = frame_width ;
+    encoder_config.g_h = frame_height * multiplier as u32;
+    encoder_config.g_w = frame_width * multiplier as u32;
     let mut encoder = match encoder_config.get_encoder() {
         Ok(r) => r,
         Err(e) => bail!("failed to get Av1Encoder: {e:?}"),
@@ -68,11 +74,15 @@ pub fn encode_aom(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
-        let yuv = bgr_to_yuv420_lossy(s, width, height);
+        let yuv = if is_lossy {
+            bgr_to_yuv420_lossy(s, width, height)
+        } else {
+            bgr_to_yuv420_limited_scale(s, width, height)
+        };
         let yuv_buf = YUV420Buf {
             data: yuv,
-            width: width ,
-            height: height ,
+            width: width * multiplier,
+            height: height * multiplier,
         };
 
         let frame = av_data::frame::Frame {
