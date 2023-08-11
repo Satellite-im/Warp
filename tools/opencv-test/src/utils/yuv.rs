@@ -37,6 +37,46 @@ pub fn yuyv422_to_rgb_(data: &[u8], rgba: bool) -> Vec<u8> {
     rgb
 }
 
+pub fn bgr_to_yuv444(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let size = width * height * 3;
+    let mut yuv = vec![0; size];
+    let y_base = 0;
+    let u_base = width * height;
+    let v_base = u_base << 2;
+    let mut idx = 0;
+
+    let get_y = |rgb: (f32, f32, f32)| {
+        // best. appears to be from the wikipedia page on YCbCr
+        (0.2578125 * rgb.0 + 0.50390625 * rgb.1 + 0.09765625 * rgb.2 + 16.0) as u8
+        // full scale:   // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
+        //(0.299 * rgb.0 + 0.587 * rgb.1 + 0.114 * rgb.2 + 0.0) as u8
+        // hdtv
+        //(0.183 * rgb.0 + 0.614 * rgb.1 + 0.062 * rgb.2 + 16.0) as u8
+    };
+
+    let get_u = |rgb: (f32, f32, f32)| {
+        (-0.1484375 * rgb.0 + -0.2890625 * rgb.1 + 0.4375 * rgb.2 + 128.0) as u8
+        //(-0.169 * rgb.0 + -0.331 * rgb.1 + 0.500 * rgb.2 + 128.0) as u8
+        //(-0.101 * rgb.0 + -0.339 * rgb.1 + 0.439 * rgb.2 + 128.0) as u8
+    };
+
+    let get_v = |rgb: (f32, f32, f32)| {
+        (0.4375 * rgb.0 + -0.3671875 * rgb.1 + -0.0703125 * rgb.2 + 128.0) as u8
+        //(0.500 * rgb.0 + -0.419 * rgb.1 + -0.081 * rgb.2 + 128.0) as u8
+        //(0.439 * rgb.0 + -0.399 * rgb.1 + -0.040 * rgb.2 + 128.0) as u8
+    };
+
+    for chunk in rgb.chunks_exact(3) {
+        let rgb = (chunk[2] as f32, chunk[1] as f32, chunk[0] as f32);
+        yuv[y_base + idx] = get_y(rgb);
+        yuv[u_base + idx] = get_u(rgb);
+        yuv[v_base + idx] = get_v(rgb);
+        idx += 1;
+    }
+
+    yuv
+}
+
 pub fn bgr_to_yuv420_lossy(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
     let size = (3 * width * height) / 2;
     let mut yuv = vec![0; size];
@@ -97,13 +137,13 @@ pub fn bgr_to_yuv420_lossy(rgba: &[u8], width: usize, height: usize) -> Vec<u8> 
     yuv
 }
 
-pub struct YUVBuf {
+pub struct YUV420Buf {
     pub yuv: Vec<u8>,
     pub width: usize,
     pub height: usize,
 }
 
-impl av_data::frame::FrameBuffer for YUVBuf {
+impl av_data::frame::FrameBuffer for YUV420Buf {
     fn linesize(&self, idx: usize) -> Result<usize, av_data::frame::FrameError> {
         match idx {
             0 => Ok(self.width),
@@ -139,7 +179,7 @@ impl av_data::frame::FrameBuffer for YUVBuf {
     }
 }
 
-impl YUVSource for YUVBuf {
+impl YUVSource for YUV420Buf {
     fn width(&self) -> i32 {
         self.width as i32
     }
@@ -173,6 +213,85 @@ impl YUVSource for YUVBuf {
 
     fn v_stride(&self) -> i32 {
         self.width as i32 / 2
+    }
+}
+
+pub struct YUV444Buf {
+    pub yuv: Vec<u8>,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl av_data::frame::FrameBuffer for YUV444Buf {
+    fn linesize(&self, idx: usize) -> Result<usize, av_data::frame::FrameError> {
+        match idx {
+            0..=2 => Ok(self.width),
+            _ => Err(av_data::frame::FrameError::InvalidIndex),
+        }
+    }
+
+    fn count(&self) -> usize {
+        3
+    }
+
+    fn as_slice_inner(&self, idx: usize) -> Result<&[u8], av_data::frame::FrameError> {
+        let base_u = self.width * self.height;
+        let base_v = base_u << 2;
+        match idx {
+            0 => Ok(&self.yuv[0..base_u]),
+            1 => Ok(&self.yuv[base_u..base_v]),
+            2 => Ok(&self.yuv[base_v..]),
+            _ => Err(av_data::frame::FrameError::InvalidIndex),
+        }
+    }
+
+    fn as_mut_slice_inner(&mut self, idx: usize) -> Result<&mut [u8], av_data::frame::FrameError> {
+        let base_u = self.width * self.height;
+        let base_v = base_u << 2;
+        match idx {
+            0 => Ok(&mut self.yuv[0..self.width * self.height]),
+            1 => Ok(&mut self.yuv[base_u..base_v]),
+            2 => Ok(&mut self.yuv[base_v..]),
+            _ => Err(av_data::frame::FrameError::InvalidIndex),
+        }
+    }
+}
+
+impl YUVSource for YUV444Buf {
+    fn width(&self) -> i32 {
+        self.width as i32
+    }
+
+    fn height(&self) -> i32 {
+        self.height as i32
+    }
+
+    fn y(&self) -> &[u8] {
+        &self.yuv[0..self.width * self.height]
+    }
+
+    fn u(&self) -> &[u8] {
+        let base_u = self.width * self.height;
+        let base_v = base_u << 2;
+        &self.yuv[base_u..base_v]
+    }
+
+    fn v(&self) -> &[u8] {
+        let base_u = self.width * self.height;
+        let base_v = base_u << 2;
+        &self.yuv[base_v..]
+    }
+
+    fn y_stride(&self) -> i32 {
+        self.width as _
+    }
+
+    fn u_stride(&self) -> i32 {
+        self.width as _
+    }
+
+    fn v_stride(&self) -> i32 {
+        self.width as _
     }
 }
 
