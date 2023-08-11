@@ -167,12 +167,15 @@ pub fn bgr_to_yuv420_lossy_faster(
     color_scale: ColorScale,
 ) -> Vec<u8> {
     let color_scale_idx = color_scale.to_idx();
-    let m = [
+    let mut m = [
         // these scales are for turning RGB to YUV. but the input is in BGR.
-        Y_SCALE[color_scale_idx].clone().reverse(),
-        U_SCALE[color_scale_idx].clone().reverse(),
-        V_SCALE[color_scale_idx].clone().reverse(),
+        Y_SCALE[color_scale_idx].clone(),
+        U_SCALE[color_scale_idx].clone(),
+        V_SCALE[color_scale_idx].clone(),
     ];
+    m[0].reverse();
+    m[1].reverse();
+    m[2].reverse();
     let p = m.as_ptr() as *mut std::ffi::c_void;
     let m = unsafe { Mat::new_rows_cols_with_data(3, 3, CV_32F, p, Mat_AUTO_STEP) }
         .expect("failed to make xform matrix");
