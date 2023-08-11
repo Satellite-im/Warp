@@ -3,7 +3,7 @@
 use std::ffi::c_void;
 
 use opencv::{
-    core::{Mat_AUTO_STEP, CV_32F},
+    core::{Mat_AUTO_STEP, CV_32F, CV_32FC3},
     prelude::{Mat, MatTrait},
 };
 use openh264::formats::YUVSource;
@@ -179,9 +179,10 @@ pub fn bgr_to_yuv420_lossy_faster(
     let float_input: Vec<f32> = u8_input.iter().map(|x| *x as f32).collect();
     let p = float_input.as_ptr() as *mut c_void;
 
-    let frame =
-        unsafe { Mat::new_rows_cols_with_data(height as _, width as _, CV_32F, p, Mat_AUTO_STEP) }
-            .expect("failed to make input matrix");
+    let frame = unsafe {
+        Mat::new_rows_cols_with_data(height as _, width as _, CV_32FC3, p, Mat_AUTO_STEP)
+    }
+    .expect("failed to make input matrix");
 
     let color_scale_idx = color_scale.to_idx();
 
