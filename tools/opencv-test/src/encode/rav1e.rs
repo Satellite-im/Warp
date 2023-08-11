@@ -1,7 +1,7 @@
 use super::Args;
+use crate::utils::yuv::*;
 use anyhow::Result;
 use rav1e::{prelude::ChromaSampling, *};
-
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
@@ -58,7 +58,7 @@ pub fn encode_rav1e(args: Args) -> Result<()> {
 
         println!("converting format");
         // note that width and height have doubled
-        let yuv = crate::utils::bgr_to_yuv420_full_scale(s, width, height);
+        let yuv = bgr_to_yuv420_full_scale(s, width, height);
         println!("done converting");
 
         // create a frame

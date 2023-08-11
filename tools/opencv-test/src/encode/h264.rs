@@ -1,12 +1,12 @@
 use super::Args;
 use anyhow::Result;
 
+use crate::utils::yuv::*;
+use opencv::{prelude::*, videoio};
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
 };
-
-use opencv::{prelude::*, videoio};
 
 pub fn encode_h264(args: Args) -> Result<()> {
     let cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
@@ -46,9 +46,9 @@ pub fn encode_h264(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
-        let yuv = crate::utils::bgr_to_yuv420_full_scale(s, width, height);
+        let yuv = bgr_to_yuv420_full_scale(s, width, height);
 
-        let yuv_buf = crate::utils::YUVBuf {
+        let yuv_buf = YUVBuf {
             yuv,
             width: width * 2,
             height: height * 2,
