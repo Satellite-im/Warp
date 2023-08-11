@@ -4,9 +4,8 @@ use super::Args;
 use anyhow::{bail, Result};
 use av_data::{
     frame::FrameType,
-    pixel,
     pixel::{
-        self, ChromaLocation, Chromaton, ColorModel, ColorPrimaries, Formaton, MatrixCoefficients,
+        ChromaLocation, Chromaton, ColorModel, ColorPrimaries, Formaton, MatrixCoefficients,
         TransferCharacteristic, TrichromaticEncodingSystem, YUVRange, YUVSystem,
     },
     timeinfo::TimeInfo,
