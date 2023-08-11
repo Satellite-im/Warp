@@ -63,8 +63,8 @@ pub fn encode_aom(args: Args) -> Result<()> {
         components: 3,
         comp_info: [
             Some(Chromaton::new(0, 0, false, 8, 0, 0, 1)),
-            Some(Chromaton::yuv8(0, 0, 0)),
-            Some(Chromaton::yuv8(0, 0, 0)),
+            Some(Chromaton::yuv8(1, 1, 1)),
+            Some(Chromaton::yuv8(1, 1, 2)),
             None,
             None,
         ],
