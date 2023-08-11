@@ -162,6 +162,7 @@ pub fn bgr_to_yuv420(s: &[u8], width: usize, height: usize, color_scale: ColorSc
 }
 
 /// use opencv matrix transformation to convert from BGR to YUV
+/// appears to be slower. hilarious.
 pub fn bgr_to_yuv420_lossy_faster(
     frame: Mat,
     m: &Mat,
@@ -171,23 +172,12 @@ pub fn bgr_to_yuv420_lossy_faster(
 ) -> Vec<u8> {
     let len = width * height * 3;
 
+    // the frame is in u8 format. can't very well multiply by a negative number and expect it to work.
+    // instead have to convert to a float first.
     let mut frame2 = Mat::default();
     frame
         .convert_to(&mut frame2, CV_32FC3, 1.0, 0.0)
         .expect("failed to convert");
-
-    // the frame is in u8 format. can't very well multiply by a negative number and expect it to work.
-    // instead have to convert to a float first.
-    // let p = frame.data_mut();
-    // let u8_input = std::ptr::slice_from_raw_parts_mut(p, len as _);
-    // let u8_input = unsafe { &*u8_input };
-    // let float_input: Vec<f32> = u8_input.iter().map(|x| *x as f32).collect();
-    // let p = float_input.as_ptr() as *mut c_void;
-    //
-    // let frame = unsafe {
-    //     Mat::new_rows_cols_with_data(height as _, width as _, CV_32FC3, p, Mat_AUTO_STEP)
-    // }
-    // .expect("failed to make input matrix");
 
     let color_scale_idx = color_scale.to_idx();
 
