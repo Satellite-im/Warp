@@ -1,13 +1,12 @@
 mod protocol;
 
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     iter,
     task::{Context, Poll},
 };
 
 use libipld::Cid;
-use rust_ipfs::libp2p::swarm::OneShotHandler;
 use rust_ipfs::libp2p::{
     core::Endpoint,
     swarm::{
@@ -17,11 +16,19 @@ use rust_ipfs::libp2p::{
     Multiaddr, PeerId,
 };
 use rust_ipfs::NetworkBehaviour;
+use rust_ipfs::{libp2p::swarm::OneShotHandler, Keypair};
 use tracing::log;
-use warp::{crypto::DID, multipass::MultiPassEventKind};
+use warp::{
+    crypto::DID,
+    multipass::{
+        identity::{IdentityStatus, Platform},
+        MultiPassEventKind,
+    },
+};
 
 use crate::{
     config::UpdateEvents,
+    get_keypair_did,
     store::{
         document::identity::IdentityDocument,
         identity::{IdentityEvent, RequestOption, ResponseOption},
@@ -46,11 +53,99 @@ pub enum IdentityCommand {
 
 pub struct Behaviour {
     pending_events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>>,
+
     identity_document: IdentityDocument,
+
+    keypair: Keypair,
+
+    share_platform: bool,
+
     event: tokio::sync::broadcast::Sender<MultiPassEventKind>,
     command: futures::channel::mpsc::Receiver<IdentityCommand>,
+
+    blocked: HashSet<PeerId>,
+    blocked_by: HashSet<PeerId>,
     cache: HashMap<PeerId, IdentityDocument>,
+
     event_option: UpdateEvents,
+}
+
+impl Behaviour {
+    pub fn push(&mut self, did: DID) -> Result<(), Error> {
+        let peer_id = did.to_peer_id()?;
+        let mut identity = self.identity_document.clone();
+
+        let is_blocked = self.blocked.contains(&peer_id);
+        let is_blocked_by = self.blocked_by.contains(&peer_id);
+
+        let share_platform = self.share_platform;
+
+        let platform =
+            (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
+
+        let status = self.identity_document.status.and_then(|status| {
+            (!is_blocked || !is_blocked_by)
+                .then_some(status)
+                .or(Some(IdentityStatus::Offline))
+        });
+
+        let profile_picture = identity.profile_picture;
+        let profile_banner = identity.profile_banner;
+
+        let include_pictures =
+            matches!(self.event_option, UpdateEvents::Enabled) && (!is_blocked && !is_blocked_by);
+
+        log::trace!("Including cid in push: {include_pictures}");
+
+        identity.profile_picture =
+            profile_picture.and_then(|picture| include_pictures.then_some(picture));
+        identity.profile_banner =
+            profile_banner.and_then(|banner| include_pictures.then_some(banner));
+
+        identity.status = status;
+        identity.platform = platform;
+
+        //Note: Maybe use the keypair directly instead of performing the conversion
+        let kp_did = get_keypair_did(&self.keypair)?;
+
+        let payload = identity.sign(&kp_did)?;
+
+        let event = IdentityEvent::Receive {
+            option: ResponseOption::Identity { identity: payload },
+        };
+
+        log::info!("Sending document to {did}");
+
+        self.pending_events.push_back(ToSwarm::NotifyHandler {
+            peer_id,
+            handler: rust_ipfs::libp2p::swarm::NotifyHandler::Any,
+            event,
+        });
+
+        Ok(())
+    }
+
+    fn own_platform(&self) -> Platform {
+        if self.share_platform {
+            if cfg!(any(
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd"
+            )) {
+                Platform::Desktop
+            } else if cfg!(any(target_os = "android", target_os = "ios")) {
+                Platform::Mobile
+            } else {
+                Platform::Unknown
+            }
+        } else {
+            Platform::Unknown
+        }
+    }
 }
 
 impl NetworkBehaviour for Behaviour {
@@ -119,7 +214,9 @@ impl NetworkBehaviour for Behaviour {
         log::debug!("Event: {event:?}");
         match event {
             IdentityEvent::Request { option } => match option {
-                RequestOption::Identity => {}
+                RequestOption::Identity => {
+                    let _ = self.push(did);
+                }
                 RequestOption::Image { banner, picture } => {}
             },
             IdentityEvent::Receive {
