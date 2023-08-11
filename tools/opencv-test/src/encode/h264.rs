@@ -9,6 +9,7 @@ use std::{
 };
 
 pub fn encode_h264(args: Args) -> Result<()> {
+    let color_scale = args.color_scale.unwrap_or(ColorScale::Full);
     let cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
     let opened = videoio::VideoCapture::is_opened(&cam)?;
     if !opened {
@@ -33,8 +34,7 @@ pub fn encode_h264(args: Args) -> Result<()> {
 
     let mut encoder = openh264::encoder::Encoder::with_config(config)?;
 
-    let mut iter = crate::VideoFileIter::new(cam);
-    while let Some(mut frame) = iter.next() {
+    for mut frame in crate::VideoFileIter::new(cam) {
         let sz = frame.size()?;
         let width = sz.width as usize;
         let height = sz.height as usize;
@@ -46,7 +46,7 @@ pub fn encode_h264(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
-        let yuv = bgr_to_yuv420_full_scale(s, width, height);
+        let yuv = bgr_to_yuv420(s, width, height, color_scale);
 
         let yuv_buf = YUV420Buf {
             data: yuv,

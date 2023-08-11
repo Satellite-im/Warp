@@ -2,7 +2,28 @@
 
 use openh264::formats::YUVSource;
 
-#[derive(Clone, Copy)]
+const Y_SCALE: [[f32; 3]; 3] = [
+    [0.2578125, 0.50390625, 0.09765625],
+    [0.299, 0.587, 0.114],
+    [0.183, 0.614, 0.062],
+];
+const Y_OFFSET: [f32; 3] = [16.0, 0.0, 16.0];
+
+const U_SCALE: [[f32; 3]; 3] = [
+    [-0.1484375, -0.2890625, 0.4375],
+    [-0.169, -0.331, 0.500],
+    [-0.101, -0.339, 0.439],
+];
+const U_OFFSET: [f32; 3] = [128.0, 128.0, 128.0];
+
+const V_SCALE: [[f32; 3]; 3] = [
+    [0.4375, -0.3671875, -0.0703125],
+    [0.500, -0.419, -0.081],
+    [0.439, -0.399, -0.040],
+];
+const V_OFFSET: [f32; 3] = [128.0, 128.0, 128.0];
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum ColorScale {
     // coeffecients taken from https://github.com/hanguk0726/Avatar-Vision/blob/main/rust/src/tools/image_processing.rs
     Av,
@@ -11,41 +32,27 @@ pub enum ColorScale {
     // HdTv scale: // https://web.archive.org/web/20180423091842/http://www.equasys.de/colorconversion.html
     HdTv,
 }
+
+impl ColorScale {
+    fn to_idx(self) -> usize {
+        match self {
+            ColorScale::Av => 0,
+            ColorScale::Full => 1,
+            ColorScale::HdTv => 2,
+        }
+    }
+}
+
 fn rgb_to_yuv(rgb: (f32, f32, f32), color_scale: ColorScale) -> (u8, u8, u8) {
-    let y_scale: [[f32; 3]; 3] = [
-        [0.2578125, 0.50390625, 0.09765625],
-        [0.299, 0.587, 0.114],
-        [0.183, 0.614, 0.062],
-    ];
-    let y_offset: [f32; 3] = [16.0, 0.0, 16.0];
+    let idx = color_scale.to_idx();
 
-    let u_scale: [[f32; 3]; 3] = [
-        [-0.1484375, -0.2890625, 0.4375],
-        [-0.169, -0.331, 0.500],
-        [-0.101, -0.339, 0.439],
-    ];
-    let u_offset: [f32; 3] = [128.0, 128.0, 128.0];
+    let y_scale: &[f32; 3] = &Y_SCALE[idx];
+    let u_scale: &[f32; 3] = &U_SCALE[idx];
+    let v_scale: &[f32; 3] = &V_SCALE[idx];
 
-    let v_scale: [[f32; 3]; 3] = [
-        [0.4375, -0.3671875, -0.0703125],
-        [0.500, -0.419, -0.081],
-        [0.439, -0.399, -0.040],
-    ];
-    let v_offset: [f32; 3] = [128.0, 128.0, 128.0];
-
-    let idx = match color_scale {
-        ColorScale::Av => 0,
-        ColorScale::Full => 1,
-        ColorScale::HdTv => 2,
-    };
-
-    let y_scale: &[f32; 3] = &y_scale[idx];
-    let u_scale: &[f32; 3] = &u_scale[idx];
-    let v_scale: &[f32; 3] = &v_scale[idx];
-
-    let y_offset = y_offset[idx];
-    let u_offset = u_offset[idx];
-    let v_offset = v_offset[idx];
+    let y_offset = Y_OFFSET[idx];
+    let u_offset = U_OFFSET[idx];
+    let v_offset = V_OFFSET[idx];
 
     let y = y_scale[0] * rgb.0 + y_scale[1] * rgb.1 + y_scale[2] * rgb.2 + y_offset;
     let u = u_scale[0] * rgb.0 + u_scale[1] * rgb.1 + u_scale[2] * rgb.2 + u_offset;
@@ -96,21 +103,19 @@ pub fn bgr_to_yuv444(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
     let y_base = 0;
     let u_base = width * height;
     let v_base = u_base + u_base;
-    let mut idx = 0;
 
-    for chunk in rgb.chunks_exact(3) {
+    for (idx, chunk) in rgb.chunks_exact(3).enumerate() {
         let rgb = (chunk[2] as f32, chunk[1] as f32, chunk[0] as f32);
         let (y, u, v) = rgb_to_yuv(rgb, ColorScale::Av);
         yuv[y_base + idx] = y;
         yuv[u_base + idx] = u;
         yuv[v_base + idx] = v;
-        idx += 1;
     }
 
     yuv
 }
-
-fn bgr_to_yuv420(s: &[u8], width: usize, height: usize, color_scale: ColorScale) -> Vec<u8> {
+// attempts to avoid the loss when converting from BGR to YUV420 by quadrupling the size of the output. this ensures no UV samples are discarded/averaged
+pub fn bgr_to_yuv420(s: &[u8], width: usize, height: usize, color_scale: ColorScale) -> Vec<u8> {
     // for y
     let y_rc_2_idx = |row: usize, col: usize| (row * width * 2) + col;
 
@@ -151,7 +156,12 @@ fn bgr_to_yuv420(s: &[u8], width: usize, height: usize, color_scale: ColorScale)
 }
 
 // u and v are calculated by averaging a 4-pixel square
-pub fn bgr_to_yuv420_lossy(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
+pub fn bgr_to_yuv420_lossy(
+    rgb: &[u8],
+    width: usize,
+    height: usize,
+    color_scale: ColorScale,
+) -> Vec<u8> {
     let size = (3 * width * height) / 2;
     let mut yuv = vec![0; size];
 
@@ -166,23 +176,32 @@ pub fn bgr_to_yuv420_lossy(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
         (
             rgb[base_pos + 2] as f32,
             rgb[base_pos + 1] as f32,
-            rgb[base_pos + 0] as f32,
+            rgb[base_pos] as f32,
         )
     };
 
+    let color_scale_idx = color_scale.to_idx();
+    let y_scale: &[f32; 3] = &Y_SCALE[color_scale_idx];
+    let u_scale: &[f32; 3] = &U_SCALE[color_scale_idx];
+    let v_scale: &[f32; 3] = &V_SCALE[color_scale_idx];
+
+    let y_offset = Y_OFFSET[color_scale_idx];
+    let u_offset = U_OFFSET[color_scale_idx];
+    let v_offset = V_OFFSET[color_scale_idx];
+
     let write_y = |yuv: &mut [u8], x: usize, y: usize, rgb: (f32, f32, f32)| {
         yuv[x + y * width] =
-            (0.2578125 * rgb.0 + 0.50390625 * rgb.1 + 0.09765625 * rgb.2 + 16.0) as u8;
+            (y_scale[0] * rgb.0 + y_scale[1] * rgb.1 + y_scale[2] * rgb.2 + y_offset) as u8;
     };
 
     let write_u = |yuv: &mut [u8], x: usize, y: usize, rgb: (f32, f32, f32)| {
         yuv[u_base + x + y * half_width] =
-            (-0.1484375 * rgb.0 + -0.2890625 * rgb.1 + 0.4375 * rgb.2 + 128.0) as u8;
+            (u_scale[0] * rgb.0 + u_scale[1] * rgb.1 + u_scale[2] * rgb.2 + u_offset) as u8;
     };
 
     let write_v = |yuv: &mut [u8], x: usize, y: usize, rgb: (f32, f32, f32)| {
         yuv[v_base + x + y * half_width] =
-            (0.4375 * rgb.0 + -0.3671875 * rgb.1 + -0.0703125 * rgb.2 + 128.0) as u8;
+            (v_scale[0] * rgb.0 + v_scale[1] * rgb.1 + v_scale[2] * rgb.2 + v_offset) as u8;
     };
     for i in 0..width / 2 {
         for j in 0..height / 2 {
@@ -209,16 +228,6 @@ pub fn bgr_to_yuv420_lossy(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
         }
     }
     yuv
-}
-
-// attempts to avoid the loss when converting from BGR to YUV420 by quadrupling the size of the output. this ensures no UV samples are discarded/averaged
-pub fn bgr_to_yuv420_full_scale(s: &[u8], width: usize, height: usize) -> Vec<u8> {
-    bgr_to_yuv420(s, width, height, ColorScale::Av)
-}
-
-// attempts to avoid the loss when converting from BGR to YUV420 by quadrupling the size of the output. this ensures no UV samples are discarded/averaged
-pub fn bgr_to_yuv420_limited_scale(s: &[u8], width: usize, height: usize) -> Vec<u8> {
-    bgr_to_yuv420(s, width, height, ColorScale::HdTv)
 }
 
 pub struct YUV420Buf {

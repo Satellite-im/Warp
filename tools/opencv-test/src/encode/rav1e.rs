@@ -10,6 +10,7 @@ use std::{
 use opencv::{prelude::*, videoio};
 
 pub fn encode_rav1e(args: Args) -> Result<()> {
+    let color_scale = args.color_scale.unwrap_or(ColorScale::Full);
     let cam = videoio::VideoCapture::from_file(&args.input, videoio::CAP_ANY)?;
     let opened = videoio::VideoCapture::is_opened(&cam)?;
     if !opened {
@@ -42,8 +43,7 @@ pub fn encode_rav1e(args: Args) -> Result<()> {
         .new_context()
         .map_err(|e| anyhow::anyhow!(format!("couldn't make context: {e:?}")))?;
 
-    let mut iter = crate::VideoFileIter::new(cam);
-    while let Some(mut frame) = iter.next() {
+    for mut frame in crate::VideoFileIter::new(cam) {
         println!("read new frame");
         let sz = frame.size()?;
         let width = sz.width as usize;
@@ -58,7 +58,7 @@ pub fn encode_rav1e(args: Args) -> Result<()> {
 
         println!("converting format");
         // note that width and height have doubled
-        let yuv = bgr_to_yuv420_full_scale(s, width, height);
+        let yuv = bgr_to_yuv420(s, width, height, color_scale);
         println!("done converting");
 
         // create a frame
@@ -80,7 +80,7 @@ pub fn encode_rav1e(args: Args) -> Result<()> {
             match ctx.receive_packet() {
                 Ok(packet) => {
                     println!("got packet");
-                    writer.write(&packet.data)?;
+                    let _ = writer.write(&packet.data)?;
                 }
                 Err(EncoderStatus::Encoded) => {
                     println!("frame encoded");

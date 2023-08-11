@@ -6,6 +6,7 @@ pub use crate::encode::aom::encode_aom;
 pub use crate::encode::h264::encode_h264;
 pub use crate::encode::rav1e::encode_rav1e;
 pub use crate::encode::x264::encode_x264;
+use crate::utils::yuv::ColorScale;
 
 use clap::Parser;
 
@@ -22,6 +23,7 @@ pub struct Args {
     /// NotLossy doubles the size of each frame so that converting to YUV420
     /// doesn't lose any chromiance information.
     pub encoding_type: Option<EncodingType>,
+    pub color_scale: Option<ColorScale>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]

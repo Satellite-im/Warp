@@ -21,6 +21,7 @@ use libaom::encoder::*;
 use opencv::{prelude::*, videoio};
 
 pub fn encode_aom(args: Args) -> Result<()> {
+    let color_scale = args.color_scale.unwrap_or(ColorScale::HdTv);
     let is_lossy = args
         .encoding_type
         .map(|t| matches!(t, EncodingType::Lossy))
@@ -57,11 +58,9 @@ pub fn encode_aom(args: Args) -> Result<()> {
         Err(e) => bail!("failed to get Av1Encoder: {e:?}"),
     };
 
-    let pixel_format = av_data::pixel::formats::YUV420.clone();
+    let pixel_format = *av_data::pixel::formats::YUV420;
     let pixel_format = Arc::new(pixel_format);
-    let mut idx = 0;
-    let mut iter = crate::VideoFileIter::new(cam);
-    while let Some(mut frame) = iter.next() {
+    for (idx, mut frame) in crate::VideoFileIter::new(cam).enumerate() {
         println!("read new frame");
         let sz = frame.size()?;
         let width = sz.width as usize;
@@ -75,9 +74,9 @@ pub fn encode_aom(args: Args) -> Result<()> {
         let s: &[u8] = unsafe { &*s };
 
         let yuv = if is_lossy {
-            bgr_to_yuv420_lossy(s, width, height)
+            bgr_to_yuv420_lossy(s, width, height, color_scale)
         } else {
-            bgr_to_yuv420_limited_scale(s, width, height)
+            bgr_to_yuv420(s, width, height, color_scale)
         };
         let yuv_buf = YUV420Buf {
             data: yuv,
@@ -95,12 +94,10 @@ pub fn encode_aom(args: Args) -> Result<()> {
             )),
             buf: Box::new(yuv_buf),
             t: TimeInfo {
-                pts: Some(idx * 60),
+                pts: Some(idx as i64 * 60),
                 ..Default::default()
             },
         };
-
-        idx += 1;
 
         println!("encoding");
         if let Err(e) = encoder.encode(&frame) {
@@ -110,7 +107,7 @@ pub fn encode_aom(args: Args) -> Result<()> {
         println!("calling get_packet");
         while let Some(packet) = encoder.get_packet() {
             if let AOMPacket::Packet(p) = packet {
-                writer.write(&p.data)?;
+                let _ = writer.write(&p.data)?;
             }
         }
     }

@@ -33,8 +33,7 @@ pub fn encode_x264(args: Args) -> Result<()> {
         .expect("failed to make builder");
     let mut idx = 0;
 
-    let mut iter = crate::VideoFileIter::new(cam);
-    while let Some(mut frame) = iter.next() {
+    for mut frame in crate::VideoFileIter::new(cam) {
         let sz = frame.size()?;
         if sz.width > 0 {
             let p = frame.data_mut();
@@ -46,7 +45,7 @@ pub fn encode_x264(args: Args) -> Result<()> {
                 .encode(fps as i64 * idx as i64, img)
                 .expect("failed to encode frame");
             idx += 1;
-            writer.write(data.entirety())?;
+            let _ = writer.write(data.entirety())?;
         }
     }
     writer.flush()?;

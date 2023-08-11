@@ -2,9 +2,7 @@ pub fn bgr_to_rgb(input: &[u8]) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend_from_slice(input);
     for chunk in v.chunks_exact_mut(3) {
-        let b = chunk[0];
-        chunk[0] = chunk[2];
-        chunk[2] = b;
+        chunk.swap(0, 2);
     }
     v
 }
