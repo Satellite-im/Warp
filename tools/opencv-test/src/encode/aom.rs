@@ -1,4 +1,4 @@
-use crate::utils::yuv::*;
+use crate::utils::rgb::*;
 
 use super::Args;
 use anyhow::{bail, Result};
@@ -52,29 +52,29 @@ pub fn encode_aom(args: Args) -> Result<()> {
     };
     // would use formats::RBG24 but it is not implemented
     //let pixel_format = pixel::formats::YUV420.clone();
-    let pixel_format = Formaton {
-        model: ColorModel::Trichromatic(TrichromaticEncodingSystem::YUV(YUVSystem::YCbCr(
-            YUVRange::Limited,
-        ))),
-        primaries: ColorPrimaries::Unspecified,
-        xfer: TransferCharacteristic::Unspecified,
-        matrix: MatrixCoefficients::Unspecified,
-        chroma_location: ChromaLocation::Unspecified,
-        components: 3,
-        comp_info: [
-            Some(Chromaton::new(0, 0, false, 8, 0, 0, 1)),
-            Some(Chromaton::yuv8(1, 1, 1)),
-            Some(Chromaton::yuv8(1, 1, 2)),
-            None,
-            None,
-        ],
-        elem_size: 0,
-        be: false,
-        alpha: false,
-        palette: false,
-    };
+    // let pixel_format = Formaton {
+    //     model: ColorModel::Trichromatic(TrichromaticEncodingSystem::YUV(YUVSystem::YCbCr(
+    //         YUVRange::Limited,
+    //     ))),
+    //     primaries: ColorPrimaries::Unspecified,
+    //     xfer: TransferCharacteristic::Unspecified,
+    //     matrix: MatrixCoefficients::Unspecified,
+    //     chroma_location: ChromaLocation::Unspecified,
+    //     components: 3,
+    //     comp_info: [
+    //         Some(Chromaton::new(0, 0, false, 8, 0, 0, 1)),
+    //         Some(Chromaton::yuv8(1, 1, 1)),
+    //         Some(Chromaton::yuv8(1, 1, 2)),
+    //         None,
+    //         None,
+    //     ],
+    //     elem_size: 0,
+    //     be: false,
+    //     alpha: false,
+    //     palette: false,
+    // };
     // sadly not implemented
-    // pixel_format.model = ColorModel::Trichromatic(TrichromaticEncodingSystem::YUV(YUVSystem::YCbCr(YUVRange::Full)));
+    let pixel_format = av_data::pixel::formats::RGB24.clone();
     let pixel_format = Arc::new(pixel_format);
     let mut idx = 0;
     let mut iter = crate::VideoFileIter::new(cam);
@@ -91,22 +91,28 @@ pub fn encode_aom(args: Args) -> Result<()> {
         let s = std::ptr::slice_from_raw_parts(p, len as _);
         let s: &[u8] = unsafe { &*s };
 
-        let yuv = bgr_to_yuv420_limited_scale(s, width, height);
-        let yuv_buf = YUVBuf {
-            yuv,
-            width: width * 2,
-            height: height * 2,
+        let rbg = bgr_to_rgb(s);
+        let rbg_buf = RGBBuf {
+            data: rbg,
+            width,
+            height,
         };
+        //let yuv = bgr_to_yuv420_limited_scale(s, width, height);
+        //let yuv_buf = YUVBuf {
+        //    yuv,
+        //    width: width * 2,
+        //    height: height * 2,
+        //};
 
         let frame = av_data::frame::Frame {
             kind: av_data::frame::MediaKind::Video(av_data::frame::VideoInfo::new(
-                width * 2,
-                height * 2,
+                rbg_buf.width,
+                rbg_buf.height,
                 false,
                 FrameType::I,
                 pixel_format.clone(),
             )),
-            buf: Box::new(yuv_buf),
+            buf: Box::new(rbg_buf),
             t: TimeInfo {
                 pts: Some(idx * 60),
                 ..Default::default()
