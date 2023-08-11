@@ -4,8 +4,11 @@ use super::Args;
 use anyhow::{bail, Result};
 use av_data::{
     frame::FrameType,
-    //pixel::{self, ColorModel, TrichromaticEncodingSystem, YUVSystem, YUVRange},
     pixel,
+    pixel::{
+        self, ChromaLocation, Chromaton, ColorModel, ColorPrimaries, Formaton, MatrixCoefficients,
+        TransferCharacteristic, TrichromaticEncodingSystem, YUVRange, YUVSystem,
+    },
     timeinfo::TimeInfo,
 };
 use std::{
@@ -49,7 +52,28 @@ pub fn encode_aom(args: Args) -> Result<()> {
         Err(e) => bail!("failed to get Av1Encoder: {e:?}"),
     };
     // would use formats::RBG24 but it is not implemented
-    let pixel_format = pixel::formats::YUV420.clone();
+    //let pixel_format = pixel::formats::YUV420.clone();
+    let pixel_format = Formaton {
+        model: ColorModel::Trichromatic(TrichromaticEncodingSystem::YUV(YUVSystem::YCbCr(
+            YUVRange::Limited,
+        ))),
+        primaries: ColorPrimaries::Unspecified,
+        xfer: TransferCharacteristic::Unspecified,
+        matrix: MatrixCoefficients::Unspecified,
+        chroma_location: ChromaLocation::Unspecified,
+        components: 3,
+        comp_info: [
+            Some(Chromaton::new(0, 0, false, 8, 0, 0, 1)),
+            Some(Chromaton::yuv8(0, 0, 0)),
+            Some(Chromaton::yuv8(0, 0, 0)),
+            None,
+            None,
+        ],
+        elem_size: 0,
+        be: false,
+        alpha: false,
+        palette: false,
+    };
     // sadly not implemented
     // pixel_format.model = ColorModel::Trichromatic(TrichromaticEncodingSystem::YUV(YUVSystem::YCbCr(YUVRange::Full)));
     let pixel_format = Arc::new(pixel_format);
