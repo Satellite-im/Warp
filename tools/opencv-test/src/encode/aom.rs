@@ -1,4 +1,4 @@
-use crate::utils::yuv::*;
+use crate::{encode::Mode, utils::yuv::*};
 
 use super::{Args, EncodingType};
 use anyhow::{bail, Result};
@@ -22,6 +22,7 @@ use opencv::{prelude::*, videoio};
 
 pub fn encode_aom(args: Args) -> Result<()> {
     let color_scale = args.color_scale.unwrap_or(ColorScale::HdTv);
+    let optimized_mode = args.mode.unwrap_or(Mode::Normal);
     let is_lossy = args
         .encoding_type
         .map(|t| matches!(t, EncodingType::Lossy))
@@ -68,16 +69,23 @@ pub fn encode_aom(args: Args) -> Result<()> {
         if width == 0 {
             continue;
         }
-        let p = frame.data_mut();
-        let len = width * height * 3;
-        let s = std::ptr::slice_from_raw_parts(p, len as _);
-        let s: &[u8] = unsafe { &*s };
 
-        let yuv = if is_lossy {
-            bgr_to_yuv420_lossy(s, width, height, color_scale)
-        } else {
-            bgr_to_yuv420(s, width, height, color_scale)
+        let yuv = match optimized_mode {
+            Mode::Faster => bgr_to_yuv420_lossy_faster(frame, width, height, color_scale),
+            _ => {
+                let p = frame.data_mut();
+                let len = width * height * 3;
+                let s = std::ptr::slice_from_raw_parts(p, len as _);
+                let s: &[u8] = unsafe { &*s };
+
+                if is_lossy {
+                    bgr_to_yuv420_lossy(s, width, height, color_scale)
+                } else {
+                    bgr_to_yuv420(s, width, height, color_scale)
+                }
+            }
         };
+
         let yuv_buf = YUV420Buf {
             data: yuv,
             width: width * multiplier,

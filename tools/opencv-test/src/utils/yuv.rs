@@ -1,5 +1,9 @@
 // shamelessly stolen from here: https://github.com/hanguk0726/Avatar-Vision/blob/main/rust/src/tools/image_processing.rs
 
+use opencv::{
+    core::{Mat_AUTO_STEP, CV_32F},
+    prelude::{Mat, MatTrait},
+};
 use openh264::formats::YUVSource;
 
 const Y_SCALE: [[f32; 3]; 3] = [
@@ -152,6 +156,100 @@ pub fn bgr_to_yuv420(s: &[u8], width: usize, height: usize, color_scale: ColorSc
         }
     }
 
+    yuv
+}
+
+/// use opencv matrix transformation to convert from BGR to YUV
+pub fn bgr_to_yuv420_lossy_faster(
+    frame: Mat,
+    width: usize,
+    height: usize,
+    color_scale: ColorScale,
+) -> Vec<u8> {
+    let color_scale_idx = color_scale.to_idx();
+    let m = [
+        // these scales are for turning RGB to YUV. but the input is in BGR.
+        Y_SCALE[color_scale_idx].clone().reverse(),
+        U_SCALE[color_scale_idx].clone().reverse(),
+        V_SCALE[color_scale_idx].clone().reverse(),
+    ];
+    let p = m.as_ptr() as *mut std::ffi::c_void;
+    let m = unsafe { Mat::new_rows_cols_with_data(3, 3, CV_32F, p, Mat_AUTO_STEP) }
+        .expect("failed to make xform matrix");
+
+    let offsets = [
+        Y_OFFSET[color_scale_idx],
+        U_OFFSET[color_scale_idx],
+        V_OFFSET[color_scale_idx],
+    ];
+    let mut xformed = Mat::default();
+    opencv::core::transform(&frame, &mut xformed, &m).expect("failed to transform matrix");
+
+    let p = xformed.data_mut() as *mut f32;
+    let len = width * height * 3;
+    let s = std::ptr::slice_from_raw_parts_mut(p, len as _);
+    let s: &mut [f32] = unsafe { &mut *s };
+
+    for chunk in s.chunks_exact_mut(3) {
+        chunk[0] += offsets[0];
+        chunk[1] += offsets[1];
+        chunk[2] += offsets[2];
+    }
+
+    //////////////////
+
+    let size = (3 * width * height) / 2;
+    let mut yuv = Vec::new();
+    yuv.resize(size, 0_u8);
+
+    let u_base = width * height;
+    let v_base = u_base + u_base / 4;
+    let half_width = width / 2;
+
+    // y is full size, u, v is quarter size
+    let get_yuv = |x: usize, y: usize| -> (u8, u8, u8) {
+        // two dim to single dim
+        let base_pos = (x + y * width) * 3;
+        (
+            s[base_pos] as u8,
+            s[base_pos + 1] as u8,
+            s[base_pos + 2] as u8,
+        )
+    };
+
+    let write_y = |yuv: &mut [u8], x: usize, y: usize, y_| {
+        yuv[x + y * width] = y_;
+    };
+
+    let write_u = |yuv: &mut [u8], x: usize, y: usize, u_| {
+        yuv[u_base + x + y * half_width] = u_;
+    };
+    let write_v = |yuv: &mut [u8], x: usize, y: usize, v_| yuv[v_base + x + y * half_width] = v_;
+
+    for i in 0..width / 2 {
+        for j in 0..height / 2 {
+            let px = i * 2;
+            let py = j * 2;
+            let pix0x0 = get_yuv(px, py);
+            let pix0x1 = get_yuv(px, py + 1);
+            let pix1x0 = get_yuv(px + 1, py);
+            let pix1x1 = get_yuv(px + 1, py + 1);
+            let avg_pix = (
+                (pix0x0.0 as u32 + pix0x1.0 as u32 + pix1x0.0 as u32 + pix1x1.0 as u32) as f32
+                    / 4.0,
+                (pix0x0.1 as u32 + pix0x1.1 as u32 + pix1x0.1 as u32 + pix1x1.1 as u32) as f32
+                    / 4.0,
+                (pix0x0.2 as u32 + pix0x1.2 as u32 + pix1x0.2 as u32 + pix1x1.2 as u32) as f32
+                    / 4.0,
+            );
+            write_y(&mut yuv[..], px, py, pix0x0.0);
+            write_y(&mut yuv[..], px, py + 1, pix0x1.0);
+            write_y(&mut yuv[..], px + 1, py, pix1x0.0);
+            write_y(&mut yuv[..], px + 1, py + 1, pix1x1.0);
+            write_u(&mut yuv[..], i, j, avg_pix.1 as u8);
+            write_v(&mut yuv[..], i, j, avg_pix.2 as u8);
+        }
+    }
     yuv
 }
 

@@ -23,7 +23,11 @@ pub struct Args {
     /// NotLossy doubles the size of each frame so that converting to YUV420
     /// doesn't lose any chromiance information.
     pub encoding_type: Option<EncodingType>,
+    ///specifies the RGB to YUV transformation matrix
     pub color_scale: Option<ColorScale>,
+    /// use optimized version. currently only works for aom in lossy mode.
+    /// if set, overrides encoding_type
+    pub mode: Option<Mode>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -42,4 +46,10 @@ pub enum CodecTypes {
 pub enum EncodingType {
     Lossy,
     NotLossy,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum Mode {
+    Normal,
+    Faster,
 }
