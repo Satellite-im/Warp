@@ -2,6 +2,7 @@
 
 use openh264::formats::YUVSource;
 
+#[derive(Clone, Copy)]
 pub enum ColorScale {
     // coeffecients taken from https://github.com/hanguk0726/Avatar-Vision/blob/main/rust/src/tools/image_processing.rs
     Av,
@@ -109,8 +110,48 @@ pub fn bgr_to_yuv444(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
     yuv
 }
 
+fn bgr_to_yuv420(s: &[u8], width: usize, height: usize, color_scale: ColorScale) -> Vec<u8> {
+    // for y
+    let y_rc_2_idx = |row: usize, col: usize| (row * width * 2) + col;
+
+    let yuv_len = (width * height) * 6;
+    let mut yuv: Vec<u8> = Vec::new();
+    yuv.resize(yuv_len, 0);
+    let u_base = (width * height) * 4;
+    let v_base = u_base + (width * height);
+    let mut uv_idx = 0;
+    for row in 0..height {
+        for col in 0..width {
+            let base_pos = (col + row * width) * 3;
+            let b = s[base_pos];
+            let g = s[base_pos + 1];
+            let r = s[base_pos + 2];
+
+            let rgb = (r as _, g as _, b as _);
+            let (y, u, v) = rgb_to_yuv(rgb, color_scale);
+
+            // each byte in the u/v plane corresponds to a 4x4 square on the y plane
+            let y_row = row * 2;
+            let y_col = col * 2;
+
+            let idx = y_rc_2_idx(y_row, y_col);
+            yuv[idx] = y;
+            yuv[idx + 1] = y;
+            let idx = y_rc_2_idx(y_row + 1, y_col);
+            yuv[idx] = y;
+            yuv[idx + 1] = y;
+
+            yuv[u_base + uv_idx] = u;
+            yuv[v_base + uv_idx] = v;
+            uv_idx += 1;
+        }
+    }
+
+    yuv
+}
+
 // u and v are calculated by averaging a 4-pixel square
-pub fn bgr_to_yuv420_lossy(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
+pub fn bgr_to_yuv420_lossy(rgb: &[u8], width: usize, height: usize) -> Vec<u8> {
     let size = (3 * width * height) / 2;
     let mut yuv = vec![0; size];
 
@@ -123,9 +164,9 @@ pub fn bgr_to_yuv420_lossy(rgba: &[u8], width: usize, height: usize) -> Vec<u8> 
         // two dim to single dim
         let base_pos = (x + y * width) * 3;
         (
-            rgba[base_pos + 2] as f32,
-            rgba[base_pos + 1] as f32,
-            rgba[base_pos + 0] as f32,
+            rgb[base_pos + 2] as f32,
+            rgb[base_pos + 1] as f32,
+            rgb[base_pos + 0] as f32,
         )
     };
 
@@ -171,87 +212,13 @@ pub fn bgr_to_yuv420_lossy(rgba: &[u8], width: usize, height: usize) -> Vec<u8> 
 }
 
 // attempts to avoid the loss when converting from BGR to YUV420 by quadrupling the size of the output. this ensures no UV samples are discarded/averaged
-// unfortunately is still lossy
 pub fn bgr_to_yuv420_full_scale(s: &[u8], width: usize, height: usize) -> Vec<u8> {
-    // for y
-    let y_rc_2_idx = |row: usize, col: usize| (row * width * 2) + col;
-
-    let yuv_len = (width * height) * 6;
-    let mut yuv: Vec<u8> = Vec::new();
-    yuv.resize(yuv_len, 0);
-    let u_base = (width * height) * 4;
-    let v_base = u_base + (width * height);
-    let mut uv_idx = 0;
-    for row in 0..height {
-        for col in 0..width {
-            let base_pos = (col + row * width) * 3;
-            let b = s[base_pos];
-            let g = s[base_pos + 1];
-            let r = s[base_pos + 2];
-
-            let rgb = (r as _, g as _, b as _);
-            let (y, u, v) = rgb_to_yuv(rgb, ColorScale::Av);
-
-            // each byte in the u/v plane corresponds to a 4x4 square on the y plane
-            let y_row = row * 2;
-            let y_col = col * 2;
-
-            let idx = y_rc_2_idx(y_row, y_col);
-            yuv[idx] = y;
-            yuv[idx + 1] = y;
-            let idx = y_rc_2_idx(y_row + 1, y_col);
-            yuv[idx] = y;
-            yuv[idx + 1] = y;
-
-            yuv[u_base + uv_idx] = u;
-            yuv[v_base + uv_idx] = v;
-            uv_idx += 1;
-        }
-    }
-
-    yuv
+    bgr_to_yuv420(s, width, height, ColorScale::Av)
 }
 
 // attempts to avoid the loss when converting from BGR to YUV420 by quadrupling the size of the output. this ensures no UV samples are discarded/averaged
-// unfortunately is still lossy
 pub fn bgr_to_yuv420_limited_scale(s: &[u8], width: usize, height: usize) -> Vec<u8> {
-    // for y
-    let y_rc_2_idx = |row: usize, col: usize| (row * width * 2) + col;
-
-    let yuv_len = (width * height) * 6;
-    let mut yuv: Vec<u8> = Vec::new();
-    yuv.resize(yuv_len, 0);
-    let u_base = (width * height) * 4;
-    let v_base = u_base + (width * height);
-    let mut uv_idx = 0;
-    for row in 0..height {
-        for col in 0..width {
-            let base_pos = (col + row * width) * 3;
-            let b = s[base_pos];
-            let g = s[base_pos + 1];
-            let r = s[base_pos + 2];
-
-            let rgb = (r as _, g as _, b as _);
-            let (y, u, v) = rgb_to_yuv(rgb, ColorScale::HdTv);
-
-            // each byte in the u/v plane corresponds to a 4x4 square on the y plane
-            let y_row = row * 2;
-            let y_col = col * 2;
-
-            let idx = y_rc_2_idx(y_row, y_col);
-            yuv[idx] = y;
-            yuv[idx + 1] = y;
-            let idx = y_rc_2_idx(y_row + 1, y_col);
-            yuv[idx] = y;
-            yuv[idx + 1] = y;
-
-            yuv[u_base + uv_idx] = u;
-            yuv[v_base + uv_idx] = v;
-            uv_idx += 1;
-        }
-    }
-
-    yuv
+    bgr_to_yuv420(s, width, height, ColorScale::HdTv)
 }
 
 pub struct YUV420Buf {
