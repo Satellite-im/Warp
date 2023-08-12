@@ -71,6 +71,7 @@ where
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
     Sent,
     Received { event: IdentityEvent },

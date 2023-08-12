@@ -11,7 +11,7 @@ use rust_ipfs::libp2p::{
     core::Endpoint,
     swarm::{
         ConnectionDenied, ConnectionId, FromSwarm, PollParameters, THandler, THandlerInEvent,
-        THandlerOutEvent, ToSwarm,
+        THandlerOutEvent, ToSwarm, ConnectionClosed, derive_prelude::ConnectionEstablished,
     },
     Multiaddr, PeerId,
 };
@@ -32,7 +32,7 @@ use crate::{
     store::{
         document::identity::IdentityDocument,
         identity::{IdentityEvent, RequestOption, ResponseOption},
-        DidExt, PeerIdExt,
+        DidExt, PeerIdExt, PeerType,
     },
 };
 
@@ -44,6 +44,7 @@ use self::protocol::{IdentityProtocol, Message};
 
 pub enum IdentityCommand {
     Push {
+        peer_id: Option<PeerId>,
         response: OneshotSender<Result<(), Error>>,
     },
     Cache {
@@ -54,7 +55,13 @@ pub enum IdentityCommand {
 pub struct Behaviour {
     pending_events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>>,
 
+    connections: HashMap<PeerId, Vec<ConnectionId>>,
+
+    responsive: HashSet<PeerId>,
+
     identity_document: IdentityDocument,
+    profile_picture: Vec<u8>,
+    profile_banner: Vec<u8>,
 
     keypair: Keypair,
 
@@ -71,7 +78,11 @@ pub struct Behaviour {
 }
 
 impl Behaviour {
-    pub fn push(&mut self, did: DID) -> Result<(), Error> {
+    pub fn push<T: Into<PeerType>>(&mut self, p_ty: T) -> Result<(), Error> {
+        let did = match p_ty.into() {
+            PeerType::DID(did) => did,
+            PeerType::PeerId(peer_id) => peer_id.to_did()?,
+        };
         let peer_id = did.to_peer_id()?;
         let mut identity = self.identity_document.clone();
 
@@ -228,8 +239,9 @@ impl NetworkBehaviour for Behaviour {
                     return;
                 }
 
-                if let Err(e) = identity.verify() {
-                    log::error!("Error verifying identity: {e}");
+                if let Err(_e) = identity.verify() {
+                    //TODO: Implement scoring system and any invalid
+                    log::error!("Unable to verify identity for {}", identity.did);
                     return;
                 }
 
@@ -261,16 +273,59 @@ impl NetworkBehaviour for Behaviour {
             }
             IdentityEvent::Receive {
                 option: ResponseOption::Image { cid, data },
-            } => {}
+            } => {
+                let _ = cid;
+                let _ = data;
+            }
         }
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {}
+    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+        match event {
+            FromSwarm::ConnectionEstablished(ConnectionEstablished {
+                peer_id,
+                connection_id,
+                other_established,
+                ..
+            }) => {
+                match self.connections.entry(peer_id) {
+                    Entry::Occupied(mut entry) => {
+                        let connections = entry.get_mut();
+                        if !connections.contains(&connection_id) {
+                            connections.push(connection_id);
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(vec![connection_id]);
+                    }
+                }
+
+                if other_established == 0 && self.responsive.contains(&peer_id) {
+                    self.push(peer_id);
+                }
+            }
+            FromSwarm::ConnectionClosed(ConnectionClosed {
+                peer_id,
+                connection_id,
+                remaining_established,
+                ..
+            }) => {
+                if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
+                    let connections = entry.get_mut();
+                    connections.retain(|conn| conn != &connection_id);
+                    if connections.is_empty() {
+                        entry.remove();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 
     fn poll(
         &mut self,
         cx: &mut Context,
-        params: &mut impl PollParameters,
+        _: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::OutEvent, THandlerInEvent<Self>>> {
         if let Some(event) = self.pending_events.pop_front() {
             return Poll::Ready(event);
@@ -281,8 +336,14 @@ impl NetworkBehaviour for Behaviour {
                 Poll::Ready(Some(IdentityCommand::Cache { response })) => {
                     let _ = response.send(Ok(self.cache.values().cloned().collect::<Vec<_>>()));
                 }
-                Poll::Ready(Some(IdentityCommand::Push { response })) => {
-                    //TODO
+                Poll::Ready(Some(IdentityCommand::Push { peer_id, response })) => {
+                    if let Some(peer_id) = peer_id {
+                        let Ok(did) = peer_id.to_did() else {
+                            continue;
+                        };
+                        let _ = response.send(self.push(did));
+                        continue;
+                    }
                     let _ = response.send(Ok(()));
                 }
                 Poll::Ready(None) => unreachable!("Channels are owned"),
