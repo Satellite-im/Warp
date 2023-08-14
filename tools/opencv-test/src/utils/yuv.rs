@@ -4,6 +4,7 @@ use opencv::{
     core::CV_32FC3,
     prelude::{Mat, MatTrait, MatTraitConst},
 };
+#[cfg(feature = "all")]
 use openh264::formats::YUVSource;
 
 pub const Y_SCALE: [[f32; 3]; 3] = [
@@ -367,6 +368,7 @@ impl av_data::frame::FrameBuffer for YUV420Buf {
     }
 }
 
+#[cfg(feature = "all")]
 impl YUVSource for YUV420Buf {
     fn width(&self) -> i32 {
         self.width as i32

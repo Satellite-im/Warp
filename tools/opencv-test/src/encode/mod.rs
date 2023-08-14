@@ -1,10 +1,16 @@
 mod aom;
+#[cfg(feature = "all")]
 mod h264;
+#[cfg(feature = "all")]
 mod rav1e;
+#[cfg(feature = "all")]
 mod x264;
 pub use crate::encode::aom::encode_aom;
+#[cfg(feature = "all")]
 pub use crate::encode::h264::encode_h264;
+#[cfg(feature = "all")]
 pub use crate::encode::rav1e::encode_rav1e;
+#[cfg(feature = "all")]
 pub use crate::encode::x264::encode_x264;
 use crate::utils::yuv::ColorScale;
 
@@ -32,10 +38,13 @@ pub struct Args {
 
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum CodecTypes {
+    #[cfg(feature = "all")]
     /// OpenH264
     H264,
+    #[cfg(feature = "all")]
     /// x264
     X264,
+    #[cfg(feature = "all")]
     /// av1 (rav1e)
     RAV1E,
     /// av1 (aom)

@@ -1,6 +1,8 @@
 use clap::Parser;
 use opencv::{highgui, prelude::*, videoio};
-use opencv_test::encode::{encode_aom, encode_h264, encode_rav1e, encode_x264, CodecTypes};
+use opencv_test::encode::{encode_aom, CodecTypes};
+#[cfg(feature = "all")]
+use opencv_test::encode::{encode_h264, encode_rav1e, encode_x264};
 
 #[derive(Parser, Debug)]
 enum Command {
@@ -17,8 +19,11 @@ async fn main() -> anyhow::Result<()> {
     let cmd = Command::parse();
     match cmd {
         Command::Encode(args) => match args.codec {
+            #[cfg(feature = "all")]
             CodecTypes::H264 => encode_h264(args)?,
+            #[cfg(feature = "all")]
             CodecTypes::X264 => encode_x264(args)?,
+            #[cfg(feature = "all")]
             CodecTypes::RAV1E => encode_rav1e(args)?,
             CodecTypes::AOM => encode_aom(args)?,
         },
