@@ -2,14 +2,7 @@ use crate::{encode::Mode, utils::yuv::*};
 
 use super::{Args, EncodingType};
 use anyhow::{bail, Result};
-use av_data::{
-    frame::FrameType,
-    // pixel::{
-    //     ChromaLocation, Chromaton, ColorModel, ColorPrimaries, Formaton, MatrixCoefficients,
-    //     TransferCharacteristic, TrichromaticEncodingSystem, YUVRange, YUVSystem,
-    // },
-    timeinfo::TimeInfo,
-};
+use av_data::{frame::FrameType, timeinfo::TimeInfo};
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
@@ -67,9 +60,9 @@ pub fn encode_aom(args: Args) -> Result<()> {
     let color_scale_idx = color_scale.to_idx();
     let mut m = [
         // these scales are for turning RGB to YUV. but the input is in BGR.
-        Y_SCALE[color_scale_idx].clone(),
-        U_SCALE[color_scale_idx].clone(),
-        V_SCALE[color_scale_idx].clone(),
+        Y_SCALE[color_scale_idx],
+        U_SCALE[color_scale_idx],
+        V_SCALE[color_scale_idx],
     ];
     m[0].reverse();
     m[1].reverse();

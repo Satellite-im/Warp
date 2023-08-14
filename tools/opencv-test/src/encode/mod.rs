@@ -44,12 +44,16 @@ pub enum CodecTypes {
 
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum EncodingType {
+    /// convert from BGR24 to YUV420
     Lossy,
+    /// expand BGR24 image before converting to YUV420
     NotLossy,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum Mode {
     Normal,
+    /// attempt to use opencv matrix multiplication
+    /// to speed up the conversion from BGR to YUV
     Faster,
 }
