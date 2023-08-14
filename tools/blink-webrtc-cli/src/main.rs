@@ -20,7 +20,10 @@ use warp::crypto::DID;
 use warp::multipass::identity::Identity;
 
 use warp::tesseract::Tesseract;
-use warp_ipfs::{config::{Config, UpdateEvents}, WarpIpfsBuilder};
+use warp_ipfs::{
+    config::{Config, UpdateEvents},
+    WarpIpfsBuilder,
+};
 
 mod logger;
 

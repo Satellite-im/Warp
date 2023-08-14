@@ -135,7 +135,7 @@ impl WarpIpfsBuilder {
 
         let mp = Box::new(instance.clone()) as Box<_>;
         let rg = Box::new(instance.clone()) as Box<_>;
-        let fs = Box::new(instance.clone()) as Box<_>;
+        let fs = Box::new(instance) as Box<_>;
 
         Ok((mp, rg, fs))
     }
