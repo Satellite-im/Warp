@@ -58,7 +58,8 @@ impl Behaviour {
             command,
         }
     }
-
+    
+    #[tracing::instrument(skip(self))]
     fn send_online_event(&mut self, peer_id: PeerId) {
         // Check to determine if we have any connections to the peer before emitting event
         if !self.connections.contains_key(&peer_id) {
@@ -77,6 +78,8 @@ impl Behaviour {
             }
         };
 
+        tracing::trace!("Emitting online event for {did}");
+
         self.entry_state
             .entry(peer_id)
             .and_modify(|state| *state = PhoneBookState::Online)
@@ -87,6 +90,7 @@ impl Behaviour {
         let _ = event.send(MultiPassEventKind::IdentityOnline { did });
     }
 
+    #[tracing::instrument(skip(self))]
     fn send_offline_event(&mut self, peer_id: PeerId) {
         if let Some(PhoneBookState::Offline) = self.entry_state.get(&peer_id) {
             return;
@@ -99,6 +103,8 @@ impl Behaviour {
                 return;
             }
         };
+
+        tracing::trace!("Emitting offline event for {did}");
 
         self.entry_state
             .entry(peer_id)
@@ -183,6 +189,7 @@ impl NetworkBehaviour for Behaviour {
                 }
 
                 if other_established == 0 && self.entry.contains(&peer_id) {
+                    tracing::info!("{peer_id} has connected");
                     self.send_online_event(peer_id);
                 }
             }
@@ -200,6 +207,7 @@ impl NetworkBehaviour for Behaviour {
                     }
                 }
                 if remaining_established == 0 && self.entry.contains(&peer_id) {
+                    tracing::info!("{peer_id} has disconnected");
                     self.send_offline_event(peer_id);
                 }
             }
