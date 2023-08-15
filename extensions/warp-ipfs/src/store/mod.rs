@@ -1,4 +1,5 @@
 pub mod conversation;
+pub mod files;
 pub mod discovery;
 pub mod document;
 pub mod friends;
