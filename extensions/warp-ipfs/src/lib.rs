@@ -18,7 +18,6 @@ use ipfs::p2p::{
 };
 
 use rust_ipfs as ipfs;
-use warp::crypto::zeroize::Zeroizing;
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -41,6 +40,7 @@ use warp::constellation::{
     Constellation, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
     ConstellationProgressStream,
 };
+use warp::crypto::zeroize::Zeroizing;
 use warp::raygun::{
     AttachmentEventStream, Conversation, EmbedState, Location, Message, MessageEvent,
     MessageEventStream, MessageOptions, MessageStatus, Messages, PinState, RayGun,
@@ -139,11 +139,6 @@ impl WarpIpfs {
         let (constellation_tx, _) = tokio::sync::broadcast::channel(1024);
 
         let mut identity = WarpIpfs {
-            // index: Directory::new("root"),
-            // path: Arc::new(Default::default()),
-            // modified: Utc::now(),
-            // index_cid: Default::default(),
-            // thumbnail_store: ThumbnailGenerator::default(),
             config,
             tesseract,
             ipfs: Default::default(),
