@@ -73,6 +73,9 @@ pub struct BlinkImpl {
     // handles 3 streams: one for webrtc events and two IPFS topics
     // pertains to the active_call, which is stored in STATIC_DATA
     webrtc_handler: Arc<warp::sync::RwLock<Option<JoinHandle<()>>>>,
+
+    // used to keep track of reference counter
+    _ref: Arc<()>,
 }
 
 #[derive(Clone)]
@@ -112,20 +115,23 @@ impl From<CallInfo> for ActiveCall {
 
 impl Drop for BlinkImpl {
     fn drop(&mut self) {
-        let webrtc_handler = std::mem::take(&mut *self.webrtc_handler.write());
-        if let Some(handle) = webrtc_handler {
-            handle.abort();
-        }
-        self.offer_handler.write().abort();
-        let webrtc_controller = self.webrtc_controller.clone();
-        tokio::spawn(async move {
-            if let Err(e) = webrtc_controller.write().await.deinit().await {
-                log::error!("error in webrtc_controller deinit: {e}");
+        // Only drop when there are only a single reference
+        if Arc::strong_count(&self._ref) == 1 {
+            let webrtc_handler = std::mem::take(&mut *self.webrtc_handler.write());
+            if let Some(handle) = webrtc_handler {
+                handle.abort();
             }
-            host_media::audio::automute::stop();
-            host_media::reset().await;
-            log::debug!("deinit finished");
-        });
+            self.offer_handler.write().abort();
+            let webrtc_controller = self.webrtc_controller.clone();
+            tokio::spawn(async move {
+                if let Err(e) = webrtc_controller.write().await.deinit().await {
+                    log::error!("error in webrtc_controller deinit: {e}");
+                }
+                host_media::audio::automute::stop();
+                host_media::reset().await;
+                log::debug!("deinit finished");
+            });
+        }
     }
 }
 
@@ -187,6 +193,7 @@ impl BlinkImpl {
             audio_sink_codec: Arc::new(RwLock::new(sink_codec)),
             offer_handler: Arc::new(warp::sync::RwLock::new(tokio::spawn(async {}))),
             webrtc_handler: Arc::new(warp::sync::RwLock::new(None)),
+            _ref: Arc::default(),
         };
 
         let ipfs = blink_impl.ipfs.clone();
