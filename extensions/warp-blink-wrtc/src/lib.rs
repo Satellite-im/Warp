@@ -759,7 +759,7 @@ impl Blink for BlinkImpl {
     ) -> Result<Uuid, Error> {
         if self.ipfs.read().await.is_none() {
             return Err(Error::OtherWithContext(
-                "received signal before blink is initialized".into(),
+                "no ipfs - received signal before blink is initialized".into(),
             ));
         }
         if let Some(ac) = self.active_call.read().await.as_ref() {
@@ -775,7 +775,7 @@ impl Blink for BlinkImpl {
                 Some(r) => r,
                 None => {
                     return Err(Error::OtherWithContext(
-                        "received signal before blink is initialized".into(),
+                        "no own_id - received signal before blink is initialized".into(),
                     ));
                 }
             };
@@ -793,7 +793,7 @@ impl Blink for BlinkImpl {
             Some(r) => r,
             None => {
                 return Err(Error::OtherWithContext(
-                    "received signal before blink is initialized".into(),
+                    "no own_id - received signal before blink is initialized".into(),
                 ));
             }
         };
@@ -802,7 +802,7 @@ impl Blink for BlinkImpl {
             Some(r) => r,
             None => {
                 return Err(Error::OtherWithContext(
-                    "received signal before blink is initialized".into(),
+                    "no ipfs - received signal before blink is initialized".into(),
                 ));
             }
         };
