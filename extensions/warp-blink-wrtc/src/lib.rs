@@ -395,7 +395,19 @@ async fn handle_call_initiation(
                     .await
                     .insert(call_info.call_id(), call_info);
                 if let Err(e) = ch.send(evt) {
-                    log::error!("failed to send IncomingCall Event: {e}");
+                    log::error!("failed to send IncomingCall event: {e}");
+                }
+            }
+            InitiationSignal::Cancel { call_id } => {
+                if let Some(call) = pending_calls.write().await.remove(&call_id) {
+                    if !call.participants().contains(&sender) {
+                        log::warn!("someone who wasn't a participant tried to cancel the call");
+                        continue;
+                    }
+                    let evt = BlinkEventKind::CallCancelled { call_id };
+                    if let Err(e) = ch.send(evt) {
+                        log::error!("failed to send CallCancelled event: {e}");
+                    }
                 }
             }
         }
@@ -877,6 +889,16 @@ impl Blink for BlinkImpl {
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
+        let lock = self.own_id.read().await;
+        let own_id = match lock.as_ref() {
+            Some(r) => r,
+            None => {
+                return Err(Error::OtherWithContext(
+                    "received signal before blink is initialized".into(),
+                ));
+            }
+        };
+
         let lock = self.ipfs.read().await;
         let ipfs = match lock.as_ref() {
             Some(r) => r,
@@ -887,9 +909,10 @@ impl Blink for BlinkImpl {
             }
         };
         if let Some(ac) = self.active_call.write().await.as_mut() {
-            match ac.call_state.clone() {
+            let mut should_cancel = match ac.call_state.clone() {
                 CallState::Started => {
                     ac.call_state = CallState::Closing;
+                    false
                 }
                 CallState::Closed => {
                     log::info!("call already closed");
@@ -898,6 +921,7 @@ impl Blink for BlinkImpl {
                 CallState::Uninitialized => {
                     log::info!("cancelling call");
                     ac.call_state = CallState::Closed;
+                    true
                 }
                 CallState::Closing => {
                     log::warn!("leave_call when call_state is: {:?}", ac.call_state);
@@ -905,13 +929,40 @@ impl Blink for BlinkImpl {
                 }
             };
 
+            // if everyone else left the call but you
+            if ac
+                .connected_participants
+                .values()
+                .filter(|x| !matches!(x, PeerState::Disconnected | PeerState::Closed))
+                .count()
+                == 0
+            {
+                should_cancel = true;
+            }
+
             let call_id = ac.call.call_id();
-            let topic = ipfs_routes::call_signal_route(&call_id);
-            let signal = CallSignal::Leave { call_id };
-            if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
-                log::error!("failed to send signal: {e}");
+
+            if should_cancel {
+                for peer in ac.call.participants() {
+                    if &peer == own_id {
+                        continue;
+                    }
+
+                    let topic = ipfs_routes::call_initiation_route(&peer);
+                    let signal = InitiationSignal::Cancel { call_id };
+
+                    if let Err(e) = send_signal_ecdh(ipfs, own_id, &peer, signal, topic).await {
+                        log::error!("failed to send signal: {e}");
+                    }
+                }
             } else {
-                log::debug!("sent signal to leave call");
+                let topic = ipfs_routes::call_signal_route(&call_id);
+                let signal = CallSignal::Leave { call_id };
+                if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
+                    log::error!("failed to send signal: {e}");
+                } else {
+                    log::debug!("sent signal to leave call");
+                }
             }
 
             let r = self.webrtc_controller.write().await.deinit().await;

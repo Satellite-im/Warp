@@ -33,6 +33,9 @@ pub enum InitiationSignal {
     /// invite a peer to join a call
     #[display(fmt = "Offer")]
     Offer { call_info: CallInfo },
+    /// cancel the offered call
+    #[display(fmt = "Cancel")]
+    Cancel { call_id: Uuid },
 }
 
 pub mod ipfs_routes {

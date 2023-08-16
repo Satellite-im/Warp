@@ -117,6 +117,9 @@ pub enum BlinkEventKind {
         // the total set of participants who are invited to the call
         participants: Vec<DID>,
     },
+    /// A call is no longer offered
+    #[display(fmt = "CallCancelled")]
+    CallCancelled { call_id: Uuid },
     /// Someone joined the call
     #[display(fmt = "ParticipantJoined")]
     ParticipantJoined { call_id: Uuid, peer_id: DID },
