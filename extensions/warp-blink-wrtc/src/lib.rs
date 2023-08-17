@@ -20,7 +20,13 @@ use host_media::{
     audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
     mp4_logger::Mp4LoggerConfig,
 };
-use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    any::Any,
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
 use anyhow::{bail, Context};
@@ -59,7 +65,7 @@ use crate::{
 #[derive(Clone)]
 pub struct BlinkImpl {
     ipfs: Arc<RwLock<Option<Ipfs>>>,
-    pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
+    pending_calls: Arc<RwLock<HashMap<Uuid, PendingCall>>>,
     active_call: Arc<RwLock<Option<ActiveCall>>>,
     webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
     // the DID generated from Multipass, never cloned. contains the private key
@@ -106,6 +112,20 @@ impl From<CallInfo> for ActiveCall {
             call: value,
             connected_participants: HashMap::new(),
             call_state: CallState::Uninitialized,
+        }
+    }
+}
+
+struct PendingCall {
+    call: CallInfo,
+    connected_participants: HashSet<DID>,
+}
+
+impl From<CallInfo> for PendingCall {
+    fn from(value: CallInfo) -> Self {
+        Self {
+            call: value,
+            connected_participants: HashSet::default(),
         }
     }
 }
@@ -197,8 +217,6 @@ impl BlinkImpl {
 
         tokio::spawn(async move {
             let f = async {
-                //Note: This will block the initialization until identity is created or loaded
-                //TODO: Push into separate task if it initially fails
                 let identity = loop {
                     if let Ok(identity) = account.get_own_identity().await {
                         break identity;
@@ -321,7 +339,6 @@ impl BlinkImpl {
         let ipfs2 = self.ipfs.clone();
         let active_call = self.active_call.clone();
         let webrtc_controller = self.webrtc_controller.clone();
-        let pending_calls = self.pending_calls.clone();
         let audio_sink_codec = self.audio_sink_codec.clone();
         let ui_event_ch = self.ui_event_ch.clone();
         let event_ch2 = ui_event_ch.clone();
@@ -334,7 +351,6 @@ impl BlinkImpl {
                     ipfs: ipfs2,
                     active_call,
                     webrtc_controller,
-                    _pending_calls: pending_calls,
                     audio_sink_codec,
                     ch: ui_event_ch,
                     call_signaling_stream,
@@ -352,7 +368,7 @@ impl BlinkImpl {
 
 async fn handle_call_initiation(
     own_id: Arc<RwLock<Option<DID>>>,
-    pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
+    pending_calls: Arc<RwLock<HashMap<Uuid, PendingCall>>>,
     mut stream: SubscriptionStream,
     ch: Sender<BlinkEventKind>,
 ) {
@@ -383,30 +399,48 @@ async fn handle_call_initiation(
 
         match signal {
             InitiationSignal::Offer { call_info } => {
+                if !call_info.participants().contains(&sender) {
+                    log::warn!("someone offered a call for which they weren't a participant");
+                    continue;
+                }
+                let call_id = call_info.call_id();
                 let evt = BlinkEventKind::IncomingCall {
-                    call_id: call_info.call_id(),
+                    call_id,
                     conversation_id: call_info.conversation_id(),
-                    sender,
+                    sender: sender.clone(),
                     participants: call_info.participants(),
                 };
 
-                pending_calls
-                    .write()
-                    .await
-                    .insert(call_info.call_id(), call_info);
+                let pc = PendingCall {
+                    call: call_info,
+                    connected_participants: HashSet::from_iter(vec![sender].drain(..)),
+                };
+                pending_calls.write().await.insert(call_id, pc);
                 if let Err(e) = ch.send(evt) {
                     log::error!("failed to send IncomingCall event: {e}");
                 }
             }
-            InitiationSignal::Cancel { call_id } => {
-                if let Some(call) = pending_calls.write().await.remove(&call_id) {
-                    if !call.participants().contains(&sender) {
+            InitiationSignal::Join { call_id } => {
+                if let Some(pc) = pending_calls.write().await.get_mut(&call_id) {
+                    if !pc.call.participants().contains(&sender) {
                         log::warn!("someone who wasn't a participant tried to cancel the call");
                         continue;
                     }
-                    let evt = BlinkEventKind::CallCancelled { call_id };
-                    if let Err(e) = ch.send(evt) {
-                        log::error!("failed to send CallCancelled event: {e}");
+                    pc.connected_participants.insert(sender);
+                }
+            }
+            InitiationSignal::Leave { call_id } => {
+                if let Some(pc) = pending_calls.write().await.get_mut(&call_id) {
+                    if !pc.call.participants().contains(&sender) {
+                        log::warn!("someone who wasn't a participant tried to cancel the call");
+                        continue;
+                    }
+                    pc.connected_participants.remove(&sender);
+                    if pc.connected_participants.is_empty() {
+                        let evt = BlinkEventKind::CallCancelled { call_id };
+                        if let Err(e) = ch.send(evt) {
+                            log::error!("failed to send CallCancelled event: {e}");
+                        }
                     }
                 }
             }
@@ -420,7 +454,6 @@ struct WebRtcHandlerParams {
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     active_call: Arc<RwLock<Option<ActiveCall>>>,
     webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
-    _pending_calls: Arc<RwLock<HashMap<Uuid, CallInfo>>>,
     audio_sink_codec: Arc<RwLock<blink::AudioCodec>>,
     ch: Sender<BlinkEventKind>,
     call_signaling_stream: SubscriptionStream,
@@ -434,7 +467,6 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
         ipfs,
         active_call,
         webrtc_controller,
-        _pending_calls,
         audio_sink_codec,
         ch,
         call_signaling_stream,
@@ -835,7 +867,7 @@ impl Blink for BlinkImpl {
         }
 
         let call = match self.pending_calls.write().await.remove(&call_id) {
-            Some(r) => r,
+            Some(r) => r.call,
             None => {
                 return Err(Error::OtherWithContext(
                     "could not answer call: not found".into(),
@@ -874,10 +906,10 @@ impl Blink for BlinkImpl {
                 ));
             }
         };
-        if let Some(call) = self.pending_calls.write().await.remove(&call_id) {
+        if let Some(pc) = self.pending_calls.write().await.remove(&call_id) {
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Leave { call_id };
-            if let Err(e) = send_signal_aes(ipfs, &call.group_key(), signal, topic).await {
+            if let Err(e) = send_signal_aes(ipfs, &pc.call.group_key(), signal, topic).await {
                 log::error!("failed to send signal: {e}");
             }
             Ok(())
@@ -909,10 +941,9 @@ impl Blink for BlinkImpl {
             }
         };
         if let Some(ac) = self.active_call.write().await.as_mut() {
-            let mut should_cancel = match ac.call_state.clone() {
+            match ac.call_state.clone() {
                 CallState::Started => {
                     ac.call_state = CallState::Closing;
-                    false
                 }
                 CallState::Closed => {
                     log::info!("call already closed");
@@ -921,7 +952,6 @@ impl Blink for BlinkImpl {
                 CallState::Uninitialized => {
                     log::info!("cancelling call");
                     ac.call_state = CallState::Closed;
-                    true
                 }
                 CallState::Closing => {
                     log::warn!("leave_call when call_state is: {:?}", ac.call_state);
@@ -929,39 +959,32 @@ impl Blink for BlinkImpl {
                 }
             };
 
-            // if everyone else left the call but you
-            if ac
-                .connected_participants
-                .values()
-                .filter(|x| !matches!(x, PeerState::Disconnected | PeerState::Closed))
-                .count()
-                == 0
-            {
-                should_cancel = true;
-            }
-
             let call_id = ac.call.call_id();
 
-            if should_cancel {
-                for peer in ac.call.participants() {
-                    if &peer == own_id {
-                        continue;
-                    }
-
-                    let topic = ipfs_routes::call_initiation_route(&peer);
-                    let signal = InitiationSignal::Cancel { call_id };
-
-                    if let Err(e) = send_signal_ecdh(ipfs, own_id, &peer, signal, topic).await {
-                        log::error!("failed to send signal: {e}");
-                    }
-                }
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Leave { call_id };
+            if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
             } else {
-                let topic = ipfs_routes::call_signal_route(&call_id);
-                let signal = CallSignal::Leave { call_id };
-                if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
+                log::debug!("sent signal to leave call");
+            }
+
+            // send extra quit signal
+            for participant in ac
+                .call
+                .participants()
+                .iter()
+                .filter(|x| !ac.connected_participants.contains_key(x))
+            {
+                if participant == own_id {
+                    continue;
+                }
+                let topic = ipfs_routes::call_initiation_route(participant);
+                let signal = InitiationSignal::Leave {
+                    call_id: ac.call.call_id(),
+                };
+                if let Err(e) = send_signal_ecdh(ipfs, own_id, participant, signal, topic).await {
                     log::error!("failed to send signal: {e}");
-                } else {
-                    log::debug!("sent signal to leave call");
                 }
             }
 
@@ -1160,7 +1183,13 @@ impl Blink for BlinkImpl {
     // ------ Utility Functions ------
 
     async fn pending_calls(&self) -> Vec<CallInfo> {
-        Vec::from_iter(self.pending_calls.read().await.values().cloned())
+        Vec::from_iter(
+            self.pending_calls
+                .read()
+                .await
+                .values()
+                .map(|x| x.call.clone()),
+        )
     }
     async fn current_call(&self) -> Option<CallInfo> {
         self.active_call
