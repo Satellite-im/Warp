@@ -2,7 +2,6 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
-use warp_ipfs::WarpIpfsBuilder;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -13,6 +12,7 @@ use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Config, Discovery};
+use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
 #[clap(name = "identity-interface")]

@@ -1,0 +1,23 @@
+[package]
+name = "opencv-test"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { version = "4.0", features=["derive"] }
+opencv = { workspace = true }
+tokio = { workspace = true, features=["full"] }
+
+av-data = { workspace = true }
+libaom = { workspace = true }
+
+openh264 = { git="https://github.com/sdwoodbury/openh264-rs", rev="36abe7e7349c890684457fabaf5d90cb4b716cec", optional = true }
+x264 = { version = "0.5", optional = true }
+rav1e = { version = "0.6", default-features = false, optional = true }
+
+[features]
+all = ["dep:openh264", "dep:x264", "dep:rav1e"]
+default = []

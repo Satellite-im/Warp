@@ -135,7 +135,7 @@ impl WarpIpfsBuilder {
 
         let mp = Box::new(instance.clone()) as Box<_>;
         let rg = Box::new(instance.clone()) as Box<_>;
-        let fs = Box::new(instance.clone()) as Box<_>;
+        let fs = Box::new(instance) as Box<_>;
 
         Ok((mp, rg, fs))
     }
@@ -556,7 +556,9 @@ impl WarpIpfs {
         *self.identity_store.write() = Some(identity_store.clone());
         *self.friend_store.write() = Some(friend_store.clone());
 
-        if let Err(_e) = self.import_index().await {
+        *self.ipfs.write() = Some(ipfs.clone());
+
+        if let Err(_e) = self.import_index(&ipfs).await {
             error!("Error loading index: {_e}");
         }
 
@@ -572,30 +574,28 @@ impl WarpIpfs {
             }
         });
 
-        *self.message_store.write() = Some(
-            MessageStore::new(
-                ipfs.clone(),
-                config.path.map(|path| path.join("messages")),
-                identity_store,
-                friend_store,
-                discovery,
-                Some(Box::new(self.clone()) as Box<dyn Constellation>),
-                false,
-                1000,
-                self.raygun_tx.clone(),
-                (
-                    config.store_setting.check_spam,
-                    config.store_setting.disable_sender_event_emit,
-                    config.store_setting.with_friends,
-                    config.store_setting.conversation_load_task,
-                ),
-            )
-            .await?,
-        );
+        *self.message_store.write() = MessageStore::new(
+            ipfs.clone(),
+            config.path.map(|path| path.join("messages")),
+            identity_store,
+            friend_store,
+            discovery,
+            Some(Box::new(self.clone()) as Box<dyn Constellation>),
+            false,
+            1000,
+            self.raygun_tx.clone(),
+            (
+                config.store_setting.check_spam,
+                config.store_setting.disable_sender_event_emit,
+                config.store_setting.with_friends,
+                config.store_setting.conversation_load_task,
+            ),
+        )
+        .await
+        .ok();
 
         info!("Messaging store initialized");
 
-        *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
         Ok(())
@@ -748,8 +748,7 @@ impl WarpIpfs {
         Ok(())
     }
 
-    pub(crate) async fn import_index(&mut self) -> Result<(), Error> {
-        let ipfs = self.ipfs()?;
+    pub(crate) async fn import_index(&mut self, ipfs: &Ipfs) -> Result<(), Error> {
         if let Some(path) = self.config.path.as_ref() {
             let cid_str = tokio::fs::read(path.join(".index_id"))
                 .await
@@ -772,7 +771,7 @@ impl WarpIpfs {
                 data.append(&mut bytes);
             }
 
-            let key = self.ipfs()?.keypair().and_then(get_keypair_did)?;
+            let key = ipfs.keypair().and_then(get_keypair_did)?;
 
             let index_bytes = ecdh_decrypt(&key, None, data)?;
 
