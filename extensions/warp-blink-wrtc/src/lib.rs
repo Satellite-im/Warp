@@ -121,15 +121,6 @@ struct PendingCall {
     connected_participants: HashSet<DID>,
 }
 
-impl From<CallInfo> for PendingCall {
-    fn from(value: CallInfo) -> Self {
-        Self {
-            call: value,
-            connected_participants: HashSet::default(),
-        }
-    }
-}
-
 impl Drop for BlinkImpl {
     fn drop(&mut self) {
         let webrtc_handler = std::mem::take(&mut *self.webrtc_handler.write());
