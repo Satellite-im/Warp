@@ -413,6 +413,9 @@ impl NetworkBehaviour for Behaviour {
             IdentityEvent::Receive {
                 option: ResponseOption::Image { cid, data },
             } => {
+                //TODO: Pass in a channel to identity store to store within ipfs blockstore
+                //Note: This might change in the future where the repo itself is passed
+                //      in this behaviour, bypassing the need to call ipfs itself
                 let _ = cid;
                 let _ = data;
             }
