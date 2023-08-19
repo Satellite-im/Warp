@@ -547,10 +547,6 @@ impl WarpIpfs {
         let filestore =
             FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone()).await?;
 
-        if let Err(_e) = self.import_index(&ipfs).await {
-            error!("Error loading index: {_e}");
-        }
-
         *self.file_store.write() = Some(filestore);
 
         *self.message_store.write() = MessageStore::new(
