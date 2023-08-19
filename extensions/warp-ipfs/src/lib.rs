@@ -9,15 +9,14 @@ use chrono::{DateTime, Utc};
 use config::Config;
 use either::Either;
 use futures::channel::mpsc::{channel, unbounded};
-use futures::stream::{self, BoxStream};
-use futures::{pin_mut, AsyncReadExt, StreamExt};
+use futures::stream::BoxStream;
+use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
 use ipfs::p2p::{
     ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
 };
-use ipfs::unixfs::{AddOpt, AddOption, UnixfsStatus};
-use libipld::Cid;
+
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::collections::HashSet;
@@ -25,14 +24,12 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use store::files::FileStore;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
-use store::{ecdh_decrypt, ecdh_encrypt};
-use thumbnail::ThumbnailGenerator;
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tokio_util::io::ReaderStream;
 use tracing::debug;
 use tracing::log::{self, error, info, warn};
 use utils::ExtensionType;
@@ -40,10 +37,9 @@ use uuid::Uuid;
 use warp::constellation::directory::Directory;
 use warp::constellation::file::FileType;
 use warp::constellation::{
-    Constellation, ConstellationDataType, ConstellationEvent, ConstellationEventKind,
-    ConstellationEventStream, ConstellationProgressStream, Progression,
+    Constellation, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
+    ConstellationProgressStream,
 };
-use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::raygun::{
     AttachmentEventStream, Conversation, EmbedState, Location, Message, MessageEvent,
@@ -58,10 +54,9 @@ use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
 use ipfs::{
-    Ipfs, IpfsOptions, IpfsPath, Keypair, Multiaddr, PeerId, Protocol, StoragePath,
-    UninitializedIpfs,
+    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
 };
-use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
+use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
 use warp::multipass::{
@@ -74,18 +69,14 @@ use crate::store::discovery::Discovery;
 
 #[derive(Clone)]
 pub struct WarpIpfs {
-    index: Directory,
-    path: Arc<RwLock<PathBuf>>,
-    modified: DateTime<Utc>,
-    index_cid: Arc<RwLock<Option<Cid>>>,
-    thumbnail_store: ThumbnailGenerator,
-
     config: Config,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore>>>,
     identity_store: Arc<RwLock<Option<IdentityStore>>>,
     message_store: Arc<RwLock<Option<MessageStore>>>,
+    file_store: Arc<RwLock<Option<FileStore>>>,
+
     initialized: Arc<AtomicBool>,
 
     multipass_tx: broadcast::Sender<MultiPassEventKind>,
@@ -148,18 +139,13 @@ impl WarpIpfs {
         let (constellation_tx, _) = tokio::sync::broadcast::channel(1024);
 
         let mut identity = WarpIpfs {
-            index: Directory::new("root"),
-            path: Arc::new(Default::default()),
-            modified: Utc::now(),
-            index_cid: Default::default(),
-            thumbnail_store: ThumbnailGenerator::default(),
-
             config,
             tesseract,
             ipfs: Default::default(),
             friend_store: Default::default(),
             identity_store: Default::default(),
             message_store: Default::default(),
+            file_store: Default::default(),
             initialized: Default::default(),
 
             multipass_tx,
@@ -558,21 +544,10 @@ impl WarpIpfs {
 
         *self.ipfs.write() = Some(ipfs.clone());
 
-        if let Err(_e) = self.import_index(&ipfs).await {
-            error!("Error loading index: {_e}");
-        }
+        let filestore =
+            FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone()).await?;
 
-        tokio::spawn({
-            let fs = self.clone();
-            async move {
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                    if let Err(_e) = fs.export_index().await {
-                        error!("Error exporting index: {_e}");
-                    }
-                }
-            }
-        });
+        *self.file_store.write() = Some(filestore);
 
         *self.message_store.write() = MessageStore::new(
             ipfs.clone(),
@@ -624,6 +599,13 @@ impl WarpIpfs {
             .ok_or(Error::RayGunExtensionUnavailable)
     }
 
+    pub(crate) fn file_store(&self) -> std::result::Result<FileStore, Error> {
+        self.file_store
+            .read()
+            .clone()
+            .ok_or(Error::ConstellationExtensionUnavailable)
+    }
+
     pub(crate) fn identity_store_sync(&self) -> Result<IdentityStore, Error> {
         if !self.tesseract.is_unlock() {
             return Err(Error::TesseractLocked);
@@ -657,130 +639,6 @@ impl WarpIpfs {
     pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
         let friends = self.friend_store().await?;
         friends.is_blocked_by(pubkey).await
-    }
-
-    pub(crate) async fn export_index(&self) -> Result<(), Error> {
-        let ipfs = self.ipfs()?;
-        let index = self.export(ConstellationDataType::Json)?;
-
-        let key = self.ipfs()?.keypair().and_then(get_keypair_did)?;
-        let data = ecdh_encrypt(&key, None, index.as_bytes())?;
-
-        let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
-
-        let mut stream = ipfs
-            .unixfs()
-            .add(
-                AddOpt::Stream(data_stream),
-                Some(AddOption {
-                    pin: true,
-                    ..Default::default()
-                }),
-            )
-            .await?;
-
-        let mut ipfs_path = None;
-
-        while let Some(status) = stream.next().await {
-            if let UnixfsStatus::CompletedStatus { path, .. } = status {
-                ipfs_path = Some(path);
-            }
-        }
-
-        let path = ipfs_path.ok_or(Error::OtherWithContext("unable to get cid".into()))?;
-
-        let cid = path
-            .root()
-            .cid()
-            .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
-
-        let last_cid = { *self.index_cid.read() };
-
-        *self.index_cid.write() = Some(*cid);
-
-        if let Some(last_cid) = last_cid {
-            if *cid != last_cid {
-                let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
-                    ipfs.list_pins(None)
-                        .await
-                        .filter_map(|r| async move {
-                            match r {
-                                Ok(v) => Some(v.0),
-                                Err(_) => None,
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .await,
-                );
-
-                if ipfs.is_pinned(&last_cid).await? {
-                    ipfs.remove_pin(&last_cid, true).await?;
-                }
-
-                let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
-                    ipfs.list_pins(None)
-                        .await
-                        .filter_map(|r| async move {
-                            match r {
-                                Ok(v) => Some(v.0),
-                                Err(_) => None,
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .await,
-                );
-
-                for s_cid in new_pinned_blocks.iter() {
-                    pinned_blocks.remove(s_cid);
-                }
-
-                for cid in pinned_blocks {
-                    ipfs.remove_block(cid).await?;
-                }
-            }
-        }
-
-        if let Some(path) = self.config.path.as_ref() {
-            if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
-                error!("Error writing index: {_e}");
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) async fn import_index(&mut self, ipfs: &Ipfs) -> Result<(), Error> {
-        if let Some(path) = self.config.path.as_ref() {
-            let cid_str = tokio::fs::read(path.join(".index_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())?;
-
-            let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
-            *self.index_cid.write() = Some(cid);
-
-            let mut index_stream = ipfs
-                .unixfs()
-                .cat(IpfsPath::from(cid), None, &[], true)
-                .await
-                .map_err(anyhow::Error::from)?
-                .boxed();
-
-            let mut data = vec![];
-
-            while let Some(result) = index_stream.next().await {
-                let mut bytes = result.map_err(anyhow::Error::from)?;
-                data.append(&mut bytes);
-            }
-
-            let key = ipfs.keypair().and_then(get_keypair_did)?;
-
-            let index_bytes = ecdh_decrypt(&key, None, data)?;
-
-            self.import(
-                ConstellationDataType::Json,
-                String::from_utf8_lossy(&index_bytes).to_string(),
-            )?;
-        }
-        Ok(())
     }
 }
 
@@ -1523,348 +1381,37 @@ impl RayGunEvents for WarpIpfs {
 #[async_trait::async_trait]
 impl Constellation for WarpIpfs {
     fn modified(&self) -> DateTime<Utc> {
-        self.modified
+        self.file_store()
+            .map(|store| store.modified())
+            .unwrap_or(Utc::now())
     }
 
     fn root_directory(&self) -> Directory {
-        self.index.clone()
+        self.file_store()
+            .map(|store| store.root_directory())
+            .unwrap_or_default()
     }
 
     fn max_size(&self) -> usize {
-        self.config.max_storage_size.unwrap_or(1024 * 1024 * 1024)
+        self.file_store()
+            .map(|store| store.max_size())
+            .unwrap_or_default()
     }
 
     async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
-        let name = name.trim();
-        if name.len() < 2 || name.len() > 256 {
-            return Err(Error::InvalidLength {
-                context: "name".into(),
-                current: name.len(),
-                minimum: Some(2),
-                maximum: Some(256),
-            });
-        }
-
-        let ipfs = self.ipfs()?;
-
-        let path = PathBuf::from(path);
-        if !path.is_file() {
-            return Err(Error::FileNotFound);
-        }
-
-        let file_size = tokio::fs::metadata(&path).await?.len();
-
-        if self.current_size() + (file_size as usize) >= self.max_size() {
-            return Err(Error::InvalidLength {
-                context: path
-                    .file_name()
-                    .and_then(OsStr::to_str)
-                    .map(str::to_string)
-                    .unwrap_or("path".to_string()),
-                current: self.current_size() + file_size as usize,
-                minimum: None,
-                maximum: Some(self.max_size()),
-            });
-        }
-
-        let current_directory = self.current_directory()?;
-
-        if current_directory.get_item_by_path(name).is_ok() {
-            return Err(Error::FileExist);
-        }
-
-        let ((width, height), exact) = (
-            self.config.thumbnail_size,
-            self.config.thumbnail_exact_format,
-        );
-
-        let ticket = self
-            .thumbnail_store
-            .insert(&path, width, height, exact)
-            .await?;
-
-        let background = self.config.thumbnail_task;
-
-        let name = name.to_string();
-        let fs = self.clone();
-        let progress_stream = async_stream::stream! {
-
-            let mut last_written = 0;
-
-            let mut total_written = 0;
-            let mut returned_path = None;
-
-            let mut stream = match ipfs.unixfs().add(path.clone(), Some(AddOption { pin: true, ..Default::default() })).await {
-                Ok(ste) => ste,
-                Err(e) => {
-                    yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: Some(e.to_string()),
-                    };
-                    return;
-                }
-            };
-
-            while let Some(status) = stream.next().await {
-                let name = name.clone();
-                match status {
-                    UnixfsStatus::CompletedStatus { path, written, total_size } => {
-                        returned_path = Some(path);
-                        total_written = written;
-                        last_written = written;
-                        yield Progression::CurrentProgress {
-                            name,
-                            current: written,
-                            total: total_size,
-                        };
-                    }
-                    UnixfsStatus::FailedStatus {
-                        written, error, ..
-                    } => {
-                        last_written = written;
-                        yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: error.map(|e| e.to_string()),
-                        };
-                        return;
-                    }
-                    UnixfsStatus::ProgressStatus { written, total_size } => {
-                        last_written = written;
-                        yield Progression::CurrentProgress {
-                            name,
-                            current: written,
-                            total: total_size,
-                        };
-                    }
-                }
-            }
-            let ipfs_path = match
-                returned_path {
-                    Some(path) => path,
-                    None => {
-                        yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: Some("IpfsPath not set".into()),
-                        };
-                        return;
-                    }
-                };
-
-            let file = warp::constellation::file::File::new(&name);
-            file.set_size(total_written);
-            file.set_reference(&format!("{ipfs_path}"));
-            file.set_file_type(to_file_type(&name));
-
-            if let Ok(Err(_e)) = tokio::task::spawn_blocking({
-                let f = file.clone();
-                move || f.hash_mut().hash_from_file(&path)
-            }).await {}
-
-            if let Err(e) = current_directory.add_item(file.clone()) {
-                yield Progression::ProgressFailed {
-                    name,
-                    last_size: Some(last_written),
-                    error: Some(e.to_string()),
-                };
-                return;
-            }
-
-            let task = {
-                let fs = fs.clone();
-                let store = fs.thumbnail_store.clone();
-                let file = file.clone();
-                async move {
-                    match store.get(ticket).await {
-                        Ok((extension_type, thumbnail)) => {
-                            file.set_thumbnail(&thumbnail);
-                            file.set_thumbnail_format(extension_type.into());
-                            //We export again so the thumbnail can be apart of the index
-                            if background {
-                                if let Err(_e) = fs.export_index().await {}
-                            }
-                        }
-                        Err(_e) => {}
-                    }
-                }
-            };
-
-            if !background {
-                task.await;
-                if let Err(_e) = fs.export_index().await {}
-            } else {
-                tokio::spawn(task);
-            }
-
-            yield Progression::ProgressComplete {
-                name: name.to_string(),
-                total: Some(total_written),
-            };
-
-            let _ = fs.constellation_tx.send(ConstellationEventKind::Uploaded {
-                filename: name.to_string(),
-                size: Some(total_written)
-            }).ok();
-        };
-
-        Ok(ConstellationProgressStream(progress_stream.boxed()))
+        self.file_store()?.put(name, path).await
     }
 
     async fn get(&self, name: &str, path: &str) -> Result<(), Error> {
-        let ipfs = self.ipfs()?;
-
-        let item = self.current_directory()?.get_item_by_path(name)?;
-        let file = item.get_file()?;
-        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-
-        let mut stream = ipfs
-            .get_unixfs(reference.parse::<IpfsPath>()?, path)
-            .await?;
-
-        while let Some(status) = stream.next().await {
-            if let UnixfsStatus::FailedStatus { error, .. } = status {
-                return Err(error.map(Error::Any).unwrap_or(Error::Other));
-            }
-        }
-
-        //TODO: Validate file against the hashed reference
-        if let Err(_e) = self
-            .constellation_tx
-            .send(ConstellationEventKind::Downloaded {
-                filename: file.name(),
-                size: Some(file.size()),
-                location: Some(PathBuf::from(path)),
-            })
-        {}
-        Ok(())
+        self.file_store()?.get(name, path).await
     }
 
     async fn put_buffer(&mut self, name: &str, buffer: &[u8]) -> Result<(), Error> {
-        let name = name.trim();
-        if name.len() < 2 || name.len() > 256 {
-            return Err(Error::InvalidLength {
-                context: "name".into(),
-                current: name.len(),
-                minimum: Some(2),
-                maximum: Some(256),
-            });
-        }
-
-        if self.current_size() + buffer.len() >= self.max_size() {
-            return Err(Error::InvalidLength {
-                context: "buffer".into(),
-                current: self.current_size() + buffer.len(),
-                minimum: None,
-                maximum: Some(self.max_size()),
-            });
-        }
-
-        let ipfs = self.ipfs()?;
-
-        if self.current_directory()?.get_item_by_path(name).is_ok() {
-            return Err(Error::FileExist);
-        }
-
-        let ((width, height), exact) = (
-            self.config.thumbnail_size,
-            self.config.thumbnail_exact_format,
-        );
-
-        let ticket = self
-            .thumbnail_store
-            .insert_buffer(&name, buffer, width, height, exact)
-            .await;
-
-        let reader = ReaderStream::new(std::io::Cursor::new(buffer))
-            .map(|result| result.map(|x| x.into()))
-            .boxed();
-
-        let mut total_written = 0;
-        let mut returned_path = None;
-
-        let mut stream = ipfs
-            .unixfs()
-            .add(
-                reader,
-                Some(AddOption {
-                    pin: true,
-                    ..Default::default()
-                }),
-            )
-            .await?;
-
-        while let Some(status) = stream.next().await {
-            match status {
-                UnixfsStatus::CompletedStatus { path, written, .. } => {
-                    returned_path = Some(path);
-                    total_written = written;
-                }
-                UnixfsStatus::FailedStatus { error, .. } => {
-                    return Err(error.map(Error::Any).unwrap_or(Error::Other))
-                }
-                _ => {}
-            }
-        }
-
-        let ipfs_path = returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
-        let file = warp::constellation::file::File::new(name);
-        file.set_size(total_written);
-        file.set_reference(&format!("{ipfs_path}"));
-        file.set_file_type(to_file_type(name));
-        file.hash_mut().hash_from_slice(buffer)?;
-
-        match self.thumbnail_store.get(ticket).await {
-            Ok((extension_type, thumbnail)) => {
-                file.set_thumbnail(&thumbnail);
-                file.set_thumbnail_format(extension_type.into())
-            }
-            Err(_e) => {}
-        }
-
-        self.current_directory()?.add_item(file)?;
-
-        if let Err(_e) = self.export_index().await {}
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Uploaded {
-                filename: name.to_string(),
-                size: Some(total_written),
-            })
-            .ok();
-        Ok(())
+        self.file_store()?.put_buffer(name, buffer).await
     }
 
     async fn get_buffer(&self, name: &str) -> Result<Vec<u8>, Error> {
-        let ipfs = self.ipfs()?;
-
-        let item = self.current_directory()?.get_item_by_path(name)?;
-        let file = item.get_file()?;
-        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs
-            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-            .await
-            .map_err(anyhow::Error::from)?;
-        pin_mut!(stream);
-
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let mut bytes = data.map_err(anyhow::Error::from)?;
-            buffer.append(&mut bytes);
-        }
-
-        //TODO: Validate file against the hashed reference
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Downloaded {
-                filename: file.name(),
-                size: Some(file.size()),
-                location: None,
-            })
-            .ok();
-        Ok(buffer)
+        self.file_store()?.get_buffer(name).await
     }
 
     /// Used to upload file to the filesystem with data from a stream
@@ -1874,139 +1421,9 @@ impl Constellation for WarpIpfs {
         total_size: Option<usize>,
         stream: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream, Error> {
-        let name = name.trim();
-        if name.len() < 2 || name.len() > 256 {
-            return Err(Error::InvalidLength {
-                context: "name".into(),
-                current: name.len(),
-                minimum: Some(2),
-                maximum: Some(256),
-            });
-        }
-
-        let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
-
-        let current_directory = self.current_directory()?;
-
-        if current_directory.get_item_by_path(name).is_ok() {
-            return Err(Error::FileExist);
-        }
-
-        let fs = self.clone();
-        let name = name.to_string();
-        let stream = stream.map(Ok::<_, std::io::Error>).boxed();
-        let progress_stream = async_stream::stream! {
-
-            let mut last_written = 0;
-
-            let mut total_written = 0;
-            let mut returned_path = None;
-
-            let mut stream = match ipfs.unixfs().add(stream, Some(AddOption { pin: true, ..Default::default() })).await {
-                Ok(ste) => ste,
-                Err(e) => {
-                    yield Progression::ProgressFailed {
-                        name,
-                        last_size: Some(last_written),
-                        error: Some(e.to_string()),
-                    };
-                    return;
-                }
-            };
-
-            while let Some(status) = stream.next().await {
-                let n = name.clone();
-                match status {
-                    UnixfsStatus::CompletedStatus { path, written, .. } => {
-                        returned_path = Some(path);
-                        total_written = written;
-                        last_written = written;
-                        yield Progression::CurrentProgress {
-                            name: n,
-                            current: written,
-                            total: total_size,
-                        };
-                    }
-                    UnixfsStatus::FailedStatus {
-                        written, error, ..
-                    } => {
-                        last_written = written;
-                        yield Progression::ProgressFailed {
-                            name: n,
-                            last_size: Some(last_written),
-                            error: error.map(|e| e.to_string()),
-                        };
-                        return;
-                    }
-                    UnixfsStatus::ProgressStatus { written, .. } => {
-                        last_written = written;
-                        yield Progression::CurrentProgress {
-                            name: n,
-                            current: written,
-                            total: total_size,
-                        };
-                    }
-                }
-
-                if fs.current_size() + last_written >= fs.max_size() {
-                    yield Progression::ProgressFailed {
-                        name,
-                        last_size: Some(last_written),
-                        error: Some(Error::InvalidLength {
-                            context: "buffer".into(),
-                            current: fs.current_size() + last_written,
-                            minimum: None,
-                            maximum: Some(fs.max_size()),
-                        }).map(|e| e.to_string())
-                    };
-                    return;
-                }
-
-            }
-            let ipfs_path = match
-                returned_path {
-                    Some(path) => path,
-                    None => {
-                        yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: Some("IpfsPath not set".into()),
-                        };
-                        return;
-                    }
-                };
-
-            let file = warp::constellation::file::File::new(&name);
-            file.set_size(total_written);
-            file.set_reference(&format!("{ipfs_path}"));
-            file.set_file_type(to_file_type(&name));
-            // file.hash_mut().hash_from_slice(buffer)?;
-            if let Err(e) = current_directory.add_item(file) {
-                yield Progression::ProgressFailed {
-                    name,
-                    last_size: Some(last_written),
-                    error: Some(e.to_string()),
-                };
-                return;
-            }
-
-            if let Err(_e) = fs.export_index().await {}
-
-            yield Progression::ProgressComplete {
-                name: name.to_string(),
-                total: Some(total_written),
-            };
-
-            let _ = fs.constellation_tx.send(ConstellationEventKind::Uploaded {
-                filename: name.to_string(),
-                size: Some(total_written)
-            }).ok();
-        };
-
-        Ok(ConstellationProgressStream(progress_stream.boxed()))
+        self.file_store()?
+            .put_stream(name, total_size, stream)
+            .await
     }
 
     /// Used to download data from the filesystem using a stream
@@ -2014,203 +1431,36 @@ impl Constellation for WarpIpfs {
         &self,
         name: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
-        let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
-
-        let item = self.current_directory()?.get_item_by_path(name)?;
-        let file = item.get_file()?;
-        let size = file.size();
-        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-
-        let tx = self.constellation_tx.clone();
-
-        let stream = async_stream::stream! {
-            let cat_stream = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-                .await
-                .map_err(anyhow::Error::from)?;
-
-            for await data in cat_stream {
-                match data {
-                    Ok(data) => yield Ok(data),
-                    Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
-                }
-            }
-
-            let _ = tx.send(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).ok();
-        };
-
-        //TODO: Validate file against the hashed reference
-        Ok(stream.boxed())
+        self.file_store()?.get_stream(name).await
     }
 
     /// Used to remove data from the filesystem
-    async fn remove(&mut self, name: &str, _: bool) -> Result<(), Error> {
-        let ipfs = self.ipfs()?;
-        //TODO: Recursively delete directory but for now only support deleting a file
-        let directory = self.current_directory()?;
-
-        let item = directory.get_item_by_path(name)?;
-
-        let file = item.get_file()?;
-        let reference = file
-            .reference()
-            .ok_or(Error::ObjectNotFound)?
-            .parse::<IpfsPath>()?; //Reference not found
-
-        let cid = reference
-            .root()
-            .cid()
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
-
-        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid, true).await?;
-        }
-
-        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
-        for s_cid in new_pinned_blocks.iter() {
-            pinned_blocks.remove(s_cid);
-        }
-
-        for cid in pinned_blocks {
-            ipfs.remove_block(cid).await?;
-        }
-
-        directory.remove_item(&item.name())?;
-        if let Err(_e) = self.export_index().await {}
-
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Deleted {
-                item_name: name.to_string(),
-            })
-            .ok();
-
-        Ok(())
+    async fn remove(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
+        self.file_store()?.remove(name, recursive).await
     }
 
     async fn rename(&mut self, current: &str, new: &str) -> Result<(), Error> {
-        //Used as guard in the event its not available but will be used in the future
-        let _ipfs = self.ipfs()?;
-
-        //Note: This will only support renaming the file or directory in the index
-        let directory = self.current_directory()?;
-
-        if directory.get_item_by_path(new).is_ok() {
-            return Err(Error::DuplicateName);
-        }
-
-        directory.rename_item(current, new)?;
-        if let Err(_e) = self.export_index().await {}
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Renamed {
-                old_item_name: current.to_string(),
-                new_item_name: new.to_string(),
-            })
-            .ok();
-        Ok(())
+        self.file_store()?.rename(current, new).await
     }
 
     async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
-        //Used as guard in the event its not available but will be used in the future
-        let _ipfs = self.ipfs()?;
-
-        let directory = self.current_directory()?;
-
-        //Prevent creating recursive/nested directorieis if `recursive` isnt true
-        if name.contains('/') && !recursive {
-            return Err(Error::InvalidDirectory);
-        }
-
-        if directory.has_item(name) || directory.get_item_by_path(name).is_ok() {
-            return Err(Error::DirectoryExist);
-        }
-
-        self.current_directory()?
-            .add_directory(Directory::new(name))?;
-        if let Err(_e) = self.export_index().await {}
-        Ok(())
+        self.file_store()?.create_directory(name, recursive).await
     }
 
     async fn sync_ref(&mut self, path: &str) -> Result<(), Error> {
-        let ipfs = self.ipfs()?;
-
-        let directory = self.current_directory()?;
-        let file = directory
-            .get_item_by_path(path)
-            .and_then(|item| item.get_file())?;
-
-        let reference = file.reference().ok_or(Error::FileNotFound)?;
-
-        let stream = ipfs
-            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-            .await
-            .map_err(anyhow::Error::from)?;
-
-        pin_mut!(stream);
-
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let bytes = data.map_err(anyhow::Error::from)?;
-            buffer.extend(bytes);
-        }
-
-        let ((width, height), exact) = (
-            self.config.thumbnail_size,
-            self.config.thumbnail_exact_format,
-        );
-
-        // Generate the thumbnail for the file
-        let id = self
-            .thumbnail_store
-            .insert_buffer(file.name(), &buffer, width, height, exact)
-            .await;
-
-        if let Ok((extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
-            file.set_thumbnail(&thumbnail);
-            file.set_thumbnail_format(extension_type.into())
-        }
-
-        let _ = self.export_index().await;
-
-        Ok(())
+        self.file_store()?.sync_ref(path).await
     }
 
     fn set_path(&mut self, path: PathBuf) {
-        *self.path.write() = path;
+        if let Ok(mut store) = self.file_store() {
+            store.set_path(path)
+        }
     }
 
     fn get_path(&self) -> PathBuf {
-        PathBuf::from(self.path.read().to_string_lossy().replace('\\', "/"))
+        self.file_store()
+            .map(|store| store.get_path())
+            .unwrap_or_default()
     }
 }
 
@@ -2242,17 +1492,6 @@ pub(crate) fn to_file_type(name: &str) -> FileType {
         .unwrap_or(ExtensionType::Other);
 
     extension.into()
-}
-
-fn get_keypair_did(keypair: &rust_ipfs::Keypair) -> anyhow::Result<DID> {
-    let kp = keypair
-        .clone()
-        .try_into_ed25519()
-        .map_err(anyhow::Error::from)?
-        .to_bytes();
-    let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
-    Ok(did.into())
 }
 
 // pub mod ffi {
