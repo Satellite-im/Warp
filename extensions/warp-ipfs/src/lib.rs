@@ -542,35 +542,39 @@ impl WarpIpfs {
         *self.identity_store.write() = Some(identity_store.clone());
         *self.friend_store.write() = Some(friend_store.clone());
 
+        *self.ipfs.write() = Some(ipfs.clone());
+
         let filestore =
             FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone()).await?;
 
+        if let Err(_e) = self.import_index(&ipfs).await {
+            error!("Error loading index: {_e}");
+        }
+
         *self.file_store.write() = Some(filestore);
 
-        *self.message_store.write() = Some(
-            MessageStore::new(
-                ipfs.clone(),
-                config.path.map(|path| path.join("messages")),
-                identity_store,
-                friend_store,
-                discovery,
-                Some(Box::new(self.clone()) as Box<dyn Constellation>),
-                false,
-                1000,
-                self.raygun_tx.clone(),
-                (
-                    config.store_setting.check_spam,
-                    config.store_setting.disable_sender_event_emit,
-                    config.store_setting.with_friends,
-                    config.store_setting.conversation_load_task,
-                ),
-            )
-            .await?,
-        );
+        *self.message_store.write() = MessageStore::new(
+            ipfs.clone(),
+            config.path.map(|path| path.join("messages")),
+            identity_store,
+            friend_store,
+            discovery,
+            Some(Box::new(self.clone()) as Box<dyn Constellation>),
+            false,
+            1000,
+            self.raygun_tx.clone(),
+            (
+                config.store_setting.check_spam,
+                config.store_setting.disable_sender_event_emit,
+                config.store_setting.with_friends,
+                config.store_setting.conversation_load_task,
+            ),
+        )
+        .await
+        .ok();
 
         info!("Messaging store initialized");
 
-        *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
         Ok(())
