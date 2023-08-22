@@ -1003,7 +1003,10 @@ impl MultiPass for WarpIpfs {
 
 #[async_trait::async_trait]
 impl MultiPassImportExport for WarpIpfs {
-    async fn import_identity(&mut self, option: IdentityImportOption) -> Result<Identity, Error> {
+    async fn import_identity<'a>(
+        &mut self,
+        option: IdentityImportOption<'a>,
+    ) -> Result<Identity, Error> {
         if self.initialized.load(Ordering::SeqCst) {
             return Err(Error::IdentityExist);
         }
@@ -1045,13 +1048,46 @@ impl MultiPassImportExport for WarpIpfs {
                 return store.import_identity(exported_document).await;
             }
             IdentityImportOption::Locate {
+                location: ImportLocation::Memory { buffer },
+                passphrase,
+            } => {
+                let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
+
+                let bytes = std::mem::take(buffer);
+
+                let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
+                let exported_document =
+                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+
+                exported_document.verify()?;
+
+                let bytes = Zeroizing::new(keypair.private_key_bytes());
+
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut self.tesseract,
+                    &passphrase,
+                    None,
+                    self.config.save_phrase,
+                )?;
+
+                self.init_ipfs(
+                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                        .map_err(|_| Error::PrivateKeyInvalid)?,
+                )
+                .await?;
+
+                let mut store = self.identity_store(false).await?;
+
+                return store.import_identity(exported_document).await;
+            }
+            IdentityImportOption::Locate {
                 location: ImportLocation::Remote,
                 ..
             } => return Err(Error::Unimplemented),
         }
     }
 
-    async fn export_identity(&mut self, location: ImportLocation) -> Result<(), Error> {
+    async fn export_identity<'a>(&mut self, location: ImportLocation<'a>) -> Result<(), Error> {
         let store = self.identity_store(true).await?;
         let kp = store.get_keypair_did()?;
         let ipfs = self.ipfs()?;
@@ -1059,11 +1095,16 @@ impl MultiPassImportExport for WarpIpfs {
 
         let exported = document.export(&ipfs).await?;
 
+        let bytes = serde_json::to_vec(&exported)?;
+        let encrypted_bundle = ecdh_encrypt(&kp, None, bytes)?;
+
         match location {
             ImportLocation::Local { path } => {
-                let bytes = serde_json::to_vec(&exported)?;
-                let encrypted_bundle = ecdh_encrypt(&kp, None, bytes)?;
                 tokio::fs::write(path, encrypted_bundle).await?;
+                Ok(())
+            }
+            ImportLocation::Memory { buffer } => {
+                *buffer = encrypted_bundle;
                 Ok(())
             }
             ImportLocation::Remote => return Err(Error::Unimplemented),

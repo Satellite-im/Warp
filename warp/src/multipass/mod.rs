@@ -40,20 +40,23 @@ pub enum MultiPassEventKind {
     UnblockedBy { did: DID },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ImportLocation {
+#[derive(Debug, PartialEq, Eq)]
+pub enum ImportLocation<'a> {
     /// Remote location where the identity is stored
     Remote,
 
     /// Local path where the identity is stored
     Local { path: PathBuf },
+
+    /// Buffer memory of where identity is stored
+    Memory { buffer: &'a mut Vec<u8> }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IdentityImportOption {
+#[derive(Debug, PartialEq, Eq)]
+pub enum IdentityImportOption<'a> {
     Locate {
         /// Location of the identity
-        location: ImportLocation,
+        location: ImportLocation<'a>,
 
         /// Passphrase of the identity
         passphrase: String,
@@ -114,12 +117,12 @@ dyn_clone::clone_trait_object!(MultiPass);
 #[async_trait::async_trait]
 pub trait MultiPassImportExport: Sync + Send {
     /// Import identity from a specific location
-    async fn import_identity(&mut self, _: IdentityImportOption) -> Result<Identity, Error> {
+    async fn import_identity<'a>(&mut self, _: IdentityImportOption<'a>) -> Result<Identity, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Manually export identity to a specific location
-    async fn export_identity(&mut self, _: ImportLocation) -> Result<(), Error> {
+    async fn export_identity<'a>(&mut self, _: ImportLocation<'a>) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 }
