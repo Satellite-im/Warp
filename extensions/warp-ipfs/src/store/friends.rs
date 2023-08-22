@@ -250,6 +250,10 @@ impl FriendsStore {
         Ok(store)
     }
 
+    pub(crate) fn phonebook(&self) -> Option<&PhoneBook> {
+        self.phonebook.as_ref()
+    }
+
     //TODO: Implement Errors
     #[tracing::instrument(skip(self, data))]
     async fn check_request_message(&mut self, did: &DID, data: &[u8]) -> anyhow::Result<()> {

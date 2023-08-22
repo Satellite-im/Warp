@@ -1404,6 +1404,17 @@ impl IdentityStore {
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
         self.enable_event();
+
+        if let Ok(store) = self.friend_store().await {
+            log::info!("Loading friends list into phonebook");
+            if let Ok(friends) = store.friends_list().await {
+                if let Some(phonebook) = store.phonebook() {
+                    if let Err(_e) = phonebook.add_friend_list(friends).await {
+                        error!("Error adding friends in phonebook: {_e}");
+                    }
+                }
+            }
+        }
         Ok(identity)
     }
 
