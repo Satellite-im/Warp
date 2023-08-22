@@ -15,6 +15,8 @@ use warp::{
     multipass::identity::{Identity, IdentityStatus},
 };
 
+use crate::store::get_keypair_did;
+
 use self::{identity::IdentityDocument, utils::GetLocalDag};
 
 use super::friends::Request;
@@ -65,6 +67,29 @@ where
     async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error> {
         let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
         ipfs.put_dag(ipld).await.map_err(Error::from)
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub struct ExtractedRootDocument {
+    pub identity: Identity,
+    pub friends: Vec<DID>,
+    pub block_list: Vec<DID>,
+    pub block_by_list: Vec<DID>,
+    pub request: Vec<super::friends::Request>,
+    pub signature: Option<Vec<u8>>,
+}
+
+impl ExtractedRootDocument {
+    pub fn verify(&self) -> Result<(), Error> {
+        let mut doc = self.clone();
+        let signature = doc.signature.take().ok_or(Error::InvalidSignature)?;
+        let bytes = serde_json::to_vec(&doc)?;
+        self.identity
+            .did_key()
+            .verify(&bytes, &signature)
+            .map_err(|_| Error::InvalidSignature)?;
+        Ok(())
     }
 }
 
@@ -160,6 +185,56 @@ impl RootDocument {
         }
 
         Ok((identity, friends, block_list, block_by_list, request))
+    }
+
+    pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
+        data.verify()?;
+        let keypair = ipfs.keypair()?;
+        let did_kp = get_keypair_did(keypair)?;
+
+        let document: IdentityDocument = data.identity.into();
+
+        document.verify()?;
+
+        let identity = document.to_cid(ipfs).await?;
+        let friends = data.friends.to_cid(ipfs).await.ok();
+        let blocks = data.block_list.to_cid(ipfs).await.ok();
+        let block_by = data.block_by_list.to_cid(ipfs).await.ok();
+        let request = data.request.to_cid(ipfs).await.ok();
+
+        let mut root_document = RootDocument {
+            identity,
+            friends,
+            blocks,
+            block_by,
+            request,
+            status: None,
+            signature: None,
+        };
+        root_document.sign(&did_kp)?;
+
+        unimplemented!()
+    }
+
+    pub async fn export(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {
+        let (identity, friends, block_list, block_by_list, request) = self.resolve(ipfs).await?;
+
+        let mut exported = ExtractedRootDocument {
+            identity,
+            friends,
+            block_list,
+            block_by_list,
+            request,
+            signature: None,
+        };
+
+        let bytes = serde_json::to_vec(&exported)?;
+        let kp = ipfs.keypair()?;
+        let signature = kp.sign(&bytes).map_err(anyhow::Error::from)?;
+
+        exported.signature = Some(signature);
+
+        Ok(exported)
     }
 }
 

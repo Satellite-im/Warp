@@ -78,12 +78,16 @@ impl core::ops::DerefMut for MultiPassEventStream {
 
 #[async_trait::async_trait]
 pub trait MultiPass:
-    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + DynClone
+    Extension
+    + IdentityInformation
+    + MultiPassImportExport
+    + Friends
+    + FriendsEvent
+    + Sync
+    + Send
+    + SingleHandle
+    + DynClone
 {
-    async fn import_identity(&mut self, _: IdentityImportOption) -> Result<Identity, Error> {
-        Err(Error::Unimplemented)
-    }
-
     /// Create an [`Identity`]
     async fn create_identity(
         &mut self,
@@ -106,6 +110,19 @@ pub trait MultiPass:
 }
 
 dyn_clone::clone_trait_object!(MultiPass);
+
+#[async_trait::async_trait]
+pub trait MultiPassImportExport: Sync + Send {
+    /// Import identity from a specific location
+    async fn import_identity(&mut self, _: IdentityImportOption) -> Result<Identity, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Manually export identity to a specific location
+    async fn export_identity(&mut self, _: ImportLocation) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
 
 #[async_trait::async_trait]
 pub trait Friends: Sync + Send {

@@ -2137,13 +2137,11 @@ impl IdentityStore {
             let fingerprint = identity.did_key().fingerprint();
             let bytes = fingerprint.as_bytes();
 
-            let short_id = String::from_utf8_lossy(
-                bytes[bytes.len() - SHORT_ID_SIZE..]
-                    .try_into()
-                    .map_err(anyhow::Error::from)?,
-            );
+            let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
+                .try_into()
+                .map_err(anyhow::Error::from)?;
 
-            if identity.short_id() != short_id {
+            if identity.short_id() != short_id.into() {
                 return Err(Error::PublicKeyInvalid);
             }
         }

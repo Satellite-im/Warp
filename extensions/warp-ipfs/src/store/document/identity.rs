@@ -36,6 +36,37 @@ pub struct IdentityDocument {
     pub signature: Option<String>,
 }
 
+impl From<Identity> for IdentityDocument {
+    fn from(identity: Identity) -> Self {
+        let username = identity.username();
+        let did = identity.did_key();
+        let short_id = *identity.short_id();
+        let status_message = identity.status_message();
+        IdentityDocument {
+            username,
+            short_id,
+            did,
+            status_message,
+            profile_picture: None,
+            profile_banner: None,
+            platform: None,
+            status: None,
+            signature: None,
+        }
+    }
+}
+
+impl From<IdentityDocument> for Identity {
+    fn from(document: IdentityDocument) -> Self {
+        let mut identity = Identity::default();
+        identity.set_did_key(document.did);
+        identity.set_short_id(document.short_id);
+        identity.set_status_message(document.status_message);
+        identity.set_username(&document.username);
+        identity
+    }
+}
+
 impl PartialEq for IdentityDocument {
     fn eq(&self, other: &Self) -> bool {
         self.did.eq(&other.did) && self.short_id.eq(&other.short_id)

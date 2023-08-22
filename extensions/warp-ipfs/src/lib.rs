@@ -24,6 +24,7 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use store::document::ExtractedRootDocument;
 use store::files::FileStore;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
@@ -60,16 +61,18 @@ use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
 use warp::multipass::{
-    identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
-    MultiPassEventStream,
+    identity, Friends, FriendsEvent, IdentityImportOption, IdentityInformation, ImportLocation,
+    MultiPass, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 
 use crate::config::Bootstrap;
 use crate::store::discovery::Discovery;
+use crate::store::{ecdh_decrypt, ecdh_encrypt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
     config: Config,
+    identity_guard: Arc<warp::sync::Mutex<()>>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore>>>,
@@ -138,7 +141,7 @@ impl WarpIpfs {
         let (raygun_tx, _) = tokio::sync::broadcast::channel(1024);
         let (constellation_tx, _) = tokio::sync::broadcast::channel(1024);
 
-        let mut identity = WarpIpfs {
+        let identity = WarpIpfs {
             config,
             tesseract,
             ipfs: Default::default(),
@@ -147,14 +150,14 @@ impl WarpIpfs {
             message_store: Default::default(),
             file_store: Default::default(),
             initialized: Default::default(),
-
+            identity_guard: Arc::default(),
             multipass_tx,
             raygun_tx,
             constellation_tx,
         };
 
         if !identity.tesseract.is_unlock() {
-            let mut inner = identity.clone();
+            let inner = identity.clone();
             tokio::spawn(async move {
                 let mut stream = inner.tesseract.subscribe();
                 while let Some(event) = stream.next().await {
@@ -170,7 +173,7 @@ impl WarpIpfs {
         Ok(identity)
     }
 
-    async fn initialize_store(&mut self, init: bool) -> anyhow::Result<()> {
+    async fn initialize_store(&self, init: bool) -> anyhow::Result<()> {
         let tesseract = self.tesseract.clone();
 
         if init && self.identity_store.read().is_some() && self.friend_store.read().is_some()
@@ -203,6 +206,13 @@ impl WarpIpfs {
             _ => anyhow::bail!("Unable to initialize store"),
         };
 
+        self.init_ipfs(keypair).await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn init_ipfs(&self, keypair: Keypair) -> Result<(), Error> {
+        let tesseract = self.tesseract.clone();
         info!(
             "Have keypair with peer id: {}",
             keypair.public().to_peer_id()
@@ -668,6 +678,7 @@ impl MultiPass for WarpIpfs {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
+        let _g = self.identity_guard.lock();
         info!(
             "create_identity with username: {username:?} and containing passphrase: {}",
             passphrase.is_some()
@@ -677,6 +688,8 @@ impl MultiPass for WarpIpfs {
             info!("Store is initialized with existing identity");
             return Err(Error::IdentityExist);
         }
+
+        // let _g = self.identity_guard.lock();
 
         if let Some(u) = username.map(|u| u.trim()) {
             let username_len = u.len();
@@ -987,6 +1000,57 @@ impl MultiPass for WarpIpfs {
         store.push_to_all().await;
 
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl MultiPassImportExport for WarpIpfs {
+    async fn import_identity(&mut self, option: IdentityImportOption) -> Result<Identity, Error> {
+        if self.initialized.load(Ordering::SeqCst) {
+            return Err(Error::IdentityExist);
+        }
+        let _g = self.identity_guard.lock();
+
+        match option {
+            IdentityImportOption::Locate {
+                location: ImportLocation::Local { path },
+                passphrase,
+            } => {
+                let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
+                let bytes = tokio::fs::read(path).await?;
+                let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
+                let exported_document =
+                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+
+                exported_document.verify()?;
+
+                //TODO
+            }
+            IdentityImportOption::Locate {
+                location: ImportLocation::Remote,
+                ..
+            } => return Err(Error::Unimplemented),
+        }
+        unimplemented!()
+    }
+
+    async fn export_identity(&mut self, location: ImportLocation) -> Result<(), Error> {
+        let store = self.identity_store(true).await?;
+        let kp = store.get_keypair_did()?;
+        let ipfs = self.ipfs()?;
+        let document = store.get_root_document().await?;
+
+        let exported = document.export(&ipfs).await?;
+
+        match location {
+            ImportLocation::Local { path } => {
+                let bytes = serde_json::to_vec(&exported)?;
+                let encrypted_bundle = ecdh_encrypt(&kp, None, bytes)?;
+                tokio::fs::write(path, encrypted_bundle).await?;
+                Ok(())
+            }
+            ImportLocation::Remote => return Err(Error::Unimplemented),
+        }
     }
 }
 
