@@ -189,7 +189,7 @@ impl RootDocument {
 
     pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
         data.verify()?;
-        
+
         let keypair = ipfs.keypair()?;
         let did_kp = get_keypair_did(keypair)?;
 
@@ -198,10 +198,23 @@ impl RootDocument {
         let document = document.sign(&did_kp)?;
 
         let identity = document.to_cid(ipfs).await?;
-        let friends = data.friends.to_cid(ipfs).await.ok();
-        let blocks = data.block_list.to_cid(ipfs).await.ok();
-        let block_by = data.block_by_list.to_cid(ipfs).await.ok();
-        let request = data.request.to_cid(ipfs).await.ok();
+        let has_friends = !data.friends.is_empty();
+        let has_blocks = !data.block_list.is_empty();
+        let has_block_by_list = !data.block_by_list.is_empty();
+        let has_requests = !data.request.is_empty();
+
+        let friends = has_friends
+            .then_some(data.friends.to_cid(ipfs).await.ok())
+            .flatten();
+        let blocks = has_blocks
+            .then_some(data.block_list.to_cid(ipfs).await.ok())
+            .flatten();
+        let block_by = has_block_by_list
+            .then_some(data.block_by_list.to_cid(ipfs).await.ok())
+            .flatten();
+        let request = has_requests
+            .then_some(data.request.to_cid(ipfs).await.ok())
+            .flatten();
 
         let mut root_document = RootDocument {
             identity,
