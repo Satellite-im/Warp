@@ -2,6 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
+use warp::crypto::keypair::PhraseType;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -9,7 +10,7 @@ use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
-use warp::multipass::MultiPass;
+use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Config, Discovery};
 use warp_ipfs::WarpIpfsBuilder;
@@ -43,6 +44,10 @@ struct Opt {
     autoaccept_friend: bool,
     #[clap(long)]
     wait: Option<u64>,
+    #[clap(long)]
+    import: Option<PathBuf>,
+    #[clap(long)]
+    phrase: Option<String>,
 }
 
 async fn account(
@@ -101,7 +106,21 @@ async fn account(
         .await?;
 
     if account.get_own_identity().await.is_err() {
-        account.create_identity(username, None).await?;
+        match (opt.import.clone(), opt.phrase.clone()) {
+            (Some(path), Some(passphrase)) => {
+                account
+                    .import_identity(IdentityImportOption::Locate {
+                        location: ImportLocation::Local { path },
+                        passphrase,
+                    })
+                    .await?;
+            }
+            _ => {
+                let (phrase, _) = warp::crypto::keypair::generate_keypair(PhraseType::Standard, None)?;
+                println!("Phrase: {phrase}");
+                account.create_identity(username, Some(&phrase)).await?;
+            }
+        };
     }
     Ok(account)
 }
@@ -308,6 +327,13 @@ async fn main() -> anyhow::Result<()> {
                     rl.add_history_entry(line.clone());
                     let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
+                        Some("export") => {
+                            if let Err(e) = account.export_identity(warp::multipass::ImportLocation::Local { path: PathBuf::from("account.bin") }).await {
+                                writeln!(stdout, "Error exporting identity: {e}")?;
+                                continue;
+                            }
+                            writeln!(stdout, "Identity been exported")?;
+                        }
                         Some("friends-list") => {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key"]);

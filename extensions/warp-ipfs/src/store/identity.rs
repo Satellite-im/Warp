@@ -44,7 +44,7 @@ use super::{
     document::{
         identity::{unixfs_fetch, IdentityDocument},
         utils::GetLocalDag,
-        RootDocument, ToCid,
+        ExtractedRootDocument, RootDocument, ToCid,
     },
     ecdh_decrypt, ecdh_encrypt,
     friends::{FriendsStore, Request},
@@ -1384,6 +1384,27 @@ impl IdentityStore {
                 .unwrap_or_default(),
             None => Default::default(),
         }
+    }
+
+    #[tracing::instrument(skip(self, extracted))]
+    pub async fn import_identity(
+        &mut self,
+        extracted: ExtractedRootDocument,
+    ) -> Result<Identity, Error> {
+        extracted.verify()?;
+
+        let identity = extracted.identity.clone();
+
+        let root_document = RootDocument::import(&self.ipfs, extracted).await?;
+
+        let root_cid = root_document.to_cid(&self.ipfs).await?;
+
+        self.ipfs.insert_pin(&root_cid, true).await?;
+
+        self.save_cid(root_cid).await?;
+        self.update_identity().await?;
+        self.enable_event();
+        Ok(identity)
     }
 
     #[tracing::instrument(skip(self))]

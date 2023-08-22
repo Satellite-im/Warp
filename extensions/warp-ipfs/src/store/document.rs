@@ -189,12 +189,13 @@ impl RootDocument {
 
     pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
         data.verify()?;
+        
         let keypair = ipfs.keypair()?;
         let did_kp = get_keypair_did(keypair)?;
 
         let document: IdentityDocument = data.identity.into();
 
-        document.verify()?;
+        let document = document.sign(&did_kp)?;
 
         let identity = document.to_cid(ipfs).await?;
         let friends = data.friends.to_cid(ipfs).await.ok();
@@ -213,7 +214,7 @@ impl RootDocument {
         };
         root_document.sign(&did_kp)?;
 
-        unimplemented!()
+        Ok(root_document)
     }
 
     pub async fn export(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {

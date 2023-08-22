@@ -57,7 +57,7 @@ use warp::{Extension, SingleHandle};
 use ipfs::{
     Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
 };
-use warp::crypto::DID;
+use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
 use warp::multipass::{
@@ -72,7 +72,7 @@ use crate::store::{ecdh_decrypt, ecdh_encrypt};
 #[derive(Clone)]
 pub struct WarpIpfs {
     config: Config,
-    identity_guard: Arc<warp::sync::Mutex<()>>,
+    identity_guard: Arc<tokio::sync::Mutex<()>>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore>>>,
@@ -678,7 +678,7 @@ impl MultiPass for WarpIpfs {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
-        let _g = self.identity_guard.lock();
+        let _g = self.identity_guard.lock().await;
         info!(
             "create_identity with username: {username:?} and containing passphrase: {}",
             passphrase.is_some()
@@ -688,8 +688,6 @@ impl MultiPass for WarpIpfs {
             info!("Store is initialized with existing identity");
             return Err(Error::IdentityExist);
         }
-
-        // let _g = self.identity_guard.lock();
 
         if let Some(u) = username.map(|u| u.trim()) {
             let username_len = u.len();
@@ -1009,14 +1007,17 @@ impl MultiPassImportExport for WarpIpfs {
         if self.initialized.load(Ordering::SeqCst) {
             return Err(Error::IdentityExist);
         }
-        let _g = self.identity_guard.lock();
-
+        let _g = self.identity_guard.lock().await;
+        if !self.tesseract.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
         match option {
             IdentityImportOption::Locate {
                 location: ImportLocation::Local { path },
                 passphrase,
             } => {
                 let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
+
                 let bytes = tokio::fs::read(path).await?;
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
                 let exported_document =
@@ -1024,14 +1025,30 @@ impl MultiPassImportExport for WarpIpfs {
 
                 exported_document.verify()?;
 
-                //TODO
+                let bytes = Zeroizing::new(keypair.private_key_bytes());
+
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut self.tesseract,
+                    &passphrase,
+                    None,
+                    self.config.save_phrase,
+                )?;
+
+                self.init_ipfs(
+                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                        .map_err(|_| Error::PrivateKeyInvalid)?,
+                )
+                .await?;
+
+                let mut store = self.identity_store(false).await?;
+
+                return store.import_identity(exported_document).await;
             }
             IdentityImportOption::Locate {
                 location: ImportLocation::Remote,
                 ..
             } => return Err(Error::Unimplemented),
         }
-        unimplemented!()
     }
 
     async fn export_identity(&mut self, location: ImportLocation) -> Result<(), Error> {
