@@ -64,9 +64,10 @@ pub async fn create_account(
         .set_config(config)
         .finalize()
         .await?;
-    let did = account.create_identity(username, passphrase).await?;
-    let identity = account.get_own_identity().await?;
-    Ok((account, did, identity))
+    let profile = account.create_identity(username, passphrase).await?;
+    let identity = profile.identity().clone();
+
+    Ok((account, identity.did_key(), identity))
 }
 
 #[allow(dead_code)]
@@ -114,9 +115,10 @@ pub async fn create_account_and_chat(
         .finalize()
         .await?;
 
-    let did = account.create_identity(username, passphrase).await?;
-    let identity = account.get_own_identity().await?;
-    Ok((account, raygun, did, identity))
+    let profile = account.create_identity(username, passphrase).await?;
+    let identity = profile.identity().clone();
+
+    Ok((account, raygun, identity.did_key(), identity))
 }
 
 pub async fn create_accounts_and_chat(

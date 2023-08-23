@@ -33,9 +33,9 @@ async fn main() -> anyhow::Result<()> {
         .finalize()
         .await?;
 
-    identity.create_identity(None, None).await?;
+    let profile = identity.create_identity(None, None).await?;
 
-    let ident = identity.get_own_identity().await?;
+    let ident = profile.identity();
 
     println!("Current Identity: {}", serde_json::to_string(&ident)?);
 

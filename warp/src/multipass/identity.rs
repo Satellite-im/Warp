@@ -36,6 +36,40 @@ pub enum Platform {
     Unknown,
 }
 
+/// Profile containing the newly created `Identity` and a passphrase, if applicable.
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct IdentityProfile {
+    identity: Identity,
+    passphrase: Option<zeroize::Zeroizing<String>>,
+}
+
+impl Drop for IdentityProfile {
+    fn drop(&mut self) {
+        if let Some(passphrase) = self.passphrase.as_mut() {
+            zeroize::Zeroize::zeroize(passphrase);
+        }
+    }
+}
+
+impl IdentityProfile {
+    pub fn new(identity: Identity, passphrase: Option<String>) -> Self {
+        Self {
+            identity,
+            passphrase: passphrase.map(zeroize::Zeroizing::new),
+        }
+    }
+
+    /// Reference to `Identity`
+    pub fn identity(&self) -> &Identity {
+        &self.identity
+    }
+
+    /// Supplied passphrase, if applicable.
+    pub fn passphrase(&self) -> Option<&str> {
+        self.passphrase.as_ref().map(|phrase| phrase.as_str())
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, FFIFree)]
 pub struct Relationship {
     friends: bool,
