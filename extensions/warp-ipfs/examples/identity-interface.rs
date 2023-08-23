@@ -146,16 +146,20 @@ async fn main() -> anyhow::Result<()> {
 
     let (mut account, profile) = account(opt.path.clone(), None, &opt).await?;
 
-    if let Some(profile) = profile {
-        println!("Identity created");
-        if let Some(phrase) = profile.passphrase() {
-            println!("Identity mnemonic phrase: {phrase}");
+    let own_identity = match profile {
+        Some(profile) => {
+            println!("Identity created");
+            if let Some(phrase) = profile.passphrase() {
+                println!("Identity mnemonic phrase: {phrase}");
+            }
+            profile.identity().clone()
         }
-    } else {
-        println!("Obtained identity....");
-    }
+        None => {
+            println!("Obtained identity....");
+            account.get_own_identity().await?
+        }
+    };
 
-    let own_identity = account.get_own_identity().await?;
     println!(
         "Username: {}#{}",
         own_identity.username(),
