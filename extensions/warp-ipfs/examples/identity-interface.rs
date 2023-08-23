@@ -8,7 +8,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
-use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
+use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus, IdentityUpdate};
 use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Config, Discovery};
@@ -53,7 +53,7 @@ async fn account(
     path: Option<PathBuf>,
     username: Option<&str>,
     opt: &Opt,
-) -> anyhow::Result<Box<dyn MultiPass>> {
+) -> anyhow::Result<(Box<dyn MultiPass>, Option<IdentityProfile>)> {
     let tesseract = match path.as_ref() {
         Some(path) => Tesseract::open_or_create(path, "tdatastore")?,
         None => Tesseract::default(),
@@ -104,6 +104,8 @@ async fn account(
         .finalize()
         .await?;
 
+    let mut profile = None;
+
     if account.get_own_identity().await.is_err() {
         match (opt.import.clone(), opt.phrase.clone()) {
             (Some(path), Some(passphrase)) => {
@@ -115,14 +117,11 @@ async fn account(
                     .await?;
             }
             _ => {
-                let profile = account.create_identity(username, None).await?;
-                if let Some(phrase) = profile.passphrase() {
-                    println!("Phrase: {}", phrase);
-                }
+                profile = Some(account.create_identity(username, None).await?);
             }
         };
     }
-    Ok(account)
+    Ok((account, profile))
 }
 
 #[tokio::main]
@@ -145,15 +144,24 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let mut account = account(opt.path.clone(), None, &opt).await?;
+    let (mut account, profile) = account(opt.path.clone(), None, &opt).await?;
 
-    println!("Obtaining identity....");
+    if let Some(profile) = profile {
+        println!("Identity created");
+        if let Some(phrase) = profile.passphrase() {
+            println!("Identity mnemonic phrase: {phrase}");
+        }
+    } else {
+        println!("Obtained identity....");
+    }
+
     let own_identity = account.get_own_identity().await?;
     println!(
-        "Registered user {}#{}",
+        "Username: {}#{}",
         own_identity.username(),
         own_identity.short_id()
     );
+
     println!("DID: {}", own_identity.did_key());
 
     let (mut rl, mut stdout) = Readline::new(format!(
