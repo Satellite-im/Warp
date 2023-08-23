@@ -17,7 +17,7 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{Identifier, IdentityUpdate};
 
-use self::identity::{IdentityStatus, Platform, Relationship};
+use self::identity::{IdentityStatus, Platform, Relationship, IdentityProfile};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
@@ -89,7 +89,7 @@ pub trait MultiPass:
         &mut self,
         username: Option<&str>,
         passphrase: Option<&str>,
-    ) -> Result<DID, Error>;
+    ) -> Result<IdentityProfile, Error>;
 
     /// Obtain an [`Identity`] using [`Identifier`]
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error>;
@@ -269,7 +269,7 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
-    use super::identity::{IdentityStatus, Relationship};
+    use super::identity::{IdentityStatus, Relationship, IdentityProfile};
     use super::MultiPassEventStream;
 
     #[allow(clippy::missing_safety_doc)]
@@ -278,7 +278,7 @@ pub mod ffi {
         ctx: *mut MultiPassAdapter,
         username: *const c_char,
         passphrase: *const c_char,
-    ) -> FFIResult<DID> {
+    ) -> FFIResult<IdentityProfile> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
