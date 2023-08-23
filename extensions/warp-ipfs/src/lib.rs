@@ -694,7 +694,7 @@ impl MultiPass for WarpIpfs {
             }
         }
 
-        let (phrase, supplied) = match passphrase {
+        let (phrase, can_include) = match passphrase {
             Some(phrase) => {
                 info!("Passphrase was supplied");
                 (phrase.to_string(), false)
@@ -725,7 +725,7 @@ impl MultiPass for WarpIpfs {
             .create_identity(username)
             .await?;
         info!("Identity with {} has been created", identity.did_key());
-        let profile = IdentityProfile::new(identity, supplied.then_some(phrase));
+        let profile = IdentityProfile::new(identity, can_include.then_some(phrase));
         Ok(profile)
     }
 
