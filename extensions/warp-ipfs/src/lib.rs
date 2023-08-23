@@ -712,6 +712,7 @@ impl MultiPass for WarpIpfs {
                     phrase,
                     None,
                     self.config.save_phrase,
+                    false,
                 )?;
             }
         }
@@ -1035,6 +1036,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &passphrase,
                     None,
                     self.config.save_phrase,
+                    false,
                 )?;
 
                 self.init_ipfs(
@@ -1068,6 +1070,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &passphrase,
                     None,
                     self.config.save_phrase,
+                    false,
                 )?;
 
                 self.init_ipfs(
