@@ -2,7 +2,6 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
-use warp::crypto::keypair::PhraseType;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -116,9 +115,10 @@ async fn account(
                     .await?;
             }
             _ => {
-                let (phrase, _) = warp::crypto::keypair::generate_keypair(PhraseType::Standard, None)?;
-                println!("Phrase: {phrase}");
-                account.create_identity(username, Some(&phrase)).await?;
+                let profile = account.create_identity(username, None).await?;
+                if let Some(phrase) = profile.passphrase() {
+                    println!("Phrase: {}", phrase);
+                }
             }
         };
     }
