@@ -40,6 +40,7 @@ use warp::constellation::{
     Constellation, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
     ConstellationProgressStream,
 };
+use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
 use warp::raygun::{
     AttachmentEventStream, Conversation, EmbedState, Location, Message, MessageEvent,
@@ -58,7 +59,9 @@ use ipfs::{
 };
 use warp::crypto::DID;
 use warp::error::Error;
-use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
+use warp::multipass::identity::{
+    Identifier, Identity, IdentityProfile, IdentityUpdate, Relationship,
+};
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
     MultiPassEventStream,
@@ -667,7 +670,7 @@ impl MultiPass for WarpIpfs {
         &mut self,
         username: Option<&str>,
         passphrase: Option<&str>,
-    ) -> Result<DID, Error> {
+    ) -> Result<IdentityProfile, Error> {
         info!(
             "create_identity with username: {username:?} and containing passphrase: {}",
             passphrase.is_some()
@@ -691,18 +694,26 @@ impl MultiPass for WarpIpfs {
             }
         }
 
-        if let Some(phrase) = passphrase {
-            info!("Passphrase exist");
-            let mut tesseract = self.tesseract.clone();
-            if !tesseract.exist("keypair") {
-                warn!("Loading keypair generated from mnemonic phrase into tesseract");
-                warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut tesseract,
-                    phrase,
-                    None,
-                    self.config.save_phrase,
-                )?;
+        let (phrase, can_include) = match passphrase {
+            Some(phrase) => {
+                info!("Passphrase was supplied");
+                (phrase.to_string(), false)
             }
+            None => (
+                warp::crypto::keypair::generate_mnemonic_phrase(PhraseType::Standard).into_phrase(),
+                true,
+            ),
+        };
+
+        let mut tesseract = self.tesseract.clone();
+        if !tesseract.exist("keypair") {
+            warn!("Loading keypair generated from mnemonic phrase into tesseract");
+            warp::crypto::keypair::mnemonic_into_tesseract(
+                &mut tesseract,
+                &phrase,
+                None,
+                self.config.save_phrase,
+            )?;
         }
 
         info!("Initializing stores");
@@ -714,7 +725,8 @@ impl MultiPass for WarpIpfs {
             .create_identity(username)
             .await?;
         info!("Identity with {} has been created", identity.did_key());
-        Ok(identity.did_key())
+        let profile = IdentityProfile::new(identity, can_include.then_some(phrase));
+        Ok(profile)
     }
 
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
