@@ -8,8 +8,8 @@ use std::str::FromStr;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
-use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
-use warp::multipass::MultiPass;
+use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus, IdentityUpdate};
+use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Config, Discovery};
 use warp_ipfs::WarpIpfsBuilder;
@@ -43,13 +43,17 @@ struct Opt {
     autoaccept_friend: bool,
     #[clap(long)]
     wait: Option<u64>,
+    #[clap(long)]
+    import: Option<PathBuf>,
+    #[clap(long)]
+    phrase: Option<String>,
 }
 
 async fn account(
     path: Option<PathBuf>,
     username: Option<&str>,
     opt: &Opt,
-) -> anyhow::Result<Box<dyn MultiPass>> {
+) -> anyhow::Result<(Box<dyn MultiPass>, Option<IdentityProfile>)> {
     let tesseract = match path.as_ref() {
         Some(path) => Tesseract::open_or_create(path, "tdatastore")?,
         None => Tesseract::default(),
@@ -100,10 +104,24 @@ async fn account(
         .finalize()
         .await?;
 
+    let mut profile = None;
+
     if account.get_own_identity().await.is_err() {
-        account.create_identity(username, None).await?;
+        match (opt.import.clone(), opt.phrase.clone()) {
+            (Some(path), Some(passphrase)) => {
+                account
+                    .import_identity(IdentityImportOption::Locate {
+                        location: ImportLocation::Local { path },
+                        passphrase,
+                    })
+                    .await?;
+            }
+            _ => {
+                profile = Some(account.create_identity(username, None).await?);
+            }
+        };
     }
-    Ok(account)
+    Ok((account, profile))
 }
 
 #[tokio::main]
@@ -126,15 +144,28 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let mut account = account(opt.path.clone(), None, &opt).await?;
+    let (mut account, profile) = account(opt.path.clone(), None, &opt).await?;
 
-    println!("Obtaining identity....");
-    let own_identity = account.get_own_identity().await?;
+    let own_identity = match profile {
+        Some(profile) => {
+            println!("Identity created");
+            if let Some(phrase) = profile.passphrase() {
+                println!("Identity mnemonic phrase: {phrase}");
+            }
+            profile.identity().clone()
+        }
+        None => {
+            println!("Obtained identity....");
+            account.get_own_identity().await?
+        }
+    };
+
     println!(
-        "Registered user {}#{}",
+        "Username: {}#{}",
         own_identity.username(),
         own_identity.short_id()
     );
+
     println!("DID: {}", own_identity.did_key());
 
     let (mut rl, mut stdout) = Readline::new(format!(
@@ -308,6 +339,13 @@ async fn main() -> anyhow::Result<()> {
                     rl.add_history_entry(line.clone());
                     let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
+                        Some("export") => {
+                            if let Err(e) = account.export_identity(warp::multipass::ImportLocation::Local { path: PathBuf::from("account.bin") }).await {
+                                writeln!(stdout, "Error exporting identity: {e}")?;
+                                continue;
+                            }
+                            writeln!(stdout, "Identity been exported")?;
+                        }
                         Some("friends-list") => {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key"]);
