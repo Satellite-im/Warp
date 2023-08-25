@@ -227,6 +227,24 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
     Ok(list)
 }
 
+// pub mod ffi {
+//     use crate::StrettoClient;
+//     use warp::pocket_dimension::PocketDimensionAdapter;
+//     use warp::sync::{Arc, RwLock};
+
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn pocketdimension_stretto_new() -> *mut PocketDimensionAdapter {
+//         let client = match StrettoClient::new() {
+//             Ok(client) => PocketDimensionAdapter::new(Arc::new(RwLock::new(Box::new(client)))),
+//             Err(_) => return std::ptr::null_mut(),
+//         };
+
+//         let obj = Box::new(client);
+//         Box::into_raw(obj) as *mut PocketDimensionAdapter
+//     }
+// }
+
 #[cfg(test)]
 mod test {
     use crate::StrettoClient;
@@ -295,23 +313,5 @@ mod test {
         assert_eq!(count, 5);
 
         Ok(())
-    }
-}
-
-pub mod ffi {
-    use crate::StrettoClient;
-    use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn pocketdimension_stretto_new() -> *mut PocketDimensionAdapter {
-        let client = match StrettoClient::new() {
-            Ok(client) => PocketDimensionAdapter::new(Arc::new(RwLock::new(Box::new(client)))),
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        let obj = Box::new(client);
-        Box::into_raw(obj) as *mut PocketDimensionAdapter
     }
 }

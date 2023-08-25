@@ -2,6 +2,8 @@
 pub mod generator;
 pub mod identity;
 
+use std::path::PathBuf;
+
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -15,9 +17,9 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{Identifier, IdentityUpdate};
 
-use self::identity::{IdentityStatus, Platform, Relationship};
+use self::identity::{IdentityStatus, Platform, Relationship, IdentityProfile};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
@@ -38,6 +40,29 @@ pub enum MultiPassEventKind {
     UnblockedBy { did: DID },
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ImportLocation<'a> {
+    /// Remote location where the identity is stored
+    Remote,
+
+    /// Local path where the identity is stored
+    Local { path: PathBuf },
+
+    /// Buffer memory of where identity is stored
+    Memory { buffer: &'a mut Vec<u8> }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum IdentityImportOption<'a> {
+    Locate {
+        /// Location of the identity
+        location: ImportLocation<'a>,
+
+        /// Passphrase of the identity
+        passphrase: String,
+    },
+}
+
 #[derive(FFIFree)]
 pub struct MultiPassEventStream(pub BoxStream<'static, MultiPassEventKind>);
 
@@ -56,14 +81,22 @@ impl core::ops::DerefMut for MultiPassEventStream {
 
 #[async_trait::async_trait]
 pub trait MultiPass:
-    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + DynClone
+    Extension
+    + IdentityInformation
+    + MultiPassImportExport
+    + Friends
+    + FriendsEvent
+    + Sync
+    + Send
+    + SingleHandle
+    + DynClone
 {
     /// Create an [`Identity`]
     async fn create_identity(
         &mut self,
         username: Option<&str>,
         passphrase: Option<&str>,
-    ) -> Result<DID, Error>;
+    ) -> Result<IdentityProfile, Error>;
 
     /// Obtain an [`Identity`] using [`Identifier`]
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error>;
@@ -80,6 +113,19 @@ pub trait MultiPass:
 }
 
 dyn_clone::clone_trait_object!(MultiPass);
+
+#[async_trait::async_trait]
+pub trait MultiPassImportExport: Sync + Send {
+    /// Import identity from a specific location
+    async fn import_identity<'a>(&mut self, _: IdentityImportOption<'a>) -> Result<Identity, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Manually export identity to a specific location
+    async fn export_identity<'a>(&mut self, _: ImportLocation<'a>) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
 
 #[async_trait::async_trait]
 pub trait Friends: Sync + Send {
@@ -243,7 +289,7 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
-    use super::identity::{IdentityStatus, Relationship};
+    use super::identity::{IdentityStatus, Relationship, IdentityProfile};
     use super::MultiPassEventStream;
 
     #[allow(clippy::missing_safety_doc)]
@@ -252,7 +298,7 @@ pub mod ffi {
         ctx: *mut MultiPassAdapter,
         username: *const c_char,
         passphrase: *const c_char,
-    ) -> FFIResult<DID> {
+    ) -> FFIResult<IdentityProfile> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::crypto::DID;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -32,6 +34,40 @@ pub enum Platform {
     #[display(fmt = "unknown")]
     #[default]
     Unknown,
+}
+
+/// Profile containing the newly created `Identity` and a passphrase, if applicable.
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct IdentityProfile {
+    identity: Identity,
+    passphrase: Option<zeroize::Zeroizing<String>>,
+}
+
+impl Drop for IdentityProfile {
+    fn drop(&mut self) {
+        if let Some(passphrase) = self.passphrase.as_mut() {
+            zeroize::Zeroize::zeroize(passphrase);
+        }
+    }
+}
+
+impl IdentityProfile {
+    pub fn new(identity: Identity, passphrase: Option<String>) -> Self {
+        Self {
+            identity,
+            passphrase: passphrase.map(zeroize::Zeroizing::new),
+        }
+    }
+
+    /// Reference to `Identity`
+    pub fn identity(&self) -> &Identity {
+        &self.identity
+    }
+
+    /// Supplied passphrase, if applicable.
+    pub fn passphrase(&self) -> Option<&str> {
+        self.passphrase.as_ref().map(|phrase| phrase.as_str())
+    }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, FFIFree)]
@@ -86,6 +122,31 @@ impl Relationship {
         self.blocked_by
     }
 }
+
+#[derive(
+    Default, Hash, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Ord,
+)]
+pub struct ShortId([u8; SHORT_ID_SIZE]);
+
+impl core::ops::Deref for ShortId {
+    type Target = [u8; SHORT_ID_SIZE];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<[u8; SHORT_ID_SIZE]> for ShortId {
+    fn from(id: [u8; SHORT_ID_SIZE]) -> Self {
+        ShortId(id)
+    }
+}
+
+impl Display for ShortId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(&self.0))
+    }
+}
+
 #[derive(
     Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
@@ -94,7 +155,7 @@ pub struct Identity {
     username: String,
 
     /// Short id derived from the DID to be used along side `Identity::username` (eg `Username#0000`)
-    short_id: [u8; SHORT_ID_SIZE],
+    short_id: ShortId,
 
     /// Public key for the identity
     did_key: DID,
@@ -108,8 +169,8 @@ impl Identity {
         self.username = user.to_string()
     }
 
-    pub fn set_short_id(&mut self, id: [u8; SHORT_ID_SIZE]) {
-        self.short_id = id
+    pub fn set_short_id<I: Into<ShortId>>(&mut self, id: I) {
+        self.short_id = id.into()
     }
 
     pub fn set_did_key(&mut self, pubkey: DID) {
@@ -126,8 +187,8 @@ impl Identity {
         self.username.clone()
     }
 
-    pub fn short_id(&self) -> String {
-        String::from_utf8_lossy(&self.short_id).to_string()
+    pub fn short_id(&self) -> ShortId {
+        self.short_id
     }
 
     pub fn did_key(&self) -> DID {
@@ -241,7 +302,7 @@ pub mod ffi {
         }
 
         let identity = &*identity;
-        match CString::new(identity.short_id()) {
+        match CString::new(identity.short_id().to_string()) {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }

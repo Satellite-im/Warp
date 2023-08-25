@@ -8,7 +8,7 @@ repository = "https://github.com/Satellite-im/Warp"
 
 [workspace]
 members = ["extensions/*", "warp", "warp/warp-derive", "tools/*"]
-exclude = ["deprecated/*"]
+exclude = ["deprecated/*", "tools/opencv-test"]
 
 [workspace.dependencies]
 
@@ -79,3 +79,11 @@ void = "1"
 
 #ipfs dependency
 rust-ipfs = "=0.3.19"
+
+# Blink related crates
+# av-data is needed to use libaom. need to ensure that Warp and libaom use the same version of av-data
+av-data = "*"
+libaom = { git="https://github.com/rust-av/aom-rs", rev="7aca932ea5f6cc1f0e9eb54f7aabcce234f18864" }
+mp4 = { git="https://github.com/sdwoodbury/mp4-rust", rev="9887024513f59e5fcda9f44442b2a3a2cdfe9706" }
+opus = { git = "https://github.com/sdwoodbury/opus-rs", rev="3f07443dac1907dbcc847181a0d40d561592072b" }
+opencv = { version = "0.82", features=["clang-runtime"] }

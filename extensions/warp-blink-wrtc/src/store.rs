@@ -32,7 +32,7 @@ impl PeerIdExt for ipfs::PeerId {
     }
 }
 
-// uses asymetric encryption
+// uses asymmetric encryption
 pub async fn send_signal_ecdh<T: Serialize + Display>(
     ipfs: &Ipfs,
     own_did: &DID,

@@ -80,12 +80,13 @@ pub fn mnemonic_into_tesseract(
     mnemonic: &str,
     passphrase: Option<&str>,
     save_mnemonic: bool,
+    override_key: bool,
 ) -> Result<(), Error> {
     if !tesseract.is_unlock() {
         return Err(Error::TesseractLocked);
     }
 
-    if tesseract.exist("keypair") {
+    if tesseract.exist("keypair") && !override_key {
         return Err(Error::Any(anyhow::anyhow!("Keypair already exist")));
     }
 
@@ -151,7 +152,7 @@ pub mod ffi {
 
         let phrase = CStr::from_ptr(phrase).to_string_lossy().to_string();
 
-        super::mnemonic_into_tesseract(&mut *tesseract, &phrase, None, save).into()
+        super::mnemonic_into_tesseract(&mut *tesseract, &phrase, None, save, false).into()
     }
 }
 
