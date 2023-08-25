@@ -601,7 +601,7 @@ pub mod ffi {
             false => CStr::from_ptr(name).to_string_lossy().to_string(),
         };
         let directory = Box::new(Directory::new(name.as_str()));
-        Box::into_raw(directory) as *mut Directory
+        Box::into_raw(directory)
     }
 
     #[allow(clippy::missing_safety_doc)]

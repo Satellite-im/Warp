@@ -86,7 +86,9 @@ async fn setup_persistent<P: AsRef<Path>>(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {}
+    if fdlimit::raise_fd_limit().is_none() {
+        //raising fd limit
+    }
 
     let (_, mut filesystem) = setup_persistent(None, opt.path.clone(), &opt).await?;
 

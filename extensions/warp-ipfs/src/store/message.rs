@@ -901,7 +901,7 @@ impl MessageStore {
                 {
                     let signature = message.signature();
                     let sender = message.sender();
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
@@ -1011,7 +1011,7 @@ impl MessageStore {
                 //Validate the original message
                 {
                     let signature = message.signature();
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
@@ -1028,7 +1028,7 @@ impl MessageStore {
 
                 //Validate the edit message
                 {
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
@@ -1075,7 +1075,7 @@ impl MessageStore {
 
                     let signature = message.signature();
                     let sender = message.sender();
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
@@ -2957,7 +2957,7 @@ impl MessageStore {
         message.set_sender(own_did.clone());
         message.set_value(messages.clone());
 
-        let construct = vec![
+        let construct = [
             message.id().into_bytes().to_vec(),
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
@@ -3020,7 +3020,7 @@ impl MessageStore {
 
         let own_did = &*self.did.clone();
 
-        let construct = vec![
+        let construct = [
             message_id.into_bytes().to_vec(),
             conversation.id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
@@ -3090,7 +3090,7 @@ impl MessageStore {
         message.set_value(messages);
         message.set_replied(Some(message_id));
 
-        let construct = vec![
+        let construct = [
             message.id().into_bytes().to_vec(),
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
@@ -3429,7 +3429,7 @@ impl MessageStore {
                     message.set_attachment(attachments);
                     message.set_value(messages.clone());
                     message.set_replied(message_id);
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         own_did.to_string().as_bytes().to_vec(),

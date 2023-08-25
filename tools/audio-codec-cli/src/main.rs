@@ -202,13 +202,13 @@ Frame size (in samples) vs duration for various sampling rates:
             sm.channels = channels;
         }
         Cli::SampleRate { rate } => {
-            if !vec![8000, 12000, 16000, 24000, 48000].contains(&rate) {
+            if ![8000, 12000, 16000, 24000, 48000].contains(&rate) {
                 bail!("invalid sample rate")
             }
             sm.sample_rate = rate;
         }
         Cli::FrameSize { frame_size } => {
-            if !vec![120, 240, 480, 960, 1920, 2880].contains(&frame_size) {
+            if ![120, 240, 480, 960, 1920, 2880].contains(&frame_size) {
                 bail!("invalid frame size");
             }
             sm.frame_size = frame_size;
