@@ -60,7 +60,9 @@ async fn main() -> anyhow::Result<()> {
     println!("Utility inspector tool.. ");
     let opt = Opt::parse();
     //Just in case
-    if fdlimit::raise_fd_limit().is_none() {}
+    if fdlimit::raise_fd_limit().is_none() {
+        // 
+    }
 
     let password = Zeroizing::new(match opt.password {
         Some(password) => password,

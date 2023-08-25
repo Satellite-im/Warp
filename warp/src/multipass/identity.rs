@@ -351,7 +351,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(Identifier::user_name(&name))) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::user_name(&name)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -363,13 +363,13 @@ pub mod ffi {
 
         let key = &*key;
 
-        Box::into_raw(Box::new(Identifier::did_key(key.clone()))) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::did_key(key.clone())))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identifier_own() -> *mut Identifier {
-        Box::into_raw(Box::new(Identifier::own())) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::own()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -383,7 +383,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Username(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Username(name)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -397,7 +397,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Picture(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Picture(name)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -411,7 +411,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Banner(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Banner(name)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -426,7 +426,7 @@ pub mod ffi {
             IdentityUpdate::StatusMessage(None)
         };
 
-        Box::into_raw(Box::new(update)) as *mut IdentityUpdate
+        Box::into_raw(Box::new(update))
     }
 
     #[allow(clippy::missing_safety_doc)]
