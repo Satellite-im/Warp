@@ -217,6 +217,6 @@ pub mod ffi {
         let obj = Box::new(PocketDimensionAdapter::new(Arc::new(RwLock::new(
             Box::new(MemoryClient::new()),
         ))));
-        Box::into_raw(obj) as *mut PocketDimensionAdapter
+        Box::into_raw(obj)
     }
 }

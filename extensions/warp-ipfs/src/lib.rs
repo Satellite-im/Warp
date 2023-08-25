@@ -480,7 +480,7 @@ impl WarpIpfs {
                                         log::trace!(
                                             "Disabling relays due to being publicly accessible."
                                         );
-                                        let addrs = addrs.drain(..).collect::<Vec<_>>();
+                                        let addrs = std::mem::take(&mut addrs);
                                         stop_relay_client(addrs).await;
                                         using_relay = false;
                                     }

@@ -283,7 +283,7 @@ pub mod ffi {
         }
         let directory = &*directory;
         let item = Box::new(Item::new_directory(directory.clone()));
-        Box::into_raw(item) as *mut Item
+        Box::into_raw(item)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -294,7 +294,7 @@ pub mod ffi {
         }
         let file = &*file;
         let item = Box::new(Item::new_file(file.clone()));
-        Box::into_raw(item) as *mut Item
+        Box::into_raw(item)
     }
 
     #[allow(clippy::missing_safety_doc)]

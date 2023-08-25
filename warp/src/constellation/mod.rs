@@ -404,7 +404,7 @@ pub mod ffi {
         }
         let constellation = &*(ctx);
         let directory = constellation.root_directory();
-        Box::into_raw(Box::new(directory)) as *mut Directory
+        Box::into_raw(Box::new(directory))
     }
 
     #[allow(clippy::missing_safety_doc)]

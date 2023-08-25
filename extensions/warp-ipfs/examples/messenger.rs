@@ -133,7 +133,9 @@ async fn setup<P: AsRef<Path>>(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {}
+    if fdlimit::raise_fd_limit().is_none() {
+        //raising fd limit
+    }
 
     if !opt.stdout_log {
         let file_appender = tracing_appender::rolling::hourly(
