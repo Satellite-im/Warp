@@ -34,16 +34,14 @@ impl Bootstrap {
     /// List of bootstrap multiaddr
     pub fn address(&self) -> Vec<Multiaddr> {
         match self {
-            Bootstrap::Ipfs => vec![
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+            Bootstrap::Ipfs => ["/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-            ]
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
-            Bootstrap::Experimental => vec!["/ip4/137.184.70.241/tcp/4894/p2p/12D3KooWP5aD68wq8eDqMtbcMgAzzhUJt8Y3n2g5vzAA1Lo7uVgY"]
+            Bootstrap::Experimental => ["/ip4/137.184.70.241/tcp/4894/p2p/12D3KooWP5aD68wq8eDqMtbcMgAzzhUJt8Y3n2g5vzAA1Lo7uVgY"]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
@@ -323,7 +321,7 @@ impl Default for Config {
         Config {
             path: None,
             bootstrap: Bootstrap::Ipfs,
-            listen_on: vec!["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
+            listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
                 .iter()
                 .filter_map(|s| Multiaddr::from_str(s).ok())
                 .collect::<Vec<_>>(),

@@ -127,7 +127,9 @@ async fn account(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {}
+    if fdlimit::raise_fd_limit().is_none() {
+        //raising fd limit
+    }
 
     let file_appender = match &opt.path {
         Some(path) => tracing_appender::rolling::hourly(path, "warp_mp_identity_interface.log"),
