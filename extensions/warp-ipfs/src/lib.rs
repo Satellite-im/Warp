@@ -281,7 +281,6 @@ impl WarpIpfs {
                     cache: 100,
                     push_update: true,
                     protocol_version: "/satellite/warp/0.1".into(),
-                    initial_delay: Duration::from_secs(0),
                     ..Default::default()
                 };
                 if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
@@ -372,10 +371,7 @@ impl WarpIpfs {
             let peer_id_extract = |addr: &Multiaddr| -> Option<PeerId> {
                 let mut addr = addr.clone();
                 match addr.pop() {
-                    Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
-                        Ok(id) => Some(id),
-                        _ => None,
-                    },
+                    Some(Protocol::P2p(peer_id)) => Some(peer_id),
                     _ => None,
                 }
             };

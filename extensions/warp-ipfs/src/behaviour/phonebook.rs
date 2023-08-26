@@ -119,7 +119,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
-    type OutEvent = void::Void;
+    type ToSwarm = void::Void;
 
     fn handle_pending_inbound_connection(
         &mut self,
@@ -219,7 +219,7 @@ impl NetworkBehaviour for Behaviour {
         &mut self,
         cx: &mut Context,
         _: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::OutEvent, THandlerInEvent<Self>>> {
+    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         loop {
             match self.command.poll_next_unpin(cx) {
                 Poll::Ready(Some(PhoneBookCommand::AddEntry { peer_id, response })) => {
