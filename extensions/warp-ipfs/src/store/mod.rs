@@ -406,7 +406,7 @@ pub async fn discover_peer(
         Discovery::None => {
             //Attempt a direct dial via relay
             for addr in relay.iter() {
-                let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
+                let addr = addr.clone().with(Protocol::P2p(peer_id));
                 if let Err(_e) = ipfs.connect(addr).await {
                     continue;
                 }
