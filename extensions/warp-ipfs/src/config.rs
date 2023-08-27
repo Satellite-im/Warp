@@ -33,15 +33,17 @@ impl Bootstrap {
     /// List of bootstrap multiaddr
     pub fn address(&self) -> Vec<Multiaddr> {
         match self {
-            Bootstrap::Ipfs => ["/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+            Bootstrap::Ipfs => [
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"]
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+            ]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
             Bootstrap::Custom(address) => address.clone(),
-            Bootstrap::None => vec![]
+            Bootstrap::None => vec![],
         }
     }
 }
@@ -193,6 +195,8 @@ pub struct IpfsSetting {
     pub bootstrap: bool,
     pub portmapping: bool,
     pub agent_version: Option<String>,
+    /// Used for testing with a memory transport
+    pub memory_transport: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -347,7 +351,7 @@ impl Config {
     /// Test configuration. Used for in-memory
     pub fn testing() -> Config {
         Config {
-            bootstrap:  Bootstrap::Ipfs,
+            bootstrap: Bootstrap::Ipfs,
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },

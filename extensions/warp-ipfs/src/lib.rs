@@ -10,6 +10,10 @@ use config::Config;
 use futures::channel::mpsc::{channel, unbounded};
 use futures::stream::BoxStream;
 use futures::{AsyncReadExt, StreamExt};
+use ipfs::libp2p::Transport;
+use ipfs::libp2p::core::muxing::StreamMuxerBox;
+use ipfs::libp2p::core::transport::{Boxed, OrTransport, MemoryTransport};
+use ipfs::libp2p::core::upgrade::Version;
 use ipfs::libp2p::swarm::SwarmEvent;
 use ipfs::p2p::{
     ConnectionLimits, IdentifyConfiguration, KadConfig, KadInserts, PubsubConfig, TransportConfig,
@@ -348,6 +352,32 @@ impl WarpIpfs {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
             });
+
+        if config.ipfs_setting.memory_transport {
+            uninitialized = uninitialized.set_custom_transport(Box::new(
+                |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
+                    let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+                    let transport = match relay {
+                        Some(relay) => OrTransport::new(relay, MemoryTransport::default())
+                            .upgrade(Version::V1)
+                            .authenticate(noise_config)
+                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                            .timeout(Duration::from_secs(20))
+                            .boxed(),
+                        None => MemoryTransport::default()
+                            .upgrade(Version::V1)
+                            .authenticate(noise_config)
+                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                            .timeout(Duration::from_secs(20))
+                            .boxed(),
+                    };
+
+                    Ok(transport)
+                },
+            ));
+        }
 
         if config.ipfs_setting.portmapping {
             uninitialized = uninitialized.enable_upnp();
