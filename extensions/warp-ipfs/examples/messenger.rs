@@ -64,7 +64,7 @@ struct Opt {
 async fn setup<P: AsRef<Path>>(
     path: Option<P>,
     passphrase: Zeroizing<String>,
-    experimental: bool,
+    _: bool,
     opt: &Opt,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>)> {
     let tesseract = match path.as_ref() {
@@ -81,8 +81,8 @@ async fn setup<P: AsRef<Path>>(
     tesseract.unlock(passphrase.as_bytes())?;
 
     let mut config = match path.as_ref() {
-        Some(path) => warp_ipfs::config::Config::production(path, experimental),
-        None => warp_ipfs::config::Config::testing(experimental),
+        Some(path) => warp_ipfs::config::Config::production(path),
+        None => warp_ipfs::config::Config::testing(),
     };
 
     if !opt.direct || !opt.no_discovery {

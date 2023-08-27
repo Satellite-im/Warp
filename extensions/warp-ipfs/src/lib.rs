@@ -223,7 +223,7 @@ impl WarpIpfs {
         let config = self.config.clone();
 
         let empty_bootstrap = match &config.bootstrap {
-            Bootstrap::Ipfs | Bootstrap::Experimental => false,
+            Bootstrap::Ipfs => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
             Bootstrap::None => true,
         };
