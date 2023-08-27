@@ -7,14 +7,13 @@ mod utils;
 
 use chrono::{DateTime, Utc};
 use config::Config;
-use either::Either;
 use futures::channel::mpsc::{channel, unbounded};
 use futures::stream::BoxStream;
 use futures::{AsyncReadExt, StreamExt};
-use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
 use ipfs::p2p::{
-    ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
+    ConnectionLimits, IdentifyConfiguration, KadConfig, KadInserts, PubsubConfig, TransportConfig,
+    UpdateMode,
 };
 
 use rust_ipfs as ipfs;
@@ -270,44 +269,7 @@ impl WarpIpfs {
 
         let mut opts = IpfsOptions {
             bootstrap: config.bootstrap.address(),
-            mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on.clone(),
-            dcutr: config.ipfs_setting.relay_client.enable,
-            relay: config.ipfs_setting.relay_client.enable,
-            relay_server: config.ipfs_setting.relay_server.enable,
-            keep_alive: true,
-            identify_configuration: Some({
-                let mut idconfig = IdentifyConfiguration {
-                    cache: 100,
-                    push_update: true,
-                    protocol_version: "/satellite/warp/0.1".into(),
-                    ..Default::default()
-                };
-                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
-                    idconfig.agent_version = agent.clone();
-                }
-                idconfig
-            }),
-            kad_configuration: Some(Either::Right({
-                let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
-                conf.set_query_timeout(std::time::Duration::from_secs(60));
-                conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
-                conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
-                conf.set_kbucket_inserts(KademliaBucketInserts::Manual);
-                conf
-            })),
-            swarm_configuration: Some(swarm_configuration),
-            transport_configuration: Some(TransportConfig {
-                yamux_update_mode: UpdateMode::Read,
-                mplex_max_buffer_size: usize::MAX / 2,
-                enable_quic: false,
-                ..Default::default()
-            }),
-            pubsub_config: Some(PubsubConfig {
-                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
-                ..Default::default()
-            }),
-            port_mapping: config.ipfs_setting.portmapping,
             ..Default::default()
         };
 
@@ -331,9 +293,26 @@ impl WarpIpfs {
         };
 
         info!("Starting ipfs");
-        let ipfs = UninitializedIpfs::with_opt(opts)
+        let mut uninitialized = UninitializedIpfs::with_opt(opts)
             .set_custom_behaviour(behaviour)
             .set_keypair(keypair)
+            .set_transport_configuration(TransportConfig {
+                yamux_update_mode: UpdateMode::Read,
+                ..Default::default()
+            })
+            .set_swarm_configuration(swarm_configuration)
+            .set_identify_configuration({
+                let mut idconfig = IdentifyConfiguration {
+                    cache: 100,
+                    push_update: true,
+                    protocol_version: "/satellite/warp/0.1".into(),
+                    ..Default::default()
+                };
+                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
+                    idconfig.agent_version = agent.clone();
+                }
+                idconfig
+            })
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
@@ -355,8 +334,34 @@ impl WarpIpfs {
                     }
                 }
             })
-            .start()
-            .await?;
+            .set_kad_configuration(
+                KadConfig {
+                    query_timeout: std::time::Duration::from_secs(60),
+                    publication_interval: Some(Duration::from_secs(30 * 60)),
+                    provider_record_ttl: Some(Duration::from_secs(60 * 60)),
+                    insert_method: KadInserts::Manual,
+                    ..Default::default()
+                },
+                Default::default(),
+            )
+            .set_pubsub_configuration(PubsubConfig {
+                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
+                ..Default::default()
+            });
+
+        if config.ipfs_setting.portmapping {
+            uninitialized = uninitialized.enable_upnp();
+        }
+
+        if config.ipfs_setting.mdns.enable {
+            uninitialized = uninitialized.enable_mdns();
+        }
+
+        if config.ipfs_setting.relay_client.enable {
+            uninitialized = uninitialized.enable_relay(true);
+        }
+
+        let ipfs = uninitialized.start().await?;
 
         if config.ipfs_setting.bootstrap && !empty_bootstrap {
             //TODO: determine if bootstrap should run in intervals
