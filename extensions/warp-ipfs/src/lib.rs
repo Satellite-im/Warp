@@ -307,8 +307,6 @@ impl WarpIpfs {
             .set_swarm_configuration(swarm_configuration)
             .set_identify_configuration({
                 let mut idconfig = IdentifyConfiguration {
-                    cache: 100,
-                    push_update: true,
                     protocol_version: "/satellite/warp/0.1".into(),
                     ..Default::default()
                 };
