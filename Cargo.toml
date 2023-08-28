@@ -90,4 +90,4 @@ opencv = { version = "0.82", features=["clang-runtime"] }
 
 warp = { path = "./warp" }
 warp-ipfs = { path = "./extensions/warp-ipfs" }
-warp-fs-memory = { path = "./extensions/warp-blink/wrtc" }
+warp-blink-wrtc = { path = "./extensions/warp-blink-wrtc" }
