@@ -8,9 +8,9 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 clap = { version = "4.0", features=["derive"] }
-opencv = { workspace = true }
 tokio = { workspace = true, features=["full"] }
 
+opencv = { version = "0.82", features=["clang-runtime"] }
 av-data = { workspace = true }
 libaom = { workspace = true }
 
