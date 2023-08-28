@@ -10,11 +10,11 @@ use config::Config;
 use futures::channel::mpsc::{channel, unbounded};
 use futures::stream::BoxStream;
 use futures::{AsyncReadExt, StreamExt};
-use ipfs::libp2p::Transport;
 use ipfs::libp2p::core::muxing::StreamMuxerBox;
-use ipfs::libp2p::core::transport::{Boxed, OrTransport, MemoryTransport};
+use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 use ipfs::libp2p::core::upgrade::Version;
 use ipfs::libp2p::swarm::SwarmEvent;
+use ipfs::libp2p::Transport;
 use ipfs::p2p::{
     ConnectionLimits, IdentifyConfiguration, KadConfig, KadInserts, PubsubConfig, TransportConfig,
     UpdateMode,
@@ -59,7 +59,8 @@ use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
 use ipfs::{
-    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
+    DhtMode, Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath,
+    UninitializedIpfs,
 };
 use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
@@ -390,6 +391,10 @@ impl WarpIpfs {
         }
 
         let ipfs = uninitialized.start().await?;
+
+        if config.ipfs_setting.dht_client {
+            ipfs.dht_mode(DhtMode::Client).await?;
+        }
 
         if config.ipfs_setting.bootstrap && !empty_bootstrap {
             //TODO: determine if bootstrap should run in intervals

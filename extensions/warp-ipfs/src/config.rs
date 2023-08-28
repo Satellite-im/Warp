@@ -197,6 +197,7 @@ pub struct IpfsSetting {
     pub agent_version: Option<String>,
     /// Used for testing with a memory transport
     pub memory_transport: bool,
+    pub dht_client: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
