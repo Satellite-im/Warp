@@ -87,3 +87,7 @@ libaom = { git="https://github.com/rust-av/aom-rs", rev="7aca932ea5f6cc1f0e9eb54
 mp4 = { git="https://github.com/sdwoodbury/mp4-rust", rev="9887024513f59e5fcda9f44442b2a3a2cdfe9706" }
 opus = { git = "https://github.com/sdwoodbury/opus-rs", rev="3f07443dac1907dbcc847181a0d40d561592072b" }
 opencv = { version = "0.82", features=["clang-runtime"] }
+
+warp = { path = "./warp" }
+warp-ipfs = { path = "./extensions/warp-ipfs" }
+warp-fs-memory = { path = "./extensions/warp-blink/wrtc" }
