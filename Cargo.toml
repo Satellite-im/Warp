@@ -10,6 +10,8 @@ repository = "https://github.com/Satellite-im/Warp"
 members = ["extensions/*", "warp", "warp/warp-derive", "tools/*"]
 exclude = ["deprecated/*", "tools/opencv-test"]
 
+resolver = "2"
+
 [workspace.dependencies]
 
 # Async and futures crates
