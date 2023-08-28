@@ -69,8 +69,7 @@ pub fn encode_aom(output_file: &str) -> Result<()> {
     });
 
     let color_scale = ColorScale::HdTv;
-    let is_lossy = true;
-    let multiplier: usize = if is_lossy { 1 } else { 2 };
+    let multiplier: usize = 1;
 
     let frame_width = stream_descr.width;
     let frame_height = stream_descr.height;
@@ -110,11 +109,7 @@ pub fn encode_aom(output_file: &str) -> Result<()> {
             let s = std::ptr::slice_from_raw_parts(p, len as _);
             let s: &[u8] = unsafe { &*s };
 
-            if is_lossy {
-                bgr_to_yuv420_lossy(s, frame_width as _, frame_height as _, color_scale)
-            } else {
-                bgr_to_yuv420(s, frame_width as _, frame_height as _, color_scale)
-            }
+            rgb_to_yuv420(s, frame_width as _, frame_height as _, color_scale)
         };
 
         let yuv_buf = YUV420Buf {
