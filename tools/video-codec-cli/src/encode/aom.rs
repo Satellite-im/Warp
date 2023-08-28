@@ -10,7 +10,7 @@ use eye::{
         PlatformContext,
     },
 };
-use std::sync::mpsc;
+use std::{sync::mpsc, time::{Instant, Duration}};
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
@@ -42,7 +42,7 @@ pub fn encode_aom(output_file: &str) -> Result<()> {
 
             // Strive for HD (1280 x 720)
             let distance = |width: u32, height: u32| {
-                f32::sqrt(((1280 - width as i32).pow(2) + (720 - height as i32).pow(2)) as f32)
+                f32::sqrt(((640 - width as i32).pow(2) + (480 - height as i32).pow(2)) as f32)
             };
 
             if distance(s1.width, s1.height) < distance(s2.width, s2.height) {
@@ -63,9 +63,13 @@ pub fn encode_aom(output_file: &str) -> Result<()> {
     let mut stream = dev.start_stream(&stream_descr)?;
     let (tx, rx) = mpsc::channel();
 
+    println!("starting stream with description: {stream_descr:?}");
+
     std::thread::spawn(move || loop {
         let buf = stream.next().unwrap().unwrap();
-        tx.send(buf.to_vec()).unwrap();
+        if tx.send(buf.to_vec()).is_err() {
+            return;
+        }
     });
 
     let color_scale = ColorScale::HdTv;
@@ -73,8 +77,7 @@ pub fn encode_aom(output_file: &str) -> Result<()> {
 
     let frame_width = stream_descr.width;
     let frame_height = stream_descr.height;
-    // todo: convert this to 1/duration to get fps
-    let _fps = stream_descr.interval;
+    let fps = 1000.0 / (stream_descr.interval.as_millis() as f64);
 
     let output_file = OpenOptions::new()
         .read(false)
@@ -99,9 +102,18 @@ pub fn encode_aom(output_file: &str) -> Result<()> {
     let pixel_format = Arc::new(pixel_format);
 
     // run the loop for about 10 seconds
-    let mut frame_idx: i32 = 1;
+    let start_time = Instant::now();
     while let Ok(frame) = rx.recv() {
-        println!("read new frame");
+       // println!("read new frame");
+
+       let frame_time = Duration::from(Instant::now() - start_time);
+       let frame_time_ms = frame_time.as_millis();
+
+       if frame_time_ms > 10000 {
+        break;
+       }
+
+       let timestamp = frame_time_ms as f64 / fps;
 
         let yuv = {
             let p = frame.as_ptr();
@@ -128,26 +140,21 @@ pub fn encode_aom(output_file: &str) -> Result<()> {
             )),
             buf: Box::new(yuv_buf),
             t: TimeInfo {
-                pts: Some(frame_idx as i64 * 60),
+                pts: Some(timestamp as i64),
                 ..Default::default()
             },
         };
 
-        println!("encoding");
+       // println!("encoding");
         if let Err(e) = encoder.encode(&frame) {
             bail!("encoding error: {e}");
         }
 
-        println!("calling get_packet");
+       // println!("calling get_packet");
         while let Some(packet) = encoder.get_packet() {
             if let AOMPacket::Packet(p) = packet {
                 let _ = writer.write(&p.data)?;
             }
-        }
-
-        frame_idx += 1;
-        if frame_idx >= 300 {
-            break;
         }
     }
     writer.flush()?;
