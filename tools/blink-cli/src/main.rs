@@ -357,7 +357,6 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let mut blink: Box<dyn Blink> = warp_blink_wrtc::BlinkImpl::new(multipass.clone()).await?;
-    let multipass = Arc::new(Mutex::new(multipass));
     let blink_event_stream = blink.get_event_stream().await?;
     let blink_handle = tokio::spawn(async {
         if let Err(e) = handle_blink_event_stream(blink_event_stream).await {
