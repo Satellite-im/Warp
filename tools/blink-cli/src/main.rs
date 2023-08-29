@@ -15,7 +15,7 @@ use warp::{
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
 
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 use std::str::FromStr;
 
@@ -122,7 +122,7 @@ enum Repl {
 
 async fn handle_command(
     blink: &mut Box<dyn Blink>,
-    multipass: &Box<dyn MultiPass>,
+    multipass: &mut Box<dyn MultiPass>,
     own_id: &Identity,
     cmd: Repl,
 ) -> anyhow::Result<()> {
@@ -132,7 +132,7 @@ async fn handle_command(
         }
         Repl::Dial { id } => {
             let did = DID::from_str(&id)?;
-            let _ = multipass.lock().await.send_request(&did).await;
+            let _ = multipass.send_request(&did).await;
             let codecs = CODECS.read().await;
             blink
                 .offer_call(None, vec![did], codecs.webrtc.clone())
@@ -284,7 +284,7 @@ async fn handle_blink_event_stream(mut stream: BlinkEventStream) -> anyhow::Resu
 }
 
 async fn handle_multipass_event_stream(
-    multipass: Box<dyn MultiPass>,
+    mut multipass: Box<dyn MultiPass>,
     mut stream: MultiPassEventStream,
 ) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
@@ -387,7 +387,7 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        if let Err(e) = handle_command(&mut blink, &multipass, &own_identity, cli).await {
+        if let Err(e) = handle_command(&mut blink, &mut multipass, &own_identity, cli).await {
             println!("command failed: {e}");
         }
     }
