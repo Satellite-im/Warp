@@ -137,12 +137,16 @@ async fn main() -> anyhow::Result<()> {
         //raising fd limit
     }
 
+    let mut _log_guard = None;
+
     if !opt.stdout_log {
         let file_appender = tracing_appender::rolling::hourly(
             opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
             "warp_rg_ipfs_messenger.log",
         );
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        _log_guard = Some(_guard);
 
         tracing_subscriber::fmt()
             .with_writer(non_blocking)
