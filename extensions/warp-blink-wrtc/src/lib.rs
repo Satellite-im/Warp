@@ -680,13 +680,17 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                                 }
                                 // have to use data after active_call or there will be 2 mutable borrows, which isn't allowed
                                 webrtc_controller.hang_up(&peer).await;
-                                // this log should appear after the logs emitted by hang_up
-                                if all_closed {
+                                // only autoclose for 2-person calls (group or direct).
+                                // library user should respond to CallTerminated event.
+                                if all_closed && active_call.call.participants().len() == 2 {
                                     log::info!("all participants have successfully been disconnected");
                                     if let Err(e) = webrtc_controller.deinit().await {
                                         log::error!("webrtc deinit failed: {e}");
                                     }
+                                    rtp_logger::deinit().await;
                                     host_media::reset().await;
+                                    let event = BlinkEventKind::CallTerminated { call_id };
+                                    let _ = ch.send(event);
                                     // terminate the task on purpose.
                                     return;
                                 }
@@ -983,6 +987,8 @@ impl Blink for BlinkImpl {
 
             let r = self.webrtc_controller.write().await.deinit().await;
             host_media::reset().await;
+            // may be duplicate
+            rtp_logger::deinit().await;
             let _ = r?;
             Ok(())
         } else {

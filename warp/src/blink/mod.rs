@@ -120,6 +120,9 @@ pub enum BlinkEventKind {
     /// A call is no longer offered
     #[display(fmt = "CallCancelled")]
     CallCancelled { call_id: Uuid },
+    /// Blink automatically ended the call
+    #[display(fmt = "CallTerminated")]
+    CallTerminated { call_id: Uuid },
     /// Someone joined the call
     #[display(fmt = "ParticipantJoined")]
     ParticipantJoined { call_id: Uuid, peer_id: DID },

@@ -74,6 +74,7 @@ pub async fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
 }
 
 pub async fn deinit() {
+    log::debug!("rtp_logger::deinit()");
     let tx = match RTP_LOGGER.write().take() {
         Some(logger) => {
             logger.should_quit.store(true, Ordering::Relaxed);
