@@ -284,7 +284,7 @@ async fn handle_blink_event_stream(mut stream: BlinkEventStream) -> anyhow::Resu
 }
 
 async fn handle_multipass_event_stream(
-    multipass: Arc<Mutex<Box<dyn MultiPass>>>,
+    multipass: Box<dyn MultiPass>,
     mut stream: MultiPassEventStream,
 ) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
