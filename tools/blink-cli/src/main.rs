@@ -289,7 +289,7 @@ async fn handle_multipass_event_stream(
 ) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
         if let MultiPassEventKind::FriendRequestReceived { from } = evt {
-            let _ = multipass.lock().await.accept_request(&from).await;
+            let _ = multipass.accept_request(&from).await;
         }
     }
 
