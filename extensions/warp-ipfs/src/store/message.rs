@@ -3418,6 +3418,11 @@ impl MessageStore {
                 }
             }
 
+            if attachments.is_empty() {
+                yield AttachmentKind::Pending(Err(Error::IoError(std::io::Error::new(std::io::ErrorKind::Other, "No files are attached"))));
+                return
+            }
+
             let final_results = {
                 let mut store = store.clone();
                 async move {
