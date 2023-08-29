@@ -203,7 +203,7 @@ impl MessageStore {
                 let did = &*(store.did.clone());
                 let Ok(stream) = store.ipfs.pubsub_subscribe(did.messaging()).await else {
                     error!("Unable to create subscription stream. Terminating task");
-                    //TODO: Maybe panic?
+                    //TODO: Maybe panic? 
                     return;
                 };
                 futures::pin_mut!(stream);
@@ -339,16 +339,16 @@ impl MessageStore {
         info!("Event Task started for {conversation_id}");
         let did = self.did.clone();
         let Ok(mut conversation) = self.get_conversation(conversation_id).await else {
-            return;
+            return
         };
         conversation.recipients.clear();
 
         let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
-            return;
+            return
         };
 
         let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
-            return;
+            return
         };
 
         let conversation_type = conversation.conversation_type;
@@ -431,15 +431,11 @@ impl MessageStore {
         info!("RequestResponse Task started for {conversation_id}");
         let did = self.did.clone();
         let Ok(conversation) = self.get_conversation(conversation_id).await else {
-            return;
+            return
         };
 
-        let Ok(stream) = self
-            .ipfs
-            .pubsub_subscribe(conversation.reqres_topic(&did))
-            .await
-        else {
-            return;
+        let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.reqres_topic(&did)).await else {
+            return
         };
         drop(conversation);
 
@@ -463,11 +459,9 @@ impl MessageStore {
                                         kind,
                                     } => match kind {
                                         ConversationRequestKind::Key => {
-                                            let Ok(conversation) =
-                                                store.get_conversation(conversation_id).await
-                                            else {
-                                                continue;
-                                            };
+                                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
+                                                    continue
+                                                };
 
                                             if !matches!(
                                                 conversation.conversation_type,
@@ -611,11 +605,9 @@ impl MessageStore {
                                     } => match kind {
                                         ConversationResponseKind::Key { key } => {
                                             let sender = payload.sender();
-                                            let Ok(conversation) =
-                                                store.get_conversation(conversation_id).await
-                                            else {
-                                                continue;
-                                            };
+                                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
+                                                    continue
+                                                };
 
                                             if !matches!(
                                                 conversation.conversation_type,
@@ -1591,7 +1583,9 @@ impl MessageStore {
                 }
 
                 let Some(creator) = conversation.creator.as_ref() else {
-                    return Err(anyhow::anyhow!("Group conversation requires a creator"));
+                    return Err(anyhow::anyhow!(
+                        "Group conversation requires a creator"
+                    ));
                 };
 
                 let own_did = &*self.did;
@@ -2248,7 +2242,7 @@ impl MessageStore {
 
     pub async fn load_conversations(&self, background: bool) -> Result<(), Error> {
         let Some(path) = self.path.as_ref() else {
-            return Ok(());
+            return Ok(())
         };
 
         if !path.is_dir() {
@@ -2261,11 +2255,8 @@ impl MessageStore {
             let entry = entry?;
             let entry_path = entry.path();
             if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
-                let Some(filename) = entry_path
-                    .file_name()
-                    .map(|file| file.to_string_lossy().to_string())
-                else {
-                    continue;
+                let Some(filename) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()) else {
+                    continue
                 };
 
                 //TODO: Maybe check file extension instead
@@ -2277,18 +2268,15 @@ impl MessageStore {
                     .unwrap_or_default();
 
                 let Some(file_id) = slices.first() else {
-                    continue;
+                    continue
                 };
 
                 let Ok(id) = Uuid::from_str(file_id) else {
-                    continue;
+                    continue
                 };
 
-                let Ok(cid_str) = tokio::fs::read(entry_path)
-                    .await
-                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                else {
-                    continue;
+                let Ok(cid_str) = tokio::fs::read(entry_path).await.map(|bytes| String::from_utf8_lossy(&bytes).to_string()) else {
+                    continue
                 };
                 if let Ok(cid) = cid_str.parse::<Cid>() {
                     if keystore {
