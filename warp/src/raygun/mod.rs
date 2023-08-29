@@ -785,15 +785,14 @@ pub enum EmbedState {
     Disable,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
-    Constellation,
+    Constellation { path: String},
 
     /// Use file from disk
-    #[default]
-    Disk,
+    Disk { path: PathBuf},
 }
 
 #[async_trait::async_trait]
@@ -933,8 +932,7 @@ pub trait RayGunAttachment: Sync + Send {
         &mut self,
         _: Uuid,
         _: Option<Uuid>,
-        _: Location,
-        _: Vec<PathBuf>,
+        _: Vec<Location>,
         _: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
         Err(Error::Unimplemented)

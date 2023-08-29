@@ -3216,14 +3216,13 @@ impl MessageStore {
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
-        location: Location,
-        files: Vec<PathBuf>,
+        locations: Vec<Location>,
         messages: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
-        if files.len() > 8 {
+        if locations.len() > 8 {
             return Err(Error::InvalidLength {
                 context: "files".into(),
-                current: files.len(),
+                current: locations.len(),
                 minimum: Some(1),
                 maximum: Some(8),
             });
@@ -3258,13 +3257,12 @@ impl MessageStore {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        let files = files
+        let files = locations
             .iter()
-            .filter(|path| {
-                if matches!(location, Location::Disk) {
-                    path.is_file()
-                } else {
-                    true
+            .filter(|location| {
+                match location {
+                    Location::Disk {path}=> path.is_file(), 
+                    _ => true,
                 }
             })
             .cloned()
@@ -3285,9 +3283,9 @@ impl MessageStore {
             let mut streams: SelectAll<_> = SelectAll::new();
 
             for file in files {
-                match location {
-                    Location::Constellation => {
-                        let path = file.display().to_string();
+                match file {
+                    Location::Constellation {path} => {
+                        let path = path.clone();
                         match constellation
                             .root_directory()
                             .get_item_by_path(&path)
@@ -3303,8 +3301,8 @@ impl MessageStore {
                             None => continue,
                         }
                     }
-                    Location::Disk => {
-                        let mut filename = match file.file_name() {
+                    Location::Disk {path} => {
+                        let mut filename = match path.file_name() {
                             Some(file) => file.to_string_lossy().to_string(),
                             None => continue,
                         };
@@ -3353,7 +3351,7 @@ impl MessageStore {
                             continue;
                         }
 
-                        let file = file.display().to_string();
+                        let file = path.display().to_string();
 
                         in_stack.push(filename.clone());
 

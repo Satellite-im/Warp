@@ -1415,12 +1415,11 @@ impl RayGunAttachment for WarpIpfs {
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
-        location: Location,
-        files: Vec<PathBuf>,
+        locations: Vec<Location>,
         message: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
         self.messaging_store()?
-            .attach(conversation_id, message_id, location, files, message)
+            .attach(conversation_id, message_id, locations, message)
             .await
     }
 
