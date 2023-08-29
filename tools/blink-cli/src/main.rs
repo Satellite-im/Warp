@@ -57,7 +57,9 @@ static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
 
 #[derive(Parser, Debug, Eq, PartialEq)]
 struct Args {
-    /// the warp directory to use
+    /// a folder to reuse from a previous invocation or
+    /// a place to create a new folder to be used by warp.
+    /// ex: /path/to/<folder name>
     path: String,
 }
 

@@ -21,13 +21,15 @@ pub struct LoggerInstance {
 pub struct RtpHeaderWrapper {
     val: Header,
     id: String,
+    log_time: u128,
 }
 
 impl LoggerInstance {
-    pub fn log(&self, header: Header) {
+    pub fn log(&self, header: Header, log_time: u128) {
         let _ = self.tx.try_send(RtpHeaderWrapper {
             val: header,
             id: self.peer_id.clone(),
+            log_time,
         });
     }
 }
@@ -72,6 +74,7 @@ pub async fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
 }
 
 pub async fn deinit() {
+    log::debug!("rtp_logger::deinit()");
     let tx = match RTP_LOGGER.write().take() {
         Some(logger) => {
             logger.should_quit.store(true, Ordering::Relaxed);
@@ -83,6 +86,7 @@ pub async fn deinit() {
         .send(RtpHeaderWrapper {
             val: Header::default(),
             id: String::from("end"),
+            log_time: 0,
         })
         .await;
 }
@@ -114,7 +118,15 @@ fn run(
     log::debug!("starting rtp logger");
     let f = fs::File::create(rtp_log_path)?;
     let mut writer = BufWriter::new(f);
-    writer.write_all("peer_id,timestamp,sequence_number\n".as_bytes())?;
+    writer.write_all("peer_id,packet_time_diff,log_time_diff,sequence_number_diff\n".as_bytes())?;
+    let mut prev_log_times: std::collections::HashMap<String, u128> =
+        std::collections::HashMap::new();
+
+    let mut prev_packet_times: std::collections::HashMap<String, u32> =
+        std::collections::HashMap::new();
+
+    let mut prev_sequence_numbers: std::collections::HashMap<String, u16> =
+        std::collections::HashMap::new();
 
     while !should_quit.load(Ordering::Relaxed) {
         while let Some(wrapper) = ch.blocking_recv() {
@@ -132,10 +144,28 @@ fn run(
                 continue;
             }
 
+            let prev_time = prev_log_times
+                .entry(wrapper.id.clone())
+                .or_insert(wrapper.log_time);
+            let log_time_diff = wrapper.log_time.checked_sub(*prev_time).unwrap_or_default();
+            *prev_time = wrapper.log_time;
+
+            let prev_time = prev_packet_times
+                .entry(wrapper.id.clone())
+                .or_insert(wrapper.val.timestamp);
+            let packet_time_diff = wrapper.val.timestamp.checked_sub(*prev_time).unwrap_or_default();
+            *prev_time = wrapper.val.timestamp;
+
+            let prev_num = prev_sequence_numbers
+                .entry(wrapper.id.clone())
+                .or_insert(wrapper.val.sequence_number);
+            let sequence_num_diff = wrapper.val.sequence_number.checked_sub(*prev_num).unwrap_or_default();
+            *prev_num = wrapper.val.sequence_number;
+
             writer.write_all(
                 format!(
-                    "{},{},{}\n",
-                    wrapper.id, wrapper.val.timestamp, wrapper.val.sequence_number
+                    "{},{},{},{}\n",
+                    wrapper.id, packet_time_diff, log_time_diff, sequence_num_diff
                 )
                 .as_bytes(),
             )?;
