@@ -7,12 +7,15 @@ use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
-use warp::blink::{
-    AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
-    MimeType, VideoCodec,
+use warp::{
+    blink::{
+        AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
+        MimeType, VideoCodec,
+    },
+    multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use std::str::FromStr;
 
@@ -119,6 +122,7 @@ enum Repl {
 
 async fn handle_command(
     blink: &mut Box<dyn Blink>,
+    multipass: &Arc<Mutex<Box<dyn MultiPass>>>,
     own_id: &Identity,
     cmd: Repl,
 ) -> anyhow::Result<()> {
@@ -128,6 +132,7 @@ async fn handle_command(
         }
         Repl::Dial { id } => {
             let did = DID::from_str(&id)?;
+            let _ = multipass.lock().await.send_request(&did).await;
             let codecs = CODECS.read().await;
             blink
                 .offer_call(None, vec![did], codecs.webrtc.clone())
@@ -252,7 +257,7 @@ async fn handle_command(
     Ok(())
 }
 
-async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
+async fn handle_blink_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
         // get rid of noisy logs
         if !matches!(evt, BlinkEventKind::ParticipantSpeaking { .. }) {
@@ -272,6 +277,19 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
                 lock.replace(call_id);
             }
             _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_multipass_event_stream(
+    multipass: Arc<Mutex<Box<dyn MultiPass>>>,
+    mut stream: MultiPassEventStream,
+) -> anyhow::Result<()> {
+    while let Some(evt) = stream.next().await {
+        if let MultiPassEventKind::FriendRequestReceived { from } = evt {
+            let _ = multipass.lock().await.accept_request(&from).await;
         }
     }
 
@@ -338,11 +356,20 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut blink: Box<dyn Blink> = warp_blink_wrtc::BlinkImpl::new(multipass).await?;
-    let event_stream = blink.get_event_stream().await?;
-    let handle = tokio::spawn(async {
-        if let Err(e) = handle_event_stream(event_stream).await {
-            println!("handle event stream failed: {e}");
+    let mut blink: Box<dyn Blink> = warp_blink_wrtc::BlinkImpl::new(multipass.clone()).await?;
+    let multipass = Arc::new(Mutex::new(multipass));
+    let blink_event_stream = blink.get_event_stream().await?;
+    let blink_handle = tokio::spawn(async {
+        if let Err(e) = handle_blink_event_stream(blink_event_stream).await {
+            println!("handle blink event stream failed: {e}");
+        }
+    });
+
+    let multipass_event_stream = multipass.lock().await.subscribe().await?;
+    let multipass2 = multipass.clone();
+    let multipass_handle = tokio::spawn(async {
+        if let Err(e) = handle_multipass_event_stream(multipass2, multipass_event_stream).await {
+            println!("handle multipass event stream failed: {e}");
         }
     });
 
@@ -361,12 +388,13 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        if let Err(e) = handle_command(&mut blink, &own_identity, cli).await {
+        if let Err(e) = handle_command(&mut blink, &multipass, &own_identity, cli).await {
             println!("command failed: {e}");
         }
     }
 
-    handle.abort();
+    blink_handle.abort();
+    multipass_handle.abort();
 
     Ok(())
 }
