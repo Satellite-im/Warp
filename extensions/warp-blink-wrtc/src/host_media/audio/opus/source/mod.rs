@@ -191,7 +191,7 @@ fn create_source_track(
         })?;
 
     let join_handle = tokio::spawn(async move {
-        // let logger = rtp_logger::get_instance("self-audio".to_string());
+        let logger = crate::rtp_logger::get_instance("self-audio".to_string());
 
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
@@ -230,9 +230,9 @@ fn create_source_track(
                             }
 
                             for packet in &packets {
-                                // if let Some(logger) = logger.as_ref() {
-                                //     logger.log(packet.header.clone())
-                                // }
+                                if let Some(logger) = logger.as_ref() {
+                                    logger.log(packet.header.clone())
+                                }
 
                                 if let Err(e) = track
                                     .write_rtp_with_extensions(

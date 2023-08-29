@@ -10,7 +10,7 @@
 #![allow(dead_code)]
 
 mod host_media;
-// mod rtp_logger;
+mod rtp_logger;
 mod signaling;
 mod simple_webrtc;
 mod store;
@@ -135,6 +135,7 @@ impl Drop for BlinkImpl {
             }
             host_media::audio::automute::stop();
             host_media::reset().await;
+            rtp_logger::deinit().await;
             log::debug!("deinit finished");
         });
     }
@@ -266,6 +267,7 @@ impl BlinkImpl {
     }
 
     async fn init_call(&mut self, call: CallInfo) -> anyhow::Result<()> {
+        rtp_logger::init(call.call_id(), std::path::PathBuf::from("")).await?;
         let lock = self.ipfs.read().await;
         let ipfs = match lock.as_ref() {
             Some(r) => r,

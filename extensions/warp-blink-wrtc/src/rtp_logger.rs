@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Result};
 use once_cell::sync::Lazy;
+use std::time::Instant;
 use std::{
     fs::{self, create_dir_all},
     io::{BufWriter, Write},
@@ -114,7 +115,8 @@ fn run(
     log::debug!("starting rtp logger");
     let f = fs::File::create(rtp_log_path)?;
     let mut writer = BufWriter::new(f);
-    writer.write_all("peer_id,timestamp,sequence_number\n".as_bytes())?;
+    writer.write_all("peer_id,peer_timestamp,local_timestamp,sequence_number\n".as_bytes())?;
+    let logger_start_time = Instant::now();
 
     while !should_quit.load(Ordering::Relaxed) {
         while let Some(wrapper) = ch.blocking_recv() {
@@ -132,10 +134,12 @@ fn run(
                 continue;
             }
 
+            let local_timestamp = logger_start_time.elapsed().as_millis();
+
             writer.write_all(
                 format!(
-                    "{},{},{}\n",
-                    wrapper.id, wrapper.val.timestamp, wrapper.val.sequence_number
+                    "{},{},{},{}\n",
+                    wrapper.id, wrapper.val.timestamp, local_timestamp, wrapper.val.sequence_number
                 )
                 .as_bytes(),
             )?;

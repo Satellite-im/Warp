@@ -271,7 +271,7 @@ where
 
     let automute_tx = host_media::audio::automute::AUDIO_CMD_CH.tx.clone();
 
-    // let logger = rtp_logger::get_instance(format!("{}-audio", peer_id));
+    let logger = crate::rtp_logger::get_instance(format!("{}-audio", peer_id));
 
     loop {
         match track.read(&mut b).await {
@@ -294,9 +294,9 @@ where
                     }
                 }
 
-                // if let Some(logger) = logger.as_ref() {
-                //     logger.log(rtp_packet.header.clone())
-                // }
+                if let Some(logger) = logger.as_ref() {
+                    logger.log(rtp_packet.header.clone())
+                }
 
                 if let Some(extension) = rtp_packet.header.extensions.first() {
                     // don't yet have the MediaEngine exposed. for now since there's only one extension being used, this way seems to be good enough
