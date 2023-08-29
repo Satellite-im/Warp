@@ -72,7 +72,7 @@ impl FileStore {
             }
         }
 
-        let index = Directory::default();
+        let index = Directory::new("root");
         let path = Arc::default();
         let modified = Utc::now();
         let index_cid = Arc::new(RwLock::new(index_cid));
