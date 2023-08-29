@@ -1,5 +1,5 @@
 [package]
-name = "blink-webrtc-cli"
+name = "blink-cli"
 version = "0.1.0"
 edition = "2021"
 
