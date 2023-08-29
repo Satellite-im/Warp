@@ -10,7 +10,7 @@
 #![allow(dead_code)]
 
 mod host_media;
-mod rtp_logger;
+// mod rtp_logger;
 mod signaling;
 mod simple_webrtc;
 mod store;
@@ -135,7 +135,7 @@ impl Drop for BlinkImpl {
             }
             host_media::audio::automute::stop();
             host_media::reset().await;
-            rtp_logger::deinit().await;
+            //rtp_logger::deinit().await;
             log::debug!("deinit finished");
         });
     }
@@ -267,7 +267,7 @@ impl BlinkImpl {
     }
 
     async fn init_call(&mut self, call: CallInfo) -> anyhow::Result<()> {
-        rtp_logger::init(call.call_id(), std::path::PathBuf::from("")).await?;
+        //rtp_logger::init(call.call_id(), std::path::PathBuf::from("")).await?;
         let lock = self.ipfs.read().await;
         let ipfs = match lock.as_ref() {
             Some(r) => r,
@@ -687,7 +687,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                                     if let Err(e) = webrtc_controller.deinit().await {
                                         log::error!("webrtc deinit failed: {e}");
                                     }
-                                    rtp_logger::deinit().await;
+                                    //rtp_logger::deinit().await;
                                     host_media::reset().await;
                                     let event = BlinkEventKind::CallTerminated { call_id };
                                     let _ = ch.send(event);
@@ -987,8 +987,7 @@ impl Blink for BlinkImpl {
 
             let r = self.webrtc_controller.write().await.deinit().await;
             host_media::reset().await;
-            // may be duplicate
-            rtp_logger::deinit().await;
+            //rtp_logger::deinit().await;
             let _ = r?;
             Ok(())
         } else {
