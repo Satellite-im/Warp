@@ -3474,11 +3474,6 @@ impl MessageStore {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        if constellation.id() != "warp-fs-ipfs" {
-            //Note: Temporary for now; Will get lifted in the future
-            return Err(Error::Unimplemented);
-        }
-
         let message = self.get_message(conversation, message_id).await?;
 
         if message.message_type() != MessageType::Attachment {
