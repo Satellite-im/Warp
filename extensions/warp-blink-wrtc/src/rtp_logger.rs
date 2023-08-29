@@ -147,19 +147,19 @@ fn run(
             let prev_time = prev_log_times
                 .entry(wrapper.id.clone())
                 .or_insert(wrapper.log_time);
-            let log_time_diff = wrapper.log_time - *prev_time;
+            let log_time_diff = wrapper.log_time.checked_sub(*prev_time).unwrap_or_default();
             *prev_time = wrapper.log_time;
 
             let prev_time = prev_packet_times
                 .entry(wrapper.id.clone())
                 .or_insert(wrapper.val.timestamp);
-            let packet_time_diff = wrapper.val.timestamp - *prev_time;
+            let packet_time_diff = wrapper.val.timestamp.checked_sub(*prev_time).unwrap_or_default();
             *prev_time = wrapper.val.timestamp;
 
             let prev_num = prev_sequence_numbers
                 .entry(wrapper.id.clone())
                 .or_insert(wrapper.val.sequence_number);
-            let sequence_num_diff = wrapper.val.sequence_number - *prev_num;
+            let sequence_num_diff = wrapper.val.sequence_number.checked_sub(*prev_num).unwrap_or_default();
             *prev_num = wrapper.val.sequence_number;
 
             writer.write_all(
