@@ -122,7 +122,7 @@ enum Repl {
 
 async fn handle_command(
     blink: &mut Box<dyn Blink>,
-    multipass: &Arc<Mutex<Box<dyn MultiPass>>>,
+    multipass: &Box<dyn MultiPass>,
     own_id: &Identity,
     cmd: Repl,
 ) -> anyhow::Result<()> {
