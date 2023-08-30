@@ -3418,9 +3418,15 @@ impl MessageStore {
                 }
             }
 
+
             let final_results = {
                 let mut store = store.clone();
                 async move {
+
+                    if attachments.is_empty() {
+                        return Err(Error::IoError(std::io::Error::new(std::io::ErrorKind::Other, "No files are attached")));
+                    }
+
                     let own_did = &*store.did;
                     let mut message = Message::default();
                     message.set_message_type(MessageType::Attachment);
@@ -3473,11 +3479,6 @@ impl MessageStore {
             .filesystem
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
-
-        if constellation.id() != "warp-fs-ipfs" {
-            //Note: Temporary for now; Will get lifted in the future
-            return Err(Error::Unimplemented);
-        }
 
         let message = self.get_message(conversation, message_id).await?;
 
