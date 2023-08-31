@@ -324,8 +324,16 @@ impl FriendsStore {
             }
             Event::Request => {
                 if self.is_friend(&data.sender).await? {
-                    error!("Friend already exist");
-                    anyhow::bail!(Error::FriendExist);
+                    log::debug!("Friend already exist. Remitting event");
+                    let payload = RequestResponsePayload {
+                        sender: (*self.did_key).clone(),
+                        event: Event::Accept,
+                    };
+        
+                    self.broadcast_request((&data.sender, &payload), false, false)
+                        .await?;
+
+                    return Ok(())
                 }
 
                 let list = self.list_all_raw_request().await?;
