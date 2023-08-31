@@ -58,7 +58,7 @@ impl Behaviour {
             command,
         }
     }
-    
+
     #[tracing::instrument(skip(self))]
     fn send_online_event(&mut self, peer_id: PeerId) {
         // Check to determine if we have any connections to the peer before emitting event

@@ -302,11 +302,16 @@ impl FriendsStore {
             Event::Accept => {
                 let list = self.list_all_raw_request().await?;
 
-                let Some(item) = list.iter().filter(|req| req.r#type() == RequestType::Outgoing).find(|req| data.sender.eq(req.did())).cloned() else {
-                        anyhow::bail!(
-                            "Unable to locate pending request. Already been accepted or rejected?"
-                        )
-                    };
+                let Some(item) = list
+                    .iter()
+                    .filter(|req| req.r#type() == RequestType::Outgoing)
+                    .find(|req| data.sender.eq(req.did()))
+                    .cloned()
+                else {
+                    anyhow::bail!(
+                        "Unable to locate pending request. Already been accepted or rejected?"
+                    )
+                };
 
                 // Maybe just try the function instead and have it be a hard error?
                 if self
@@ -329,11 +334,11 @@ impl FriendsStore {
                         sender: (*self.did_key).clone(),
                         event: Event::Accept,
                     };
-        
+
                     self.broadcast_request((&data.sender, &payload), false, false)
                         .await?;
 
-                    return Ok(())
+                    return Ok(());
                 }
 
                 let list = self.list_all_raw_request().await?;
