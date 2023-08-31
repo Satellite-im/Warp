@@ -1,7 +1,7 @@
 pub mod conversation;
-pub mod files;
 pub mod discovery;
 pub mod document;
+pub mod files;
 pub mod friends;
 pub mod identity;
 pub mod keystore;
