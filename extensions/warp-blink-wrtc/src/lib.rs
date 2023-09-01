@@ -168,29 +168,33 @@ impl BlinkImpl {
 
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            if let Ok(mut configs) = input_device.supported_input_configs() {
-                if !configs.any(|c| c.channels() == 1) {
-                    source_codec.channels = 2;
+            if !input_device
+                .supported_input_configs()?
+                .any(|c| c.channels() == 1)
+            {
+                source_codec.channels = 2;
 
-                    if !configs.any(|c| c.channels() == 2) {
-                        bail!(
-                            "unsupported audio input device. doesn't support 1 or 2 channel audio"
-                        );
-                    }
+                if !input_device
+                    .supported_input_configs()?
+                    .any(|c| c.channels() == 2)
+                {
+                    bail!("unsupported audio input device. doesn't support 1 or 2 channel audio");
                 }
             }
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            if let Ok(mut configs) = output_device.supported_output_configs() {
-                if !configs.any(|c| c.channels() == 1) {
-                    sink_codec.channels = 2;
+            if !output_device
+                .supported_output_configs()?
+                .any(|c| c.channels() == 1)
+            {
+                sink_codec.channels = 2;
 
-                    if !configs.any(|c| c.channels() == 2) {
-                        bail!(
-                            "unsupported audio output device. doesn't support 1 or 2 channel audio"
-                        );
-                    }
+                if !output_device
+                    .supported_output_configs()?
+                    .any(|c| c.channels() == 2)
+                {
+                    bail!("unsupported audio output device. doesn't support 1 or 2 channel audio");
                 }
             }
         }
