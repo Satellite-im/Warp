@@ -31,7 +31,6 @@ pub struct OpusSource {
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
-    source_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     // used to cancel the current packetizer when the input device is changed.
@@ -66,7 +65,7 @@ impl SourceTrack for OpusSource {
             input_device,
             track.clone(),
             webrtc_codec.clone(),
-            source_codec.clone(),
+            source_codec,
             event_ch.clone(),
             mp4_logger.clone(),
             muted2,
@@ -77,7 +76,6 @@ impl SourceTrack for OpusSource {
             event_ch,
             track,
             webrtc_codec,
-            source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
             mp4_logger,
@@ -96,14 +94,18 @@ impl SourceTrack for OpusSource {
         Ok(())
     }
     // should not require RTP renegotiation
-    fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()> {
+    fn change_input_device(
+        &mut self,
+        input_device: &cpal::Device,
+        source_codec: blink::AudioCodec,
+    ) -> Result<()> {
         self.stream.pause()?;
         self.packetizer_handle.abort();
         let (stream, handle) = create_source_track(
             input_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
-            self.source_codec.clone(),
+            source_codec,
             self.event_ch.clone(),
             self.mp4_logger.clone(),
             self.muted.clone(),

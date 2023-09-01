@@ -129,7 +129,7 @@ async fn handle_command(
             let ids = ids.iter().map(|id| {
                 DID::from_str(id).map_err(|e| format!("error for peer id {}: {}", id, e))
             });
-            let errs = ids.clone().filter_map(|x| x.err()).map(|x| x.to_string());
+            let errs = ids.clone().filter_map(|x| x.err());
             let ids = ids.filter_map(|x| x.ok());
 
             let errs: Vec<String> = errs.collect();
