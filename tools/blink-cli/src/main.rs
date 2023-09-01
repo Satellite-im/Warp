@@ -258,7 +258,10 @@ async fn handle_command(
 async fn handle_blink_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
         // get rid of noisy logs
-        if !matches!(evt, BlinkEventKind::ParticipantSpeaking { .. }) {
+        if !matches!(
+            evt,
+            BlinkEventKind::ParticipantSpeaking { .. } | BlinkEventKind::SelfSpeaking
+        ) {
             println!("BlinkEvent: {evt}");
         }
 
