@@ -362,7 +362,7 @@ impl BlinkImpl {
                     1 => Some(1),
                     2 => match acc {
                         None => Some(2),
-                        Some(1) => acc,
+                        Some(1) | Some(2) => acc,
                         _ => unreachable!(""),
                     },
                     _ => acc,
@@ -390,7 +390,7 @@ impl BlinkImpl {
                     1 => Some(1),
                     2 => match acc {
                         None => Some(2),
-                        Some(1) => acc,
+                        Some(1) | Some(2) => acc,
                         _ => unreachable!(""),
                     },
                     _ => acc,
