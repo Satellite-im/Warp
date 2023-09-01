@@ -31,7 +31,6 @@ use warp_ipfs::{
 mod logger;
 
 struct Codecs {
-    webrtc: AudioCodec,
     audio: AudioCodec,
     _video: VideoCodec,
     _screen_share: VideoCodec,
@@ -40,26 +39,7 @@ struct Codecs {
 static OFFERED_CALL: Lazy<Mutex<Option<Uuid>>> = Lazy::new(|| Mutex::new(None));
 
 static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
-    // make it easier to use the blink-cli on devices which can't use one channel audio.
-    let mut channels = 1;
-    let cpal_host = cpal::default_host();
-    if let Some(input_device) = cpal_host.default_input_device() {
-        if let Ok(mut configs) = input_device.supported_input_configs() {
-            if !configs.any(|c| c.channels() == channels) {
-                if let Ok(default_config) = input_device.default_input_config() {
-                    channels = default_config.channels();
-                }
-            }
-        }
-    }
-
     let audio = AudioCodecBuiler::new()
-        .mime(MimeType::OPUS)
-        .sample_rate(AudioSampleRate::High)
-        .channels(channels)
-        .build();
-
-    let webrtc = AudioCodecBuiler::new()
         .mime(MimeType::OPUS)
         .sample_rate(AudioSampleRate::High)
         .channels(1)
@@ -68,7 +48,6 @@ static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
     let video = VideoCodec::default();
     let screen_share = VideoCodec::default();
     RwLock::new(Codecs {
-        webrtc,
         audio,
         _video: video,
         _screen_share: screen_share,
@@ -113,7 +92,6 @@ enum Repl {
     /// specify which speaker to use for output
     ConnectSpeaker { device_name: String },
     /// set the sampling frequency used to send audio samples over webrtc
-    SetWebRtcAudioRate { rate: String },
     /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
     /// the specified sample rate will be used when the host initiates a call.
     SetAudioRate { rate: String },
@@ -152,7 +130,7 @@ async fn handle_command(
             let _ = multipass.send_request(&did).await;
             let codecs = CODECS.read().await;
             blink
-                .offer_call(None, vec![did], codecs.webrtc.clone())
+                .offer_call(None, vec![did], codecs.audio.clone())
                 .await?;
         }
         Repl::Answer { id } => {
@@ -199,17 +177,10 @@ async fn handle_command(
         }
         Repl::SetAudioRate { rate } => {
             let mut codecs = CODECS.write().await;
-            let audio = AudioCodecBuiler::from(codecs.audio.clone())
+            let codec = AudioCodecBuiler::from(codecs.audio.clone())
                 .sample_rate(rate.try_into()?)
                 .build();
-            codecs.audio = audio;
-        }
-        Repl::SetWebRtcAudioRate { rate } => {
-            let mut codecs = CODECS.write().await;
-            let webrtc = AudioCodecBuiler::from(codecs.audio.clone())
-                .sample_rate(rate.try_into()?)
-                .build();
-            codecs.webrtc = webrtc;
+            codecs.audio = codec;
         }
         Repl::SetAudioChannels { channels } => {
             if !(1..=2).contains(&channels) {
