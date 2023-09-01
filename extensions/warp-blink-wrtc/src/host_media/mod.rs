@@ -152,7 +152,9 @@ pub async fn create_audio_sink_track(
         webrtc_codec,
         sink_codec,
     )?;
-    sink_track.play()?;
+    sink_track
+        .play()
+        .map_err(|e| anyhow::anyhow!("{e}: failed to play sink track"))?;
     unsafe {
         // don't want two tracks logging at the same time
         if let Some(mut track) = DATA.audio_sink_tracks.insert(peer_id.clone(), sink_track) {
@@ -171,7 +173,10 @@ pub async fn create_audio_sink_track(
     Ok(())
 }
 
-pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
+pub async fn change_audio_input(
+    device: cpal::Device,
+    source_codec: blink::AudioCodec,
+) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
     // change_input_device destroys the audio stream. if that function fails. there should be
@@ -181,7 +186,7 @@ pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
     }
 
     if let Some(source) = unsafe { DATA.audio_source_track.as_mut() } {
-        source.change_input_device(&device)?;
+        source.change_input_device(&device, source_codec)?;
     }
     unsafe {
         DATA.audio_input_device.replace(device);
@@ -189,12 +194,15 @@ pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
+pub async fn change_audio_output(
+    device: cpal::Device,
+    sink_codec: blink::AudioCodec,
+) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
     // todo: if this fails, return an error or keep going?
     for (_k, v) in unsafe { DATA.audio_sink_tracks.iter_mut() } {
-        if let Err(e) = v.change_output_device(&device) {
+        if let Err(e) = v.change_output_device(&device, sink_codec.clone()) {
             log::error!("failed to change output device: {e}");
         }
     }

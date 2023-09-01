@@ -145,14 +145,6 @@ impl BlinkImpl {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Box<Self>> {
         log::trace!("initializing WebRTC");
 
-        let cpal_host = cpal::platform::default_host();
-        if let Some(d) = cpal_host.default_input_device() {
-            host_media::change_audio_input(d).await?;
-        }
-        if let Some(d) = cpal_host.default_output_device() {
-            host_media::change_audio_output(d).await?;
-        }
-
         // check SupportedStreamConfigs. if those channels aren't supported, use the default.
         let mut source_codec = blink::AudioCodec {
             mime: MimeType::OPUS,
@@ -168,23 +160,17 @@ impl BlinkImpl {
 
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            if let Ok(mut configs) = input_device.supported_input_configs() {
-                if !configs.any(|c| c.channels() == source_codec.channels()) {
-                    if let Ok(default_config) = input_device.default_input_config() {
-                        source_codec.channels = default_config.channels();
-                    }
-                }
-            }
+            source_codec.channels = Self::get_min_source_channels(&input_device)?;
+            host_media::change_audio_input(input_device, source_codec.clone()).await?;
+        } else {
+            log::warn!("blink started with no input device");
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            if let Ok(mut configs) = output_device.supported_output_configs() {
-                if !configs.any(|c| c.channels() == sink_codec.channels()) {
-                    if let Ok(default_config) = output_device.default_output_config() {
-                        sink_codec.channels = default_config.channels();
-                    }
-                }
-            }
+            sink_codec.channels = Self::get_min_sink_channels(&output_device)?;
+            host_media::change_audio_output(output_device, sink_codec.clone()).await?;
+        } else {
+            log::warn!("blink started with no output device");
         }
 
         let (ui_event_ch, _rx) = broadcast::channel(1024);
@@ -281,11 +267,12 @@ impl BlinkImpl {
 
         self.active_call.write().await.replace(call.clone().into());
         let audio_source_codec = self.audio_source_codec.read().await;
+        let webrtc_codec = call.codec();
         // ensure there is an audio source track
         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-            mime_type: audio_source_codec.mime_type(),
-            clock_rate: audio_source_codec.sample_rate(),
-            channels: audio_source_codec.channels(),
+            mime_type: webrtc_codec.mime_type(),
+            clock_rate: webrtc_codec.sample_rate(),
+            channels: webrtc_codec.channels(),
             ..Default::default()
         };
         let track = self
@@ -298,7 +285,7 @@ impl BlinkImpl {
             own_id.clone(),
             self.ui_event_ch.clone(),
             track,
-            call.codec(),
+            webrtc_codec,
             audio_source_codec.clone(),
         )
         .await?;
@@ -356,6 +343,62 @@ impl BlinkImpl {
 
         self.webrtc_handler.write().replace(webrtc_handle);
         Ok(())
+    }
+
+    async fn update_audio_source_codec(
+        &mut self,
+        input_device: &cpal::Device,
+    ) -> anyhow::Result<()> {
+        let min_channels = Self::get_min_source_channels(input_device)?;
+        self.audio_source_codec.write().await.channels = min_channels;
+        Ok(())
+    }
+
+    fn get_min_source_channels(input_device: &cpal::Device) -> anyhow::Result<u16> {
+        let min_channels =
+            input_device
+                .supported_input_configs()?
+                .fold(None, |acc: Option<u16>, x| match x.channels() {
+                    1 => Some(1),
+                    2 => match acc {
+                        None => Some(2),
+                        Some(1) => acc,
+                        _ => unreachable!(""),
+                    },
+                    _ => acc,
+                });
+        let channels = min_channels.ok_or(anyhow::anyhow!(
+            "unsupported audio input device. doesn't support 1 or 2 channel audio"
+        ))?;
+        Ok(channels)
+    }
+
+    async fn update_audio_sink_codec(
+        &mut self,
+        output_device: &cpal::Device,
+    ) -> anyhow::Result<()> {
+        let min_channels = Self::get_min_sink_channels(output_device)?;
+        self.audio_sink_codec.write().await.channels = min_channels;
+        Ok(())
+    }
+
+    fn get_min_sink_channels(output_device: &cpal::Device) -> anyhow::Result<u16> {
+        let min_channels =
+            output_device
+                .supported_output_configs()?
+                .fold(None, |acc: Option<u16>, x| match x.channels() {
+                    1 => Some(1),
+                    2 => match acc {
+                        None => Some(2),
+                        Some(1) => acc,
+                        _ => unreachable!(""),
+                    },
+                    _ => acc,
+                });
+        let channels = min_channels.ok_or(anyhow::anyhow!(
+            "unsupported audio output device. doesn't support 1 or 2 channel audio"
+        ))?;
+        Ok(channels)
     }
 }
 
@@ -1024,7 +1067,12 @@ impl Blink for BlinkImpl {
         for device in devices {
             if let Ok(name) = device.name() {
                 if name == device_name {
-                    host_media::change_audio_input(device).await?;
+                    self.update_audio_source_codec(&device).await?;
+                    host_media::change_audio_input(
+                        device,
+                        self.audio_source_codec.read().await.clone(),
+                    )
+                    .await?;
                     return Ok(());
                 }
             }
@@ -1041,7 +1089,9 @@ impl Blink for BlinkImpl {
             .ok_or(Error::OtherWithContext(String::from(
                 "no default input device",
             )))?;
-        host_media::change_audio_input(device).await?;
+        self.update_audio_source_codec(&device).await?;
+        host_media::change_audio_input(device, self.audio_source_codec.read().await.clone())
+            .await?;
         Ok(())
     }
     async fn get_available_speakers(&self) -> Result<Vec<String>, Error> {
@@ -1069,7 +1119,12 @@ impl Blink for BlinkImpl {
         for device in devices {
             if let Ok(name) = device.name() {
                 if name == device_name {
-                    host_media::change_audio_output(device).await?;
+                    self.update_audio_sink_codec(&device).await?;
+                    host_media::change_audio_output(
+                        device,
+                        self.audio_sink_codec.read().await.clone(),
+                    )
+                    .await?;
                     return Ok(());
                 }
             }
@@ -1086,7 +1141,8 @@ impl Blink for BlinkImpl {
             .ok_or(Error::OtherWithContext(String::from(
                 "no default input device",
             )))?;
-        host_media::change_audio_output(device).await?;
+        self.update_audio_sink_codec(&device).await?;
+        host_media::change_audio_output(device, self.audio_sink_codec.read().await.clone()).await?;
         Ok(())
     }
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {

@@ -31,7 +31,6 @@ use warp_ipfs::{
 mod logger;
 
 struct Codecs {
-    webrtc: AudioCodec,
     audio: AudioCodec,
     _video: VideoCodec,
     _screen_share: VideoCodec,
@@ -46,12 +45,9 @@ static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
         .channels(1)
         .build();
 
-    let webrtc = audio.clone();
-
     let video = VideoCodec::default();
     let screen_share = VideoCodec::default();
     RwLock::new(Codecs {
-        webrtc,
         audio,
         _video: video,
         _screen_share: screen_share,
@@ -72,8 +68,8 @@ struct Args {
 enum Repl {
     /// show your DID
     ShowDid,
-    /// given a DID, initiate a call
-    Dial { id: String },
+    /// given a list of DIDs, initiate a call
+    Dial { ids: Vec<String> },
     /// given a Uuid, answer a call
     /// if no argument is given, the most recent call will be answered
     Answer { id: Option<String> },
@@ -95,8 +91,6 @@ enum Repl {
     ConnectMicrophone { device_name: String },
     /// specify which speaker to use for output
     ConnectSpeaker { device_name: String },
-    /// set the sampling frequency used to send audio samples over webrtc
-    SetWebRtcAudioRate { rate: String },
     /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
     /// the specified sample rate will be used when the host initiates a call.
     SetAudioRate { rate: String },
@@ -130,13 +124,24 @@ async fn handle_command(
         Repl::ShowDid => {
             println!("own identity: {}", own_id.did_key());
         }
-        Repl::Dial { id } => {
-            let did = DID::from_str(&id)?;
-            let _ = multipass.send_request(&did).await;
+        Repl::Dial { ids } => {
+            let ids = ids.iter().map(|id| {
+                DID::from_str(id).map_err(|e| format!("error for peer id {}: {}", id, e))
+            });
+            let errs = ids.clone().filter_map(|x| x.err());
+            let ids = ids.filter_map(|x| x.ok());
+
+            let errs: Vec<String> = errs.collect();
+            if !errs.is_empty() {
+                bail!(errs.join("\n"));
+            }
+            let ids: Vec<DID> = ids.collect();
+            for did in ids.iter() {
+                let _ = multipass.send_request(did).await;
+            }
+
             let codecs = CODECS.read().await;
-            blink
-                .offer_call(None, vec![did], codecs.webrtc.clone())
-                .await?;
+            blink.offer_call(None, ids, codecs.audio.clone()).await?;
         }
         Repl::Answer { id } => {
             let mut lock = OFFERED_CALL.lock().await;
@@ -182,17 +187,10 @@ async fn handle_command(
         }
         Repl::SetAudioRate { rate } => {
             let mut codecs = CODECS.write().await;
-            let audio = AudioCodecBuiler::from(codecs.audio.clone())
+            let codec = AudioCodecBuiler::from(codecs.audio.clone())
                 .sample_rate(rate.try_into()?)
                 .build();
-            codecs.audio = audio;
-        }
-        Repl::SetWebRtcAudioRate { rate } => {
-            let mut codecs = CODECS.write().await;
-            let webrtc = AudioCodecBuiler::from(codecs.audio.clone())
-                .sample_rate(rate.try_into()?)
-                .build();
-            codecs.webrtc = webrtc;
+            codecs.audio = codec;
         }
         Repl::SetAudioChannels { channels } => {
             if !(1..=2).contains(&channels) {
@@ -260,7 +258,10 @@ async fn handle_command(
 async fn handle_blink_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
         // get rid of noisy logs
-        if !matches!(evt, BlinkEventKind::ParticipantSpeaking { .. }) {
+        if !matches!(
+            evt,
+            BlinkEventKind::ParticipantSpeaking { .. } | BlinkEventKind::SelfSpeaking
+        ) {
             println!("BlinkEvent: {evt}");
         }
 

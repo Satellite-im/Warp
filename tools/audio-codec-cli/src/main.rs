@@ -1,6 +1,7 @@
 use anyhow::bail;
 use clap::Parser;
 
+use cpal::traits::{DeviceTrait, HostTrait};
 use log::LevelFilter;
 use once_cell::sync::Lazy;
 use play::*;
@@ -18,6 +19,10 @@ mod record;
 /// Test CPAL and OPUS
 #[derive(Parser, Debug, Clone)]
 enum Cli {
+    /// show the supported CPAL input stream configs
+    SupportedInputConfigs,
+    /// show the supported CPAL output stream configs
+    SupportedOutputConfigs,
     /// print help text regarding properly setting sample rate and
     /// frame size
     ConfigInfo,
@@ -331,6 +336,26 @@ Frame size (in samples) vs duration for various sampling rates:
             output_file_name,
         } => loudness::calculate_loudness_rms2(&input_file_name, &output_file_name)?,
         Cli::Feedback => feedback::feedback(sm.clone()).await?,
+        Cli::SupportedInputConfigs => {
+            let host = cpal::default_host();
+            let dev = host
+                .default_input_device()
+                .ok_or(anyhow::anyhow!("no input device"))?;
+            let configs = dev.supported_input_configs()?;
+            for config in configs {
+                println!("{config:#?}");
+            }
+        }
+        Cli::SupportedOutputConfigs => {
+            let host = cpal::default_host();
+            let dev = host
+                .default_output_device()
+                .ok_or(anyhow::anyhow!("no input device"))?;
+            let configs = dev.supported_output_configs()?;
+            for config in configs {
+                println!("{config:#?}");
+            }
+        }
     }
     Ok(())
 }
