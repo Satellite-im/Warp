@@ -168,35 +168,41 @@ impl BlinkImpl {
 
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            if !input_device
-                .supported_input_configs()?
-                .any(|c| c.channels() == 1)
-            {
-                source_codec.channels = 2;
-                if !input_device
+            let min_channels =
+                input_device
                     .supported_input_configs()?
-                    .any(|c| c.channels() == 2)
-                {
-                    bail!("unsupported audio input device. doesn't support 1 or 2 channel audio");
-                }
-            }
+                    .fold(None, |acc: Option<u16>, x| match x.channels() {
+                        1 => Some(1),
+                        2 => match acc {
+                            None => Some(2),
+                            Some(1) => acc,
+                            _ => unreachable!(""),
+                        },
+                        _ => acc,
+                    });
+            source_codec.channels = min_channels.ok_or(anyhow::anyhow!(
+                "unsupported audio input device. doesn't support 1 or 2 channel audio"
+            ))?;
         } else {
             log::warn!("blink started with no input device");
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            if !output_device
-                .supported_output_configs()?
-                .any(|c| c.channels() == 1)
-            {
-                sink_codec.channels = 2;
-                if !output_device
+            let min_channels =
+                output_device
                     .supported_output_configs()?
-                    .any(|c| c.channels() == 2)
-                {
-                    bail!("unsupported audio output device. doesn't support 1 or 2 channel audio");
-                }
-            }
+                    .fold(None, |acc: Option<u16>, x| match x.channels() {
+                        1 => Some(1),
+                        2 => match acc {
+                            None => Some(2),
+                            Some(1) => acc,
+                            _ => unreachable!(""),
+                        },
+                        _ => acc,
+                    });
+            sink_codec.channels = min_channels.ok_or(anyhow::anyhow!(
+                "unsupported audio output device. doesn't support 1 or 2 channel audio"
+            ))?;
         } else {
             log::warn!("blink started with no output device");
         }
