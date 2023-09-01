@@ -360,11 +360,7 @@ impl BlinkImpl {
                 .supported_input_configs()?
                 .fold(None, |acc: Option<u16>, x| match x.channels() {
                     1 => Some(1),
-                    2 => match acc {
-                        None => Some(2),
-                        Some(1) | Some(2) => acc,
-                        _ => unreachable!(""),
-                    },
+                    2 if acc.is_none() => Some(2),
                     _ => acc,
                 });
         let channels = min_channels.ok_or(anyhow::anyhow!(
@@ -388,11 +384,7 @@ impl BlinkImpl {
                 .supported_output_configs()?
                 .fold(None, |acc: Option<u16>, x| match x.channels() {
                     1 => Some(1),
-                    2 => match acc {
-                        None => Some(2),
-                        Some(1) | Some(2) => acc,
-                        _ => unreachable!(""),
-                    },
+                    2 if acc.is_none() => Some(2),
                     _ => acc,
                 });
         let channels = min_channels.ok_or(anyhow::anyhow!(
