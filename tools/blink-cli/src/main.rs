@@ -91,7 +91,6 @@ enum Repl {
     ConnectMicrophone { device_name: String },
     /// specify which speaker to use for output
     ConnectSpeaker { device_name: String },
-    /// set the sampling frequency used to send audio samples over webrtc
     /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
     /// the specified sample rate will be used when the host initiates a call.
     SetAudioRate { rate: String },
