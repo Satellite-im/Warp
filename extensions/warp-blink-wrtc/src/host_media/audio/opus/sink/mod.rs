@@ -192,10 +192,12 @@ impl SinkTrack for OpusSink {
 
     fn play(&self) -> Result<()> {
         *self.muted.write() = false;
+        self.stream.play()?;
         Ok(())
     }
     fn pause(&self) -> Result<()> {
         *self.muted.write() = true;
+        self.stream.pause()?;
         Ok(())
     }
     fn change_output_device(&mut self, output_device: &cpal::Device) -> Result<()> {
@@ -211,6 +213,10 @@ impl SinkTrack for OpusSink {
             self.sink_codec.clone(),
         )?;
         *self = new_sink;
+        if !*self.muted.read() {
+            self.stream.play()?;
+        }
+
         Ok(())
     }
 

@@ -1,5 +1,8 @@
 use anyhow::Result;
-use cpal::{traits::DeviceTrait, SampleRate};
+use cpal::{
+    traits::{DeviceTrait, StreamTrait},
+    SampleRate,
+};
 use rand::Rng;
 use ringbuf::HeapRb;
 
@@ -83,15 +86,18 @@ impl SourceTrack for OpusSource {
     }
 
     fn play(&self) -> Result<()> {
+        self.stream.play()?;
         *self.muted.write() = false;
         Ok(())
     }
     fn pause(&self) -> Result<()> {
+        self.stream.pause()?;
         *self.muted.write() = true;
         Ok(())
     }
     // should not require RTP renegotiation
     fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()> {
+        self.stream.pause()?;
         self.packetizer_handle.abort();
         let (stream, handle) = create_source_track(
             input_device,
@@ -104,6 +110,9 @@ impl SourceTrack for OpusSource {
         )?;
         self.stream = stream;
         self.packetizer_handle = handle;
+        if !*self.muted.read() {
+            self.stream.play()?;
+        }
         Ok(())
     }
 

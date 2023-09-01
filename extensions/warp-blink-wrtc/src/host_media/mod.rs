@@ -152,7 +152,9 @@ pub async fn create_audio_sink_track(
         webrtc_codec,
         sink_codec,
     )?;
-    sink_track.play()?;
+    sink_track
+        .play()
+        .map_err(|e| anyhow::anyhow!("{e}: failed to play sink track"))?;
     unsafe {
         // don't want two tracks logging at the same time
         if let Some(mut track) = DATA.audio_sink_tracks.insert(peer_id.clone(), sink_track) {
