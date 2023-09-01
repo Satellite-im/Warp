@@ -173,7 +173,6 @@ impl BlinkImpl {
                 .any(|c| c.channels() == 1)
             {
                 source_codec.channels = 2;
-
                 if !input_device
                     .supported_input_configs()?
                     .any(|c| c.channels() == 2)
@@ -181,6 +180,8 @@ impl BlinkImpl {
                     bail!("unsupported audio input device. doesn't support 1 or 2 channel audio");
                 }
             }
+        } else {
+            log::warn!("blink started with no input device");
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
@@ -189,7 +190,6 @@ impl BlinkImpl {
                 .any(|c| c.channels() == 1)
             {
                 sink_codec.channels = 2;
-
                 if !output_device
                     .supported_output_configs()?
                     .any(|c| c.channels() == 2)
@@ -197,6 +197,8 @@ impl BlinkImpl {
                     bail!("unsupported audio output device. doesn't support 1 or 2 channel audio");
                 }
             }
+        } else {
+            log::warn!("blink started with no output device");
         }
 
         let (ui_event_ch, _rx) = broadcast::channel(1024);
