@@ -40,13 +40,30 @@ struct Codecs {
 static OFFERED_CALL: Lazy<Mutex<Option<Uuid>>> = Lazy::new(|| Mutex::new(None));
 
 static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
+    // make it easier to use the blink-cli on devices which can't use one channel audio.
+    let mut channels = 1;
+    let cpal_host = cpal::default_host();
+    if let Some(input_device) = cpal_host.default_input_device() {
+        if let Ok(mut configs) = input_device.supported_input_configs() {
+            if !configs.any(|c| c.channels() == channels) {
+                if let Ok(default_config) = input_device.default_input_config() {
+                    channels = default_config.channels();
+                }
+            }
+        }
+    }
+
     let audio = AudioCodecBuiler::new()
+        .mime(MimeType::OPUS)
+        .sample_rate(AudioSampleRate::High)
+        .channels(channels)
+        .build();
+
+    let webrtc = AudioCodecBuiler::new()
         .mime(MimeType::OPUS)
         .sample_rate(AudioSampleRate::High)
         .channels(1)
         .build();
-
-    let webrtc = audio.clone();
 
     let video = VideoCodec::default();
     let screen_share = VideoCodec::default();
