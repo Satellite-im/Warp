@@ -55,6 +55,7 @@ static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
 });
 
 #[derive(Parser, Debug, Eq, PartialEq)]
+/// starts the blink-repl
 struct Args {
     /// a folder to reuse from a previous invocation or
     /// a place to create a new folder to be used by warp.
