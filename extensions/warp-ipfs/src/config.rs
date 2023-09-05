@@ -13,7 +13,6 @@ use warp::multipass::identity::Identity;
 pub enum Bootstrap {
     #[default]
     Ipfs,
-    Experimental,
     Custom(Vec<Multiaddr>),
     None,
 }
@@ -34,19 +33,17 @@ impl Bootstrap {
     /// List of bootstrap multiaddr
     pub fn address(&self) -> Vec<Multiaddr> {
         match self {
-            Bootstrap::Ipfs => ["/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+            Bootstrap::Ipfs => [
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"]
-            .iter()
-            .filter_map(|s| Multiaddr::from_str(s).ok())
-            .collect::<Vec<_>>(),
-            Bootstrap::Experimental => ["/ip4/137.184.70.241/tcp/4894/p2p/12D3KooWP5aD68wq8eDqMtbcMgAzzhUJt8Y3n2g5vzAA1Lo7uVgY"]
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+            ]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
             Bootstrap::Custom(address) => address.clone(),
-            Bootstrap::None => vec![]
+            Bootstrap::None => vec![],
         }
     }
 }
@@ -198,6 +195,9 @@ pub struct IpfsSetting {
     pub bootstrap: bool,
     pub portmapping: bool,
     pub agent_version: Option<String>,
+    /// Used for testing with a memory transport
+    pub memory_transport: bool,
+    pub dht_client: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -350,12 +350,9 @@ impl Config {
     }
 
     /// Test configuration. Used for in-memory
-    pub fn testing(experimental: bool) -> Config {
+    pub fn testing() -> Config {
         Config {
-            bootstrap: match experimental {
-                true => Bootstrap::Experimental,
-                false => Bootstrap::Ipfs,
-            },
+            bootstrap: Bootstrap::Ipfs,
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
@@ -417,12 +414,9 @@ impl Config {
     }
 
     /// Recommended production configuration
-    pub fn production<P: AsRef<std::path::Path>>(path: P, experimental: bool) -> Config {
+    pub fn production<P: AsRef<std::path::Path>>(path: P) -> Config {
         Config {
-            bootstrap: match experimental {
-                true => Bootstrap::Experimental,
-                false => Bootstrap::Ipfs,
-            },
+            bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },

@@ -321,7 +321,7 @@ async fn main() -> anyhow::Result<()> {
     tesseract.set_autosave();
     tesseract.unlock("abcdefghik".as_bytes())?;
 
-    let mut config = Config::production(multipass_dir, false);
+    let mut config = Config::production(multipass_dir);
     config.ipfs_setting.portmapping = true;
     config.ipfs_setting.agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
     config.store_setting.emit_online_event = true;

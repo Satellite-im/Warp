@@ -63,8 +63,8 @@ async fn account(
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let mut config = match path.as_ref() {
-        Some(path) => Config::production(path, opt.experimental_node),
-        None => Config::testing(opt.experimental_node),
+        Some(path) => Config::production(path),
+        None => Config::testing(),
     };
 
     if !opt.direct || !opt.no_discovery {

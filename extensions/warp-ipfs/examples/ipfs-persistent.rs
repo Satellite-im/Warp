@@ -67,7 +67,7 @@ async fn setup_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let mut config = Config::production(path, opt.experimental_node);
+    let mut config = Config::production(path);
 
     config.ipfs_setting.mdns.enable = opt.mdns;
 

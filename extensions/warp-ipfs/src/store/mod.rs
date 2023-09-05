@@ -257,11 +257,10 @@ pub fn get_keypair_did(keypair: &ipfs::Keypair) -> anyhow::Result<DID> {
     Ok(did.into())
 }
 
-#[allow(deprecated)]
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
     let pub_key =
-        ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?;
-    Ok(ipfs::libp2p::identity::PublicKey::Ed25519(pub_key))
+        ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(&public_key.public_key_bytes())?;
+    Ok(ipfs::libp2p::identity::PublicKey::from(pub_key))
 }
 
 fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
@@ -407,7 +406,7 @@ pub async fn discover_peer(
         Discovery::None => {
             //Attempt a direct dial via relay
             for addr in relay.iter() {
-                let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
+                let addr = addr.clone().with(Protocol::P2p(peer_id));
                 if let Err(_e) = ipfs.connect(addr).await {
                     continue;
                 }
