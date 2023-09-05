@@ -278,7 +278,7 @@ where
         mp4_writer,
         muted,
         audio_multiplier,
-        dump_consumer_queue,
+        dump_consumer_queue: _,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -373,7 +373,7 @@ where
                                 }
                                 for sample in raw_samples.drain(..) {
                                     if let Err(_e) = producer.push(sample) {
-                                        *dump_consumer_queue.write() = true;
+                                        //*dump_consumer_queue.write() = true;
                                         let _ = event_ch.send(BlinkEventKind::AudioDegradation {
                                             peer_id: peer_id.clone(),
                                         });
