@@ -91,7 +91,6 @@ impl OpusSink {
             x => bail!("invalid number of channels: {x}"),
         };
 
-        let dump_consumer_queue = Arc::new(RwLock::new(false));
         let decoder = opus::Decoder::new(webrtc_sample_rate, webrtc_channels)?;
         let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
         let (producer, mut consumer) = ring.split();
@@ -106,7 +105,6 @@ impl OpusSink {
         let muted2 = muted.clone();
         let audio_multiplier = Arc::new(RwLock::new(1.0));
         let audio_multiplier2 = audio_multiplier.clone();
-        let dump_consumer_queue2 = dump_consumer_queue.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
                 track: track2,
@@ -120,7 +118,6 @@ impl OpusSink {
                 mp4_writer: mp4_logger2,
                 muted: muted2,
                 audio_multiplier: audio_multiplier2,
-                dump_consumer_queue: dump_consumer_queue2,
             })
             .await
             {
@@ -131,12 +128,13 @@ impl OpusSink {
 
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut input_fell_behind = false;
-            if *dump_consumer_queue.read() {
-                *dump_consumer_queue.write() = false;
-                unsafe {
-                    consumer.advance(consumer.len());
-                }
-            }
+            // this is test code, left here for reference. it can be deleted later if needed.
+            // if *dump_consumer_queue.read() {
+            //     *dump_consumer_queue.write() = false;
+            //     unsafe {
+            //         consumer.advance(consumer.len());
+            //     }
+            // }
             for sample in data {
                 *sample = match consumer.pop() {
                     Some(s) => s,
@@ -258,8 +256,6 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     mp4_writer: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
     muted: Arc<RwLock<bool>>,
     audio_multiplier: Arc<RwLock<f32>>,
-    // used to tell the audio steam to dump the consumer queue
-    dump_consumer_queue: Arc<RwLock<bool>>,
 }
 
 async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<()>
@@ -278,7 +274,6 @@ where
         mp4_writer,
         muted,
         audio_multiplier,
-        dump_consumer_queue: _,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -373,14 +368,18 @@ where
                                 }
                                 for sample in raw_samples.drain(..) {
                                     if let Err(_e) = producer.push(sample) {
-                                        //*dump_consumer_queue.write() = true;
+                                        // this is test code, left here for reference. it can be deleted later if needed.
+                                        // *dump_consumer_queue.write() = true;
+
+                                        // log::error!(
+                                        //     "audio degradation: {}",
+                                        //     task_start_time.elapsed().as_millis()
+                                        // );
+
                                         let _ = event_ch.send(BlinkEventKind::AudioDegradation {
                                             peer_id: peer_id.clone(),
                                         });
-                                        //log::error!(
-                                        //    "audio degradation: {}",
-                                        //    task_start_time.elapsed().as_millis()
-                                        //);
+
                                         last_degradation_time =
                                             task_start_time.elapsed().as_millis();
                                         break 'PROCESS_DECODED_SAMPLES;
