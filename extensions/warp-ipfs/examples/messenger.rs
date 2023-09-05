@@ -18,7 +18,7 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     AttachmentKind, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
+    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState, Location,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -772,7 +772,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut files = vec![];
 
                             for item in cmd_line.by_ref() {
-                                files.push(PathBuf::from(item));
+                                files.push(Location::Disk {path:PathBuf::from(item)});
                             }
 
                             if files.is_empty() {
@@ -786,7 +786,7 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    let mut stream = match chat.attach(conversation_id, None, Default::default(), files, vec![]).await {
+                                    let mut stream = match chat.attach(conversation_id, None, files, vec![]).await {
                                         Ok(stream) => stream,
                                         Err(e) => {
                                             writeln!(stdout, "> Error: {e}")?;

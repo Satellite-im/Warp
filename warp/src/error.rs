@@ -171,6 +171,8 @@ pub enum Error {
     GroupClosed,
     #[error("Group is opened")]
     GroupOpened,
+    #[error("No attachments provided for message")]
+    NoAttachments,
 
     //Crypto Errors
     #[error("{0}")]

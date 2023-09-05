@@ -3228,14 +3228,13 @@ impl MessageStore {
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
-        location: Location,
-        files: Vec<PathBuf>,
+        locations: Vec<Location>,
         messages: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
-        if files.len() > 8 {
+        if locations.len() > 8 {
             return Err(Error::InvalidLength {
                 context: "files".into(),
-                current: files.len(),
+                current: locations.len(),
                 minimum: Some(1),
                 maximum: Some(8),
             });
@@ -3270,20 +3269,17 @@ impl MessageStore {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        let files = files
+        let files = locations
             .iter()
-            .filter(|path| {
-                if matches!(location, Location::Disk) {
-                    path.is_file()
-                } else {
-                    true
-                }
+            .filter(|location| match location {
+                Location::Disk { path } => path.is_file(),
+                _ => true,
             })
             .cloned()
             .collect::<Vec<_>>();
 
         if files.is_empty() {
-            return Err(Error::InvalidMessage);
+            return Err(Error::NoAttachments);
         }
 
         let store = self.clone();
@@ -3297,26 +3293,31 @@ impl MessageStore {
             let mut streams: SelectAll<_> = SelectAll::new();
 
             for file in files {
-                match location {
-                    Location::Constellation => {
-                        let path = file.display().to_string();
+                match file {
+                    Location::Constellation { path } => {
                         match constellation
                             .root_directory()
                             .get_item_by_path(&path)
                             .and_then(|item| item.get_file())
-                            .ok()
                         {
-                            Some(f) => {
+                            Ok(f) => {
                                 let stream = async_stream::stream! {
                                     yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
                                 };
                                 streams.push(stream.boxed());
                             },
-                            None => continue,
+                            Err(e) => {
+                                let constellation_path = PathBuf::from(&path);
+                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
+                                };
+                                streams.push(stream.boxed());
+                            },
                         }
                     }
-                    Location::Disk => {
-                        let mut filename = match file.file_name() {
+                    Location::Disk {path} => {
+                        let mut filename = match path.file_name() {
                             Some(file) => file.to_string_lossy().to_string(),
                             None => continue,
                         };
@@ -3365,7 +3366,7 @@ impl MessageStore {
                             continue;
                         }
 
-                        let file = file.display().to_string();
+                        let file = path.display().to_string();
 
                         in_stack.push(filename.clone());
 
@@ -3436,7 +3437,7 @@ impl MessageStore {
                 async move {
 
                     if attachments.is_empty() {
-                        return Err(Error::IoError(std::io::Error::new(std::io::ErrorKind::Other, "No files are attached")));
+                        return Err(Error::NoAttachments);
                     }
 
                     let own_did = &*store.did;
