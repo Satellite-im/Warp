@@ -280,6 +280,7 @@ where
     // let logger = crate::rtp_logger::get_instance(format!("{}-audio", peer_id));
     // let logger_start_time = std::time::Instant::now();
 
+    let mut samples_to_skip = 0;
     loop {
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {
@@ -324,11 +325,15 @@ where
                     }
                 }
 
-                let mut logged_error_once = false;
                 // turn RTP packets into samples via SampleBuilder.push
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
+                    if samples_to_skip > 0 {
+                        samples_to_skip = samples_to_skip - 1;
+                        continue;
+                    }
+
                     // discard samples if muted
                     if *muted.read() {
                         continue;
@@ -355,13 +360,14 @@ where
                                     }
                                     ChannelMixerOutput::None => {}
                                 }
-                                for sample in raw_samples.drain(..) {
+                                'SEND_RAW_SAMPLES: for sample in raw_samples.drain(..) {
                                     if let Err(_e) = producer.push(sample) {
-                                        if !logged_error_once {
-                                            logged_error_once = true;
-                                            log::error!("opus sink failed to send sample");
-                                            // todo: send event for audio degradation.
-                                        }
+                                        // each sample is 10ms. this is like skipping 1 second of audio.
+                                        samples_to_skip = 9;
+                                        let _ = event_ch.send(BlinkEventKind::AudioDegradation {
+                                            peer_id: peer_id.clone(),
+                                        });
+                                        break 'SEND_RAW_SAMPLES;
                                     }
                                 }
                             }
