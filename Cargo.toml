@@ -10,6 +10,8 @@ repository = "https://github.com/Satellite-im/Warp"
 members = ["extensions/*", "warp", "warp/warp-derive", "tools/*"]
 exclude = ["deprecated/*", "tools/opencv-test", "tools/video-codec-cli"]
 
+resolver = "2"
+
 [workspace.dependencies]
 
 # Async and futures crates
@@ -78,7 +80,7 @@ either = "1"
 void = "1"
 
 #ipfs dependency
-rust-ipfs = "=0.3.19"
+rust-ipfs = "0.4.1"
 
 # Blink related crates
 # av-data is needed to use libaom. need to ensure that Warp and libaom use the same version of av-data
@@ -87,3 +89,7 @@ libaom = { git="https://github.com/sdwoodbury/aom-rs", rev="51086cef6b3eb177bdb8
 mp4 = { git="https://github.com/sdwoodbury/mp4-rust", rev="9887024513f59e5fcda9f44442b2a3a2cdfe9706" }
 eye = { git="https://github.com/raymanfx/eye-rs.git", rev="24324eb629dd73f349d0b4678cb0dd4dc5d75f1c" }
 opus = { git = "https://github.com/sdwoodbury/opus-rs", rev="3f07443dac1907dbcc847181a0d40d561592072b" }
+
+warp = { path = "./warp" }
+warp-ipfs = { path = "./extensions/warp-ipfs" }
+warp-blink-wrtc = { path = "./extensions/warp-blink-wrtc" }

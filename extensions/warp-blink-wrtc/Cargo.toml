@@ -30,7 +30,7 @@ ringbuf = "0.3"
 serde = { workspace = true, features = ["derive"] }
 serde_cbor = { workspace = true }
 tokio = { workspace = true }
-warp = { path = "../../warp" }
+warp.workspace = true
 webrtc = "0.6.0"
 
 # media 

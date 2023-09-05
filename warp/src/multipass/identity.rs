@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::crypto::DID;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -120,6 +122,31 @@ impl Relationship {
         self.blocked_by
     }
 }
+
+#[derive(
+    Default, Hash, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Ord,
+)]
+pub struct ShortId([u8; SHORT_ID_SIZE]);
+
+impl core::ops::Deref for ShortId {
+    type Target = [u8; SHORT_ID_SIZE];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<[u8; SHORT_ID_SIZE]> for ShortId {
+    fn from(id: [u8; SHORT_ID_SIZE]) -> Self {
+        ShortId(id)
+    }
+}
+
+impl Display for ShortId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(&self.0))
+    }
+}
+
 #[derive(
     Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
@@ -128,7 +155,7 @@ pub struct Identity {
     username: String,
 
     /// Short id derived from the DID to be used along side `Identity::username` (eg `Username#0000`)
-    short_id: [u8; SHORT_ID_SIZE],
+    short_id: ShortId,
 
     /// Public key for the identity
     did_key: DID,
@@ -142,8 +169,8 @@ impl Identity {
         self.username = user.to_string()
     }
 
-    pub fn set_short_id(&mut self, id: [u8; SHORT_ID_SIZE]) {
-        self.short_id = id
+    pub fn set_short_id<I: Into<ShortId>>(&mut self, id: I) {
+        self.short_id = id.into()
     }
 
     pub fn set_did_key(&mut self, pubkey: DID) {
@@ -160,8 +187,8 @@ impl Identity {
         self.username.clone()
     }
 
-    pub fn short_id(&self) -> String {
-        String::from_utf8_lossy(&self.short_id).to_string()
+    pub fn short_id(&self) -> ShortId {
+        self.short_id
     }
 
     pub fn did_key(&self) -> DID {
@@ -275,7 +302,7 @@ pub mod ffi {
         }
 
         let identity = &*identity;
-        match CString::new(identity.short_id()) {
+        match CString::new(identity.short_id().to_string()) {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
@@ -324,7 +351,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(Identifier::user_name(&name))) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::user_name(&name)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -336,13 +363,13 @@ pub mod ffi {
 
         let key = &*key;
 
-        Box::into_raw(Box::new(Identifier::did_key(key.clone()))) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::did_key(key.clone())))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identifier_own() -> *mut Identifier {
-        Box::into_raw(Box::new(Identifier::own())) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::own()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -356,7 +383,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Username(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Username(name)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -370,7 +397,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Picture(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Picture(name)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -384,7 +411,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Banner(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Banner(name)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -399,7 +426,7 @@ pub mod ffi {
             IdentityUpdate::StatusMessage(None)
         };
 
-        Box::into_raw(Box::new(update)) as *mut IdentityUpdate
+        Box::into_raw(Box::new(update))
     }
 
     #[allow(clippy::missing_safety_doc)]

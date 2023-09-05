@@ -72,7 +72,7 @@ impl FileStore {
             }
         }
 
-        let index = Directory::default();
+        let index = Directory::new("root");
         let path = Arc::default();
         let modified = Utc::now();
         let index_cid = Arc::new(RwLock::new(index_cid));
@@ -143,7 +143,8 @@ impl FileStore {
 
             let index_bytes = ecdh_decrypt(&key, None, data)?;
 
-            let directory_index: Directory = serde_json::from_slice(&index_bytes)?;
+            let mut directory_index: Directory = serde_json::from_slice(&index_bytes)?;
+            directory_index.rebuild_paths();
 
             self.index.set_items(directory_index.get_items());
         }

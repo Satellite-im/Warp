@@ -118,7 +118,9 @@ impl FlatfileIndex {
         let mut fs = std::fs::File::create(path)?;
         let data = serde_json::to_string(&self.0)?;
         fs.write_all(data.as_bytes())?;
-        if std::fs::remove_file(format!("{}_backup", path.display())).is_err() {}
+        if std::fs::remove_file(format!("{}_backup", path.display())).is_err() {
+            //
+        }
         Ok(())
     }
 

@@ -248,6 +248,22 @@ impl Item {
         }
         Ok(())
     }
+
+    /// Path to the `File` or `Directory
+    pub fn path(&self) -> &str {
+        match self {
+            Item::File(file) => file.path(),
+            Item::Directory(directory) => directory.path(),
+        }
+    }
+
+    /// Set path to `File` or `Directory
+    pub fn set_path(&mut self, new_path: &str) {
+        match self {
+            Item::File(file) => file.set_path(new_path),
+            Item::Directory(directory) => directory.set_path(new_path),
+        }
+    }
 }
 
 impl Item {
@@ -283,7 +299,7 @@ pub mod ffi {
         }
         let directory = &*directory;
         let item = Box::new(Item::new_directory(directory.clone()));
-        Box::into_raw(item) as *mut Item
+        Box::into_raw(item)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -294,7 +310,7 @@ pub mod ffi {
         }
         let file = &*file;
         let item = Box::new(Item::new_file(file.clone()));
-        Box::into_raw(item) as *mut Item
+        Box::into_raw(item)
     }
 
     #[allow(clippy::missing_safety_doc)]

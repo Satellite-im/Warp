@@ -203,7 +203,7 @@ impl MessageStore {
                 let did = &*(store.did.clone());
                 let Ok(stream) = store.ipfs.pubsub_subscribe(did.messaging()).await else {
                     error!("Unable to create subscription stream. Terminating task");
-                    //TODO: Maybe panic? 
+                    //TODO: Maybe panic?
                     return;
                 };
                 futures::pin_mut!(stream);
@@ -339,16 +339,16 @@ impl MessageStore {
         info!("Event Task started for {conversation_id}");
         let did = self.did.clone();
         let Ok(mut conversation) = self.get_conversation(conversation_id).await else {
-            return
+            return;
         };
         conversation.recipients.clear();
 
         let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
-            return
+            return;
         };
 
         let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
-            return
+            return;
         };
 
         let conversation_type = conversation.conversation_type;
@@ -431,11 +431,15 @@ impl MessageStore {
         info!("RequestResponse Task started for {conversation_id}");
         let did = self.did.clone();
         let Ok(conversation) = self.get_conversation(conversation_id).await else {
-            return
+            return;
         };
 
-        let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.reqres_topic(&did)).await else {
-            return
+        let Ok(stream) = self
+            .ipfs
+            .pubsub_subscribe(conversation.reqres_topic(&did))
+            .await
+        else {
+            return;
         };
         drop(conversation);
 
@@ -459,9 +463,11 @@ impl MessageStore {
                                         kind,
                                     } => match kind {
                                         ConversationRequestKind::Key => {
-                                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
-                                                    continue
-                                                };
+                                            let Ok(conversation) =
+                                                store.get_conversation(conversation_id).await
+                                            else {
+                                                continue;
+                                            };
 
                                             if !matches!(
                                                 conversation.conversation_type,
@@ -605,9 +611,11 @@ impl MessageStore {
                                     } => match kind {
                                         ConversationResponseKind::Key { key } => {
                                             let sender = payload.sender();
-                                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
-                                                    continue
-                                                };
+                                            let Ok(conversation) =
+                                                store.get_conversation(conversation_id).await
+                                            else {
+                                                continue;
+                                            };
 
                                             if !matches!(
                                                 conversation.conversation_type,
@@ -901,7 +909,7 @@ impl MessageStore {
                 {
                     let signature = message.signature();
                     let sender = message.sender();
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
@@ -1011,7 +1019,7 @@ impl MessageStore {
                 //Validate the original message
                 {
                     let signature = message.signature();
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
@@ -1028,7 +1036,7 @@ impl MessageStore {
 
                 //Validate the edit message
                 {
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
@@ -1075,7 +1083,7 @@ impl MessageStore {
 
                     let signature = message.signature();
                     let sender = message.sender();
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
@@ -1583,9 +1591,7 @@ impl MessageStore {
                 }
 
                 let Some(creator) = conversation.creator.as_ref() else {
-                    return Err(anyhow::anyhow!(
-                        "Group conversation requires a creator"
-                    ));
+                    return Err(anyhow::anyhow!("Group conversation requires a creator"));
                 };
 
                 let own_did = &*self.did;
@@ -2242,7 +2248,7 @@ impl MessageStore {
 
     pub async fn load_conversations(&self, background: bool) -> Result<(), Error> {
         let Some(path) = self.path.as_ref() else {
-            return Ok(())
+            return Ok(());
         };
 
         if !path.is_dir() {
@@ -2255,8 +2261,11 @@ impl MessageStore {
             let entry = entry?;
             let entry_path = entry.path();
             if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
-                let Some(filename) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()) else {
-                    continue
+                let Some(filename) = entry_path
+                    .file_name()
+                    .map(|file| file.to_string_lossy().to_string())
+                else {
+                    continue;
                 };
 
                 //TODO: Maybe check file extension instead
@@ -2268,15 +2277,18 @@ impl MessageStore {
                     .unwrap_or_default();
 
                 let Some(file_id) = slices.first() else {
-                    continue
+                    continue;
                 };
 
                 let Ok(id) = Uuid::from_str(file_id) else {
-                    continue
+                    continue;
                 };
 
-                let Ok(cid_str) = tokio::fs::read(entry_path).await.map(|bytes| String::from_utf8_lossy(&bytes).to_string()) else {
-                    continue
+                let Ok(cid_str) = tokio::fs::read(entry_path)
+                    .await
+                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                else {
+                    continue;
                 };
                 if let Ok(cid) = cid_str.parse::<Cid>() {
                     if keystore {
@@ -2957,7 +2969,7 @@ impl MessageStore {
         message.set_sender(own_did.clone());
         message.set_value(messages.clone());
 
-        let construct = vec![
+        let construct = [
             message.id().into_bytes().to_vec(),
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
@@ -3020,7 +3032,7 @@ impl MessageStore {
 
         let own_did = &*self.did.clone();
 
-        let construct = vec![
+        let construct = [
             message_id.into_bytes().to_vec(),
             conversation.id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
@@ -3090,7 +3102,7 @@ impl MessageStore {
         message.set_value(messages);
         message.set_replied(Some(message_id));
 
-        let construct = vec![
+        let construct = [
             message.id().into_bytes().to_vec(),
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
@@ -3418,9 +3430,15 @@ impl MessageStore {
                 }
             }
 
+
             let final_results = {
                 let mut store = store.clone();
                 async move {
+
+                    if attachments.is_empty() {
+                        return Err(Error::IoError(std::io::Error::new(std::io::ErrorKind::Other, "No files are attached")));
+                    }
+
                     let own_did = &*store.did;
                     let mut message = Message::default();
                     message.set_message_type(MessageType::Attachment);
@@ -3429,7 +3447,7 @@ impl MessageStore {
                     message.set_attachment(attachments);
                     message.set_value(messages.clone());
                     message.set_replied(message_id);
-                    let construct = vec![
+                    let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         own_did.to_string().as_bytes().to_vec(),
@@ -3473,11 +3491,6 @@ impl MessageStore {
             .filesystem
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
-
-        if constellation.id() != "warp-fs-ipfs" {
-            //Note: Temporary for now; Will get lifted in the future
-            return Err(Error::Unimplemented);
-        }
 
         let message = self.get_message(conversation, message_id).await?;
 

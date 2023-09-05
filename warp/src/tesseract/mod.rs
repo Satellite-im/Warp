@@ -638,7 +638,9 @@ impl Tesseract {
     ///  assert!(!tesseract.is_unlock());
     /// ```
     pub fn lock(&self) {
-        if self.save().is_ok() {}
+        if self.save().is_ok() {
+            //
+        }
         self.enc_pass.write().zeroize();
         self.unlock.store(false, Ordering::Relaxed);
         self.soft_unlock.store(false, Ordering::Relaxed);

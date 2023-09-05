@@ -38,7 +38,7 @@ async fn setup<P: AsRef<Path>>(
     let tesseract = Tesseract::from_file(keystore_path)?;
     tesseract.unlock(passphrase.as_bytes())?;
 
-    let mut config = warp_ipfs::config::Config::production(path, false);
+    let mut config = warp_ipfs::config::Config::production(path);
     config.store_setting.discovery = Discovery::None;
     config.ipfs_setting.bootstrap = false;
     config.ipfs_setting.mdns.enable = false;
@@ -60,7 +60,9 @@ async fn main() -> anyhow::Result<()> {
     println!("Utility inspector tool.. ");
     let opt = Opt::parse();
     //Just in case
-    if fdlimit::raise_fd_limit().is_none() {}
+    if fdlimit::raise_fd_limit().is_none() {
+        //
+    }
 
     let password = Zeroizing::new(match opt.password {
         Some(password) => password,

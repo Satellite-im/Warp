@@ -19,7 +19,7 @@ pub enum DirectoryType {
 }
 
 /// `Directory` handles folders and its contents.
-#[derive(Clone, Serialize, Deserialize, Debug, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Serialize, Deserialize, warp_derive::FFIVec, FFIFree)]
 pub struct Directory {
     /// ID of the `Directory`
     id: Arc<Uuid>,
@@ -51,6 +51,24 @@ pub struct Directory {
 
     /// List of `Item`, which would represents either `File` or `Directory`
     items: Arc<RwLock<Vec<Item>>>,
+
+    /// Path of directory
+    #[serde(default)]
+    path: Arc<String>,
+}
+
+impl std::fmt::Debug for Directory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Directory")
+            .field("name", &self.name())
+            .field("description", &self.description())
+            .field("favorite", &self.favorite())
+            .field("creation", &self.creation())
+            .field("modified", &self.modified())
+            .field("items", &self.items)
+            .field("path", &self.path())
+            .finish()
+    }
 }
 
 impl core::hash::Hash for Directory {
@@ -81,6 +99,7 @@ impl Default for Directory {
             modified: Arc::new(RwLock::new(timestamp)),
             directory_type: Default::default(),
             items: Default::default(),
+            path: Arc::new("/".into()),
         }
     }
 }
@@ -546,6 +565,37 @@ impl Directory {
     pub fn set_modified(&self) {
         *self.modified.write() = Utc::now()
     }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn set_path(&mut self, new_path: &str) {
+        let mut new_path = new_path.trim().to_string();
+        if !new_path.ends_with('/') {
+            new_path.push('/');
+        }
+        let path = Arc::make_mut(&mut self.path);
+        *path = new_path.to_string();
+    }
+}
+
+impl Directory {
+    /// Rebuilds the items path after an update
+    pub fn rebuild_paths(&mut self) {
+        let items = &mut *self.items.write();
+        for item in items {
+            match item {
+                Item::Directory(directory) => {
+                    let mut path = self.path().to_string();
+                    path.push_str(&directory.name());
+                    directory.set_path(&path);
+                    directory.rebuild_paths();
+                }
+                Item::File(file) => file.set_path(self.path()),
+            }
+        }
+    }
 }
 
 impl Directory {
@@ -601,7 +651,7 @@ pub mod ffi {
             false => CStr::from_ptr(name).to_string_lossy().to_string(),
         };
         let directory = Box::new(Directory::new(name.as_str()));
-        Box::into_raw(directory) as *mut Directory
+        Box::into_raw(directory)
     }
 
     #[allow(clippy::missing_safety_doc)]

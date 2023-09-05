@@ -17,7 +17,7 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{Identifier, IdentityUpdate};
 
-use self::identity::{IdentityStatus, Platform, Relationship, IdentityProfile};
+use self::identity::{IdentityProfile, IdentityStatus, Platform, Relationship};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
@@ -40,20 +40,23 @@ pub enum MultiPassEventKind {
     UnblockedBy { did: DID },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ImportLocation {
+#[derive(Debug, PartialEq, Eq)]
+pub enum ImportLocation<'a> {
     /// Remote location where the identity is stored
     Remote,
 
     /// Local path where the identity is stored
     Local { path: PathBuf },
+
+    /// Buffer memory of where identity is stored
+    Memory { buffer: &'a mut Vec<u8> },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IdentityImportOption {
+#[derive(Debug, PartialEq, Eq)]
+pub enum IdentityImportOption<'a> {
     Locate {
         /// Location of the identity
-        location: ImportLocation,
+        location: ImportLocation<'a>,
 
         /// Passphrase of the identity
         passphrase: String,
@@ -78,12 +81,16 @@ impl core::ops::DerefMut for MultiPassEventStream {
 
 #[async_trait::async_trait]
 pub trait MultiPass:
-    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + DynClone
+    Extension
+    + IdentityInformation
+    + MultiPassImportExport
+    + Friends
+    + FriendsEvent
+    + Sync
+    + Send
+    + SingleHandle
+    + DynClone
 {
-    async fn import_identity(&mut self, _: IdentityImportOption) -> Result<Identity, Error> {
-        Err(Error::Unimplemented)
-    }
-
     /// Create an [`Identity`]
     async fn create_identity(
         &mut self,
@@ -106,6 +113,22 @@ pub trait MultiPass:
 }
 
 dyn_clone::clone_trait_object!(MultiPass);
+
+#[async_trait::async_trait]
+pub trait MultiPassImportExport: Sync + Send {
+    /// Import identity from a specific location
+    async fn import_identity<'a>(
+        &mut self,
+        _: IdentityImportOption<'a>,
+    ) -> Result<Identity, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Manually export identity to a specific location
+    async fn export_identity<'a>(&mut self, _: ImportLocation<'a>) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
 
 #[async_trait::async_trait]
 pub trait Friends: Sync + Send {
@@ -269,7 +292,7 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
-    use super::identity::{IdentityStatus, Relationship, IdentityProfile};
+    use super::identity::{IdentityProfile, IdentityStatus, Relationship};
     use super::MultiPassEventStream;
 
     #[allow(clippy::missing_safety_doc)]

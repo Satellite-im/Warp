@@ -7,9 +7,12 @@ use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
-use warp::blink::{
-    AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
-    MimeType, VideoCodec,
+use warp::{
+    blink::{
+        AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
+        MimeType, VideoCodec,
+    },
+    multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
 
 use std::path::Path;
@@ -28,7 +31,6 @@ use warp_ipfs::{
 mod logger;
 
 struct Codecs {
-    webrtc: AudioCodec,
     audio: AudioCodec,
     _video: VideoCodec,
     _screen_share: VideoCodec,
@@ -43,12 +45,9 @@ static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
         .channels(1)
         .build();
 
-    let webrtc = audio.clone();
-
     let video = VideoCodec::default();
     let screen_share = VideoCodec::default();
     RwLock::new(Codecs {
-        webrtc,
         audio,
         _video: video,
         _screen_share: screen_share,
@@ -56,8 +55,11 @@ static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
 });
 
 #[derive(Parser, Debug, Eq, PartialEq)]
+/// starts the blink-repl
 struct Args {
-    /// the warp directory to use
+    /// a folder to reuse from a previous invocation or
+    /// a place to create a new folder to be used by warp.
+    /// ex: blink-cli /path/to/<folder name>
     path: String,
 }
 
@@ -67,8 +69,8 @@ struct Args {
 enum Repl {
     /// show your DID
     ShowDid,
-    /// given a DID, initiate a call
-    Dial { id: String },
+    /// given a list of DIDs, initiate a call
+    Dial { ids: Vec<String> },
     /// given a Uuid, answer a call
     /// if no argument is given, the most recent call will be answered
     Answer { id: Option<String> },
@@ -90,8 +92,6 @@ enum Repl {
     ConnectMicrophone { device_name: String },
     /// specify which speaker to use for output
     ConnectSpeaker { device_name: String },
-    /// set the sampling frequency used to send audio samples over webrtc
-    SetWebRtcAudioRate { rate: String },
     /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
     /// the specified sample rate will be used when the host initiates a call.
     SetAudioRate { rate: String },
@@ -117,6 +117,7 @@ enum Repl {
 
 async fn handle_command(
     blink: &mut Box<dyn Blink>,
+    multipass: &mut Box<dyn MultiPass>,
     own_id: &Identity,
     cmd: Repl,
 ) -> anyhow::Result<()> {
@@ -124,12 +125,24 @@ async fn handle_command(
         Repl::ShowDid => {
             println!("own identity: {}", own_id.did_key());
         }
-        Repl::Dial { id } => {
-            let did = DID::from_str(&id)?;
+        Repl::Dial { ids } => {
+            let ids = ids.iter().map(|id| {
+                DID::from_str(id).map_err(|e| format!("error for peer id {}: {}", id, e))
+            });
+            let errs = ids.clone().filter_map(|x| x.err());
+            let ids = ids.filter_map(|x| x.ok());
+
+            let errs: Vec<String> = errs.collect();
+            if !errs.is_empty() {
+                bail!(errs.join("\n"));
+            }
+            let ids: Vec<DID> = ids.collect();
+            for did in ids.iter() {
+                let _ = multipass.send_request(did).await;
+            }
+
             let codecs = CODECS.read().await;
-            blink
-                .offer_call(None, vec![did], codecs.webrtc.clone())
-                .await?;
+            blink.offer_call(None, ids, codecs.audio.clone()).await?;
         }
         Repl::Answer { id } => {
             let mut lock = OFFERED_CALL.lock().await;
@@ -175,17 +188,10 @@ async fn handle_command(
         }
         Repl::SetAudioRate { rate } => {
             let mut codecs = CODECS.write().await;
-            let audio = AudioCodecBuiler::from(codecs.audio.clone())
+            let codec = AudioCodecBuiler::from(codecs.audio.clone())
                 .sample_rate(rate.try_into()?)
                 .build();
-            codecs.audio = audio;
-        }
-        Repl::SetWebRtcAudioRate { rate } => {
-            let mut codecs = CODECS.write().await;
-            let webrtc = AudioCodecBuiler::from(codecs.audio.clone())
-                .sample_rate(rate.try_into()?)
-                .build();
-            codecs.webrtc = webrtc;
+            codecs.audio = codec;
         }
         Repl::SetAudioChannels { channels } => {
             if !(1..=2).contains(&channels) {
@@ -250,10 +256,13 @@ async fn handle_command(
     Ok(())
 }
 
-async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
+async fn handle_blink_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
         // get rid of noisy logs
-        if !matches!(evt, BlinkEventKind::ParticipantSpeaking { .. }) {
+        if !matches!(
+            evt,
+            BlinkEventKind::ParticipantSpeaking { .. } | BlinkEventKind::SelfSpeaking
+        ) {
             println!("BlinkEvent: {evt}");
         }
 
@@ -270,6 +279,19 @@ async fn handle_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()>
                 lock.replace(call_id);
             }
             _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_multipass_event_stream(
+    mut multipass: Box<dyn MultiPass>,
+    mut stream: MultiPassEventStream,
+) -> anyhow::Result<()> {
+    while let Some(evt) = stream.next().await {
+        if let MultiPassEventKind::FriendRequestReceived { from } = evt {
+            let _ = multipass.accept_request(&from).await;
         }
     }
 
@@ -299,7 +321,7 @@ async fn main() -> anyhow::Result<()> {
     tesseract.set_autosave();
     tesseract.unlock("abcdefghik".as_bytes())?;
 
-    let mut config = Config::production(multipass_dir, false);
+    let mut config = Config::production(multipass_dir);
     config.ipfs_setting.portmapping = true;
     config.ipfs_setting.agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
     config.store_setting.emit_online_event = true;
@@ -336,11 +358,19 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut blink: Box<dyn Blink> = warp_blink_wrtc::BlinkImpl::new(multipass).await?;
-    let event_stream = blink.get_event_stream().await?;
-    let handle = tokio::spawn(async {
-        if let Err(e) = handle_event_stream(event_stream).await {
-            println!("handle event stream failed: {e}");
+    let mut blink: Box<dyn Blink> = warp_blink_wrtc::BlinkImpl::new(multipass.clone()).await?;
+    let blink_event_stream = blink.get_event_stream().await?;
+    let blink_handle = tokio::spawn(async {
+        if let Err(e) = handle_blink_event_stream(blink_event_stream).await {
+            println!("handle blink event stream failed: {e}");
+        }
+    });
+
+    let multipass_event_stream = multipass.subscribe().await?;
+    let multipass2 = multipass.clone();
+    let multipass_handle = tokio::spawn(async {
+        if let Err(e) = handle_multipass_event_stream(multipass2, multipass_event_stream).await {
+            println!("handle multipass event stream failed: {e}");
         }
     });
 
@@ -359,12 +389,13 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        if let Err(e) = handle_command(&mut blink, &own_identity, cli).await {
+        if let Err(e) = handle_command(&mut blink, &mut multipass, &own_identity, cli).await {
             println!("command failed: {e}");
         }
     }
 
-    handle.abort();
+    blink_handle.abort();
+    multipass_handle.abort();
 
     Ok(())
 }

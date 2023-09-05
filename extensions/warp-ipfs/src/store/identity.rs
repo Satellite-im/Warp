@@ -44,7 +44,7 @@ use super::{
     document::{
         identity::{unixfs_fetch, IdentityDocument},
         utils::GetLocalDag,
-        RootDocument, ToCid,
+        ExtractedRootDocument, RootDocument, ToCid,
     },
     ecdh_decrypt, ecdh_encrypt,
     friends::{FriendsStore, Request},
@@ -874,7 +874,7 @@ impl IdentityStore {
         let identity = self.own_identity_document().await?;
 
         let Some(picture_cid) = identity.profile_picture else {
-            return Ok(())
+            return Ok(());
         };
 
         if cid != picture_cid {
@@ -921,7 +921,7 @@ impl IdentityStore {
         let identity = self.own_identity_document().await?;
 
         let Some(banner_cid) = identity.profile_banner else {
-            return Ok(())
+            return Ok(());
         };
 
         if cid != banner_cid {
@@ -1384,6 +1384,38 @@ impl IdentityStore {
                 .unwrap_or_default(),
             None => Default::default(),
         }
+    }
+
+    #[tracing::instrument(skip(self, extracted))]
+    pub async fn import_identity(
+        &mut self,
+        extracted: ExtractedRootDocument,
+    ) -> Result<Identity, Error> {
+        extracted.verify()?;
+
+        let identity = extracted.identity.clone();
+
+        let root_document = RootDocument::import(&self.ipfs, extracted).await?;
+
+        let root_cid = root_document.to_cid(&self.ipfs).await?;
+
+        self.ipfs.insert_pin(&root_cid, true).await?;
+
+        self.save_cid(root_cid).await?;
+        self.update_identity().await?;
+        self.enable_event();
+
+        if let Ok(store) = self.friend_store().await {
+            log::info!("Loading friends list into phonebook");
+            if let Ok(friends) = store.friends_list().await {
+                if let Some(phonebook) = store.phonebook() {
+                    if let Err(_e) = phonebook.add_friend_list(friends).await {
+                        error!("Error adding friends in phonebook: {_e}");
+                    }
+                }
+            }
+        }
+        Ok(identity)
     }
 
     #[tracing::instrument(skip(self))]
@@ -2137,13 +2169,11 @@ impl IdentityStore {
             let fingerprint = identity.did_key().fingerprint();
             let bytes = fingerprint.as_bytes();
 
-            let short_id = String::from_utf8_lossy(
-                bytes[bytes.len() - SHORT_ID_SIZE..]
-                    .try_into()
-                    .map_err(anyhow::Error::from)?,
-            );
+            let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
+                .try_into()
+                .map_err(anyhow::Error::from)?;
 
-            if identity.short_id() != short_id {
+            if identity.short_id() != short_id.into() {
                 return Err(Error::PublicKeyInvalid);
             }
         }

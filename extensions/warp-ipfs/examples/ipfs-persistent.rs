@@ -67,7 +67,7 @@ async fn setup_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let mut config = Config::production(path, opt.experimental_node);
+    let mut config = Config::production(path);
 
     config.ipfs_setting.mdns.enable = opt.mdns;
 
@@ -86,7 +86,9 @@ async fn setup_persistent<P: AsRef<Path>>(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {}
+    if fdlimit::raise_fd_limit().is_none() {
+        //raising fd limit
+    }
 
     let (_, mut filesystem) = setup_persistent(None, opt.path.clone(), &opt).await?;
 
@@ -179,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
                         "Modified",
                         "Thumbnail",
                         "Reference",
+                        "Path",
                     ]);
                     table.add_row(vec![
                         file.name(),
@@ -189,6 +192,7 @@ async fn main() -> anyhow::Result<()> {
                         file.modified().date_naive().to_string(),
                         (!file.thumbnail().is_empty()).to_string(),
                         file.reference().unwrap_or_else(|| String::from("N/A")),
+                        file.path().to_string(),
                     ]);
 
                     println!("{table}");
@@ -211,6 +215,7 @@ async fn main() -> anyhow::Result<()> {
                 "Thumbnail",
                 "File Type",
                 "Reference",
+                "Path",
             ]);
             for item in list.iter() {
                 table.add_row(vec![
@@ -235,6 +240,7 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         String::new()
                     },
+                    item.path().to_string(),
                 ]);
             }
             println!("{table}");

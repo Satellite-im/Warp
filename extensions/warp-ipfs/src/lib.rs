@@ -7,14 +7,17 @@ mod utils;
 
 use chrono::{DateTime, Utc};
 use config::Config;
-use either::Either;
 use futures::channel::mpsc::{channel, unbounded};
 use futures::stream::BoxStream;
 use futures::{AsyncReadExt, StreamExt};
-use ipfs::libp2p::kad::KademliaBucketInserts;
+use ipfs::libp2p::core::muxing::StreamMuxerBox;
+use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
+use ipfs::libp2p::core::upgrade::Version;
 use ipfs::libp2p::swarm::SwarmEvent;
+use ipfs::libp2p::Transport;
 use ipfs::p2p::{
-    ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
+    ConnectionLimits, IdentifyConfiguration, KadConfig, KadInserts, PubsubConfig, TransportConfig,
+    UpdateMode,
 };
 
 use rust_ipfs as ipfs;
@@ -24,6 +27,7 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use store::document::ExtractedRootDocument;
 use store::files::FileStore;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
@@ -55,24 +59,27 @@ use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
 use ipfs::{
-    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
+    DhtMode, Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath,
+    UninitializedIpfs,
 };
-use warp::crypto::DID;
+use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
 use warp::multipass::identity::{
     Identifier, Identity, IdentityProfile, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
-    MultiPassEventStream,
+    identity, Friends, FriendsEvent, IdentityImportOption, IdentityInformation, ImportLocation,
+    MultiPass, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 
 use crate::config::Bootstrap;
 use crate::store::discovery::Discovery;
+use crate::store::{ecdh_decrypt, ecdh_encrypt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
     config: Config,
+    identity_guard: Arc<tokio::sync::Mutex<()>>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore>>>,
@@ -141,7 +148,7 @@ impl WarpIpfs {
         let (raygun_tx, _) = tokio::sync::broadcast::channel(1024);
         let (constellation_tx, _) = tokio::sync::broadcast::channel(1024);
 
-        let mut identity = WarpIpfs {
+        let identity = WarpIpfs {
             config,
             tesseract,
             ipfs: Default::default(),
@@ -150,14 +157,14 @@ impl WarpIpfs {
             message_store: Default::default(),
             file_store: Default::default(),
             initialized: Default::default(),
-
+            identity_guard: Arc::default(),
             multipass_tx,
             raygun_tx,
             constellation_tx,
         };
 
         if !identity.tesseract.is_unlock() {
-            let mut inner = identity.clone();
+            let inner = identity.clone();
             tokio::spawn(async move {
                 let mut stream = inner.tesseract.subscribe();
                 while let Some(event) = stream.next().await {
@@ -173,7 +180,7 @@ impl WarpIpfs {
         Ok(identity)
     }
 
-    async fn initialize_store(&mut self, init: bool) -> anyhow::Result<()> {
+    async fn initialize_store(&self, init: bool) -> anyhow::Result<()> {
         let tesseract = self.tesseract.clone();
 
         if init && self.identity_store.read().is_some() && self.friend_store.read().is_some()
@@ -206,6 +213,13 @@ impl WarpIpfs {
             _ => anyhow::bail!("Unable to initialize store"),
         };
 
+        self.init_ipfs(keypair).await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn init_ipfs(&self, keypair: Keypair) -> Result<(), Error> {
+        let tesseract = self.tesseract.clone();
         info!(
             "Have keypair with peer id: {}",
             keypair.public().to_peer_id()
@@ -214,7 +228,7 @@ impl WarpIpfs {
         let config = self.config.clone();
 
         let empty_bootstrap = match &config.bootstrap {
-            Bootstrap::Ipfs | Bootstrap::Experimental => false,
+            Bootstrap::Ipfs => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
             Bootstrap::None => true,
         };
@@ -260,45 +274,7 @@ impl WarpIpfs {
 
         let mut opts = IpfsOptions {
             bootstrap: config.bootstrap.address(),
-            mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on.clone(),
-            dcutr: config.ipfs_setting.relay_client.enable,
-            relay: config.ipfs_setting.relay_client.enable,
-            relay_server: config.ipfs_setting.relay_server.enable,
-            keep_alive: true,
-            identify_configuration: Some({
-                let mut idconfig = IdentifyConfiguration {
-                    cache: 100,
-                    push_update: true,
-                    protocol_version: "/satellite/warp/0.1".into(),
-                    initial_delay: Duration::from_secs(0),
-                    ..Default::default()
-                };
-                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
-                    idconfig.agent_version = agent.clone();
-                }
-                idconfig
-            }),
-            kad_configuration: Some(Either::Right({
-                let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
-                conf.set_query_timeout(std::time::Duration::from_secs(60));
-                conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
-                conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
-                conf.set_kbucket_inserts(KademliaBucketInserts::Manual);
-                conf
-            })),
-            swarm_configuration: Some(swarm_configuration),
-            transport_configuration: Some(TransportConfig {
-                yamux_update_mode: UpdateMode::Read,
-                mplex_max_buffer_size: usize::MAX / 2,
-                enable_quic: false,
-                ..Default::default()
-            }),
-            pubsub_config: Some(PubsubConfig {
-                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
-                ..Default::default()
-            }),
-            port_mapping: config.ipfs_setting.portmapping,
             ..Default::default()
         };
 
@@ -322,9 +298,24 @@ impl WarpIpfs {
         };
 
         info!("Starting ipfs");
-        let ipfs = UninitializedIpfs::with_opt(opts)
+        let mut uninitialized = UninitializedIpfs::with_opt(opts)
             .set_custom_behaviour(behaviour)
             .set_keypair(keypair)
+            .set_transport_configuration(TransportConfig {
+                yamux_update_mode: UpdateMode::Read,
+                ..Default::default()
+            })
+            .set_swarm_configuration(swarm_configuration)
+            .set_identify_configuration({
+                let mut idconfig = IdentifyConfiguration {
+                    protocol_version: "/satellite/warp/0.1".into(),
+                    ..Default::default()
+                };
+                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
+                    idconfig.agent_version = agent.clone();
+                }
+                idconfig
+            })
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
@@ -346,8 +337,64 @@ impl WarpIpfs {
                     }
                 }
             })
-            .start()
-            .await?;
+            .set_kad_configuration(
+                KadConfig {
+                    query_timeout: std::time::Duration::from_secs(60),
+                    publication_interval: Some(Duration::from_secs(30 * 60)),
+                    provider_record_ttl: Some(Duration::from_secs(60 * 60)),
+                    insert_method: KadInserts::Manual,
+                    ..Default::default()
+                },
+                Default::default(),
+            )
+            .set_pubsub_configuration(PubsubConfig {
+                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
+                ..Default::default()
+            });
+
+        if config.ipfs_setting.memory_transport {
+            uninitialized = uninitialized.set_custom_transport(Box::new(
+                |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
+                    let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+                    let transport = match relay {
+                        Some(relay) => OrTransport::new(relay, MemoryTransport::default())
+                            .upgrade(Version::V1)
+                            .authenticate(noise_config)
+                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                            .timeout(Duration::from_secs(20))
+                            .boxed(),
+                        None => MemoryTransport::default()
+                            .upgrade(Version::V1)
+                            .authenticate(noise_config)
+                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                            .timeout(Duration::from_secs(20))
+                            .boxed(),
+                    };
+
+                    Ok(transport)
+                },
+            ));
+        }
+
+        if config.ipfs_setting.portmapping {
+            uninitialized = uninitialized.enable_upnp();
+        }
+
+        if config.ipfs_setting.mdns.enable {
+            uninitialized = uninitialized.enable_mdns();
+        }
+
+        if config.ipfs_setting.relay_client.enable {
+            uninitialized = uninitialized.enable_relay(true);
+        }
+
+        let ipfs = uninitialized.start().await?;
+
+        if config.ipfs_setting.dht_client {
+            ipfs.dht_mode(DhtMode::Client).await?;
+        }
 
         if config.ipfs_setting.bootstrap && !empty_bootstrap {
             //TODO: determine if bootstrap should run in intervals
@@ -362,10 +409,7 @@ impl WarpIpfs {
             let peer_id_extract = |addr: &Multiaddr| -> Option<PeerId> {
                 let mut addr = addr.clone();
                 match addr.pop() {
-                    Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
-                        Ok(id) => Some(id),
-                        _ => None,
-                    },
+                    Some(Protocol::P2p(peer_id)) => Some(peer_id),
                     _ => None,
                 }
             };
@@ -470,7 +514,7 @@ impl WarpIpfs {
                                         log::trace!(
                                             "Disabling relays due to being publicly accessible."
                                         );
-                                        let addrs = addrs.drain(..).collect::<Vec<_>>();
+                                        let addrs = std::mem::take(&mut addrs);
                                         stop_relay_client(addrs).await;
                                         using_relay = false;
                                     }
@@ -671,6 +715,8 @@ impl MultiPass for WarpIpfs {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<IdentityProfile, Error> {
+        let _g = self.identity_guard.lock().await;
+
         info!(
             "create_identity with username: {username:?} and containing passphrase: {}",
             passphrase.is_some()
@@ -713,6 +759,7 @@ impl MultiPass for WarpIpfs {
                 &phrase,
                 None,
                 self.config.save_phrase,
+                false,
             )?;
         }
 
@@ -999,6 +1046,119 @@ impl MultiPass for WarpIpfs {
         store.push_to_all().await;
 
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl MultiPassImportExport for WarpIpfs {
+    async fn import_identity<'a>(
+        &mut self,
+        option: IdentityImportOption<'a>,
+    ) -> Result<Identity, Error> {
+        if self.initialized.load(Ordering::SeqCst) {
+            return Err(Error::IdentityExist);
+        }
+        let _g = self.identity_guard.lock().await;
+        if !self.tesseract.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        match option {
+            IdentityImportOption::Locate {
+                location: ImportLocation::Local { path },
+                passphrase,
+            } => {
+                let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
+
+                let bytes = tokio::fs::read(path).await?;
+                let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
+                let exported_document =
+                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+
+                exported_document.verify()?;
+
+                let bytes = Zeroizing::new(keypair.private_key_bytes());
+
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut self.tesseract,
+                    &passphrase,
+                    None,
+                    self.config.save_phrase,
+                    false,
+                )?;
+
+                self.init_ipfs(
+                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                        .map_err(|_| Error::PrivateKeyInvalid)?,
+                )
+                .await?;
+
+                let mut store = self.identity_store(false).await?;
+
+                return store.import_identity(exported_document).await;
+            }
+            IdentityImportOption::Locate {
+                location: ImportLocation::Memory { buffer },
+                passphrase,
+            } => {
+                let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
+
+                let bytes = std::mem::take(buffer);
+
+                let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
+                let exported_document =
+                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+
+                exported_document.verify()?;
+
+                let bytes = Zeroizing::new(keypair.private_key_bytes());
+
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut self.tesseract,
+                    &passphrase,
+                    None,
+                    self.config.save_phrase,
+                    false,
+                )?;
+
+                self.init_ipfs(
+                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                        .map_err(|_| Error::PrivateKeyInvalid)?,
+                )
+                .await?;
+
+                let mut store = self.identity_store(false).await?;
+
+                return store.import_identity(exported_document).await;
+            }
+            IdentityImportOption::Locate {
+                location: ImportLocation::Remote,
+                ..
+            } => return Err(Error::Unimplemented),
+        }
+    }
+
+    async fn export_identity<'a>(&mut self, location: ImportLocation<'a>) -> Result<(), Error> {
+        let store = self.identity_store(true).await?;
+        let kp = store.get_keypair_did()?;
+        let ipfs = self.ipfs()?;
+        let document = store.get_root_document().await?;
+
+        let exported = document.export(&ipfs).await?;
+
+        let bytes = serde_json::to_vec(&exported)?;
+        let encrypted_bundle = ecdh_encrypt(&kp, None, bytes)?;
+
+        match location {
+            ImportLocation::Local { path } => {
+                tokio::fs::write(path, encrypted_bundle).await?;
+                Ok(())
+            }
+            ImportLocation::Memory { buffer } => {
+                *buffer = encrypted_bundle;
+                Ok(())
+            }
+            ImportLocation::Remote => return Err(Error::Unimplemented),
+        }
     }
 }
 

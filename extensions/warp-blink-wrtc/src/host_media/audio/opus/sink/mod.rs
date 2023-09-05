@@ -33,8 +33,6 @@ pub struct OpusSink {
     track: Arc<TrackRemote>,
     // same
     webrtc_codec: blink::AudioCodec,
-    // same
-    sink_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
@@ -160,7 +158,6 @@ impl OpusSink {
             stream: output_stream,
             track,
             webrtc_codec,
-            sink_codec,
             decoder_handle: join_handle,
             event_ch,
             mp4_logger,
@@ -192,25 +189,34 @@ impl SinkTrack for OpusSink {
 
     fn play(&self) -> Result<()> {
         *self.muted.write() = false;
+        self.stream.play()?;
         Ok(())
     }
     fn pause(&self) -> Result<()> {
         *self.muted.write() = true;
+        self.stream.pause()?;
         Ok(())
     }
-    fn change_output_device(&mut self, output_device: &cpal::Device) -> Result<()> {
+    fn change_output_device(
+        &mut self,
+        output_device: &cpal::Device,
+        sink_codec: blink::AudioCodec,
+    ) -> Result<()> {
         self.stream.pause()?;
         self.decoder_handle.abort();
-
         let new_sink = OpusSink::init_internal(
             self.peer_id.clone(),
             self.event_ch.clone(),
             output_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
-            self.sink_codec.clone(),
+            sink_codec,
         )?;
         *self = new_sink;
+        if !*self.muted.read() {
+            self.stream.play()?;
+        }
+
         Ok(())
     }
 
@@ -271,7 +277,8 @@ where
 
     let automute_tx = host_media::audio::automute::AUDIO_CMD_CH.tx.clone();
 
-    // let logger = rtp_logger::get_instance(format!("{}-audio", peer_id));
+    // let logger = crate::rtp_logger::get_instance(format!("{}-audio", peer_id));
+    // let logger_start_time = std::time::Instant::now();
 
     loop {
         match track.read(&mut b).await {
@@ -295,7 +302,7 @@ where
                 }
 
                 // if let Some(logger) = logger.as_ref() {
-                //     logger.log(rtp_packet.header.clone())
+                //     logger.log(rtp_packet.header.clone(), logger_start_time.elapsed().as_millis());
                 // }
 
                 if let Some(extension) = rtp_packet.header.extensions.first() {
