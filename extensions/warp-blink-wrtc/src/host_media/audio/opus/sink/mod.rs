@@ -128,6 +128,13 @@ impl OpusSink {
 
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut input_fell_behind = false;
+            // this is test code, left here for reference. it can be deleted later if needed.
+            // if *dump_consumer_queue.read() {
+            //     *dump_consumer_queue.write() = false;
+            //     unsafe {
+            //         consumer.advance(consumer.len());
+            //     }
+            // }
             for sample in data {
                 *sample = match consumer.pop() {
                     Some(s) => s,
@@ -278,7 +285,8 @@ where
     let automute_tx = host_media::audio::automute::AUDIO_CMD_CH.tx.clone();
 
     // let logger = crate::rtp_logger::get_instance(format!("{}-audio", peer_id));
-    // let logger_start_time = std::time::Instant::now();
+    let task_start_time = std::time::Instant::now();
+    let mut last_degradation_time = 0;
 
     loop {
         match track.read(&mut b).await {
@@ -302,7 +310,7 @@ where
                 }
 
                 // if let Some(logger) = logger.as_ref() {
-                //     logger.log(rtp_packet.header.clone(), logger_start_time.elapsed().as_millis());
+                //     logger.log(rtp_packet.header.clone(), task_start_time.elapsed().as_millis());
                 // }
 
                 if let Some(extension) = rtp_packet.header.extensions.first() {
@@ -328,6 +336,10 @@ where
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
+                    // discard overflow packets
+                    if task_start_time.elapsed().as_millis() - last_degradation_time < 10 {
+                        continue;
+                    }
                     // discard samples if muted
                     if *muted.read() {
                         continue;
@@ -343,7 +355,7 @@ where
                             // hopefully each opus packet is still 10ms
                             let _ = automute_tx
                                 .send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
-                            for audio_sample in to_send {
+                            'PROCESS_DECODED_SAMPLES: for audio_sample in to_send {
                                 match channel_mixer.process(*audio_sample * multiplier) {
                                     ChannelMixerOutput::Single(sample) => {
                                         resampler.process(sample, &mut raw_samples);
@@ -355,8 +367,22 @@ where
                                     ChannelMixerOutput::None => {}
                                 }
                                 for sample in raw_samples.drain(..) {
-                                    if let Err(e) = producer.push(sample) {
-                                        log::error!("failed to send sample: {}", e);
+                                    if let Err(_e) = producer.push(sample) {
+                                        // this is test code, left here for reference. it can be deleted later if needed.
+                                        // *dump_consumer_queue.write() = true;
+
+                                        // log::error!(
+                                        //     "audio degradation: {}",
+                                        //     task_start_time.elapsed().as_millis()
+                                        // );
+
+                                        let _ = event_ch.send(BlinkEventKind::AudioDegradation {
+                                            peer_id: peer_id.clone(),
+                                        });
+
+                                        last_degradation_time =
+                                            task_start_time.elapsed().as_millis();
+                                        break 'PROCESS_DECODED_SAMPLES;
                                     }
                                 }
                             }

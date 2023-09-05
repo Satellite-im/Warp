@@ -235,9 +235,9 @@ fn create_source_track(
                     {
                         Ok(packets) => {
                             if let Some(packet) = packets.first() {
-                                if let Some(writer) = mp4_writer.write().as_mut() {
+                                if let Some(mp4_writer) = mp4_writer.write().as_mut() {
                                     // todo: use the audio codec to determine number of samples and duration
-                                    writer.log(packet.payload.clone());
+                                    mp4_writer.log(packet.payload.clone());
                                 }
                             }
 
