@@ -3259,17 +3259,15 @@ impl MessageStore {
 
         let files = locations
             .iter()
-            .filter(|location| {
-                match location {
-                    Location::Disk {path}=> path.is_file(), 
-                    _ => true,
-                }
+            .filter(|location| match location {
+                Location::Disk { path } => path.is_file(),
+                _ => true,
             })
             .cloned()
             .collect::<Vec<_>>();
 
         if files.is_empty() {
-            return Err(Error::InvalidMessage);
+            return Err(Error::NoAttachments);
         }
 
         let store = self.clone();
@@ -3284,21 +3282,26 @@ impl MessageStore {
 
             for file in files {
                 match file {
-                    Location::Constellation {path} => {
-                        let path = path.clone();
+                    Location::Constellation { path } => {
                         match constellation
                             .root_directory()
                             .get_item_by_path(&path)
                             .and_then(|item| item.get_file())
-                            .ok()
                         {
-                            Some(f) => {
+                            Ok(f) => {
                                 let stream = async_stream::stream! {
                                     yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
                                 };
                                 streams.push(stream.boxed());
                             },
-                            None => continue,
+                            Err(e) => {
+                                let constellation_path = PathBuf::from(&path);
+                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
+                                };
+                                streams.push(stream.boxed());
+                            },
                         }
                     }
                     Location::Disk {path} => {
@@ -3419,6 +3422,9 @@ impl MessageStore {
             let final_results = {
                 let mut store = store.clone();
                 async move {
+                    if attachments.is_empty() {
+                        return Err(Error::NoAttachments);
+                    }
                     let own_did = &*store.did;
                     let mut message = Message::default();
                     message.set_message_type(MessageType::Attachment);
