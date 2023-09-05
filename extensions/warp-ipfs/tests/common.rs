@@ -1,5 +1,5 @@
 use futures::{stream, StreamExt};
-use rust_ipfs::{Ipfs, Multiaddr, PeerId};
+use rust_ipfs::{Ipfs, Multiaddr, PeerId, Protocol};
 use warp::{
     crypto::DID,
     multipass::{identity::Identity, MultiPass},
@@ -52,7 +52,8 @@ pub async fn create_account(
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
-    config.listen_on = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
+    config.listen_on = vec![Multiaddr::empty().with(Protocol::Memory(0))];
+    config.ipfs_setting.memory_transport = true;
     config.store_setting.discovery = Discovery::Provider(context);
     config.store_setting.share_platform = true;
     config.ipfs_setting.relay_client.relay_address = vec![];
@@ -102,7 +103,8 @@ pub async fn create_account_and_chat(
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
-    config.listen_on = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
+    config.listen_on = vec![Multiaddr::empty().with(Protocol::Memory(0))];
+    config.ipfs_setting.memory_transport = true;
     config.store_setting.discovery = Discovery::Provider(context);
     config.store_setting.share_platform = true;
     config.ipfs_setting.relay_client.relay_address = vec![];

@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
-warp = { path = "../../warp" }
+warp.workspace = true
 
 async-trait.workspace = true
 

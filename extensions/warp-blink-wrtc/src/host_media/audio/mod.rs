@@ -32,7 +32,11 @@ pub trait SourceTrack {
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
     // should not require RTP renegotiation
-    fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()>;
+    fn change_input_device(
+        &mut self,
+        input_device: &cpal::Device,
+        source_codec: blink::AudioCodec,
+    ) -> Result<()>;
     fn init_mp4_logger(&mut self) -> Result<()>;
     fn remove_mp4_logger(&mut self) -> Result<()>;
 }
@@ -51,7 +55,11 @@ pub trait SinkTrack {
         Self: Sized;
     fn play(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;
-    fn change_output_device(&mut self, output_device: &cpal::Device) -> anyhow::Result<()>;
+    fn change_output_device(
+        &mut self,
+        output_device: &cpal::Device,
+        sink_codec: blink::AudioCodec,
+    ) -> anyhow::Result<()>;
     fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<()>;
     fn init_mp4_logger(&mut self) -> Result<()>;
     fn remove_mp4_logger(&mut self) -> Result<()>;
