@@ -292,7 +292,6 @@ where
     // let logger = crate::rtp_logger::get_instance(format!("{}-audio", peer_id));
     // let logger_start_time = std::time::Instant::now();
 
-    let mut samples_to_skip = 0;
     loop {
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {
