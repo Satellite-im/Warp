@@ -92,7 +92,7 @@ impl OpusSink {
         };
 
         let decoder = opus::Decoder::new(webrtc_sample_rate, webrtc_channels)?;
-        let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
+        let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 5);
         let (producer, mut consumer) = ring.split();
 
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket;
@@ -324,6 +324,7 @@ where
                     }
                 }
 
+                let mut logged_error_once = false;
                 // turn RTP packets into samples via SampleBuilder.push
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
@@ -355,8 +356,12 @@ where
                                     ChannelMixerOutput::None => {}
                                 }
                                 for sample in raw_samples.drain(..) {
-                                    if let Err(e) = producer.push(sample) {
-                                        log::error!("failed to send sample: {}", e);
+                                    if let Err(_e) = producer.push(sample) {
+                                        if !logged_error_once {
+                                            logged_error_once = true;
+                                            log::error!("opus sink failed to send sample");
+                                            // todo: send event for audio degradation.
+                                        }
                                     }
                                 }
                             }
