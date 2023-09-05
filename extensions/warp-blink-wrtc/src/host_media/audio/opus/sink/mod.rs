@@ -330,7 +330,7 @@ where
                 // check if a sample can be created
                 while let Some(media_sample) = sample_builder.pop() {
                     if samples_to_skip > 0 {
-                        samples_to_skip = samples_to_skip - 1;
+                        samples_to_skip -= 1;
                         continue;
                     }
 
