@@ -217,7 +217,7 @@ impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
         if matches!(self.conversation_type, ConversationType::Group) {
             let Some(creator) = self.creator.clone() else {
-                return Err(Error::PublicKeyInvalid)
+                return Err(Error::PublicKeyInvalid);
             };
 
             if !creator.eq(did) {
@@ -245,11 +245,11 @@ impl ConversationDocument {
     pub fn verify(&self) -> Result<(), Error> {
         if matches!(self.conversation_type, ConversationType::Group) {
             let Some(creator) = &self.creator else {
-                return Err(Error::PublicKeyInvalid)
+                return Err(Error::PublicKeyInvalid);
             };
 
             let Some(signature) = &self.signature else {
-                return Err(Error::InvalidSignature)
+                return Err(Error::InvalidSignature);
             };
 
             let signature = bs58::decode(signature).into_vec()?;

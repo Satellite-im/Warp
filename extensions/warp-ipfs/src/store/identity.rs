@@ -874,7 +874,7 @@ impl IdentityStore {
         let identity = self.own_identity_document().await?;
 
         let Some(picture_cid) = identity.profile_picture else {
-            return Ok(())
+            return Ok(());
         };
 
         if cid != picture_cid {
@@ -921,7 +921,7 @@ impl IdentityStore {
         let identity = self.own_identity_document().await?;
 
         let Some(banner_cid) = identity.profile_banner else {
-            return Ok(())
+            return Ok(());
         };
 
         if cid != banner_cid {

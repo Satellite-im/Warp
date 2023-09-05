@@ -1,6 +1,7 @@
 use anyhow::bail;
 use clap::Parser;
 
+use cpal::traits::{DeviceTrait, HostTrait};
 use log::LevelFilter;
 use once_cell::sync::Lazy;
 use play::*;
@@ -17,7 +18,11 @@ mod record;
 
 /// Test CPAL and OPUS
 #[derive(Parser, Debug, Clone)]
-enum Cli {
+enum Repl {
+    /// show the supported CPAL input stream configs
+    SupportedInputConfigs,
+    /// show the supported CPAL output stream configs
+    SupportedOutputConfigs,
     /// print help text regarding properly setting sample rate and
     /// frame size
     ConfigInfo,
@@ -158,14 +163,14 @@ async fn main() -> anyhow::Result<()> {
     while let Some(Ok(line)) = iter.next() {
         let mut v = vec![""];
         v.extend(line.split_ascii_whitespace());
-        let cli = match Cli::try_parse_from(v) {
+        let cli = match Repl::try_parse_from(v) {
             Ok(r) => r,
             Err(e) => {
                 println!("{e}");
                 continue;
             }
         };
-        if matches!(cli, Cli::Quit | Cli::Q) {
+        if matches!(cli, Repl::Quit | Repl::Q) {
             println!("quitting");
             break;
         }
@@ -177,11 +182,11 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_command(cli: Cli) -> anyhow::Result<()> {
+async fn handle_command(cli: Repl) -> anyhow::Result<()> {
     let mut sm = STATIC_MEM.lock().await;
     match cli {
-        Cli::Quit | Cli::Q => bail!("user quit"),
-        Cli::ConfigInfo => {
+        Repl::Quit | Repl::Q => bail!("user quit"),
+        Repl::ConfigInfo => {
             let s = "Important information regarding sample rate and frame size:
 Based on the OPUS RFC, OPUS encodes frames based on duration - 2.5, 5, 10, 20, 40, or 60ms.
 This means that for a given sample rate, not all frame sizes are acceptable.
@@ -192,28 +197,28 @@ Frame size (in samples) vs duration for various sampling rates:
     48000 samples/sec: 120: 2.5ms; 240: 5ms; 480: 10ms; 960: 10ms; 1920: 20ms;";
             println!("{s}");
         }
-        Cli::SampleType { sample_type } => {
+        Repl::SampleType { sample_type } => {
             sm.sample_type = sample_type;
         }
-        Cli::BitRate { rate } => {
+        Repl::BitRate { rate } => {
             sm.bit_rate = opus::Bitrate::Bits(rate);
         }
-        Cli::Channels { channels } => {
+        Repl::Channels { channels } => {
             sm.channels = channels;
         }
-        Cli::SampleRate { rate } => {
+        Repl::SampleRate { rate } => {
             if ![8000, 12000, 16000, 24000, 48000].contains(&rate) {
                 bail!("invalid sample rate")
             }
             sm.sample_rate = rate;
         }
-        Cli::FrameSize { frame_size } => {
+        Repl::FrameSize { frame_size } => {
             if ![120, 240, 480, 960, 1920, 2880].contains(&frame_size) {
                 bail!("invalid frame size");
             }
             sm.frame_size = frame_size;
         }
-        Cli::Bandwidth { bandwidth } => {
+        Repl::Bandwidth { bandwidth } => {
             sm.bandwidth = match bandwidth {
                 -1000 => opus::Bandwidth::Auto,
                 1101 => opus::Bandwidth::Narrowband,
@@ -224,14 +229,14 @@ Frame size (in samples) vs duration for various sampling rates:
                 _ => bail!("invalid bandwidth"),
             };
         }
-        Cli::Application { application } => {
+        Repl::Application { application } => {
             sm.application = match application {
                 2048 => opus::Application::Voip,
                 2049 => opus::Application::Audio,
                 _ => bail!("invalid application"),
             };
         }
-        Cli::Record { file_name } => {
+        Repl::Record { file_name } => {
             unsafe {
                 *AUDIO_FILE_NAME = file_name;
             }
@@ -240,7 +245,7 @@ Frame size (in samples) vs duration for various sampling rates:
                 SampleTypes::Signed => todo!(),
             }
         }
-        Cli::Encode {
+        Repl::Encode {
             input_file_name,
             output_file_name,
         } => {
@@ -259,11 +264,11 @@ Frame size (in samples) vs duration for various sampling rates:
                 SampleTypes::Signed => todo!(),
             }
         }
-        Cli::EncodeMp4 {
+        Repl::EncodeMp4 {
             input_file_name,
             output_file_name,
         } => encode::f32_mp4(sm.clone(), input_file_name, output_file_name)?,
-        Cli::CustomEncode {
+        Repl::CustomEncode {
             decoded_sample_rate,
             input_file_name,
             output_file_name,
@@ -277,7 +282,7 @@ Frame size (in samples) vs duration for various sampling rates:
             )
             .await?;
         }
-        Cli::CustomEncodeChannels {
+        Repl::CustomEncodeChannels {
             decoded_channels,
             decoded_sample_rate,
             input_file_name,
@@ -292,7 +297,7 @@ Frame size (in samples) vs duration for various sampling rates:
             )
             .await?;
         }
-        Cli::CustomEncodeRtp {
+        Repl::CustomEncodeRtp {
             decoded_sample_rate,
             input_file_name,
             output_file_name,
@@ -305,7 +310,7 @@ Frame size (in samples) vs duration for various sampling rates:
             )
             .await?
         }
-        Cli::Play {
+        Repl::Play {
             file_name,
             sample_rate,
         } => {
@@ -317,20 +322,40 @@ Frame size (in samples) vs duration for various sampling rates:
                 SampleTypes::Signed => todo!(),
             }
         }
-        Cli::ShowConfig => println!("{:#?}", sm),
-        Cli::LoudnessBs177 {
+        Repl::ShowConfig => println!("{:#?}", sm),
+        Repl::LoudnessBs177 {
             input_file_name,
             output_file_name,
         } => loudness::calculate_loudness_bs177(sm.clone(), &input_file_name, &output_file_name)?,
-        Cli::LoudnessRms {
+        Repl::LoudnessRms {
             input_file_name,
             output_file_name,
         } => loudness::calculate_loudness_rms(&input_file_name, &output_file_name)?,
-        Cli::LoudnessRms2 {
+        Repl::LoudnessRms2 {
             input_file_name,
             output_file_name,
         } => loudness::calculate_loudness_rms2(&input_file_name, &output_file_name)?,
-        Cli::Feedback => feedback::feedback(sm.clone()).await?,
+        Repl::Feedback => feedback::feedback(sm.clone()).await?,
+        Repl::SupportedInputConfigs => {
+            let host = cpal::default_host();
+            let dev = host
+                .default_input_device()
+                .ok_or(anyhow::anyhow!("no input device"))?;
+            let configs = dev.supported_input_configs()?;
+            for config in configs {
+                println!("{config:#?}");
+            }
+        }
+        Repl::SupportedOutputConfigs => {
+            let host = cpal::default_host();
+            let dev = host
+                .default_output_device()
+                .ok_or(anyhow::anyhow!("no input device"))?;
+            let configs = dev.supported_output_configs()?;
+            for config in configs {
+                println!("{config:#?}");
+            }
+        }
     }
     Ok(())
 }

@@ -1,5 +1,8 @@
 use anyhow::Result;
-use cpal::{traits::DeviceTrait, SampleRate};
+use cpal::{
+    traits::{DeviceTrait, StreamTrait},
+    SampleRate,
+};
 use rand::Rng;
 use ringbuf::HeapRb;
 
@@ -28,7 +31,6 @@ pub struct OpusSource {
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: blink::AudioCodec,
-    source_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     // used to cancel the current packetizer when the input device is changed.
@@ -63,7 +65,7 @@ impl SourceTrack for OpusSource {
             input_device,
             track.clone(),
             webrtc_codec.clone(),
-            source_codec.clone(),
+            source_codec,
             event_ch.clone(),
             mp4_logger.clone(),
             muted2,
@@ -74,7 +76,6 @@ impl SourceTrack for OpusSource {
             event_ch,
             track,
             webrtc_codec,
-            source_codec,
             stream: input_stream,
             packetizer_handle: join_handle,
             mp4_logger,
@@ -83,27 +84,37 @@ impl SourceTrack for OpusSource {
     }
 
     fn play(&self) -> Result<()> {
+        self.stream.play()?;
         *self.muted.write() = false;
         Ok(())
     }
     fn pause(&self) -> Result<()> {
+        self.stream.pause()?;
         *self.muted.write() = true;
         Ok(())
     }
     // should not require RTP renegotiation
-    fn change_input_device(&mut self, input_device: &cpal::Device) -> Result<()> {
+    fn change_input_device(
+        &mut self,
+        input_device: &cpal::Device,
+        source_codec: blink::AudioCodec,
+    ) -> Result<()> {
+        self.stream.pause()?;
         self.packetizer_handle.abort();
         let (stream, handle) = create_source_track(
             input_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
-            self.source_codec.clone(),
+            source_codec,
             self.event_ch.clone(),
             self.mp4_logger.clone(),
             self.muted.clone(),
         )?;
         self.stream = stream;
         self.packetizer_handle = handle;
+        if !*self.muted.read() {
+            self.stream.play()?;
+        }
         Ok(())
     }
 
@@ -191,7 +202,8 @@ fn create_source_track(
         })?;
 
     let join_handle = tokio::spawn(async move {
-        // let logger = rtp_logger::get_instance("self-audio".to_string());
+        //let logger = crate::rtp_logger::get_instance("self-audio".to_string());
+        //let logger_start_time = std::time::Instant::now();
 
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
@@ -231,7 +243,10 @@ fn create_source_track(
 
                             for packet in &packets {
                                 // if let Some(logger) = logger.as_ref() {
-                                //     logger.log(packet.header.clone())
+                                //     logger.log(
+                                //         packet.header.clone(),
+                                //         logger_start_time.elapsed().as_millis(),
+                                //     );
                                 // }
 
                                 if let Err(e) = track

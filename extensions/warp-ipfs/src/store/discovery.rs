@@ -71,7 +71,9 @@ impl Discovery {
                     loop {
                         if let Ok(mut stream) = discovery.ipfs.get_providers(cid).await {
                             while let Some(peer_id) = stream.next().await {
-                                let Ok(connection_type) = super::connected_to_peer(&discovery.ipfs, peer_id).await else {
+                                let Ok(connection_type) =
+                                    super::connected_to_peer(&discovery.ipfs, peer_id).await
+                                else {
                                     break;
                                 };
 
@@ -268,7 +270,9 @@ impl DiscoveryEntry {
                         //TODO: Check discovery config option to determine if we should determine how we
                         //      should check connectivity
 
-                        let Ok(connection_type) = super::connected_to_peer(&entry.ipfs, peer_id).await else {
+                        let Ok(connection_type) =
+                            super::connected_to_peer(&entry.ipfs, peer_id).await
+                        else {
                             break;
                         };
 
