@@ -17,7 +17,7 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{Identifier, IdentityUpdate};
 
-use self::identity::{IdentityStatus, Platform, Relationship, IdentityProfile};
+use self::identity::{IdentityProfile, IdentityStatus, Platform, Relationship};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
@@ -49,7 +49,7 @@ pub enum ImportLocation<'a> {
     Local { path: PathBuf },
 
     /// Buffer memory of where identity is stored
-    Memory { buffer: &'a mut Vec<u8> }
+    Memory { buffer: &'a mut Vec<u8> },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -117,7 +117,10 @@ dyn_clone::clone_trait_object!(MultiPass);
 #[async_trait::async_trait]
 pub trait MultiPassImportExport: Sync + Send {
     /// Import identity from a specific location
-    async fn import_identity<'a>(&mut self, _: IdentityImportOption<'a>) -> Result<Identity, Error> {
+    async fn import_identity<'a>(
+        &mut self,
+        _: IdentityImportOption<'a>,
+    ) -> Result<Identity, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -289,7 +292,7 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
-    use super::identity::{IdentityStatus, Relationship, IdentityProfile};
+    use super::identity::{IdentityProfile, IdentityStatus, Relationship};
     use super::MultiPassEventStream;
 
     #[allow(clippy::missing_safety_doc)]

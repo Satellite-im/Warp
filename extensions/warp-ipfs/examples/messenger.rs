@@ -18,7 +18,7 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     AttachmentKind, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
+    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState, Location,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -64,7 +64,7 @@ struct Opt {
 async fn setup<P: AsRef<Path>>(
     path: Option<P>,
     passphrase: Zeroizing<String>,
-    experimental: bool,
+    _: bool,
     opt: &Opt,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>)> {
     let tesseract = match path.as_ref() {
@@ -81,8 +81,8 @@ async fn setup<P: AsRef<Path>>(
     tesseract.unlock(passphrase.as_bytes())?;
 
     let mut config = match path.as_ref() {
-        Some(path) => warp_ipfs::config::Config::production(path, experimental),
-        None => warp_ipfs::config::Config::testing(experimental),
+        Some(path) => warp_ipfs::config::Config::production(path),
+        None => warp_ipfs::config::Config::testing(),
     };
 
     if !opt.direct || !opt.no_discovery {
@@ -137,12 +137,16 @@ async fn main() -> anyhow::Result<()> {
         //raising fd limit
     }
 
+    let mut _log_guard = None;
+
     if !opt.stdout_log {
         let file_appender = tracing_appender::rolling::hourly(
             opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
             "warp_rg_ipfs_messenger.log",
         );
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        _log_guard = Some(_guard);
 
         tracing_subscriber::fmt()
             .with_writer(non_blocking)
@@ -768,7 +772,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut files = vec![];
 
                             for item in cmd_line.by_ref() {
-                                files.push(PathBuf::from(item));
+                                files.push(Location::Disk {path:PathBuf::from(item)});
                             }
 
                             if files.is_empty() {
@@ -782,7 +786,7 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    let mut stream = match chat.attach(conversation_id, None, Default::default(), files, vec![]).await {
+                                    let mut stream = match chat.attach(conversation_id, None, files, vec![]).await {
                                         Ok(stream) => stream,
                                         Err(e) => {
                                             writeln!(stdout, "> Error: {e}")?;

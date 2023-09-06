@@ -7,14 +7,17 @@ mod utils;
 
 use chrono::{DateTime, Utc};
 use config::Config;
-use either::Either;
 use futures::channel::mpsc::{channel, unbounded};
 use futures::stream::BoxStream;
 use futures::{AsyncReadExt, StreamExt};
-use ipfs::libp2p::kad::KademliaBucketInserts;
+use ipfs::libp2p::core::muxing::StreamMuxerBox;
+use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
+use ipfs::libp2p::core::upgrade::Version;
 use ipfs::libp2p::swarm::SwarmEvent;
+use ipfs::libp2p::Transport;
 use ipfs::p2p::{
-    ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
+    ConnectionLimits, IdentifyConfiguration, KadConfig, KadInserts, PubsubConfig, TransportConfig,
+    UpdateMode,
 };
 
 use rust_ipfs as ipfs;
@@ -56,7 +59,8 @@ use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
 use ipfs::{
-    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
+    DhtMode, Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath,
+    UninitializedIpfs,
 };
 use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
@@ -224,7 +228,7 @@ impl WarpIpfs {
         let config = self.config.clone();
 
         let empty_bootstrap = match &config.bootstrap {
-            Bootstrap::Ipfs | Bootstrap::Experimental => false,
+            Bootstrap::Ipfs => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
             Bootstrap::None => true,
         };
@@ -270,45 +274,7 @@ impl WarpIpfs {
 
         let mut opts = IpfsOptions {
             bootstrap: config.bootstrap.address(),
-            mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on.clone(),
-            dcutr: config.ipfs_setting.relay_client.enable,
-            relay: config.ipfs_setting.relay_client.enable,
-            relay_server: config.ipfs_setting.relay_server.enable,
-            keep_alive: true,
-            identify_configuration: Some({
-                let mut idconfig = IdentifyConfiguration {
-                    cache: 100,
-                    push_update: true,
-                    protocol_version: "/satellite/warp/0.1".into(),
-                    initial_delay: Duration::from_secs(0),
-                    ..Default::default()
-                };
-                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
-                    idconfig.agent_version = agent.clone();
-                }
-                idconfig
-            }),
-            kad_configuration: Some(Either::Right({
-                let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
-                conf.set_query_timeout(std::time::Duration::from_secs(60));
-                conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
-                conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
-                conf.set_kbucket_inserts(KademliaBucketInserts::Manual);
-                conf
-            })),
-            swarm_configuration: Some(swarm_configuration),
-            transport_configuration: Some(TransportConfig {
-                yamux_update_mode: UpdateMode::Read,
-                mplex_max_buffer_size: usize::MAX / 2,
-                enable_quic: false,
-                ..Default::default()
-            }),
-            pubsub_config: Some(PubsubConfig {
-                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
-                ..Default::default()
-            }),
-            port_mapping: config.ipfs_setting.portmapping,
             ..Default::default()
         };
 
@@ -332,9 +298,24 @@ impl WarpIpfs {
         };
 
         info!("Starting ipfs");
-        let ipfs = UninitializedIpfs::with_opt(opts)
+        let mut uninitialized = UninitializedIpfs::with_opt(opts)
             .set_custom_behaviour(behaviour)
             .set_keypair(keypair)
+            .set_transport_configuration(TransportConfig {
+                yamux_update_mode: UpdateMode::Read,
+                ..Default::default()
+            })
+            .set_swarm_configuration(swarm_configuration)
+            .set_identify_configuration({
+                let mut idconfig = IdentifyConfiguration {
+                    protocol_version: "/satellite/warp/0.1".into(),
+                    ..Default::default()
+                };
+                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
+                    idconfig.agent_version = agent.clone();
+                }
+                idconfig
+            })
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
@@ -356,8 +337,64 @@ impl WarpIpfs {
                     }
                 }
             })
-            .start()
-            .await?;
+            .set_kad_configuration(
+                KadConfig {
+                    query_timeout: std::time::Duration::from_secs(60),
+                    publication_interval: Some(Duration::from_secs(30 * 60)),
+                    provider_record_ttl: Some(Duration::from_secs(60 * 60)),
+                    insert_method: KadInserts::Manual,
+                    ..Default::default()
+                },
+                Default::default(),
+            )
+            .set_pubsub_configuration(PubsubConfig {
+                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
+                ..Default::default()
+            });
+
+        if config.ipfs_setting.memory_transport {
+            uninitialized = uninitialized.set_custom_transport(Box::new(
+                |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
+                    let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+                    let transport = match relay {
+                        Some(relay) => OrTransport::new(relay, MemoryTransport::default())
+                            .upgrade(Version::V1)
+                            .authenticate(noise_config)
+                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                            .timeout(Duration::from_secs(20))
+                            .boxed(),
+                        None => MemoryTransport::default()
+                            .upgrade(Version::V1)
+                            .authenticate(noise_config)
+                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                            .timeout(Duration::from_secs(20))
+                            .boxed(),
+                    };
+
+                    Ok(transport)
+                },
+            ));
+        }
+
+        if config.ipfs_setting.portmapping {
+            uninitialized = uninitialized.enable_upnp();
+        }
+
+        if config.ipfs_setting.mdns.enable {
+            uninitialized = uninitialized.enable_mdns();
+        }
+
+        if config.ipfs_setting.relay_client.enable {
+            uninitialized = uninitialized.enable_relay(true);
+        }
+
+        let ipfs = uninitialized.start().await?;
+
+        if config.ipfs_setting.dht_client {
+            ipfs.dht_mode(DhtMode::Client).await?;
+        }
 
         if config.ipfs_setting.bootstrap && !empty_bootstrap {
             //TODO: determine if bootstrap should run in intervals
@@ -372,10 +409,7 @@ impl WarpIpfs {
             let peer_id_extract = |addr: &Multiaddr| -> Option<PeerId> {
                 let mut addr = addr.clone();
                 match addr.pop() {
-                    Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
-                        Ok(id) => Some(id),
-                        _ => None,
-                    },
+                    Some(Protocol::P2p(peer_id)) => Some(peer_id),
                     _ => None,
                 }
             };
@@ -1415,12 +1449,11 @@ impl RayGunAttachment for WarpIpfs {
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
-        location: Location,
-        files: Vec<PathBuf>,
+        locations: Vec<Location>,
         message: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
         self.messaging_store()?
-            .attach(conversation_id, message_id, location, files, message)
+            .attach(conversation_id, message_id, locations, message)
             .await
     }
 

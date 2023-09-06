@@ -28,7 +28,7 @@ pub enum FileType {
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
-#[derive(Clone, Deserialize, Serialize, Debug, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Deserialize, Serialize, warp_derive::FFIVec, FFIFree)]
 pub struct File {
     /// ID of the `File`
     id: Arc<Uuid>,
@@ -67,6 +67,24 @@ pub struct File {
 
     /// External reference pointing to the source of the file
     reference: Arc<RwLock<Option<String>>>,
+
+    /// Path to file
+    #[serde(default)]
+    path: Arc<String>,
+}
+
+impl std::fmt::Debug for File {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("File")
+            .field("name", &self.name())
+            .field("description", &self.description())
+            .field("thumbnail", &self.thumbnail_format())
+            .field("favorite", &self.favorite())
+            .field("creation", &self.creation())
+            .field("modified", &self.modified())
+            .field("path", &self.path())
+            .finish()
+    }
 }
 
 impl core::hash::Hash for File {
@@ -99,6 +117,7 @@ impl Default for File {
             file_type: Default::default(),
             hash: Default::default(),
             reference: Default::default(),
+            path: Arc::new("/".into()),
         }
     }
 }
@@ -252,6 +271,24 @@ impl File {
 
     pub fn file_type(&self) -> FileType {
         self.file_type.read().clone()
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn set_path(&mut self, new_path: &str) {
+        let mut new_path = new_path.trim().to_string();
+        if !new_path.ends_with('/') {
+            new_path.push('/');
+        }
+
+        let name = self.name();
+
+        new_path.push_str(&name);
+
+        let path = Arc::make_mut(&mut self.path);
+        *path = new_path;
     }
 }
 

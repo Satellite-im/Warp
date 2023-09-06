@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
-warp = { path = "../../warp" }
+warp.workspace = true
 
 rust-ipfs.workspace = true
 libipld.workspace = true
@@ -41,8 +41,6 @@ bytes.workspace = true
 [dev-dependencies]
 fdlimit = "0.2"
 bs58 = "0.4"
-warp-pd-flatfile = { path = "../warp-pd-flatfile" }
-warp-pd-stretto = { path = "../warp-pd-stretto" }
 rustyline-async = "0.3"
 comfy-table = "6.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -248,6 +248,22 @@ impl Item {
         }
         Ok(())
     }
+
+    /// Path to the `File` or `Directory
+    pub fn path(&self) -> &str {
+        match self {
+            Item::File(file) => file.path(),
+            Item::Directory(directory) => directory.path(),
+        }
+    }
+
+    /// Set path to `File` or `Directory
+    pub fn set_path(&mut self, new_path: &str) {
+        match self {
+            Item::File(file) => file.set_path(new_path),
+            Item::Directory(directory) => directory.set_path(new_path),
+        }
+    }
 }
 
 impl Item {

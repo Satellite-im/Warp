@@ -203,7 +203,7 @@ impl MessageStore {
                 let did = &*(store.did.clone());
                 let Ok(stream) = store.ipfs.pubsub_subscribe(did.messaging()).await else {
                     error!("Unable to create subscription stream. Terminating task");
-                    //TODO: Maybe panic? 
+                    //TODO: Maybe panic?
                     return;
                 };
                 futures::pin_mut!(stream);
@@ -339,16 +339,16 @@ impl MessageStore {
         info!("Event Task started for {conversation_id}");
         let did = self.did.clone();
         let Ok(mut conversation) = self.get_conversation(conversation_id).await else {
-            return
+            return;
         };
         conversation.recipients.clear();
 
         let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
-            return
+            return;
         };
 
         let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
-            return
+            return;
         };
 
         let conversation_type = conversation.conversation_type;
@@ -431,11 +431,15 @@ impl MessageStore {
         info!("RequestResponse Task started for {conversation_id}");
         let did = self.did.clone();
         let Ok(conversation) = self.get_conversation(conversation_id).await else {
-            return
+            return;
         };
 
-        let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.reqres_topic(&did)).await else {
-            return
+        let Ok(stream) = self
+            .ipfs
+            .pubsub_subscribe(conversation.reqres_topic(&did))
+            .await
+        else {
+            return;
         };
         drop(conversation);
 
@@ -459,9 +463,11 @@ impl MessageStore {
                                         kind,
                                     } => match kind {
                                         ConversationRequestKind::Key => {
-                                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
-                                                    continue
-                                                };
+                                            let Ok(conversation) =
+                                                store.get_conversation(conversation_id).await
+                                            else {
+                                                continue;
+                                            };
 
                                             if !matches!(
                                                 conversation.conversation_type,
@@ -605,9 +611,11 @@ impl MessageStore {
                                     } => match kind {
                                         ConversationResponseKind::Key { key } => {
                                             let sender = payload.sender();
-                                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
-                                                    continue
-                                                };
+                                            let Ok(conversation) =
+                                                store.get_conversation(conversation_id).await
+                                            else {
+                                                continue;
+                                            };
 
                                             if !matches!(
                                                 conversation.conversation_type,
@@ -1583,9 +1591,7 @@ impl MessageStore {
                 }
 
                 let Some(creator) = conversation.creator.as_ref() else {
-                    return Err(anyhow::anyhow!(
-                        "Group conversation requires a creator"
-                    ));
+                    return Err(anyhow::anyhow!("Group conversation requires a creator"));
                 };
 
                 let own_did = &*self.did;
@@ -2242,7 +2248,7 @@ impl MessageStore {
 
     pub async fn load_conversations(&self, background: bool) -> Result<(), Error> {
         let Some(path) = self.path.as_ref() else {
-            return Ok(())
+            return Ok(());
         };
 
         if !path.is_dir() {
@@ -2255,8 +2261,11 @@ impl MessageStore {
             let entry = entry?;
             let entry_path = entry.path();
             if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
-                let Some(filename) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()) else {
-                    continue
+                let Some(filename) = entry_path
+                    .file_name()
+                    .map(|file| file.to_string_lossy().to_string())
+                else {
+                    continue;
                 };
 
                 //TODO: Maybe check file extension instead
@@ -2268,15 +2277,18 @@ impl MessageStore {
                     .unwrap_or_default();
 
                 let Some(file_id) = slices.first() else {
-                    continue
+                    continue;
                 };
 
                 let Ok(id) = Uuid::from_str(file_id) else {
-                    continue
+                    continue;
                 };
 
-                let Ok(cid_str) = tokio::fs::read(entry_path).await.map(|bytes| String::from_utf8_lossy(&bytes).to_string()) else {
-                    continue
+                let Ok(cid_str) = tokio::fs::read(entry_path)
+                    .await
+                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                else {
+                    continue;
                 };
                 if let Ok(cid) = cid_str.parse::<Cid>() {
                     if keystore {
@@ -3216,14 +3228,13 @@ impl MessageStore {
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
-        location: Location,
-        files: Vec<PathBuf>,
+        locations: Vec<Location>,
         messages: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
-        if files.len() > 8 {
+        if locations.len() > 8 {
             return Err(Error::InvalidLength {
                 context: "files".into(),
-                current: files.len(),
+                current: locations.len(),
                 minimum: Some(1),
                 maximum: Some(8),
             });
@@ -3258,20 +3269,17 @@ impl MessageStore {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        let files = files
+        let files = locations
             .iter()
-            .filter(|path| {
-                if matches!(location, Location::Disk) {
-                    path.is_file()
-                } else {
-                    true
-                }
+            .filter(|location| match location {
+                Location::Disk { path } => path.is_file(),
+                _ => true,
             })
             .cloned()
             .collect::<Vec<_>>();
 
         if files.is_empty() {
-            return Err(Error::InvalidMessage);
+            return Err(Error::NoAttachments);
         }
 
         let store = self.clone();
@@ -3285,26 +3293,31 @@ impl MessageStore {
             let mut streams: SelectAll<_> = SelectAll::new();
 
             for file in files {
-                match location {
-                    Location::Constellation => {
-                        let path = file.display().to_string();
+                match file {
+                    Location::Constellation { path } => {
                         match constellation
                             .root_directory()
                             .get_item_by_path(&path)
                             .and_then(|item| item.get_file())
-                            .ok()
                         {
-                            Some(f) => {
+                            Ok(f) => {
                                 let stream = async_stream::stream! {
                                     yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
                                 };
                                 streams.push(stream.boxed());
                             },
-                            None => continue,
+                            Err(e) => {
+                                let constellation_path = PathBuf::from(&path);
+                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
+                                };
+                                streams.push(stream.boxed());
+                            },
                         }
                     }
-                    Location::Disk => {
-                        let mut filename = match file.file_name() {
+                    Location::Disk {path} => {
+                        let mut filename = match path.file_name() {
                             Some(file) => file.to_string_lossy().to_string(),
                             None => continue,
                         };
@@ -3353,7 +3366,7 @@ impl MessageStore {
                             continue;
                         }
 
-                        let file = file.display().to_string();
+                        let file = path.display().to_string();
 
                         in_stack.push(filename.clone());
 
@@ -3418,9 +3431,15 @@ impl MessageStore {
                 }
             }
 
+
             let final_results = {
                 let mut store = store.clone();
                 async move {
+
+                    if attachments.is_empty() {
+                        return Err(Error::NoAttachments);
+                    }
+
                     let own_did = &*store.did;
                     let mut message = Message::default();
                     message.set_message_type(MessageType::Attachment);
@@ -3473,11 +3492,6 @@ impl MessageStore {
             .filesystem
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
-
-        if constellation.id() != "warp-fs-ipfs" {
-            //Note: Temporary for now; Will get lifted in the future
-            return Err(Error::Unimplemented);
-        }
 
         let message = self.get_message(conversation, message_id).await?;
 
