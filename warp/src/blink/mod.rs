@@ -75,6 +75,9 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     async fn select_camera(&mut self, device_name: &str) -> Result<(), Error>;
     async fn select_default_camera(&mut self) -> Result<(), Error>;
 
+    async fn test_speaker(&self, device_name: &str) -> Result<(), Error>;
+    async fn test_microphone(&self, device_name: &str) -> Result<(), Error>;
+
     // ------ Media controls ------
 
     async fn mute_self(&mut self) -> Result<(), Error>;

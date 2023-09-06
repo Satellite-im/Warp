@@ -1148,6 +1148,14 @@ impl Blink for BlinkImpl {
         Err(Error::Unimplemented)
     }
 
+    async fn test_speaker(&self, _device_name: &str) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn test_microphone(&self, _device_name: &str) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
     // ------ Media controls ------
 
     async fn mute_self(&mut self) -> Result<(), Error> {
