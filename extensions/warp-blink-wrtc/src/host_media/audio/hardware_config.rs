@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use warp::blink::AudioDeviceConfig;
 
 #[derive(Clone)]
@@ -33,14 +33,6 @@ impl DeviceConfig {
 }
 
 impl AudioDeviceConfig for DeviceConfig {
-    fn test_speaker(&self) -> Result<()> {
-        todo!()
-    }
-
-    fn test_microphone(&self) -> Result<()> {
-        todo!()
-    }
-
     fn set_speaker(&mut self, device_name: &str) {
         self.selected_speaker.replace(device_name.to_string());
     }
@@ -69,5 +61,170 @@ impl AudioDeviceConfig for DeviceConfig {
         Ok(device_iter
             .map(|device| device.name().unwrap_or(String::from("unknown device")))
             .collect())
+    }
+
+    // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/beep.rs
+    fn test_speaker(&self) -> Result<()> {
+        let host = cpal::default_host();
+        let device = self.selected_speaker.clone().unwrap_or_default();
+        let device = if device == "default" {
+            host.default_output_device()
+        } else {
+            host.output_devices()?
+                .find(|x| x.name().map(|y| y == device).unwrap_or(false))
+        }
+        .ok_or(anyhow::anyhow!("failed to find output device"))?;
+        log::debug!("Output device: {}", device.name()?);
+
+        let config = device.default_output_config()?;
+        log::debug!("Default output config: {:?}", config);
+
+        let sample_rate = config.sample_rate().0 as f32;
+        let channels = config.channels() as usize;
+
+        let cpal_config = cpal::StreamConfig {
+            channels: channels as _,
+            sample_rate: cpal::SampleRate(sample_rate as _),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        // Produce a sinusoid of maximum amplitude.
+        let mut sample_clock = 0f32;
+        let mut next_value = move || {
+            sample_clock = (sample_clock + 1.0) % sample_rate;
+            (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin()
+        };
+
+        let err_fn = |err| log::error!("an error occurred on stream: {}", err);
+
+        // this was lazily copy pasted from another project and should not be used as a standard for future code.
+        fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
+        where
+            T: cpal::Sample + cpal::FromSample<f32>,
+        {
+            for frame in output.chunks_mut(channels) {
+                let value: T = T::from_sample(next_sample());
+                for sample in frame.iter_mut() {
+                    *sample = value;
+                }
+            }
+        }
+
+        let stream = device.build_output_stream(
+            &cpal_config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                write_data(data, channels, &mut next_value)
+            },
+            err_fn,
+            None,
+        )?;
+        stream.play()?;
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        Ok(())
+    }
+
+    // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/feedback.rs
+    fn test_microphone(&self) -> Result<()> {
+        let latency_ms = 500.0;
+        let host = cpal::default_host();
+        let output_device = self.selected_speaker.clone().unwrap_or_default();
+        let output_device = if output_device == "default" {
+            host.default_output_device()
+        } else {
+            host.output_devices()?
+                .find(|x| x.name().map(|y| y == output_device).unwrap_or(false))
+        }
+        .ok_or(anyhow::anyhow!("failed to find output device"))?;
+
+        let input_device = self.selected_microphone.clone().unwrap_or_default();
+        let input_device = if input_device == "default" {
+            host.default_output_device()
+        } else {
+            host.input_devices()?
+                .find(|x| x.name().map(|y| y == input_device).unwrap_or(false))
+        }
+        .ok_or(anyhow::anyhow!("failed to find input device"))?;
+
+        log::debug!("Using input device: \"{}\"", input_device.name()?);
+        log::debug!("Using output device: \"{}\"", output_device.name()?);
+
+        // We'll try and use the same configuration between streams to keep it simple.
+        let config: cpal::StreamConfig = input_device.default_input_config()?.into();
+
+        // Create a delay in case the input and output devices aren't synced.
+        let latency_frames = (latency_ms / 1_000.0) * config.sample_rate.0 as f32;
+        let latency_samples = latency_frames as usize * config.channels as usize;
+
+        // The buffer to share samples
+        let ring = ringbuf::HeapRb::<f32>::new(latency_samples * 2);
+        let (mut producer, mut consumer) = ring.split();
+
+        // Fill the samples with 0.0 equal to the length of the delay.
+        for _ in 0..latency_samples {
+            // The ring buffer has twice as much space as necessary to add latency here,
+            // so this should never fail
+            let _ = producer.push(0.0);
+        }
+
+        let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
+            let mut output_fell_behind = false;
+            for &sample in data {
+                if producer.push(sample).is_err() {
+                    output_fell_behind = true;
+                }
+            }
+            if output_fell_behind {
+                log::error!("output stream fell behind: try increasing latency");
+            }
+        };
+
+        let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            let mut input_fell_behind = false;
+            for sample in data {
+                *sample = match consumer.pop() {
+                    Some(s) => s,
+                    None => {
+                        input_fell_behind = true;
+                        0.0
+                    }
+                };
+            }
+            if input_fell_behind {
+                log::error!("input stream fell behind: try increasing latency");
+            }
+        };
+
+        // Build streams.
+        log::debug!(
+            "Attempting to build both streams with f32 samples and `{:?}`.",
+            config
+        );
+
+        // this was lazily copy pasted from another project and should not be used as a standard for future code.
+        fn err_fn(err: cpal::StreamError) {
+            log::error!("an error occurred on stream: {}", err);
+        }
+
+        let input_stream = input_device.build_input_stream(&config, input_data_fn, err_fn, None)?;
+        let output_stream =
+            output_device.build_output_stream(&config, output_data_fn, err_fn, None)?;
+        log::debug!("Successfully built streams.");
+
+        // Play the streams.
+        log::debug!(
+            "Starting the input and output streams with `{}` milliseconds of latency.",
+            latency_ms
+        );
+        input_stream.play()?;
+        output_stream.play()?;
+
+        // Run for 3 seconds before closing.
+        log::debug!("Playing for 3 seconds... ");
+        std::thread::sleep(std::time::Duration::from_millis(3000 + latency_ms as u64));
+        drop(input_stream);
+        drop(output_stream);
+        log::debug!("Done!");
+        Ok(())
     }
 }

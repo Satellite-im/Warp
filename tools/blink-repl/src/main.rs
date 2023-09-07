@@ -70,10 +70,14 @@ enum Repl {
     /// show your DID
     ShowDid,
     /// given a list of DIDs, initiate a call
-    Dial { ids: Vec<String> },
+    Dial {
+        ids: Vec<String>,
+    },
     /// given a Uuid, answer a call
     /// if no argument is given, the most recent call will be answered
-    Answer { id: Option<String> },
+    Answer {
+        id: Option<String>,
+    },
     /// end the current call
     Hangup,
     /// mute self
@@ -89,15 +93,31 @@ enum Repl {
     /// show available audio I/O devices
     ShowAvailableDevices,
     /// specify which microphone to use for input
-    ConnectMicrophone { device_name: String },
+    ConnectMicrophone {
+        device_name: String,
+    },
     /// specify which speaker to use for output
-    ConnectSpeaker { device_name: String },
+    ConnectSpeaker {
+        device_name: String,
+    },
+    /// records 5 seconds of microphone input and plays it back
+    TestMicrophone {
+        device_name: String,
+    },
+    /// plays a test tone through the speaker
+    TestSpeaker {
+        device_name: String,
+    },
     /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
     /// the specified sample rate will be used when the host initiates a call.
-    SetAudioRate { rate: String },
+    SetAudioRate {
+        rate: String,
+    },
     /// set the default number of audio channels (1 or 2)
     /// the specified number of channels will be used when the host initiates a call.
-    SetAudioChannels { channels: u16 },
+    SetAudioChannels {
+        channels: u16,
+    },
     /// show the supported CPAL input stream configs
     SupportedInputConfigs,
     /// show the supported CPAL output stream configs
@@ -107,12 +127,18 @@ enum Repl {
     /// show the default output config
     ShowOutputConfig,
     /// separately record audio of each participant
-    RecordAudio { output_dir: String },
+    RecordAudio {
+        output_dir: String,
+    },
     /// stop recording audio
     StopRecording,
     /// change the loudness of the peer for the call
     /// can only make it louder because multiplier can't be a float for the CLI
-    SetGain { peer: DID, multiplier: u32 },
+    SetGain {
+        peer: DID,
+        multiplier: u32,
+    },
+    Quit,
 }
 
 async fn handle_command(
@@ -122,6 +148,7 @@ async fn handle_command(
     cmd: Repl,
 ) -> anyhow::Result<()> {
     match cmd {
+        Repl::Quit => unreachable!("quit cmd should have been handled already"),
         Repl::ShowDid => {
             println!("own identity: {}", own_id.did_key());
         }
@@ -191,6 +218,16 @@ async fn handle_command(
             let mut config = blink.get_audio_device_config().await;
             config.set_speaker(&device_name);
             blink.set_audio_device_config(config).await?;
+        }
+        Repl::TestMicrophone { device_name } => {
+            let mut config = blink.get_audio_device_config().await;
+            config.set_microphone(&device_name);
+            config.test_microphone()?;
+        }
+        Repl::TestSpeaker { device_name } => {
+            let mut config = blink.get_audio_device_config().await;
+            config.set_speaker(&device_name);
+            config.test_speaker()?;
         }
         Repl::SetAudioRate { rate } => {
             let mut codecs = CODECS.write().await;
@@ -389,6 +426,10 @@ async fn main() -> anyhow::Result<()> {
         let mut v = vec![""];
         v.extend(line.split_ascii_whitespace());
         let cli = match Repl::try_parse_from(v) {
+            Ok(Repl::Quit) => {
+                println!("quitting");
+                break;
+            }
             Ok(r) => r,
             Err(e) => {
                 println!("{e}");
