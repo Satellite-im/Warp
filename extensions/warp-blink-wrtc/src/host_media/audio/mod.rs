@@ -9,12 +9,14 @@ use webrtc::track::{
 };
 
 pub(crate) mod automute;
+mod hardware_config;
 mod loudness;
 mod opus;
 mod speech;
 
 pub use self::opus::sink::OpusSink;
 pub use self::opus::source::OpusSource;
+pub use hardware_config::*;
 
 // stores the TrackRemote at least
 pub trait SourceTrack {

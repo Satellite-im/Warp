@@ -9,8 +9,8 @@ use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 use warp::{
     blink::{
-        AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
-        MimeType, VideoCodec,
+        AudioCodec, AudioCodecBuiler, AudioDeviceConfig, AudioSampleRate, Blink, BlinkEventKind,
+        BlinkEventStream, MimeType, VideoCodec,
     },
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
@@ -171,20 +171,26 @@ async fn handle_command(
             blink.disable_automute()?;
         }
         Repl::ShowSelectedDevices => {
-            println!("microphone: {:?}", blink.get_current_microphone().await);
-            println!("speaker: {:?}", blink.get_current_speaker().await);
+            let config = blink.get_audio_device_config().await;
+            println!("microphone: {:?}", config.microphone_device_name());
+            println!("speaker: {:?}", config.speaker_device_name());
         }
         Repl::ShowAvailableDevices => {
-            let microphones = blink.get_available_microphones().await?;
-            let speakers = blink.get_available_speakers().await?;
+            let config = blink.get_audio_device_config().await;
+            let microphones = config.get_available_microphones();
+            let speakers = config.get_available_speakers();
             println!("available microphones: {microphones:#?}");
             println!("available speakers: {speakers:#?}");
         }
         Repl::ConnectMicrophone { device_name } => {
-            blink.select_microphone(&device_name).await?;
+            let mut config = blink.get_audio_device_config().await;
+            config.set_microphone(&device_name);
+            blink.set_audio_device_config(config).await?;
         }
         Repl::ConnectSpeaker { device_name } => {
-            blink.select_speaker(&device_name).await?;
+            let mut config = blink.get_audio_device_config().await;
+            config.set_speaker(&device_name);
+            blink.set_audio_device_config(config).await?;
         }
         Repl::SetAudioRate { rate } => {
             let mut codecs = CODECS.write().await;

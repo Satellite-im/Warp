@@ -19,6 +19,8 @@ use uuid::Uuid;
 
 mod codecs;
 pub use codecs::*;
+mod audio_config;
+pub use audio_config::*;
 
 use crate::{
     crypto::DID,
@@ -63,20 +65,17 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
 
     // ------ Select input/output devices ------
 
-    async fn get_available_microphones(&self) -> Result<Vec<String>, Error>;
-    async fn get_current_microphone(&self) -> Option<String>;
-    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error>;
-    async fn select_default_microphone(&mut self) -> Result<(), Error>;
-    async fn get_available_speakers(&self) -> Result<Vec<String>, Error>;
-    async fn get_current_speaker(&self) -> Option<String>;
-    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error>;
-    async fn select_default_speaker(&mut self) -> Result<(), Error>;
+    /// returns an AudioDeviceConfig which can be used to view, test, and select
+    /// a speaker and microphone
+    async fn get_audio_device_config(&self) -> Box<dyn AudioDeviceConfig>;
+    /// Tell Blink to use the given AudioDeviceConfig for calling
+    async fn set_audio_device_config(
+        &mut self,
+        config: Box<dyn AudioDeviceConfig>,
+    ) -> Result<(), Error>;
+
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error>;
     async fn select_camera(&mut self, device_name: &str) -> Result<(), Error>;
-    async fn select_default_camera(&mut self) -> Result<(), Error>;
-
-    async fn test_speaker(&self, device_name: &str) -> Result<(), Error>;
-    async fn test_microphone(&self, device_name: &str) -> Result<(), Error>;
 
     // ------ Media controls ------
 
@@ -144,6 +143,13 @@ pub enum BlinkEventKind {
     AudioOutputDeviceNoLongerAvailable,
     #[display(fmt = "AudioInputDeviceNoLongerAvailable")]
     AudioInputDeviceNoLongerAvailable,
+
+    // these names are so ridiculously long but i don't know
+    // what else to call them.
+    #[display(fmt = "ReceivedInputFromMicrophoneTest")]
+    ReceivingInputFromMicrophoneTest,
+    #[display(fmt = "PlayingOutputForSpeakerTest")]
+    PlayingOutputForSpeakerTest,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

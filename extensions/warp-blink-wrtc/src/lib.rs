@@ -24,7 +24,7 @@ use std::{
     any::Any,
     collections::{HashMap, HashSet},
     str::FromStr,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
@@ -44,7 +44,10 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
+    blink::{
+        self, AudioCodec, AudioDeviceConfig, Blink, BlinkEventKind, BlinkEventStream, CallInfo,
+        MimeType,
+    },
     crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     module::Module,
@@ -79,6 +82,9 @@ pub struct BlinkImpl {
     // handles 3 streams: one for webrtc events and two IPFS topics
     // pertains to the active_call, which is stored in STATIC_DATA
     webrtc_handler: Arc<warp::sync::RwLock<Option<JoinHandle<()>>>>,
+
+    // prevents the UI from running multiple tests simultaneously
+    audio_device_config: Arc<RwLock<host_media::audio::DeviceConfig>>,
 }
 
 #[derive(Clone)]
@@ -158,8 +164,11 @@ impl BlinkImpl {
             channels: 1,
         };
 
+        let mut selected_speaker = None;
+        let mut selected_microphone = None;
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
+            selected_microphone = Some(input_device.name()?);
             source_codec.channels = Self::get_min_source_channels(&input_device)?;
             host_media::change_audio_input(input_device, source_codec.clone()).await?;
         } else {
@@ -167,6 +176,7 @@ impl BlinkImpl {
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
+            selected_speaker = Some(output_device.name()?);
             sink_codec.channels = Self::get_min_sink_channels(&output_device)?;
             host_media::change_audio_output(output_device, sink_codec.clone()).await?;
         } else {
@@ -185,6 +195,10 @@ impl BlinkImpl {
             audio_sink_codec: Arc::new(RwLock::new(sink_codec)),
             offer_handler: Arc::new(warp::sync::RwLock::new(tokio::spawn(async {}))),
             webrtc_handler: Arc::new(warp::sync::RwLock::new(None)),
+            audio_device_config: Arc::new(RwLock::new(host_media::audio::DeviceConfig {
+                selected_speaker,
+                selected_microphone,
+            })),
         };
 
         let ipfs = blink_impl.ipfs.clone();
@@ -391,6 +405,64 @@ impl BlinkImpl {
             "unsupported audio output device. doesn't support 1 or 2 channel audio"
         ))?;
         Ok(channels)
+    }
+
+    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
+        let host = cpal::default_host();
+        let devices = match host.input_devices() {
+            Ok(d) => d,
+            Err(e) => {
+                return Err(warp::error::Error::OtherWithContext(format!(
+                    "could not get input devices: {e}"
+                )));
+            }
+        };
+        for device in devices {
+            if let Ok(name) = device.name() {
+                if name == device_name {
+                    self.update_audio_source_codec(&device).await?;
+                    host_media::change_audio_input(
+                        device,
+                        self.audio_source_codec.read().await.clone(),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(warp::error::Error::OtherWithContext(
+            "input device not found".into(),
+        ))
+    }
+
+    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
+        let host = cpal::default_host();
+        let devices = match host.output_devices() {
+            Ok(d) => d,
+            Err(e) => {
+                return Err(warp::error::Error::OtherWithContext(format!(
+                    "could not get input devices: {e}"
+                )));
+            }
+        };
+        for device in devices {
+            if let Ok(name) = device.name() {
+                if name == device_name {
+                    self.update_audio_sink_codec(&device).await?;
+                    host_media::change_audio_output(
+                        device,
+                        self.audio_sink_codec.read().await.clone(),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(warp::error::Error::OtherWithContext(
+            "output device not found".into(),
+        ))
     }
 }
 
@@ -1034,125 +1106,34 @@ impl Blink for BlinkImpl {
 
     // ------ Select input/output devices ------
 
-    async fn get_available_microphones(&self) -> Result<Vec<String>, Error> {
-        let device_iter = match cpal::default_host().input_devices() {
-            Ok(iter) => iter,
-            Err(e) => return Err(Error::Cpal(e.to_string())),
-        };
-        Ok(device_iter
-            .map(|device| device.name().unwrap_or(String::from("unknown device")))
-            .collect())
+    async fn get_audio_device_config(&self) -> Box<dyn AudioDeviceConfig> {
+        Box::new(self.audio_device_config.read().await.clone())
     }
-    async fn get_current_microphone(&self) -> Option<String> {
-        host_media::get_input_device_name().await
-    }
-    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
-        let host = cpal::default_host();
-        let devices = match host.input_devices() {
-            Ok(d) => d,
-            Err(e) => {
-                return Err(warp::error::Error::OtherWithContext(format!(
-                    "could not get input devices: {e}"
-                )));
-            }
-        };
-        for device in devices {
-            if let Ok(name) = device.name() {
-                if name == device_name {
-                    self.update_audio_source_codec(&device).await?;
-                    host_media::change_audio_input(
-                        device,
-                        self.audio_source_codec.read().await.clone(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-        }
 
-        Err(warp::error::Error::OtherWithContext(
-            "input device not found".into(),
-        ))
-    }
-    async fn select_default_microphone(&mut self) -> Result<(), Error> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or(Error::OtherWithContext(String::from(
-                "no default input device",
-            )))?;
-        self.update_audio_source_codec(&device).await?;
-        host_media::change_audio_input(device, self.audio_source_codec.read().await.clone())
-            .await?;
+    async fn set_audio_device_config(
+        &mut self,
+        config: Box<dyn AudioDeviceConfig>,
+    ) -> Result<(), Error> {
+        let audio_device_config = host_media::audio::DeviceConfig {
+            selected_speaker: config.speaker_device_name(),
+            selected_microphone: config.microphone_device_name(),
+        };
+        *self.audio_device_config.write().await = audio_device_config;
+
+        if let Some(device_name) = config.speaker_device_name() {
+            self.select_speaker(&device_name).await?;
+        }
+        if let Some(device_name) = config.microphone_device_name() {
+            self.select_microphone(&device_name).await?;
+        }
         Ok(())
     }
-    async fn get_available_speakers(&self) -> Result<Vec<String>, Error> {
-        let device_iter = match cpal::default_host().output_devices() {
-            Ok(iter) => iter,
-            Err(e) => return Err(Error::Cpal(e.to_string())),
-        };
-        Ok(device_iter
-            .map(|device| device.name().unwrap_or(String::from("unknown device")))
-            .collect())
-    }
-    async fn get_current_speaker(&self) -> Option<String> {
-        host_media::get_output_device_name().await
-    }
-    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
-        let host = cpal::default_host();
-        let devices = match host.output_devices() {
-            Ok(d) => d,
-            Err(e) => {
-                return Err(warp::error::Error::OtherWithContext(format!(
-                    "could not get input devices: {e}"
-                )));
-            }
-        };
-        for device in devices {
-            if let Ok(name) = device.name() {
-                if name == device_name {
-                    self.update_audio_sink_codec(&device).await?;
-                    host_media::change_audio_output(
-                        device,
-                        self.audio_sink_codec.read().await.clone(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-        }
 
-        Err(warp::error::Error::OtherWithContext(
-            "output device not found".into(),
-        ))
-    }
-    async fn select_default_speaker(&mut self) -> Result<(), Error> {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or(Error::OtherWithContext(String::from(
-                "no default input device",
-            )))?;
-        self.update_audio_sink_codec(&device).await?;
-        host_media::change_audio_output(device, self.audio_sink_codec.read().await.clone()).await?;
-        Ok(())
-    }
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {
         Err(Error::Unimplemented)
     }
+
     async fn select_camera(&mut self, _device_name: &str) -> Result<(), Error> {
-        Err(Error::Unimplemented)
-    }
-
-    async fn select_default_camera(&mut self) -> Result<(), Error> {
-        Err(Error::Unimplemented)
-    }
-
-    async fn test_speaker(&self, _device_name: &str) -> Result<(), Error> {
-        Err(Error::Unimplemented)
-    }
-
-    async fn test_microphone(&self, _device_name: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
