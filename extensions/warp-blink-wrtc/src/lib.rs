@@ -24,7 +24,7 @@ use std::{
     any::Any,
     collections::{HashMap, HashSet},
     str::FromStr,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{Arc},
     time::Duration,
 };
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;

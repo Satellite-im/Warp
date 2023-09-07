@@ -9,8 +9,8 @@ use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 use warp::{
     blink::{
-        AudioCodec, AudioCodecBuiler, AudioDeviceConfig, AudioSampleRate, Blink, BlinkEventKind,
-        BlinkEventStream, MimeType, VideoCodec,
+        AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
+        MimeType, VideoCodec,
     },
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
