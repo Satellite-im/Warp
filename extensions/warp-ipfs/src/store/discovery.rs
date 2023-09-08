@@ -12,7 +12,7 @@ use std::{
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use rust_ipfs::{
     libp2p::swarm::dial_opts::{DialOpts, PeerCondition},
-    Ipfs, PeerId,
+    Ipfs, Multiaddr, PeerId,
 };
 use tokio::{
     sync::{broadcast, RwLock},
@@ -32,10 +32,11 @@ pub struct Discovery {
     entries: Arc<RwLock<HashSet<DiscoveryEntry>>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
     events: broadcast::Sender<DID>,
+    relays: Option<Vec<Multiaddr>>,
 }
 
 impl Discovery {
-    pub fn new(ipfs: Ipfs, config: DiscoveryConfig) -> Self {
+    pub fn new(ipfs: Ipfs, config: DiscoveryConfig, relays: Option<Vec<Multiaddr>>) -> Self {
         let (events, _) = tokio::sync::broadcast::channel(2048);
         Self {
             ipfs,
@@ -43,6 +44,7 @@ impl Discovery {
             entries: Arc::default(),
             task: Arc::default(),
             events,
+            relays,
         }
     }
 
@@ -87,6 +89,7 @@ impl Discovery {
                                             None,
                                             discovery.config.clone(),
                                             discovery.events.clone(),
+                                            discovery.relays.clone(),
                                         )
                                         .await;
                                         if !discovery.entries.write().await.insert(entry.clone()) {
@@ -138,6 +141,7 @@ impl Discovery {
             did_key,
             self.config.clone(),
             self.events.clone(),
+            self.relays.clone(),
         )
         .await;
         entry.enable_discovery();
@@ -221,6 +225,7 @@ pub struct DiscoveryEntry {
     config: DiscoveryConfig,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
     sender: broadcast::Sender<DID>,
+    relays: Option<Vec<Multiaddr>>,
 }
 
 impl PartialEq for DiscoveryEntry {
@@ -244,6 +249,7 @@ impl DiscoveryEntry {
         did: Option<DID>,
         config: DiscoveryConfig,
         sender: broadcast::Sender<DID>,
+        relays: Option<Vec<Multiaddr>>,
     ) -> Self {
         let entry = Self {
             ipfs: ipfs.clone(),
@@ -254,17 +260,23 @@ impl DiscoveryEntry {
             discover: Arc::default(),
             task: Arc::default(),
             sender,
+            relays,
         };
 
         let task = tokio::spawn({
             let entry = entry.clone();
             let ipfs = ipfs.clone();
             async move {
-                let mut timer = tokio::time::interval(Duration::from_secs(30));
+                let mut timer = tokio::time::interval(Duration::from_secs(5));
                 //Done in case the peer is located over DHT
                 let _ = ipfs.identity(Some(peer_id)).await.ok();
 
                 let mut sent_initial_push = false;
+                if let Some(relay) = entry.relays.as_ref() {
+                    for addr in relay {
+                        let _ = ipfs.add_peer(entry.peer_id, addr.clone()).await;
+                    }
+                }
                 loop {
                     if !entry.valid().await {
                         //TODO: Check discovery config option to determine if we should determine how we
@@ -313,29 +325,13 @@ impl DiscoveryEntry {
                     }
 
                     if entry.discover.load(Ordering::SeqCst)
-                        && matches!(
-                            entry.connection_type().await,
-                            PeerConnectionType::NotConnected
-                        )
+                        && !ipfs.is_connected(peer_id).await.unwrap_or_default()
                     {
                         match entry.config {
                             // Used for provider. Doesnt do anything right now
                             // TODO: Maybe have separate provider query in case
                             //       Discovery task isnt enabled?
-                            DiscoveryConfig::Provider(_) => {
-                                let addrs = match ipfs.identity(Some(peer_id)).await {
-                                    Ok(info) => info.listen_addrs,
-                                    Err(_) => vec![],
-                                };
-
-                                let opts = DialOpts::peer_id(peer_id)
-                                    .condition(PeerCondition::Disconnected)
-                                    .addresses(addrs)
-                                    .extend_addresses_through_behaviour()
-                                    .build();
-
-                                if let Err(_e) = ipfs.connect(opts).await {}
-                            }
+                            DiscoveryConfig::Provider(_) => {}
                             // Check over DHT
                             DiscoveryConfig::Direct => {
                                 tokio::select! {
@@ -346,17 +342,20 @@ impl DiscoveryEntry {
                                 }
                             }
                             config::Discovery::None => {
-                                //TODO: Dial out through common relays
-                                // Note: This will work if both peers shares the relays used.
+                                let opts = DialOpts::peer_id(peer_id)
+                                    .condition(PeerCondition::Disconnected)
+                                    .build();
+
+                                if let Err(_e) = ipfs.connect(opts).await {}
                             }
                         }
                     }
 
-                    let connection_type = match ipfs.is_connected(entry.peer_id).await {
-                        Ok(true) => PeerConnectionType::Connected,
-                        Ok(false) => PeerConnectionType::NotConnected,
-                        Err(_) => break,
-                    };
+                    let connection_type =
+                        match ipfs.is_connected(entry.peer_id).await.unwrap_or_default() {
+                            true => PeerConnectionType::Connected,
+                            false => PeerConnectionType::NotConnected,
+                        };
 
                     if matches!(connection_type, PeerConnectionType::Connected)
                         && !sent_initial_push

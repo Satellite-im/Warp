@@ -16,8 +16,8 @@ use ipfs::libp2p::core::upgrade::Version;
 use ipfs::libp2p::swarm::SwarmEvent;
 use ipfs::libp2p::Transport;
 use ipfs::p2p::{
-    ConnectionLimits, IdentifyConfiguration, KadConfig, KadInserts, PubsubConfig, TransportConfig,
-    UpdateMode,
+    ConnectionLimits, IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig,
+    TransportConfig, UpdateMode,
 };
 
 use rust_ipfs as ipfs;
@@ -289,7 +289,7 @@ impl WarpIpfs {
             opts.ipfs_path = StoragePath::Disk(path.clone());
         }
 
-        let (nat_channel_tx, mut nat_channel_rx) = unbounded();
+        let (signal_tx, mut _signal_rx) = unbounded();
 
         let (pb_tx, pb_rx) = channel(50);
 
@@ -305,6 +305,7 @@ impl WarpIpfs {
                 yamux_update_mode: UpdateMode::Read,
                 ..Default::default()
             })
+            .enable_keepalive()
             .set_swarm_configuration(swarm_configuration)
             .set_identify_configuration({
                 let mut idconfig = IdentifyConfiguration {
@@ -319,22 +320,41 @@ impl WarpIpfs {
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
-                move |_, event| {
-                    //Note: This will be used
-                    if let SwarmEvent::Behaviour(ipfs::BehaviourEvent::Autonat(
-                        ipfs::libp2p::autonat::Event::StatusChanged { new, .. },
-                    )) = event
-                    {
-                        match new {
-                            ipfs::libp2p::autonat::NatStatus::Public(_) => {
-                                let _ = nat_channel_tx.unbounded_send(true);
-                            }
-                            ipfs::libp2p::autonat::NatStatus::Private
-                            | ipfs::libp2p::autonat::NatStatus::Unknown => {
-                                let _ = nat_channel_tx.unbounded_send(false);
-                            }
+                move |_, event| match event {
+                    SwarmEvent::ListenerClosed { addresses, .. } => {
+                        if addresses.iter().any(|addr| {
+                            addr.iter()
+                                .any(|protocol| matches!(protocol, Protocol::P2pCircuit))
+                        }) {
+                            let _ = signal_tx.unbounded_send(());
                         }
                     }
+                    SwarmEvent::Behaviour(ipfs::BehaviourEvent::RelayClient(
+                        ipfs::libp2p::relay::client::Event::ReservationReqAccepted { .. },
+                    )) => {}
+                    SwarmEvent::Behaviour(ipfs::BehaviourEvent::RelayClient(
+                        ipfs::libp2p::relay::client::Event::ReservationReqFailed { .. },
+                    )) => {}
+                    SwarmEvent::Behaviour(ipfs::BehaviourEvent::RelayClient(
+                        ipfs::libp2p::relay::client::Event::InboundCircuitEstablished {
+                            src_peer_id: _,
+                            ..
+                        },
+                    )) => {}
+                    SwarmEvent::Behaviour(ipfs::BehaviourEvent::RelayClient(
+                        ipfs::libp2p::relay::client::Event::OutboundCircuitEstablished {
+                            relay_peer_id: _,
+                            ..
+                        },
+                    )) => {}
+                    SwarmEvent::Behaviour(ipfs::BehaviourEvent::Autonat(
+                        ipfs::libp2p::autonat::Event::StatusChanged { new, .. },
+                    )) => match new {
+                        ipfs::libp2p::autonat::NatStatus::Public(_) => {}
+                        ipfs::libp2p::autonat::NatStatus::Private
+                        | ipfs::libp2p::autonat::NatStatus::Unknown => {}
+                    },
+                    _ => {}
                 }
             })
             .set_kad_configuration(
@@ -406,13 +426,6 @@ impl WarpIpfs {
         tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
-            let peer_id_extract = |addr: &Multiaddr| -> Option<PeerId> {
-                let mut addr = addr.clone();
-                match addr.pop() {
-                    Some(Protocol::P2p(peer_id)) => Some(peer_id),
-                    _ => None,
-                }
-            };
 
             async move {
                 let start_relay_client = || {
@@ -426,7 +439,7 @@ impl WarpIpfs {
                         //      anything on this end
                         for addr in config.ipfs_setting.relay_client.relay_address.clone() {
                             let mut connected = false;
-                            if let Some(peer_id) = peer_id_extract(&addr) {
+                            if let Some(peer_id) = addr.peer_id() {
                                 connected = ipfs.is_connected(peer_id).await.unwrap_or_default();
                             }
 
@@ -485,7 +498,7 @@ impl WarpIpfs {
                     }
                 };
 
-                let stop_relay_client = |relays: Vec<Multiaddr>| {
+                let _stop_relay_client = |relays: Vec<Multiaddr>| {
                     let ipfs = ipfs.clone();
                     async move {
                         info!("Disconnecting from relays");
@@ -498,60 +511,39 @@ impl WarpIpfs {
                     }
                 };
 
-                match (
-                    config.ipfs_setting.portmapping,
-                    config.ipfs_setting.relay_client.enable,
-                ) {
-                    (true, true) => {
-                        //Start using relays right away rather than waiting for nat status
-                        let mut addrs = start_relay_client().await;
-                        let mut using_relay = true;
-                        while let Some(public) = nat_channel_rx.next().await {
-                            match public {
-                                true => {
-                                    if using_relay {
-                                        //Due to UPnP being enabled with a successful portforwarding, we would disconnect from relays
-                                        log::trace!(
-                                            "Disabling relays due to being publicly accessible."
-                                        );
-                                        let addrs = std::mem::take(&mut addrs);
-                                        stop_relay_client(addrs).await;
-                                        using_relay = false;
-                                    }
-                                }
-                                false => {
-                                    if !using_relay {
-                                        //If, for whatever reason, we are no longer publicly accessible due to UPnP (eg router or firewall changed)
-                                        //we would attempt to connect to the relays
-                                        log::trace!(
-                                            "No longer publicly accessible. Switching to relays"
-                                        );
-                                        addrs = start_relay_client().await;
-                                        using_relay = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    (false, true) => {
-                        // We dont need the addresses of the circuit relays
-                        start_relay_client().await;
-                    }
-                    (true, false) | (false, false) => {}
-                }
+                let mut _addrs = start_relay_client().await;
+                // while let Some(()) = signal_rx.next().await {
+                //     _addrs = start_relay_client().await;
+                // }
             }
         });
+        let relays = match (
+            config.ipfs_setting.relay_client.relay_address.is_empty(),
+            config.bootstrap.address().is_empty(),
+        ) {
+            (false, true) => Some(config.ipfs_setting.relay_client.relay_address.clone()),
+            (false, false) => {
+                let mut addrs = config.ipfs_setting.relay_client.relay_address.clone();
+                addrs.extend(config.bootstrap.address());
+                Some(addrs)
+            }
+            (true, false) => Some(config.bootstrap.address()),
+            _ => None,
+        };
 
-        let relays = (!config.bootstrap.address().is_empty()).then(|| {
-            config
-                .bootstrap
-                .address()
+        let relays = relays.map(|relays| {
+            relays
                 .iter()
                 .map(|addr| addr.clone().with(Protocol::P2pCircuit))
                 .collect()
         });
 
-        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone());
+
+        let discovery = Discovery::new(
+            ipfs.clone(),
+            config.store_setting.discovery.clone(),
+            relays.clone(),
+        );
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
