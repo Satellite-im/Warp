@@ -1,4 +1,5 @@
 pub mod phonebook;
+pub mod idle;
 
 use libp2p::swarm::NetworkBehaviour;
 use rust_ipfs::libp2p;
@@ -7,4 +8,5 @@ use rust_ipfs::libp2p;
 #[behaviour(prelude = "libp2p::swarm::derive_prelude", to_swarm = "void::Void")]
 pub struct Behaviour {
     pub phonebook: phonebook::Behaviour,
+    pub idle: idle::Behaviour,
 }

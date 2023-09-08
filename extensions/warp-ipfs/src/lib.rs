@@ -295,6 +295,7 @@ impl WarpIpfs {
 
         let behaviour = behaviour::Behaviour {
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
+            idle: behaviour::idle::Behaviour,
         };
 
         info!("Starting ipfs");
@@ -414,6 +415,8 @@ impl WarpIpfs {
 
         if config.ipfs_setting.dht_client {
             ipfs.dht_mode(DhtMode::Client).await?;
+        } else {
+            ipfs.dht_mode(DhtMode::Server).await?;
         }
 
         if config.ipfs_setting.bootstrap && !empty_bootstrap {
@@ -537,7 +540,6 @@ impl WarpIpfs {
                 .map(|addr| addr.clone().with(Protocol::P2pCircuit))
                 .collect()
         });
-
 
         let discovery = Discovery::new(
             ipfs.clone(),
