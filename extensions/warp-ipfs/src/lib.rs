@@ -364,25 +364,27 @@ impl WarpIpfs {
 
         let mut relay_peers = vec![];
 
-        if config.enable_relay {
-            for mut addr in config.ipfs_setting.relay_client.relay_address.clone() {
-                if addr.is_relayed() {
-                    warn!("Relay circuits cannot be used as relays");
-                    continue;
-                }
-
-                let Some(peer_id) = addr.extract_peer_id() else {
-                    warn!("{addr} does not contain a peer id. Skipping");
-                    continue;
-                };
-
-                if let Err(e) = ipfs.add_relay(peer_id, addr).await {
-                    error!("Error adding relay: {e}");
-                    continue;
-                }
-
-                relay_peers.push(peer_id);
+        for mut addr in config.ipfs_setting.relay_client.relay_address.clone() {
+            if addr.is_relayed() {
+                warn!("Relay circuits cannot be used as relays");
+                continue;
             }
+
+            let Some(peer_id) = addr.extract_peer_id() else {
+                warn!("{addr} does not contain a peer id. Skipping");
+                continue;
+            };
+
+            if let Err(e) = ipfs.add_relay(peer_id, addr).await {
+                error!("Error adding relay: {e}");
+                continue;
+            }
+
+            relay_peers.push(peer_id);
+        }
+
+        if relay_peers.is_empty() {
+            warn!("No relays available");
         }
 
         if config.ipfs_setting.dht_client {
