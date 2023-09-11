@@ -71,7 +71,7 @@ async fn account(
         config.store_setting.discovery = Discovery::Provider(opt.context.clone());
     }
     if opt.disable_relay {
-        config.ipfs_setting.relay_client.enable = false;
+        config.enable_relay = false;
     }
     if opt.upnp {
         config.ipfs_setting.portmapping = true;
