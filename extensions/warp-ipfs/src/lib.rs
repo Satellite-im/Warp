@@ -321,7 +321,6 @@ impl WarpIpfs {
                 },
                 Default::default(),
             )
-            .set_idle_connection_timeout(u64::MAX)
             .set_pubsub_configuration(PubsubConfig {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
