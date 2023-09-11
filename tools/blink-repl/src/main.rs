@@ -139,6 +139,8 @@ enum Repl {
         multiplier: u32,
     },
     Quit,
+    /// shorthand for quit
+    Q,
 }
 
 async fn handle_command(
@@ -148,7 +150,7 @@ async fn handle_command(
     cmd: Repl,
 ) -> anyhow::Result<()> {
     match cmd {
-        Repl::Quit => unreachable!("quit cmd should have been handled already"),
+        Repl::Q | Repl::Quit => unreachable!("quit cmd should have been handled already"),
         Repl::ShowDid => {
             println!("own identity: {}", own_id.did_key());
         }
@@ -426,11 +428,14 @@ async fn main() -> anyhow::Result<()> {
         let mut v = vec![""];
         v.extend(line.split_ascii_whitespace());
         let cli = match Repl::try_parse_from(v) {
-            Ok(Repl::Quit) => {
-                println!("quitting");
-                break;
+            Ok(r) => {
+                if matches!(r, Repl::Quit | Repl::Q) {
+                    println!("quitting");
+                    break;
+                } else {
+                    r
+                }
             }
-            Ok(r) => r,
             Err(e) => {
                 println!("{e}");
                 continue;
