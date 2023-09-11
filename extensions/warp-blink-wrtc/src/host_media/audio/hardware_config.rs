@@ -121,7 +121,7 @@ impl AudioDeviceConfig for DeviceConfig {
         let latency_ms = 500.0;
         let host = cpal::default_host();
         let output_device = self.selected_speaker.clone().unwrap_or_default();
-        let output_device = if output_device == "default" {
+        let output_device = if output_device.to_ascii_lowercase() == "default" {
             host.default_output_device()
         } else {
             host.output_devices()?
@@ -130,8 +130,8 @@ impl AudioDeviceConfig for DeviceConfig {
         .ok_or(anyhow::anyhow!("failed to find output device"))?;
 
         let input_device = self.selected_microphone.clone().unwrap_or_default();
-        let input_device = if input_device == "default" {
-            host.default_output_device()
+        let input_device = if input_device.to_ascii_lowercase() == "default" {
+            host.default_input_device()
         } else {
             host.input_devices()?
                 .find(|x| x.name().map(|y| y == input_device).unwrap_or(false))
