@@ -1,5 +1,6 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::Sample;
 use warp::blink::AudioDeviceConfig;
 
 #[derive(Clone)]
@@ -94,26 +95,17 @@ impl AudioDeviceConfig for DeviceConfig {
             sample_clock = (sample_clock + 1.0) % sample_rate;
             (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin()
         };
-
         let err_fn = |err| log::error!("an error occurred on stream: {}", err);
-
-        // this was lazily copy pasted from another project and should not be used as a standard for future code.
-        fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
-        where
-            T: cpal::Sample + cpal::FromSample<f32>,
-        {
-            for frame in output.chunks_mut(channels) {
-                let value: T = T::from_sample(next_sample());
-                for sample in frame.iter_mut() {
-                    *sample = value;
-                }
-            }
-        }
 
         let stream = device.build_output_stream(
             &cpal_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                write_data(data, channels, &mut next_value)
+                for frame in data.chunks_mut(channels) {
+                    let value: f32 = f32::from_sample(next_value());
+                    for sample in frame.iter_mut() {
+                        *sample = value;
+                    }
+                }
             },
             err_fn,
             None,
@@ -201,10 +193,9 @@ impl AudioDeviceConfig for DeviceConfig {
             config
         );
 
-        // this was lazily copy pasted from another project and should not be used as a standard for future code.
-        fn err_fn(err: cpal::StreamError) {
+        let err_fn = |err: cpal::StreamError| {
             log::error!("an error occurred on stream: {}", err);
-        }
+        };
 
         let input_stream = input_device.build_input_stream(&config, input_data_fn, err_fn, None)?;
         let output_stream =
