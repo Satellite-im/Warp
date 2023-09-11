@@ -42,7 +42,7 @@ async fn setup<P: AsRef<Path>>(
     config.store_setting.discovery = Discovery::None;
     config.ipfs_setting.bootstrap = false;
     config.ipfs_setting.mdns.enable = false;
-    config.ipfs_setting.relay_client.enable = false;
+    config.enable_relay = false;
 
     let (identity, raygun, constellation) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
