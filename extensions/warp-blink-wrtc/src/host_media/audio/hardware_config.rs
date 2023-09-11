@@ -118,7 +118,7 @@ impl AudioDeviceConfig for DeviceConfig {
 
     // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/feedback.rs
     fn test_microphone(&self) -> Result<()> {
-        let latency_ms = 1000.0;
+        let latency_ms = 500.0;
         let host = cpal::default_host();
         let output_device = self.selected_speaker.clone().unwrap_or_default();
         let output_device = if output_device.to_ascii_lowercase() == "default" {
@@ -142,11 +142,19 @@ impl AudioDeviceConfig for DeviceConfig {
         log::debug!("Using output device: \"{}\"", output_device.name()?);
 
         // We'll try and use the same configuration between streams to keep it simple.
-        let config: cpal::StreamConfig = input_device.default_input_config()?.into();
+        let input_config: cpal::StreamConfig = input_device.default_input_config()?.into();
+        #[allow(clippy::redundant_clone)]
+        let mut output_config = input_config.clone();
+        if !output_device
+            .supported_output_configs()?
+            .any(|x| x.channels() == input_config.channels)
+        {
+            output_config.channels = output_device.default_output_config()?.channels();
+        }
 
         // Create a delay in case the input and output devices aren't synced.
-        let latency_frames = (latency_ms / 1_000.0) * config.sample_rate.0 as f32;
-        let latency_samples = latency_frames as usize * config.channels as usize;
+        let latency_frames = (latency_ms / 1_000.0) * input_config.sample_rate.0 as f32;
+        let latency_samples = latency_frames as usize * input_config.channels as usize;
 
         // The buffer to share samples
         let ring = ringbuf::HeapRb::<f32>::new(latency_samples * 2);
@@ -167,47 +175,66 @@ impl AudioDeviceConfig for DeviceConfig {
                     input_fell_behind = true;
                 }
             }
-            if input_fell_behind {
-                if !input_err_disp_once {
-                    input_err_disp_once = true;
-                    log::error!("input stream fell behind: try increasing latency");
-                }
+            if input_fell_behind && !input_err_disp_once {
+                input_err_disp_once = true;
+                log::error!("input stream fell behind: try increasing latency");
             }
         };
 
+        let input_channels = input_config.channels;
+        let output_channels = output_config.channels;
         let mut output_err_disp_once = false;
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut output_fell_behind = false;
-            for sample in data {
-                *sample = match consumer.pop() {
-                    Some(s) => s,
-                    None => {
+            if input_channels == 2 && output_channels == 1 {
+                for sample in data {
+                    // if the queue empties, it usually happens before the last sample
+                    if consumer.is_empty() {
                         output_fell_behind = true;
-                        0.0
                     }
-                };
-            }
-            if output_fell_behind {
-                if !output_err_disp_once {
-                    output_err_disp_once = true;
-                    log::error!("output stream fell behind: try increasing latency");
+                    let sum =
+                        consumer.pop().unwrap_or_default() + consumer.pop().unwrap_or_default();
+                    *sample = sum / 2.0;
                 }
+            } else if input_channels == 1 && output_channels == 2 {
+                for frame in data.chunks_mut(output_channels as _) {
+                    if consumer.is_empty() {
+                        output_fell_behind = true;
+                    }
+                    let value: f32 = consumer.pop().unwrap_or_default();
+                    for sample in frame.iter_mut() {
+                        *sample = value;
+                    }
+                }
+            } else {
+                for sample in data {
+                    if consumer.is_empty() {
+                        output_fell_behind = true;
+                    }
+                    *sample = consumer.pop().unwrap_or_default();
+                }
+            }
+
+            if output_fell_behind && !output_err_disp_once {
+                output_err_disp_once = true;
+                log::error!("output stream fell behind: try increasing latency");
             }
         };
 
         // Build streams.
         log::debug!(
             "Attempting to build both streams with f32 samples and `{:?}`.",
-            config
+            input_config
         );
 
         let err_fn = |err: cpal::StreamError| {
             log::error!("an error occurred on stream: {}", err);
         };
 
-        let input_stream = input_device.build_input_stream(&config, input_data_fn, err_fn, None)?;
+        let input_stream =
+            input_device.build_input_stream(&input_config, input_data_fn, err_fn, None)?;
         let output_stream =
-            output_device.build_output_stream(&config, output_data_fn, err_fn, None)?;
+            output_device.build_output_stream(&output_config, output_data_fn, err_fn, None)?;
         log::debug!("Successfully built streams.");
 
         // Play the streams.
@@ -219,7 +246,7 @@ impl AudioDeviceConfig for DeviceConfig {
         output_stream.play()?;
 
         // Run for 3 seconds before closing.
-        log::debug!("Playing for 3 seconds... ");
+        log::debug!("Playing for a few seconds... ");
         std::thread::sleep(std::time::Duration::from_millis(3000 + latency_ms as u64));
         drop(input_stream);
         drop(output_stream);
