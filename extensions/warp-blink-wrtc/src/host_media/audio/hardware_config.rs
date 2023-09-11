@@ -118,7 +118,7 @@ impl AudioDeviceConfig for DeviceConfig {
 
     // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/feedback.rs
     fn test_microphone(&self) -> Result<()> {
-        let latency_ms = 500.0;
+        let latency_ms = 1000.0;
         let host = cpal::default_host();
         let output_device = self.selected_speaker.clone().unwrap_or_default();
         let output_device = if output_device.to_ascii_lowercase() == "default" {
@@ -159,31 +159,39 @@ impl AudioDeviceConfig for DeviceConfig {
             let _ = producer.push(0.0);
         }
 
+        let mut input_err_disp_once = false;
         let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-            let mut output_fell_behind = false;
+            let mut input_fell_behind = false;
             for &sample in data {
                 if producer.push(sample).is_err() {
-                    output_fell_behind = true;
+                    input_fell_behind = true;
                 }
             }
-            if output_fell_behind {
-                log::error!("output stream fell behind: try increasing latency");
+            if input_fell_behind {
+                if !input_err_disp_once {
+                    input_err_disp_once = true;
+                    log::error!("input stream fell behind: try increasing latency");
+                }
             }
         };
 
+        let mut output_err_disp_once = false;
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            let mut input_fell_behind = false;
+            let mut output_fell_behind = false;
             for sample in data {
                 *sample = match consumer.pop() {
                     Some(s) => s,
                     None => {
-                        input_fell_behind = true;
+                        output_fell_behind = true;
                         0.0
                     }
                 };
             }
-            if input_fell_behind {
-                log::error!("input stream fell behind: try increasing latency");
+            if output_fell_behind {
+                if !output_err_disp_once {
+                    output_err_disp_once = true;
+                    log::error!("output stream fell behind: try increasing latency");
+                }
             }
         };
 
