@@ -409,62 +409,79 @@ impl BlinkImpl {
 
     async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
-        // todo: use different code path if device_name is "default"
-        let devices = match host.input_devices() {
-            Ok(d) => d,
-            Err(e) => {
-                return Err(warp::error::Error::OtherWithContext(format!(
-                    "could not get input devices: {e}"
-                )));
+        let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
+            match host.default_input_device() {
+                Some(d) => d,
+                None => return Err(Error::OtherWithContext("no microphone is connected".into())),
             }
-        };
-        for device in devices {
-            if let Ok(name) = device.name() {
-                if name == device_name {
-                    self.update_audio_source_codec(&device).await?;
-                    host_media::change_audio_input(
-                        device,
-                        self.audio_source_codec.read().await.clone(),
-                    )
-                    .await?;
-                    return Ok(());
+        } else {
+            let mut devices = match host.input_devices() {
+                Ok(d) => d,
+                Err(e) => {
+                    return Err(warp::error::Error::OtherWithContext(format!(
+                        "could not get input devices: {e}"
+                    )));
+                }
+            };
+            let r = devices.find(|x| {
+                if let Ok(name) = x.name() {
+                    name == device_name
+                } else {
+                    false
+                }
+            });
+            match r {
+                Some(x) => x,
+                None => {
+                    return Err(warp::error::Error::OtherWithContext(
+                        "input device not found".into(),
+                    ))
                 }
             }
-        }
+        };
 
-        Err(warp::error::Error::OtherWithContext(
-            "input device not found".into(),
-        ))
+        self.update_audio_source_codec(&device).await?;
+        host_media::change_audio_input(device, self.audio_source_codec.read().await.clone())
+            .await?;
+        Ok(())
     }
 
     async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
-        // todo: use different code path if device_name is "default"
-        let devices = match host.output_devices() {
-            Ok(d) => d,
-            Err(e) => {
-                return Err(warp::error::Error::OtherWithContext(format!(
-                    "could not get input devices: {e}"
-                )));
+        let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
+            match host.default_output_device() {
+                Some(d) => d,
+                None => return Err(Error::OtherWithContext("no speaker is connected".into())),
             }
-        };
-        for device in devices {
-            if let Ok(name) = device.name() {
-                if name == device_name {
-                    self.update_audio_sink_codec(&device).await?;
-                    host_media::change_audio_output(
-                        device,
-                        self.audio_sink_codec.read().await.clone(),
-                    )
-                    .await?;
-                    return Ok(());
+        } else {
+            let mut devices = match host.output_devices() {
+                Ok(d) => d,
+                Err(e) => {
+                    return Err(warp::error::Error::OtherWithContext(format!(
+                        "could not get output devices: {e}"
+                    )));
+                }
+            };
+            let r = devices.find(|x| {
+                if let Ok(name) = x.name() {
+                    name == device_name
+                } else {
+                    false
+                }
+            });
+            match r {
+                Some(x) => x,
+                None => {
+                    return Err(warp::error::Error::OtherWithContext(
+                        "output device not found".into(),
+                    ))
                 }
             }
-        }
+        };
 
-        Err(warp::error::Error::OtherWithContext(
-            "output device not found".into(),
-        ))
+        self.update_audio_sink_codec(&device).await?;
+        host_media::change_audio_output(device, self.audio_sink_codec.read().await.clone()).await?;
+        Ok(())
     }
 }
 
