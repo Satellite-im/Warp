@@ -24,7 +24,7 @@ use std::{
     any::Any,
     collections::{HashMap, HashSet},
     str::FromStr,
-    sync::{Arc},
+    sync::Arc,
     time::Duration,
 };
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
@@ -409,6 +409,7 @@ impl BlinkImpl {
 
     async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
+        // todo: use different code path if device_name is "default"
         let devices = match host.input_devices() {
             Ok(d) => d,
             Err(e) => {
@@ -438,6 +439,7 @@ impl BlinkImpl {
 
     async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
+        // todo: use different code path if device_name is "default"
         let devices = match host.output_devices() {
             Ok(d) => d,
             Err(e) => {
