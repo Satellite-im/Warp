@@ -57,7 +57,7 @@ use warp::module::Module;
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{DhtMode, Ipfs, IpfsOptions, Keypair, PeerId, Protocol, StoragePath, UninitializedIpfs};
+use ipfs::{DhtMode, Ipfs, Keypair, PeerId, Protocol, UninitializedIpfs};
 use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
 use warp::multipass::identity::{
@@ -268,23 +268,6 @@ impl WarpIpfs {
             );
         }
 
-        let mut opts = IpfsOptions {
-            bootstrap: config.bootstrap.address(),
-            listening_addrs: config.listen_on.clone(),
-            ..Default::default()
-        };
-
-        if let Some(path) = self.config.path.as_ref() {
-            info!("Instance will be persistent");
-            info!("Path set: {}", path.display());
-
-            if !path.is_dir() {
-                warn!("Path doesnt exist... creating");
-                tokio::fs::create_dir_all(path).await?;
-            }
-            opts.ipfs_path = StoragePath::Disk(path.clone());
-        }
-
         let (pb_tx, pb_rx) = channel(50);
 
         let behaviour = behaviour::Behaviour {
@@ -292,13 +275,15 @@ impl WarpIpfs {
         };
 
         info!("Starting ipfs");
-        let mut uninitialized = UninitializedIpfs::with_opt(opts)
+        let mut uninitialized = UninitializedIpfs::empty()
+            .set_listening_addrs(config.listen_on.clone())
             .set_custom_behaviour(behaviour)
             .set_keypair(keypair)
             .set_transport_configuration(TransportConfig {
                 yamux_update_mode: UpdateMode::Read,
                 ..Default::default()
             })
+            .listen_as_external_addr()
             .enable_relay(true)
             .set_swarm_configuration(swarm_configuration)
             .set_identify_configuration({
@@ -325,6 +310,21 @@ impl WarpIpfs {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
             });
+
+        if let Some(path) = self.config.path.as_ref() {
+            info!("Instance will be persistent");
+            info!("Path set: {}", path.display());
+
+            if !path.is_dir() {
+                warn!("Path doesnt exist... creating");
+                tokio::fs::create_dir_all(path).await?;
+            }
+            uninitialized = uninitialized.set_path(path);
+        }
+
+        for addr in config.bootstrap.address() {
+            uninitialized = uninitialized.add_bootstrap(addr);
+        }
 
         if config.ipfs_setting.memory_transport {
             uninitialized = uninitialized.set_custom_transport(Box::new(
@@ -364,7 +364,14 @@ impl WarpIpfs {
 
         let mut relay_peers = vec![];
 
-        for mut addr in config.ipfs_setting.relay_client.relay_address.clone() {
+        for mut addr in config
+            .ipfs_setting
+            .relay_client
+            .relay_address
+            .iter()
+            .chain(config.bootstrap.address().iter())
+            .cloned()
+        {
             if addr.is_relayed() {
                 warn!("Relay circuits cannot be used as relays");
                 continue;
@@ -374,6 +381,10 @@ impl WarpIpfs {
                 warn!("{addr} does not contain a peer id. Skipping");
                 continue;
             };
+
+            if let Err(e) = ipfs.add_peer(peer_id, addr.clone()).await {
+                warn!("Error error relay: {e}");
+            }
 
             if let Err(e) = ipfs.add_relay(peer_id, addr).await {
                 error!("Error adding relay: {e}");
@@ -385,17 +396,6 @@ impl WarpIpfs {
 
         if relay_peers.is_empty() {
             warn!("No relays available");
-        }
-
-        if config.ipfs_setting.dht_client {
-            ipfs.dht_mode(DhtMode::Client).await?;
-        }
-
-        if config.ipfs_setting.bootstrap && !empty_bootstrap {
-            //TODO: determine if bootstrap should run in intervals
-            if let Err(e) = ipfs.bootstrap().await {
-                error!("Error bootstrapping: {e}");
-            }
         }
 
         tokio::spawn({
@@ -420,16 +420,39 @@ impl WarpIpfs {
             }
         });
 
-        let relays = (!config.bootstrap.address().is_empty()).then(|| {
-            config
-                .bootstrap
-                .address()
-                .iter()
-                .map(|addr| addr.clone().with(Protocol::P2pCircuit))
-                .collect()
-        });
+        if config.ipfs_setting.dht_client {
+            ipfs.dht_mode(DhtMode::Client).await?;
+        }
 
-        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone());
+        if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            //TODO: determine if bootstrap should run in intervals
+            if let Err(e) = ipfs.bootstrap().await {
+                error!("Error bootstrapping: {e}");
+            }
+        }
+
+        let relays = ipfs
+            .list_relays(false)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|(peer_id, addrs)| {
+                addrs
+                    .iter()
+                    .map(|addr| {
+                        addr.clone()
+                            .with(Protocol::P2p(*peer_id))
+                            .with(Protocol::P2pCircuit)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        let discovery = Discovery::new(
+            ipfs.clone(),
+            config.store_setting.discovery.clone(),
+            relays.clone(),
+        );
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
