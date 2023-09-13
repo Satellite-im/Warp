@@ -1,13 +1,16 @@
+mod handler;
+
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
 };
 
 use rust_ipfs::libp2p::{
     core::Endpoint,
     swarm::{
-        derive_prelude::ConnectionEstablished, ConnectionClosed, ConnectionDenied, ConnectionId,
-        FromSwarm, PollParameters, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
+        derive_prelude::ConnectionEstablished, ConnectionClosed, ConnectionDenied,
+        ConnectionHandler, ConnectionId, FromSwarm, NotifyHandler, PollParameters, THandler,
+        THandlerInEvent, THandlerOutEvent, ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -38,6 +41,7 @@ enum PhoneBookState {
 }
 
 pub struct Behaviour {
+    events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, Vec<ConnectionId>>,
     entry: HashSet<PeerId>,
     event: tokio::sync::broadcast::Sender<MultiPassEventKind>,
@@ -51,6 +55,7 @@ impl Behaviour {
         command: futures::channel::mpsc::Receiver<PhoneBookCommand>,
     ) -> Self {
         Behaviour {
+            events: Default::default(),
             connections: Default::default(),
             entry: Default::default(),
             entry_state: Default::default(),
@@ -118,7 +123,7 @@ impl Behaviour {
 }
 
 impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
+    type ConnectionHandler = handler::Handler;
     type ToSwarm = void::Void;
 
     fn handle_pending_inbound_connection(
@@ -143,21 +148,29 @@ impl NetworkBehaviour for Behaviour {
     fn handle_established_inbound_connection(
         &mut self,
         _: ConnectionId,
-        _: PeerId,
+        peer_id: PeerId,
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+        let mut handler = handler::Handler::default();
+        if self.entry.contains(&peer_id) {
+            handler.on_behaviour_event(handler::In::Set);
+        }
+        Ok(handler)
     }
 
     fn handle_established_outbound_connection(
         &mut self,
         _: ConnectionId,
-        _: PeerId,
+        peer_id: PeerId,
         _: &Multiaddr,
         _: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+        let mut handler = handler::Handler::default();
+        if self.entry.contains(&peer_id) {
+            handler.on_behaviour_event(handler::In::Set);
+        }
+        Ok(handler)
     }
 
     fn on_connection_handler_event(
@@ -220,6 +233,10 @@ impl NetworkBehaviour for Behaviour {
         cx: &mut Context,
         _: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+        if let Some(event) = self.events.pop_front() {
+            return Poll::Ready(event);
+        }
+
         loop {
             match self.command.poll_next_unpin(cx) {
                 Poll::Ready(Some(PhoneBookCommand::AddEntry { peer_id, response })) => {
@@ -229,6 +246,11 @@ impl NetworkBehaviour for Behaviour {
                     }
 
                     self.send_online_event(peer_id);
+                    self.events.push_back(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: handler::In::Set,
+                    });
                     let _ = response.send(Ok(()));
                 }
                 Poll::Ready(Some(PhoneBookCommand::RemoveEntry { peer_id, response })) => {
@@ -238,6 +260,11 @@ impl NetworkBehaviour for Behaviour {
                     }
 
                     self.send_offline_event(peer_id);
+                    self.events.push_back(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: handler::In::Unset,
+                    });
                     let _ = response.send(Ok(()));
                 }
                 Poll::Ready(None) => unreachable!("Channels are owned"),
