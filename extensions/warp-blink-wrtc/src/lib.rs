@@ -160,15 +160,25 @@ impl BlinkImpl {
 
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            source_codec.channels = Self::get_min_source_channels(&input_device)?;
-            host_media::change_audio_input(input_device, source_codec.clone()).await?;
+            match Self::get_min_source_channels(&input_device) {
+                Ok(channels) => {
+                    source_codec.channels = channels;
+                    host_media::change_audio_input(input_device, source_codec.clone()).await?;
+                }
+                Err(e) => log::error!("{e}"),
+            }
         } else {
             log::warn!("blink started with no input device");
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            sink_codec.channels = Self::get_min_sink_channels(&output_device)?;
-            host_media::change_audio_output(output_device, sink_codec.clone()).await?;
+            match Self::get_min_sink_channels(&output_device) {
+                Ok(channels) => {
+                    sink_codec.channels = channels;
+                    host_media::change_audio_output(output_device, sink_codec.clone()).await?;
+                }
+                Err(e) => log::error!("{e}"),
+            }
         } else {
             log::warn!("blink started with no output device");
         }
