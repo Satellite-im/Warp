@@ -245,7 +245,10 @@ impl IdentityStore {
         let did = store.get_keypair_did()?;
 
         let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
-        let main_stream = store.ipfs.pubsub_subscribe("/identity/announce".into()).await?;
+        let main_stream = store
+            .ipfs
+            .pubsub_subscribe("/identity/announce".into())
+            .await?;
         tokio::spawn({
             let mut store = store.clone();
             async move {
@@ -284,7 +287,7 @@ impl IdentityStore {
                             if let Some(message) = message {
                                 let entry = match message.source {
                                     Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
-                                        Some(entry) => entry.did_key().await.ok(),
+                                        Some(entry) => entry.peer_id().to_did().ok(),
                                         None => {
                                             let _ = store.discovery.insert(peer_id).await.ok();
                                             peer_id.to_did().ok()
@@ -746,7 +749,13 @@ impl IdentityStore {
     }
 
     pub async fn push_to_all(&self) {
-        let list = self.discovery.did_iter().await.collect::<Vec<_>>().await;
+        let list = self
+            .discovery
+            .list()
+            .await
+            .iter()
+            .filter_map(|entry| entry.peer_id().to_did().ok())
+            .collect::<Vec<_>>();
         self.push_iter(list).await
     }
 
