@@ -21,10 +21,12 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 
 use warp::{
-    blink::{AudioCodec, MimeType},
+    blink::MimeType,
     crypto::DID,
     sync::{Arc, RwLock},
 };
+
+use super::audio::AudioCodec;
 
 static MP4_LOGGER: Lazy<RwLock<Option<Mp4Logger>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));

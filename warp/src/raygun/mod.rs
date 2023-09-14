@@ -789,10 +789,10 @@ pub enum EmbedState {
 #[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
-    Constellation { path: String},
+    Constellation { path: String },
 
     /// Use file from disk
-    Disk { path: PathBuf},
+    Disk { path: PathBuf },
 }
 
 #[async_trait::async_trait]
@@ -1751,6 +1751,6 @@ pub mod ffi {
 
     fn convert_timstamp(timestamp: i64) -> Option<DateTime<Utc>> {
         NaiveDateTime::from_timestamp_opt(timestamp, 0)
-            .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+            .map(|naive| DateTime::<Utc>::from_local(naive, Utc))
     }
 }

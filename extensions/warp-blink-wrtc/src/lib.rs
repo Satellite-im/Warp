@@ -17,7 +17,10 @@ mod store;
 
 use async_trait::async_trait;
 use host_media::{
-    audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
+    audio::{
+        automute::{AutoMuteCmd, AUDIO_CMD_CH},
+        AudioCodec, AudioHardwareConfig,
+    },
     mp4_logger::Mp4LoggerConfig,
 };
 use std::{
@@ -44,7 +47,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
+    blink::{self, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
     crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     module::Module,
@@ -53,6 +56,7 @@ use warp::{
 };
 
 use crate::{
+    host_media::audio::AudioSampleRate,
     signaling::{ipfs_routes, CallSignal, InitiationSignal, PeerSignal},
     simple_webrtc::events::{EmittedEvents, WebRtcEventStream},
     store::{
@@ -71,8 +75,8 @@ pub struct BlinkImpl {
     // the DID generated from Multipass, never cloned. contains the private key
     own_id: Arc<RwLock<Option<DID>>>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
-    audio_source_codec: Arc<RwLock<blink::AudioCodec>>,
-    audio_sink_codec: Arc<RwLock<blink::AudioCodec>>,
+    audio_source_config: Arc<RwLock<AudioHardwareConfig>>,
+    audio_sink_config: Arc<RwLock<AudioHardwareConfig>>,
 
     // subscribes to IPFS topic to receive incoming calls
     offer_handler: Arc<warp::sync::RwLock<JoinHandle<()>>>,
@@ -146,15 +150,13 @@ impl BlinkImpl {
         log::trace!("initializing WebRTC");
 
         // check SupportedStreamConfigs. if those channels aren't supported, use the default.
-        let mut source_codec = blink::AudioCodec {
-            mime: MimeType::OPUS,
-            sample_rate: blink::AudioSampleRate::High,
+        let mut source_config = AudioHardwareConfig {
+            sample_rate: AudioSampleRate::High,
             channels: 1,
         };
 
-        let mut sink_codec = blink::AudioCodec {
-            mime: MimeType::OPUS,
-            sample_rate: blink::AudioSampleRate::High,
+        let mut sink_config = AudioHardwareConfig {
+            sample_rate: AudioSampleRate::High,
             channels: 1,
         };
 
@@ -162,8 +164,8 @@ impl BlinkImpl {
         if let Some(input_device) = cpal_host.default_input_device() {
             match Self::get_min_source_channels(&input_device) {
                 Ok(channels) => {
-                    source_codec.channels = channels;
-                    host_media::change_audio_input(input_device, source_codec.clone()).await?;
+                    source_config.channels = channels;
+                    host_media::change_audio_input(input_device, source_config.clone()).await?;
                 }
                 Err(e) => log::error!("{e}"),
             }
@@ -174,8 +176,8 @@ impl BlinkImpl {
         if let Some(output_device) = cpal_host.default_output_device() {
             match Self::get_min_sink_channels(&output_device) {
                 Ok(channels) => {
-                    sink_codec.channels = channels;
-                    host_media::change_audio_output(output_device, sink_codec.clone()).await?;
+                    sink_config.channels = channels;
+                    host_media::change_audio_output(output_device, sink_config.clone()).await?;
                 }
                 Err(e) => log::error!("{e}"),
             }
@@ -191,8 +193,8 @@ impl BlinkImpl {
             webrtc_controller: Arc::new(RwLock::new(simple_webrtc::Controller::new()?)),
             own_id: Arc::new(RwLock::new(None)),
             ui_event_ch,
-            audio_source_codec: Arc::new(RwLock::new(source_codec)),
-            audio_sink_codec: Arc::new(RwLock::new(sink_codec)),
+            audio_source_config: Arc::new(RwLock::new(source_config)),
+            audio_sink_config: Arc::new(RwLock::new(sink_config)),
             offer_handler: Arc::new(warp::sync::RwLock::new(tokio::spawn(async {}))),
             webrtc_handler: Arc::new(warp::sync::RwLock::new(None)),
         };
@@ -276,8 +278,8 @@ impl BlinkImpl {
         };
 
         self.active_call.write().await.replace(call.clone().into());
-        let audio_source_codec = self.audio_source_codec.read().await;
-        let webrtc_codec = call.codec();
+        let audio_source_config = self.audio_source_config.read().await;
+        let webrtc_codec = AudioCodec::default();
         // ensure there is an audio source track
         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
             mime_type: webrtc_codec.mime_type(),
@@ -296,7 +298,7 @@ impl BlinkImpl {
             self.ui_event_ch.clone(),
             track,
             webrtc_codec,
-            audio_source_codec.clone(),
+            audio_source_config.clone(),
         )
         .await?;
 
@@ -329,7 +331,7 @@ impl BlinkImpl {
         let ipfs2 = self.ipfs.clone();
         let active_call = self.active_call.clone();
         let webrtc_controller = self.webrtc_controller.clone();
-        let audio_sink_codec = self.audio_sink_codec.clone();
+        let audio_sink_config = self.audio_sink_config.clone();
         let ui_event_ch = self.ui_event_ch.clone();
         let event_ch2 = ui_event_ch.clone();
 
@@ -341,7 +343,7 @@ impl BlinkImpl {
                     ipfs: ipfs2,
                     active_call,
                     webrtc_controller,
-                    audio_sink_codec,
+                    audio_sink_config,
                     ch: ui_event_ch,
                     call_signaling_stream,
                     peer_signaling_stream,
@@ -355,12 +357,12 @@ impl BlinkImpl {
         Ok(())
     }
 
-    async fn update_audio_source_codec(
+    async fn update_audio_source_config(
         &mut self,
         input_device: &cpal::Device,
     ) -> anyhow::Result<()> {
         let min_channels = Self::get_min_source_channels(input_device)?;
-        self.audio_source_codec.write().await.channels = min_channels;
+        self.audio_source_config.write().await.channels = min_channels;
         Ok(())
     }
 
@@ -368,23 +370,22 @@ impl BlinkImpl {
         let min_channels =
             input_device
                 .supported_input_configs()?
-                .fold(None, |acc: Option<u16>, x| match x.channels() {
-                    1 => Some(1),
-                    2 if acc.is_none() => Some(2),
-                    _ => acc,
+                .fold(None, |acc: Option<u16>, x| match acc {
+                    None => Some(x.channels()),
+                    Some(y) => Some(std::cmp::min(x.channels(), y)),
                 });
         let channels = min_channels.ok_or(anyhow::anyhow!(
-            "unsupported audio input device. doesn't support 1 or 2 channel audio"
+            "unsupported audio input device - no input configuration available"
         ))?;
         Ok(channels)
     }
 
-    async fn update_audio_sink_codec(
+    async fn update_audio_sink_config(
         &mut self,
         output_device: &cpal::Device,
     ) -> anyhow::Result<()> {
         let min_channels = Self::get_min_sink_channels(output_device)?;
-        self.audio_sink_codec.write().await.channels = min_channels;
+        self.audio_sink_config.write().await.channels = min_channels;
         Ok(())
     }
 
@@ -392,13 +393,12 @@ impl BlinkImpl {
         let min_channels =
             output_device
                 .supported_output_configs()?
-                .fold(None, |acc: Option<u16>, x| match x.channels() {
-                    1 => Some(1),
-                    2 if acc.is_none() => Some(2),
-                    _ => acc,
+                .fold(None, |acc: Option<u16>, x| match acc {
+                    None => Some(x.channels()),
+                    Some(y) => Some(std::cmp::min(x.channels(), y)),
                 });
         let channels = min_channels.ok_or(anyhow::anyhow!(
-            "unsupported audio output device. doesn't support 1 or 2 channel audio"
+            "unsupported audio output device. no output configuration available"
         ))?;
         Ok(channels)
     }
@@ -492,7 +492,7 @@ struct WebRtcHandlerParams {
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     active_call: Arc<RwLock<Option<ActiveCall>>>,
     webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
-    audio_sink_codec: Arc<RwLock<blink::AudioCodec>>,
+    audio_sink_config: Arc<RwLock<AudioHardwareConfig>>,
     ch: Sender<BlinkEventKind>,
     call_signaling_stream: SubscriptionStream,
     peer_signaling_stream: SubscriptionStream,
@@ -505,7 +505,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
         ipfs,
         active_call,
         webrtc_controller,
-        audio_sink_codec,
+        audio_sink_config: audio_sink_codec,
         ch,
         call_signaling_stream,
         peer_signaling_stream,
@@ -700,13 +700,12 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                         let call_id = active_call.call.call_id();
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
-                                let webrtc_codec = active_call.call.codec();
                                 if peer == *own_id {
                                     log::warn!("got TrackAdded event for own id");
                                     continue;
                                 }
                                 let audio_sink_codec = audio_sink_codec.read().await.clone();
-                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), event_ch.clone(), track, webrtc_codec, audio_sink_codec).await {
+                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), event_ch.clone(), track, AudioCodec::default(), audio_sink_codec).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                             }
@@ -825,11 +824,11 @@ impl Blink for BlinkImpl {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
+    /// webrtc_codec.channels will be assumed to be 1.
     async fn offer_call(
         &mut self,
         conversation_id: Option<Uuid>,
         mut participants: Vec<DID>,
-        webrtc_codec: AudioCodec,
     ) -> Result<Uuid, Error> {
         if self.ipfs.read().await.is_none() {
             return Err(Error::OtherWithContext(
@@ -859,7 +858,7 @@ impl Blink for BlinkImpl {
             };
         }
 
-        let call_info = CallInfo::new(conversation_id, participants.clone(), webrtc_codec);
+        let call_info = CallInfo::new(conversation_id, participants.clone());
         self.init_call(call_info.clone()).await?;
 
         let lock = self.own_id.read().await;
@@ -1069,10 +1068,10 @@ impl Blink for BlinkImpl {
         for device in devices {
             if let Ok(name) = device.name() {
                 if name == device_name {
-                    self.update_audio_source_codec(&device).await?;
+                    self.update_audio_source_config(&device).await?;
                     host_media::change_audio_input(
                         device,
-                        self.audio_source_codec.read().await.clone(),
+                        self.audio_source_config.read().await.clone(),
                     )
                     .await?;
                     return Ok(());
@@ -1091,8 +1090,8 @@ impl Blink for BlinkImpl {
             .ok_or(Error::OtherWithContext(String::from(
                 "no default input device",
             )))?;
-        self.update_audio_source_codec(&device).await?;
-        host_media::change_audio_input(device, self.audio_source_codec.read().await.clone())
+        self.update_audio_source_config(&device).await?;
+        host_media::change_audio_input(device, self.audio_source_config.read().await.clone())
             .await?;
         Ok(())
     }
@@ -1121,10 +1120,10 @@ impl Blink for BlinkImpl {
         for device in devices {
             if let Ok(name) = device.name() {
                 if name == device_name {
-                    self.update_audio_sink_codec(&device).await?;
+                    self.update_audio_sink_config(&device).await?;
                     host_media::change_audio_output(
                         device,
-                        self.audio_sink_codec.read().await.clone(),
+                        self.audio_sink_config.read().await.clone(),
                     )
                     .await?;
                     return Ok(());
@@ -1143,8 +1142,9 @@ impl Blink for BlinkImpl {
             .ok_or(Error::OtherWithContext(String::from(
                 "no default input device",
             )))?;
-        self.update_audio_sink_codec(&device).await?;
-        host_media::change_audio_output(device, self.audio_sink_codec.read().await.clone()).await?;
+        self.update_audio_sink_config(&device).await?;
+        host_media::change_audio_output(device, self.audio_sink_config.read().await.clone())
+            .await?;
         Ok(())
     }
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {
@@ -1183,7 +1183,7 @@ impl Blink for BlinkImpl {
                 host_media::init_recording(Mp4LoggerConfig {
                     call_id: call.call_id(),
                     participants: call.participants(),
-                    audio_codec: call.codec(),
+                    audio_codec: AudioCodec::default(),
                     log_path: output_dir.into(),
                 })
                 .await?;
@@ -1216,23 +1216,6 @@ impl Blink for BlinkImpl {
 
     async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error> {
         host_media::set_peer_audio_gain(peer_id, multiplier).await?;
-        Ok(())
-    }
-
-    async fn get_audio_source_codec(&self) -> AudioCodec {
-        self.audio_source_codec.read().await.clone()
-    }
-    async fn set_audio_source_codec(&mut self, codec: AudioCodec) -> Result<(), Error> {
-        *self.audio_source_codec.write().await = codec;
-        // todo: validate the codec
-        Ok(())
-    }
-    async fn get_audio_sink_codec(&self) -> AudioCodec {
-        self.audio_sink_codec.read().await.clone()
-    }
-    async fn set_audio_sink_codec(&mut self, codec: AudioCodec) -> Result<(), Error> {
-        *self.audio_sink_codec.write().await = codec;
-        // todo: validate the codec
         Ok(())
     }
 

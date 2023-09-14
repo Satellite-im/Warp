@@ -5,13 +5,10 @@ use futures::StreamExt;
 
 use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use warp::{
-    blink::{
-        AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
-        MimeType, VideoCodec,
-    },
+    blink::{Blink, BlinkEventKind, BlinkEventStream},
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
 
@@ -30,29 +27,7 @@ use warp_ipfs::{
 
 mod logger;
 
-struct Codecs {
-    audio: AudioCodec,
-    _video: VideoCodec,
-    _screen_share: VideoCodec,
-}
-
 static OFFERED_CALL: Lazy<Mutex<Option<Uuid>>> = Lazy::new(|| Mutex::new(None));
-
-static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
-    let audio = AudioCodecBuiler::new()
-        .mime(MimeType::OPUS)
-        .sample_rate(AudioSampleRate::High)
-        .channels(1)
-        .build();
-
-    let video = VideoCodec::default();
-    let screen_share = VideoCodec::default();
-    RwLock::new(Codecs {
-        audio,
-        _video: video,
-        _screen_share: screen_share,
-    })
-});
 
 #[derive(Parser, Debug, Eq, PartialEq)]
 /// starts the blink-repl
@@ -92,12 +67,6 @@ enum Repl {
     ConnectMicrophone { device_name: String },
     /// specify which speaker to use for output
     ConnectSpeaker { device_name: String },
-    /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
-    /// the specified sample rate will be used when the host initiates a call.
-    SetAudioRate { rate: String },
-    /// set the default number of audio channels (1 or 2)
-    /// the specified number of channels will be used when the host initiates a call.
-    SetAudioChannels { channels: u16 },
     /// show the supported CPAL input stream configs
     SupportedInputConfigs,
     /// show the supported CPAL output stream configs
@@ -141,8 +110,7 @@ async fn handle_command(
                 let _ = multipass.send_request(did).await;
             }
 
-            let codecs = CODECS.read().await;
-            blink.offer_call(None, ids, codecs.audio.clone()).await?;
+            blink.offer_call(None, ids).await?;
         }
         Repl::Answer { id } => {
             let mut lock = OFFERED_CALL.lock().await;
@@ -186,23 +154,6 @@ async fn handle_command(
         Repl::ConnectSpeaker { device_name } => {
             blink.select_speaker(&device_name).await?;
         }
-        Repl::SetAudioRate { rate } => {
-            let mut codecs = CODECS.write().await;
-            let codec = AudioCodecBuiler::from(codecs.audio.clone())
-                .sample_rate(rate.try_into()?)
-                .build();
-            codecs.audio = codec;
-        }
-        Repl::SetAudioChannels { channels } => {
-            if !(1..=2).contains(&channels) {
-                bail!("invalid number of channels");
-            }
-            let mut codecs = CODECS.write().await;
-            let audio = AudioCodecBuiler::from(codecs.audio.clone())
-                .channels(channels)
-                .build();
-            codecs.audio = audio;
-        }
         Repl::SupportedInputConfigs => {
             let host = cpal::default_host();
             let dev = host
@@ -230,10 +181,6 @@ async fn handle_command(
                 .ok_or(anyhow::anyhow!("no input device"))?;
             let config = dev.default_input_config()?;
             println!("default input config: {config:#?}");
-            println!(
-                "default source_codec: {:#?}",
-                blink.get_audio_source_codec().await
-            );
         }
         Repl::ShowOutputConfig => {
             let host = cpal::default_host();
@@ -242,10 +189,6 @@ async fn handle_command(
                 .ok_or(anyhow::anyhow!("no input device"))?;
             let config = dev.default_output_config()?;
             println!("default output {config:#?}");
-            println!(
-                "default sink_codec: {:#?}",
-                blink.get_audio_sink_codec().await
-            );
         }
         Repl::RecordAudio { output_dir } => blink.record_call(&output_dir).await?,
         Repl::StopRecording => blink.stop_recording().await?,

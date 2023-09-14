@@ -7,6 +7,7 @@ use warp::blink;
 use crate::host_media::audio::{
     loudness,
     opus::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig},
+    AudioCodec, AudioHardwareConfig,
 };
 
 pub struct Framer {
@@ -36,8 +37,8 @@ pub struct FramerOutput {
 impl Framer {
     pub fn init(
         frame_size: usize,
-        webrtc_codec: blink::AudioCodec,
-        source_codec: blink::AudioCodec,
+        webrtc_codec: AudioCodec,
+        source_config: AudioHardwareConfig,
     ) -> anyhow::Result<Self> {
         let loudness_calculator = loudness::Calculator::new(frame_size);
         let mut buf: Vec<f32> = Vec::new();
@@ -53,17 +54,17 @@ impl Framer {
         // todo: abstract this
         encoder.set_bitrate(Bitrate::Bits(16000))?;
 
-        let resampler_config = match webrtc_codec.sample_rate().cmp(&source_codec.sample_rate()) {
+        let resampler_config = match webrtc_codec.sample_rate().cmp(&source_config.sample_rate()) {
             Ordering::Equal => ResamplerConfig::None,
             Ordering::Greater => {
-                ResamplerConfig::UpSample(webrtc_codec.sample_rate() / source_codec.sample_rate())
+                ResamplerConfig::UpSample(webrtc_codec.sample_rate() / source_config.sample_rate())
             }
-            _ => {
-                ResamplerConfig::DownSample(source_codec.sample_rate() / webrtc_codec.sample_rate())
-            }
+            _ => ResamplerConfig::DownSample(
+                source_config.sample_rate() / webrtc_codec.sample_rate(),
+            ),
         };
 
-        let channel_mixer_config = match webrtc_codec.channels().cmp(&source_codec.channels()) {
+        let channel_mixer_config = match webrtc_codec.channels().cmp(&source_config.channels()) {
             Ordering::Equal => ChannelMixerConfig::None,
             Ordering::Less => ChannelMixerConfig::Merge,
             _ => ChannelMixerConfig::Split,

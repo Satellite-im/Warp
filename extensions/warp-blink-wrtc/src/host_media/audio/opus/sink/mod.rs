@@ -21,6 +21,7 @@ use crate::{
     host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
     host_media::{
         self,
+        audio::{AudioCodec, AudioHardwareConfig},
         mp4_logger::{self, Mp4LoggerInstance},
     },
 };
@@ -32,7 +33,7 @@ pub struct OpusSink {
     // save this for changing the output device
     track: Arc<TrackRemote>,
     // same
-    webrtc_codec: blink::AudioCodec,
+    webrtc_codec: AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
@@ -55,21 +56,21 @@ impl OpusSink {
         event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
-        webrtc_codec: blink::AudioCodec,
-        sink_codec: blink::AudioCodec,
+        webrtc_codec: AudioCodec,
+        sink_config: AudioHardwareConfig,
     ) -> Result<Self> {
         let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
         let mp4_logger2 = mp4_logger.clone();
-        let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_codec.sample_rate()) {
+        let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_config.sample_rate()) {
             Ordering::Equal => ResamplerConfig::None,
             Ordering::Greater => {
-                ResamplerConfig::DownSample(webrtc_codec.sample_rate() / sink_codec.sample_rate())
+                ResamplerConfig::DownSample(webrtc_codec.sample_rate() / sink_config.sample_rate())
             }
-            _ => ResamplerConfig::UpSample(sink_codec.sample_rate() / webrtc_codec.sample_rate()),
+            _ => ResamplerConfig::UpSample(sink_config.sample_rate() / webrtc_codec.sample_rate()),
         };
         let resampler = Resampler::new(resampler_config);
 
-        let channel_mixer_config = match webrtc_codec.channels().cmp(&sink_codec.channels()) {
+        let channel_mixer_config = match webrtc_codec.channels().cmp(&sink_config.channels()) {
             Ordering::Equal => ChannelMixerConfig::None,
             Ordering::Greater => ChannelMixerConfig::Merge,
             _ => ChannelMixerConfig::Split,
@@ -77,8 +78,8 @@ impl OpusSink {
         let channel_mixer = ChannelMixer::new(channel_mixer_config);
 
         let cpal_config = cpal::StreamConfig {
-            channels: sink_codec.channels(),
-            sample_rate: SampleRate(sink_codec.sample_rate()),
+            channels: sink_config.channels(),
+            sample_rate: SampleRate(sink_config.sample_rate()),
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -181,8 +182,8 @@ impl SinkTrack for OpusSink {
         event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
-        webrtc_codec: blink::AudioCodec,
-        sink_codec: blink::AudioCodec,
+        webrtc_codec: AudioCodec,
+        sink_config: AudioHardwareConfig,
     ) -> Result<Self> {
         OpusSink::init_internal(
             peer_id,
@@ -190,7 +191,7 @@ impl SinkTrack for OpusSink {
             output_device,
             track,
             webrtc_codec,
-            sink_codec,
+            sink_config,
         )
     }
 
@@ -207,7 +208,7 @@ impl SinkTrack for OpusSink {
     fn change_output_device(
         &mut self,
         output_device: &cpal::Device,
-        sink_codec: blink::AudioCodec,
+        sink_config: AudioHardwareConfig,
     ) -> Result<()> {
         self.stream.pause()?;
         self.decoder_handle.abort();
@@ -217,7 +218,7 @@ impl SinkTrack for OpusSink {
             output_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
-            sink_codec,
+            sink_config,
         )?;
         *self = new_sink;
         if !*self.muted.read() {
