@@ -47,7 +47,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{self, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
+    blink::{Blink, BlinkEventKind, BlinkEventStream, CallInfo},
     crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     module::Module,

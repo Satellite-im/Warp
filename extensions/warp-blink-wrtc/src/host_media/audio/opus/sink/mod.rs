@@ -7,7 +7,7 @@ use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
 use warp::{
-    blink::{self, BlinkEventKind},
+    blink::{BlinkEventKind},
     crypto::DID,
     sync::RwLock,
 };
