@@ -45,10 +45,14 @@ enum Repl {
     /// show your DID
     ShowDid,
     /// given a list of DIDs, initiate a call
-    Dial { ids: Vec<String> },
+    Dial {
+        ids: Vec<String>,
+    },
     /// given a Uuid, answer a call
     /// if no argument is given, the most recent call will be answered
-    Answer { id: Option<String> },
+    Answer {
+        id: Option<String>,
+    },
     /// end the current call
     Hangup,
     /// mute self
@@ -64,9 +68,21 @@ enum Repl {
     /// show available audio I/O devices
     ShowAvailableDevices,
     /// specify which microphone to use for input
-    ConnectMicrophone { device_name: String },
+    ConnectMicrophone {
+        device_name: String,
+    },
     /// specify which speaker to use for output
-    ConnectSpeaker { device_name: String },
+    ConnectSpeaker {
+        device_name: String,
+    },
+    /// records 5 seconds of microphone input and plays it back
+    TestMicrophone {
+        device_name: String,
+    },
+    /// plays a test tone through the speaker
+    TestSpeaker {
+        device_name: String,
+    },
     /// show the supported CPAL input stream configs
     SupportedInputConfigs,
     /// show the supported CPAL output stream configs
@@ -76,12 +92,20 @@ enum Repl {
     /// show the default output config
     ShowOutputConfig,
     /// separately record audio of each participant
-    RecordAudio { output_dir: String },
+    RecordAudio {
+        output_dir: String,
+    },
     /// stop recording audio
     StopRecording,
     /// change the loudness of the peer for the call
     /// can only make it louder because multiplier can't be a float for the CLI
-    SetGain { peer: DID, multiplier: u32 },
+    SetGain {
+        peer: DID,
+        multiplier: u32,
+    },
+    Quit,
+    /// shorthand for quit
+    Q,
 }
 
 async fn handle_command(
@@ -91,6 +115,7 @@ async fn handle_command(
     cmd: Repl,
 ) -> anyhow::Result<()> {
     match cmd {
+        Repl::Q | Repl::Quit => unreachable!("quit cmd should have been handled already"),
         Repl::ShowDid => {
             println!("own identity: {}", own_id.did_key());
         }
@@ -139,20 +164,36 @@ async fn handle_command(
             blink.disable_automute()?;
         }
         Repl::ShowSelectedDevices => {
-            println!("microphone: {:?}", blink.get_current_microphone().await);
-            println!("speaker: {:?}", blink.get_current_speaker().await);
+            let config = blink.get_audio_device_config().await;
+            println!("microphone: {:?}", config.microphone_device_name());
+            println!("speaker: {:?}", config.speaker_device_name());
         }
         Repl::ShowAvailableDevices => {
-            let microphones = blink.get_available_microphones().await?;
-            let speakers = blink.get_available_speakers().await?;
+            let config = blink.get_audio_device_config().await;
+            let microphones = config.get_available_microphones();
+            let speakers = config.get_available_speakers();
             println!("available microphones: {microphones:#?}");
             println!("available speakers: {speakers:#?}");
         }
         Repl::ConnectMicrophone { device_name } => {
-            blink.select_microphone(&device_name).await?;
+            let mut config = blink.get_audio_device_config().await;
+            config.set_microphone(&device_name);
+            blink.set_audio_device_config(config).await?;
         }
         Repl::ConnectSpeaker { device_name } => {
-            blink.select_speaker(&device_name).await?;
+            let mut config = blink.get_audio_device_config().await;
+            config.set_speaker(&device_name);
+            blink.set_audio_device_config(config).await?;
+        }
+        Repl::TestMicrophone { device_name } => {
+            let mut config = blink.get_audio_device_config().await;
+            config.set_microphone(&device_name);
+            config.test_microphone()?;
+        }
+        Repl::TestSpeaker { device_name } => {
+            let mut config = blink.get_audio_device_config().await;
+            config.set_speaker(&device_name);
+            config.test_speaker()?;
         }
         Repl::SupportedInputConfigs => {
             let host = cpal::default_host();
@@ -326,7 +367,14 @@ async fn main() -> anyhow::Result<()> {
         let mut v = vec![""];
         v.extend(line.split_ascii_whitespace());
         let cli = match Repl::try_parse_from(v) {
-            Ok(r) => r,
+            Ok(r) => {
+                if matches!(r, Repl::Quit | Repl::Q) {
+                    println!("quitting");
+                    break;
+                } else {
+                    r
+                }
+            }
             Err(e) => {
                 println!("{e}");
                 continue;

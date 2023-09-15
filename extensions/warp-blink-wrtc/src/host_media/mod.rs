@@ -321,3 +321,17 @@ pub async fn set_peer_audio_gain(peer_id: DID, multiplier: f32) -> anyhow::Resul
 
     Ok(())
 }
+
+pub async fn test_microphone(
+    _device_name: &str,
+    _ch: broadcast::Sender<BlinkEventKind>,
+) -> anyhow::Result<()> {
+    todo!()
+}
+
+pub async fn test_speaker(
+    _device_name: &str,
+    _ch: broadcast::Sender<BlinkEventKind>,
+) -> anyhow::Result<()> {
+    todo!()
+}
