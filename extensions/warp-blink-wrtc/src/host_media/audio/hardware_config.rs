@@ -207,6 +207,7 @@ impl AudioDeviceConfig for DeviceConfig {
             speech::Detector::new(10, (output_config.sample_rate.0 as f32 / 5.0) as _);
 
         let input_ch = self.event_ch.clone();
+        let mut disp_input_err_once = false;
         let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
             let mut input_fell_behind = false;
             for frame in data.chunks(input_config.channels as _) {
@@ -227,12 +228,14 @@ impl AudioDeviceConfig for DeviceConfig {
                     input_fell_behind = true;
                 }
             }
-            if input_fell_behind {
+            if input_fell_behind && !disp_input_err_once {
+                disp_input_err_once = true;
                 log::error!("input stream fell behind: try increasing latency");
             }
         };
 
         let output_ch = self.event_ch.clone();
+        let mut disp_output_err_once = false;
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut output_fell_behind = false;
             for frame in data.chunks_mut(output_config.channels as _) {
@@ -256,7 +259,8 @@ impl AudioDeviceConfig for DeviceConfig {
                 }
             }
 
-            if output_fell_behind {
+            if output_fell_behind && !disp_output_err_once {
+                disp_output_err_once = true;
                 log::error!("output stream fell behind: try increasing latency");
             }
         };
@@ -288,8 +292,8 @@ impl AudioDeviceConfig for DeviceConfig {
         // Run for 3 seconds before closing.
         log::debug!("Playing for a few seconds... ");
         std::thread::sleep(std::time::Duration::from_millis(3000 + latency_ms as u64));
-        drop(input_stream);
-        drop(output_stream);
+        let _ = input_stream.pause();
+        let _ = output_stream.pause();
         log::debug!("Done!");
         Ok(())
     }
