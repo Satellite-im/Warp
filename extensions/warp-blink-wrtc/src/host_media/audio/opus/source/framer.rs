@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 use bytes::Bytes;
 use opus::Bitrate;
 
-
 use crate::host_media::audio::{
     loudness,
     opus::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig},
@@ -64,10 +63,15 @@ impl Framer {
             ),
         };
 
+        // webrtc_codec.channels() is guaranteed to be 1 channel
         let channel_mixer_config = match webrtc_codec.channels().cmp(&source_config.channels()) {
             Ordering::Equal => ChannelMixerConfig::None,
-            Ordering::Less => ChannelMixerConfig::Merge,
-            _ => ChannelMixerConfig::Split,
+            Ordering::Less => ChannelMixerConfig::Average {
+                to_sum: source_config.channels() as _,
+            },
+            _ => unreachable!(
+                "invalid channels for opus Framer. source_config has less than 1 channel."
+            ),
         };
 
         Ok(Self {
@@ -87,11 +91,13 @@ impl Framer {
             ChannelMixerOutput::Single(sample) => {
                 self.resampler.process(sample, &mut self.raw_samples);
             }
-            ChannelMixerOutput::Split(sample) => {
-                self.resampler.process(sample, &mut self.raw_samples);
-                self.resampler.process(sample, &mut self.raw_samples);
+            // this should never happen but the code is left in here for correctness.
+            ChannelMixerOutput::Split { val, repeated } => {
+                for _ in 0..repeated {
+                    self.resampler.process(val, &mut self.raw_samples);
+                }
             }
-            ChannelMixerOutput::None => {}
+            _ => {}
         }
 
         if self.raw_samples.len() == self.frame_size {

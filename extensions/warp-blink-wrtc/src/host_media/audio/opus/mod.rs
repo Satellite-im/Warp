@@ -47,18 +47,22 @@ impl Resampler {
 
 pub enum ChannelMixerConfig {
     None,
-    Merge,
-    Split,
+    // average N channels into 1 channel
+    Average { to_sum: usize },
+    // split 1 channel into N equal channels
+    Split { to_split: usize },
 }
 
 pub enum ChannelMixerOutput {
     None,
     Single(f32),
-    Split(f32),
+    Split { val: f32, repeated: usize },
 }
 
 pub struct ChannelMixer {
-    pending_sample: Option<f32>,
+    // sum and num_summed are used to take the average of multiple channels. ChannelMixerConfig tells how many samples must be averaged
+    sum: f32,
+    num_summed: usize,
     config: ChannelMixerConfig,
 }
 
@@ -66,23 +70,29 @@ impl ChannelMixer {
     pub fn new(config: ChannelMixerConfig) -> Self {
         Self {
             config,
-            pending_sample: None,
+            sum: 0.0,
+            num_summed: 0,
         }
     }
     pub fn process(&mut self, sample: f32) -> ChannelMixerOutput {
         match self.config {
             ChannelMixerConfig::None => ChannelMixerOutput::Single(sample),
-            ChannelMixerConfig::Merge => {
-                if let Some(x) = self.pending_sample.take() {
-                    let merged = (x + sample) / 2.0;
-                    ChannelMixerOutput::Single(merged)
+            ChannelMixerConfig::Average { to_sum: num } => {
+                self.sum += sample;
+                self.num_summed += 1;
+                if self.num_summed == num {
+                    let avg = self.sum / num as f32;
+                    self.sum = 0.0;
+                    self.num_summed = 0;
+                    ChannelMixerOutput::Single(avg)
                 } else {
-                    self.pending_sample.replace(sample);
                     ChannelMixerOutput::None
                 }
             }
-            // todo: verify this...
-            ChannelMixerConfig::Split => ChannelMixerOutput::Split(sample),
+            ChannelMixerConfig::Split { to_split } => ChannelMixerOutput::Split {
+                val: sample,
+                repeated: to_split,
+            },
         }
     }
 }

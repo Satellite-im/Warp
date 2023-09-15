@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
@@ -6,11 +6,7 @@ use cpal::{
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
-use warp::{
-    blink::{BlinkEventKind},
-    crypto::DID,
-    sync::RwLock,
-};
+use warp::{blink::BlinkEventKind, crypto::DID, sync::RwLock};
 
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
@@ -70,10 +66,15 @@ impl OpusSink {
         };
         let resampler = Resampler::new(resampler_config);
 
+        // webtrtc codec is guaranteed to have 1 channel
         let channel_mixer_config = match webrtc_codec.channels().cmp(&sink_config.channels()) {
             Ordering::Equal => ChannelMixerConfig::None,
-            Ordering::Greater => ChannelMixerConfig::Merge,
-            _ => ChannelMixerConfig::Split,
+            Ordering::Greater => {
+                unreachable!("invalid channels for OpusSink. sink config has less than 1 channel")
+            }
+            Ordering::Less => ChannelMixerConfig::Split {
+                to_split: sink_config.channels() as _,
+            },
         };
         let channel_mixer = ChannelMixer::new(channel_mixer_config);
 
@@ -86,13 +87,8 @@ impl OpusSink {
         // number of late samples allowed (for RTP)
         let max_late = 512;
         let webrtc_sample_rate = webrtc_codec.sample_rate();
-        let webrtc_channels = match webrtc_codec.channels() {
-            1 => opus::Channels::Mono,
-            2 => opus::Channels::Stereo,
-            x => bail!("invalid number of channels: {x}"),
-        };
 
-        let decoder = opus::Decoder::new(webrtc_sample_rate, webrtc_channels)?;
+        let decoder = opus::Decoder::new(webrtc_sample_rate, opus::Channels::Mono)?;
         let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
         let (producer, mut consumer) = ring.split();
 
@@ -361,9 +357,10 @@ where
                                     ChannelMixerOutput::Single(sample) => {
                                         resampler.process(sample, &mut raw_samples);
                                     }
-                                    ChannelMixerOutput::Split(sample) => {
-                                        resampler.process(sample, &mut raw_samples);
-                                        resampler.process(sample, &mut raw_samples);
+                                    ChannelMixerOutput::Split { val, repeated } => {
+                                        for _ in 0..repeated {
+                                            resampler.process(val, &mut raw_samples);
+                                        }
                                     }
                                     ChannelMixerOutput::None => {}
                                 }
