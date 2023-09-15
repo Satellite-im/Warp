@@ -22,7 +22,7 @@ use crate::{
     },
 };
 
-use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
+use super::{Resampler, ResamplerConfig};
 
 pub struct OpusSink {
     peer_id: DID,
@@ -66,18 +66,6 @@ impl OpusSink {
         };
         let resampler = Resampler::new(resampler_config);
 
-        // webtrtc codec is guaranteed to have 1 channel
-        let channel_mixer_config = match 1.cmp(&sink_config.channels()) {
-            Ordering::Equal => ChannelMixerConfig::None,
-            Ordering::Greater => {
-                unreachable!("invalid channels for OpusSink. sink config has less than 1 channel")
-            }
-            Ordering::Less => ChannelMixerConfig::Split {
-                to_split: sink_config.channels() as _,
-            },
-        };
-        let channel_mixer = ChannelMixer::new(channel_mixer_config);
-
         let cpal_config = cpal::StreamConfig {
             channels: sink_config.channels(),
             sample_rate: SampleRate(sink_config.sample_rate()),
@@ -109,7 +97,6 @@ impl OpusSink {
                 producer,
                 decoder,
                 resampler,
-                channel_mixer,
                 event_ch: event_ch2,
                 peer_id: peer_id2,
                 mp4_writer: mp4_logger2,
@@ -124,7 +111,6 @@ impl OpusSink {
         });
 
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            let mut input_fell_behind = false;
             // this is test code, left here for reference. it can be deleted later if needed.
             // if *dump_consumer_queue.read() {
             //     *dump_consumer_queue.write() = false;
@@ -132,17 +118,12 @@ impl OpusSink {
             //         consumer.advance(consumer.len());
             //     }
             // }
-            for sample in data {
-                *sample = match consumer.pop() {
-                    Some(s) => s,
-                    None => {
-                        input_fell_behind = true;
-                        0_f32
-                    }
+
+            for frame in data.chunks_mut(cpal_config.channels as _) {
+                let value = consumer.pop().unwrap_or_default();
+                for sample in frame.iter_mut() {
+                    *sample = value;
                 }
-            }
-            if input_fell_behind {
-                //log::trace!("output stream fell behind: try increasing latency");
             }
         };
         let output_stream = output_device.build_output_stream(
@@ -247,7 +228,6 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     producer: AudioSampleProducer,
     decoder: opus::Decoder,
     resampler: Resampler,
-    channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
     mp4_writer: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
@@ -265,7 +245,6 @@ where
         mut producer,
         mut decoder,
         mut resampler,
-        mut channel_mixer,
         event_ch,
         peer_id,
         mp4_writer,
@@ -353,17 +332,7 @@ where
                             let _ = automute_tx
                                 .send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
                             'PROCESS_DECODED_SAMPLES: for audio_sample in to_send {
-                                match channel_mixer.process(*audio_sample * multiplier) {
-                                    ChannelMixerOutput::Single(sample) => {
-                                        resampler.process(sample, &mut raw_samples);
-                                    }
-                                    ChannelMixerOutput::Split { val, repeated } => {
-                                        for _ in 0..repeated {
-                                            resampler.process(val, &mut raw_samples);
-                                        }
-                                    }
-                                    ChannelMixerOutput::None => {}
-                                }
+                                resampler.process(*audio_sample * multiplier, &mut raw_samples);
                                 for sample in raw_samples.drain(..) {
                                     if let Err(_e) = producer.push(sample) {
                                         // this is test code, left here for reference. it can be deleted later if needed.
