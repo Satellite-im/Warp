@@ -272,6 +272,8 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Functionality is not yet implemented")]
     Unimplemented,
+    #[error(transparent)]
+    Boxed(Box<dyn std::error::Error + Sync + Send>),
     #[error("An unknown error has occurred")]
     Other,
 }

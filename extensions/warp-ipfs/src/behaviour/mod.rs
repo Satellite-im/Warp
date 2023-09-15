@@ -1,4 +1,5 @@
 pub mod phonebook;
+pub mod discovery;
 
 use libp2p::swarm::NetworkBehaviour;
 use rust_ipfs::libp2p;

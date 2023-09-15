@@ -16,6 +16,7 @@ resolver = "2"
 
 # Async and futures crates
 futures = { version = "0.3" }
+futures-timer = "3.0"
 async-trait = { version = "0.1" }
 async-stream = "0.3"
 async-broadcast = "0.5"
