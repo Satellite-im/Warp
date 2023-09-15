@@ -80,8 +80,9 @@ impl ChannelMixer {
             ChannelMixerConfig::Average { to_sum: num } => {
                 self.sum += sample;
                 self.num_summed += 1;
-                if self.num_summed == num {
-                    let avg = self.sum / num as f32;
+                // using >= to prevent the ChannelMixer from being stuck. otherwise == would do.
+                if self.num_summed >= num {
+                    let avg = self.sum / self.num_summed as f32;
                     self.sum = 0.0;
                     self.num_summed = 0;
                     ChannelMixerOutput::Single(avg)

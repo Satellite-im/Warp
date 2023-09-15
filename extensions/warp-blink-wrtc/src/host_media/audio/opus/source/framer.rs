@@ -64,7 +64,7 @@ impl Framer {
         };
 
         // webrtc_codec.channels() is guaranteed to be 1 channel
-        let channel_mixer_config = match webrtc_codec.channels().cmp(&source_config.channels()) {
+        let channel_mixer_config = match 1.cmp(&source_config.channels()) {
             Ordering::Equal => ChannelMixerConfig::None,
             Ordering::Less => ChannelMixerConfig::Average {
                 to_sum: source_config.channels() as _,

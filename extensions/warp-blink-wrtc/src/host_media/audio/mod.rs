@@ -18,11 +18,11 @@ pub use self::opus::sink::OpusSink;
 pub use self::opus::source::OpusSource;
 pub use hardware_config::*;
 
+// for webrtc, the number of audio channels is hardcoded to 1.
 #[derive(Debug, Clone)]
 pub struct AudioCodec {
     pub mime: MimeType,
     pub sample_rate: AudioSampleRate,
-    pub channels: u16,
 }
 
 #[derive(Clone)]
@@ -50,9 +50,6 @@ impl AudioCodec {
     pub fn frame_size(&self) -> usize {
         self.sample_rate.frame_size()
     }
-    pub fn channels(&self) -> u16 {
-        self.channels
-    }
 }
 
 impl Default for AudioCodec {
@@ -60,7 +57,6 @@ impl Default for AudioCodec {
         Self {
             mime: MimeType::OPUS,
             sample_rate: AudioSampleRate::High,
-            channels: 1,
         }
     }
 }

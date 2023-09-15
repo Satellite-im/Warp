@@ -405,13 +405,11 @@ fn write_mp4_header(
             pre_skip: 0,
             input_sample_rate: audio_codec.sample_rate(),
             output_gain: 0,
-            channel_mapping_family: mp4::ChannelMappingFamily::Family0 {
-                stereo: audio_codec.channels() == 2,
-            },
+            channel_mapping_family: mp4::ChannelMappingFamily::Family0 { stereo: false },
         };
         let opus = OpusBox {
             data_reference_index: 1,
-            channelcount: audio_codec.channels(),
+            channelcount: 1,
             samplesize: 16, // per https://opus-codec.org/docs/opus_in_isobmff.html
             samplerate: FixedPointU16::new(audio_codec.sample_rate() as u16),
             dops,

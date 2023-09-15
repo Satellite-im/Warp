@@ -295,7 +295,7 @@ impl BlinkImpl {
         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
             mime_type: webrtc_codec.mime_type(),
             clock_rate: webrtc_codec.sample_rate(),
-            channels: webrtc_codec.channels(),
+            channels: 1,
             ..Default::default()
         };
         let track = self

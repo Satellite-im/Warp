@@ -67,7 +67,7 @@ impl OpusSink {
         let resampler = Resampler::new(resampler_config);
 
         // webtrtc codec is guaranteed to have 1 channel
-        let channel_mixer_config = match webrtc_codec.channels().cmp(&sink_config.channels()) {
+        let channel_mixer_config = match 1.cmp(&sink_config.channels()) {
             Ordering::Equal => ChannelMixerConfig::None,
             Ordering::Greater => {
                 unreachable!("invalid channels for OpusSink. sink config has less than 1 channel")
