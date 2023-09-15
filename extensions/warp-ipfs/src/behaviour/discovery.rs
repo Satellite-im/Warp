@@ -16,13 +16,20 @@ use rust_ipfs::NetworkBehaviour;
 
 use futures::{channel::oneshot::Sender as OneshotSender, StreamExt};
 
+use tracing::info;
 use warp::error::Error;
 
 #[allow(dead_code)]
 pub enum DiscoveryCommand {
+    RegisterDiscoveryNode {
+        peer_id: PeerId,
+        addr: Multiaddr,
+        namespace: String,
+        response: OneshotSender<Result<(), Error>>,
+    },
     RegisterNamespace {
         namespace: String,
-        addr: Multiaddr,
+        peer_id: PeerId,
         response: OneshotSender<Result<(), Error>>,
     },
     Refresh {
@@ -34,12 +41,19 @@ pub enum DiscoveryCommand {
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     inner: rust_ipfs::libp2p::rendezvous::client::Behaviour,
+    command: futures::channel::mpsc::Receiver<DiscoveryCommand>,
+
+    /// External nodes
     namespace_peer_addrs: HashMap<PeerId, Vec<Multiaddr>>,
     namespace_point: HashMap<Namespace, HashSet<PeerId>>,
-    command: futures::channel::mpsc::Receiver<DiscoveryCommand>,
+
+    /// Cookie of the namespace
     cookie: HashMap<Namespace, HashMap<PeerId, Option<Cookie>>>,
+
+    /// Discovered peers from a given namespace
     discovered_peers: HashMap<Namespace, HashMap<PeerId, Vec<Multiaddr>>>,
     discovery_responses: HashMap<Namespace, Vec<OneshotSender<Result<(), Error>>>>,
+    pending_registration: HashMap<Namespace, Vec<OneshotSender<Result<(), Error>>>>,
     connections: HashMap<PeerId, Vec<ConnectionId>>,
 }
 
@@ -58,6 +72,7 @@ impl Behaviour {
             cookie: Default::default(),
             discovered_peers: Default::default(),
             discovery_responses: Default::default(),
+            pending_registration: Default::default(),
             connections: HashMap::default(),
         }
     }
@@ -240,8 +255,32 @@ impl NetworkBehaviour for Behaviour {
                             ))));
                         }
                     }
-                    rust_ipfs::libp2p::rendezvous::client::Event::Registered { .. } => {}
-                    rust_ipfs::libp2p::rendezvous::client::Event::RegisterFailed { .. } => {}
+                    rust_ipfs::libp2p::rendezvous::client::Event::Registered {
+                        rendezvous_node,
+                        ttl,
+                        namespace,
+                    } => {
+                        info!("Registered to {rendezvous_node} for namespace {namespace} with ttl {ttl}");
+                        if let Some(channels) = self.pending_registration.remove(&namespace) {
+                            for ch in channels {
+                                let _ = ch.send(Ok(()));
+                            }
+                        }
+                    }
+                    rust_ipfs::libp2p::rendezvous::client::Event::RegisterFailed {
+                        rendezvous_node,
+                        namespace,
+                        error,
+                    } => {
+                        if let Some(channels) = self.pending_registration.remove(&namespace) {
+                            for ch in channels {
+                                let _ = ch.send(Err(Error::Any(anyhow::anyhow!(
+                                    "Error registering to discovery node {rendezvous_node}: {:?}",
+                                    error
+                                ))));
+                            }
+                        }
+                    }
                     rust_ipfs::libp2p::rendezvous::client::Event::Expired { .. } => {}
                 },
                 Poll::Ready(event) => {
@@ -255,13 +294,36 @@ impl NetworkBehaviour for Behaviour {
 
         loop {
             match self.command.poll_next_unpin(cx) {
-                Poll::Ready(Some(DiscoveryCommand::RegisterNamespace {
-                    namespace: _,
+                Poll::Ready(Some(DiscoveryCommand::RegisterDiscoveryNode {
+                    peer_id: _,
                     addr: _,
+                    namespace: _,
                     response,
                 })) => {
-                    // self.inner.register(namespace, rendezvous_node, ttl)
                     let _ = response.send(Ok(()));
+                }
+                Poll::Ready(Some(DiscoveryCommand::RegisterNamespace {
+                    namespace,
+                    peer_id,
+                    response,
+                })) => {
+                    let namespace = match Namespace::new(namespace) {
+                        Ok(ns) => ns,
+                        Err(e) => {
+                            let _ = response.send(Err(Error::Boxed(Box::new(e))));
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = self.inner.register(namespace.clone(), peer_id, None) {
+                        let _ = response.send(Err(Error::Boxed(Box::new(e))));
+                        continue;
+                    }
+
+                    self.pending_registration
+                        .entry(namespace)
+                        .or_default()
+                        .push(response);
                 }
                 Poll::Ready(Some(DiscoveryCommand::Refresh {
                     namespace,
