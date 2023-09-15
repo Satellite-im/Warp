@@ -5,7 +5,7 @@ use opus::Bitrate;
 
 use crate::host_media::audio::{
     loudness,
-    opus::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig},
+    opus::{Resampler, ResamplerConfig},
     AudioCodec, AudioHardwareConfig,
 };
 
@@ -19,8 +19,6 @@ pub struct Framer {
     opus_out: Vec<u8>,
     // number of samples in a frame
     frame_size: usize,
-    // for splitting and merging audio channels
-    channel_mixer: ChannelMixer,
     // for upsampling and downsampling audio
     resampler: Resampler,
     // this is needed by the bs1770 algorithm
@@ -63,43 +61,19 @@ impl Framer {
             ),
         };
 
-        // webrtc_codec.channels() is guaranteed to be 1 channel
-        let channel_mixer_config = match 1.cmp(&source_config.channels()) {
-            Ordering::Equal => ChannelMixerConfig::None,
-            Ordering::Less => ChannelMixerConfig::Average {
-                to_sum: source_config.channels() as _,
-            },
-            _ => unreachable!(
-                "invalid channels for opus Framer. source_config has less than 1 channel."
-            ),
-        };
-
         Ok(Self {
             encoder,
             raw_samples: buf,
             opus_out,
             frame_size,
             resampler: Resampler::new(resampler_config),
-            channel_mixer: ChannelMixer::new(channel_mixer_config),
             output_sample_rate: webrtc_codec.sample_rate(),
             loudness_calculator,
         })
     }
 
     pub fn frame(&mut self, sample: f32) -> Option<FramerOutput> {
-        match self.channel_mixer.process(sample) {
-            ChannelMixerOutput::Single(sample) => {
-                self.resampler.process(sample, &mut self.raw_samples);
-            }
-            // this should never happen but the code is left in here for correctness.
-            ChannelMixerOutput::Split { val, repeated } => {
-                for _ in 0..repeated {
-                    self.resampler.process(val, &mut self.raw_samples);
-                }
-            }
-            _ => {}
-        }
-
+        self.resampler.process(sample, &mut self.raw_samples);
         if self.raw_samples.len() == self.frame_size {
             for sample in self.raw_samples.iter() {
                 self.loudness_calculator.insert(*sample);

@@ -177,8 +177,10 @@ fn create_source_track(
 
     let event_ch2 = event_ch.clone();
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-        for sample in data {
-            let _ = producer.push(*sample);
+        for frame in data.chunks(config.channels as _) {
+            let sum: f32 = frame.iter().sum();
+            let avg = sum / config.channels as f32;
+            let _ = producer.push(avg);
         }
     };
     let input_stream = input_device
