@@ -1751,6 +1751,6 @@ pub mod ffi {
 
     fn convert_timstamp(timestamp: i64) -> Option<DateTime<Utc>> {
         NaiveDateTime::from_timestamp_opt(timestamp, 0)
-            .map(|naive| DateTime::<Utc>::from_local(naive, Utc))
+            .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
     }
 }
