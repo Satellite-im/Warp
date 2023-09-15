@@ -134,13 +134,6 @@ pub enum BlinkEventKind {
     AudioOutputDeviceNoLongerAvailable,
     #[display(fmt = "AudioInputDeviceNoLongerAvailable")]
     AudioInputDeviceNoLongerAvailable,
-
-    // these names are so ridiculously long but i don't know
-    // what else to call them.
-    #[display(fmt = "ReceivedInputFromMicrophoneTest")]
-    ReceivingInputFromMicrophoneTest,
-    #[display(fmt = "PlayingOutputForSpeakerTest")]
-    PlayingOutputForSpeakerTest,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

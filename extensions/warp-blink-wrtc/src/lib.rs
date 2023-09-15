@@ -204,10 +204,10 @@ impl BlinkImpl {
             audio_sink_config: Arc::new(RwLock::new(sink_config)),
             offer_handler: Arc::new(warp::sync::RwLock::new(tokio::spawn(async {}))),
             webrtc_handler: Arc::new(warp::sync::RwLock::new(None)),
-            audio_device_config: Arc::new(RwLock::new(host_media::audio::DeviceConfig {
+            audio_device_config: Arc::new(RwLock::new(host_media::audio::DeviceConfig::new(
                 selected_speaker,
                 selected_microphone,
-            })),
+            ))),
         };
 
         let ipfs = blink_impl.ipfs.clone();
@@ -1140,10 +1140,10 @@ impl Blink for BlinkImpl {
         &mut self,
         config: Box<dyn AudioDeviceConfig>,
     ) -> Result<(), Error> {
-        let audio_device_config = host_media::audio::DeviceConfig {
-            selected_speaker: config.speaker_device_name(),
-            selected_microphone: config.microphone_device_name(),
-        };
+        let audio_device_config = host_media::audio::DeviceConfig::new(
+            config.speaker_device_name(),
+            config.microphone_device_name(),
+        );
         *self.audio_device_config.write().await = audio_device_config;
 
         if let Some(device_name) = config.speaker_device_name() {
