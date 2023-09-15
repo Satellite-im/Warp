@@ -154,7 +154,8 @@ impl AudioDeviceConfig for DeviceConfig {
 
         // Create a delay in case the input and output devices aren't synced.
         let latency_frames = (latency_ms / 1_000.0) * input_config.sample_rate.0 as f32;
-        let latency_samples = latency_frames as usize * input_config.channels as usize;
+        // currently each frame is set to contain one sample
+        let latency_samples = latency_frames as usize;
 
         // The buffer to share samples
         let ring = ringbuf::HeapRb::<f32>::new(latency_samples * 2);
@@ -170,8 +171,10 @@ impl AudioDeviceConfig for DeviceConfig {
         let mut input_err_disp_once = false;
         let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
             let mut input_fell_behind = false;
-            for &sample in data {
-                if producer.push(sample).is_err() {
+            for frame in data.chunks(input_config.channels as _) {
+                let sum: f32 = frame.iter().sum();
+                let avg = sum / input_config.channels as f32;
+                if producer.push(avg).is_err() {
                     input_fell_behind = true;
                 }
             }
@@ -181,37 +184,16 @@ impl AudioDeviceConfig for DeviceConfig {
             }
         };
 
-        let input_channels = input_config.channels;
-        let output_channels = output_config.channels;
         let mut output_err_disp_once = false;
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut output_fell_behind = false;
-            if input_channels == 2 && output_channels == 1 {
-                for sample in data {
-                    // if the queue empties, it usually happens before the last sample
-                    if consumer.is_empty() {
-                        output_fell_behind = true;
-                    }
-                    let sum =
-                        consumer.pop().unwrap_or_default() + consumer.pop().unwrap_or_default();
-                    *sample = sum / 2.0;
+            for frame in data.chunks_mut(output_config.channels as _) {
+                if consumer.is_empty() {
+                    output_fell_behind = true;
                 }
-            } else if input_channels == 1 && output_channels == 2 {
-                for frame in data.chunks_mut(output_channels as _) {
-                    if consumer.is_empty() {
-                        output_fell_behind = true;
-                    }
-                    let value: f32 = consumer.pop().unwrap_or_default();
-                    for sample in frame.iter_mut() {
-                        *sample = value;
-                    }
-                }
-            } else {
-                for sample in data {
-                    if consumer.is_empty() {
-                        output_fell_behind = true;
-                    }
-                    *sample = consumer.pop().unwrap_or_default();
+                let value = consumer.pop().unwrap_or_default();
+                for sample in frame.iter_mut() {
+                    *sample = value;
                 }
             }
 
