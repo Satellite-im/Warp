@@ -21,12 +21,23 @@ pub enum Bootstrap {
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
     /// Uses DHT PROVIDER to find and connect to peers using the same context
-    Provider(Option<String>),
-    /// Dials out to peers directly. Using this will only work with the DID til that connection is made
+    Namespace {
+        namespace: Option<String>,
+        discovery_type: DiscoveryType,
+    },
+    /// Dials peers over relay
     Direct,
     /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
     #[default]
     None,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DiscoveryType {
+    #[default]
+    DHT,
+    RzPoint,
 }
 
 impl Bootstrap {
@@ -274,7 +285,10 @@ impl Default for StoreSetting {
     fn default() -> Self {
         Self {
             auto_push: None,
-            discovery: Discovery::Provider(None),
+            discovery: Discovery::Namespace {
+                namespace: None,
+                discovery_type: Default::default(),
+            },
             sync: Vec::new(),
             sync_interval: Duration::from_millis(1000),
             fetch_over_bitswap: false,
@@ -361,7 +375,10 @@ impl Config {
                 ..Default::default()
             },
             store_setting: StoreSetting {
-                discovery: Discovery::Provider(None),
+                discovery: Discovery::Namespace {
+                    namespace: None,
+                    discovery_type: Default::default(),
+                },
                 ..Default::default()
             },
             enable_relay: true,
@@ -405,7 +422,10 @@ impl Config {
                 ..Default::default()
             },
             store_setting: StoreSetting {
-                discovery: Discovery::Provider(None),
+                discovery: Discovery::Namespace {
+                    namespace: None,
+                    discovery_type: Default::default(),
+                },
                 ..Default::default()
             },
             ..Default::default()

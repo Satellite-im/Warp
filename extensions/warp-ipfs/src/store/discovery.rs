@@ -21,7 +21,7 @@ use tokio::{
 use tracing::log;
 use warp::{crypto::DID, error::Error};
 
-use crate::config::{self, Discovery as DiscoveryConfig};
+use crate::config::{self, Discovery as DiscoveryConfig, DiscoveryType};
 
 use super::{did_to_libp2p_pub, DidExt, PeerIdExt, PeerType};
 
@@ -50,10 +50,14 @@ impl Discovery {
     }
 
     /// Start discovery task
-    /// Note: This starting will only work across a provided namespace via Discovery::Provider
+    /// Note: This starting will only work across a provided namespace
     #[allow(clippy::collapsible_if)]
     pub async fn start(&self) -> Result<(), Error> {
-        if let DiscoveryConfig::Provider(namespace) = &self.config {
+        if let DiscoveryConfig::Namespace {
+            discovery_type: DiscoveryType::DHT,
+            namespace,
+        } = &self.config
+        {
             let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
             let cid = self
                 .ipfs
@@ -257,7 +261,14 @@ impl DiscoveryEntry {
                             // Used for provider. Doesnt do anything right now
                             // TODO: Maybe have separate provider query in case
                             //       Discovery task isnt enabled?
-                            DiscoveryConfig::Provider(_) => {}
+                            DiscoveryConfig::Namespace {
+                                discovery_type: DiscoveryType::DHT,
+                                ..
+                            } => {}
+                            DiscoveryConfig::Namespace {
+                                discovery_type: DiscoveryType::RzPoint,
+                                ..
+                            } => {}
                             // Check over DHT
                             DiscoveryConfig::Direct => {
                                 tokio::select! {

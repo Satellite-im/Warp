@@ -68,7 +68,10 @@ async fn account(
     };
 
     if !opt.direct || !opt.no_discovery {
-        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+        config.store_setting.discovery = Discovery::Namespace {
+            namespace: opt.context.clone(),
+            discovery_type: Default::default(),
+        };
     }
     if opt.disable_relay {
         config.enable_relay = false;

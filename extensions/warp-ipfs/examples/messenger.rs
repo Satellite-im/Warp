@@ -17,8 +17,9 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    AttachmentKind, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState, Location,
+    AttachmentKind, Location, Message, MessageEvent, MessageEventKind, MessageEventStream,
+    MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun,
+    ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -86,7 +87,10 @@ async fn setup<P: AsRef<Path>>(
     };
 
     if !opt.direct || !opt.no_discovery {
-        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+        config.store_setting.discovery = Discovery::Namespace {
+            namespace: opt.context.clone(),
+            discovery_type: Default::default(),
+        };
     }
     if opt.disable_relay {
         config.enable_relay = false;
