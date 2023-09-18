@@ -417,34 +417,16 @@ impl BlinkImpl {
     async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
         let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
-            match host.default_input_device() {
-                Some(d) => d,
-                None => return Err(Error::OtherWithContext("no microphone is connected".into())),
-            }
+            host.default_input_device()
+                .ok_or(Error::OtherWithContext("no microphone is connected".into()))?
         } else {
-            let mut devices = match host.input_devices() {
-                Ok(d) => d,
-                Err(e) => {
-                    return Err(warp::error::Error::OtherWithContext(format!(
-                        "could not get input devices: {e}"
-                    )));
-                }
-            };
-            let r = devices.find(|x| {
-                if let Ok(name) = x.name() {
-                    name == device_name
-                } else {
-                    false
-                }
-            });
-            match r {
-                Some(x) => x,
-                None => {
-                    return Err(warp::error::Error::OtherWithContext(
-                        "input device not found".into(),
-                    ))
-                }
-            }
+            let mut devices = host.input_devices().map_err(|e| {
+                warp::error::Error::OtherWithContext(format!("could not get input devices: {e}"))
+            })?;
+            let r = devices.find(|x| x.name().map(|name| name == device_name).unwrap_or_default());
+            r.ok_or(warp::error::Error::OtherWithContext(
+                "input device not found".into(),
+            ))?
         };
 
         self.update_audio_source_config(&device).await?;
@@ -456,34 +438,16 @@ impl BlinkImpl {
     async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
         let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
-            match host.default_output_device() {
-                Some(d) => d,
-                None => return Err(Error::OtherWithContext("no speaker is connected".into())),
-            }
+            host.default_output_device()
+                .ok_or(Error::OtherWithContext("no speaker is connected".into()))?
         } else {
-            let mut devices = match host.output_devices() {
-                Ok(d) => d,
-                Err(e) => {
-                    return Err(warp::error::Error::OtherWithContext(format!(
-                        "could not get output devices: {e}"
-                    )));
-                }
-            };
-            let r = devices.find(|x| {
-                if let Ok(name) = x.name() {
-                    name == device_name
-                } else {
-                    false
-                }
-            });
-            match r {
-                Some(x) => x,
-                None => {
-                    return Err(warp::error::Error::OtherWithContext(
-                        "output device not found".into(),
-                    ))
-                }
-            }
+            let mut devices = host.output_devices().map_err(|e| {
+                warp::error::Error::OtherWithContext(format!("could not get output devices: {e}"))
+            })?;
+            let r = devices.find(|x| x.name().map(|name| name == device_name).unwrap_or_default());
+            r.ok_or(warp::error::Error::OtherWithContext(
+                "output device not found".into(),
+            ))?
         };
 
         self.update_audio_sink_config(&device).await?;
