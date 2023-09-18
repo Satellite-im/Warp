@@ -280,6 +280,7 @@ impl WarpIpfs {
             .set_listening_addrs(config.listen_on.clone())
             .set_custom_behaviour(behaviour)
             .set_keypair(keypair)
+            .enable_rendezvous_client()
             .set_transport_configuration(TransportConfig {
                 yamux_update_mode: UpdateMode::Read,
                 ..Default::default()
