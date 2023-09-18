@@ -418,15 +418,13 @@ impl BlinkImpl {
         let host = cpal::default_host();
         let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
             host.default_input_device()
-                .ok_or(Error::OtherWithContext("no microphone is connected".into()))?
+                .ok_or(Error::AudioDeviceNotFound)?
         } else {
-            let mut devices = host.input_devices().map_err(|e| {
-                warp::error::Error::OtherWithContext(format!("could not get input devices: {e}"))
-            })?;
+            let mut devices = host
+                .input_devices()
+                .map_err(|e| Error::AudioHostError(e.to_string()))?;
             let r = devices.find(|x| x.name().map(|name| name == device_name).unwrap_or_default());
-            r.ok_or(warp::error::Error::OtherWithContext(
-                "input device not found".into(),
-            ))?
+            r.ok_or(Error::AudioDeviceNotFound)?
         };
 
         self.update_audio_source_config(&device).await?;
@@ -439,15 +437,13 @@ impl BlinkImpl {
         let host = cpal::default_host();
         let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
             host.default_output_device()
-                .ok_or(Error::OtherWithContext("no speaker is connected".into()))?
+                .ok_or(Error::AudioDeviceNotFound)?
         } else {
-            let mut devices = host.output_devices().map_err(|e| {
-                warp::error::Error::OtherWithContext(format!("could not get output devices: {e}"))
-            })?;
+            let mut devices = host
+                .output_devices()
+                .map_err(|e| Error::AudioHostError(e.to_string()))?;
             let r = devices.find(|x| x.name().map(|name| name == device_name).unwrap_or_default());
-            r.ok_or(warp::error::Error::OtherWithContext(
-                "output device not found".into(),
-            ))?
+            r.ok_or(Error::AudioDeviceNotFound)?
         };
 
         self.update_audio_sink_config(&device).await?;
