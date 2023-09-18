@@ -5,13 +5,10 @@ use futures::StreamExt;
 
 use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use warp::{
-    blink::{
-        AudioCodec, AudioCodecBuiler, AudioSampleRate, Blink, BlinkEventKind, BlinkEventStream,
-        MimeType, VideoCodec,
-    },
+    blink::{Blink, BlinkEventKind, BlinkEventStream},
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
 
@@ -30,29 +27,7 @@ use warp_ipfs::{
 
 mod logger;
 
-struct Codecs {
-    audio: AudioCodec,
-    _video: VideoCodec,
-    _screen_share: VideoCodec,
-}
-
 static OFFERED_CALL: Lazy<Mutex<Option<Uuid>>> = Lazy::new(|| Mutex::new(None));
-
-static CODECS: Lazy<RwLock<Codecs>> = Lazy::new(|| {
-    let audio = AudioCodecBuiler::new()
-        .mime(MimeType::OPUS)
-        .sample_rate(AudioSampleRate::High)
-        .channels(1)
-        .build();
-
-    let video = VideoCodec::default();
-    let screen_share = VideoCodec::default();
-    RwLock::new(Codecs {
-        audio,
-        _video: video,
-        _screen_share: screen_share,
-    })
-});
 
 #[derive(Parser, Debug, Eq, PartialEq)]
 /// starts the blink-repl
@@ -70,10 +45,14 @@ enum Repl {
     /// show your DID
     ShowDid,
     /// given a list of DIDs, initiate a call
-    Dial { ids: Vec<String> },
+    Dial {
+        ids: Vec<String>,
+    },
     /// given a Uuid, answer a call
     /// if no argument is given, the most recent call will be answered
-    Answer { id: Option<String> },
+    Answer {
+        id: Option<String>,
+    },
     /// end the current call
     Hangup,
     /// mute self
@@ -89,15 +68,21 @@ enum Repl {
     /// show available audio I/O devices
     ShowAvailableDevices,
     /// specify which microphone to use for input
-    ConnectMicrophone { device_name: String },
+    ConnectMicrophone {
+        device_name: String,
+    },
     /// specify which speaker to use for output
-    ConnectSpeaker { device_name: String },
-    /// set the default audio sample rate to low (8000Hz), medium (48000Hz) or high (96000Hz)
-    /// the specified sample rate will be used when the host initiates a call.
-    SetAudioRate { rate: String },
-    /// set the default number of audio channels (1 or 2)
-    /// the specified number of channels will be used when the host initiates a call.
-    SetAudioChannels { channels: u16 },
+    ConnectSpeaker {
+        device_name: String,
+    },
+    /// records 5 seconds of microphone input and plays it back
+    TestMicrophone {
+        device_name: String,
+    },
+    /// plays a test tone through the speaker
+    TestSpeaker {
+        device_name: String,
+    },
     /// show the supported CPAL input stream configs
     SupportedInputConfigs,
     /// show the supported CPAL output stream configs
@@ -107,12 +92,20 @@ enum Repl {
     /// show the default output config
     ShowOutputConfig,
     /// separately record audio of each participant
-    RecordAudio { output_dir: String },
+    RecordAudio {
+        output_dir: String,
+    },
     /// stop recording audio
     StopRecording,
     /// change the loudness of the peer for the call
     /// can only make it louder because multiplier can't be a float for the CLI
-    SetGain { peer: DID, multiplier: u32 },
+    SetGain {
+        peer: DID,
+        multiplier: u32,
+    },
+    Quit,
+    /// shorthand for quit
+    Q,
 }
 
 async fn handle_command(
@@ -122,6 +115,7 @@ async fn handle_command(
     cmd: Repl,
 ) -> anyhow::Result<()> {
     match cmd {
+        Repl::Q | Repl::Quit => unreachable!("quit cmd should have been handled already"),
         Repl::ShowDid => {
             println!("own identity: {}", own_id.did_key());
         }
@@ -141,8 +135,7 @@ async fn handle_command(
                 let _ = multipass.send_request(did).await;
             }
 
-            let codecs = CODECS.read().await;
-            blink.offer_call(None, ids, codecs.audio.clone()).await?;
+            blink.offer_call(None, ids).await?;
         }
         Repl::Answer { id } => {
             let mut lock = OFFERED_CALL.lock().await;
@@ -171,37 +164,36 @@ async fn handle_command(
             blink.disable_automute()?;
         }
         Repl::ShowSelectedDevices => {
-            println!("microphone: {:?}", blink.get_current_microphone().await);
-            println!("speaker: {:?}", blink.get_current_speaker().await);
+            let config = blink.get_audio_device_config().await;
+            println!("microphone: {:?}", config.microphone_device_name());
+            println!("speaker: {:?}", config.speaker_device_name());
         }
         Repl::ShowAvailableDevices => {
-            let microphones = blink.get_available_microphones().await?;
-            let speakers = blink.get_available_speakers().await?;
+            let config = blink.get_audio_device_config().await;
+            let microphones = config.get_available_microphones();
+            let speakers = config.get_available_speakers();
             println!("available microphones: {microphones:#?}");
             println!("available speakers: {speakers:#?}");
         }
         Repl::ConnectMicrophone { device_name } => {
-            blink.select_microphone(&device_name).await?;
+            let mut config = blink.get_audio_device_config().await;
+            config.set_microphone(&device_name);
+            blink.set_audio_device_config(config).await?;
         }
         Repl::ConnectSpeaker { device_name } => {
-            blink.select_speaker(&device_name).await?;
+            let mut config = blink.get_audio_device_config().await;
+            config.set_speaker(&device_name);
+            blink.set_audio_device_config(config).await?;
         }
-        Repl::SetAudioRate { rate } => {
-            let mut codecs = CODECS.write().await;
-            let codec = AudioCodecBuiler::from(codecs.audio.clone())
-                .sample_rate(rate.try_into()?)
-                .build();
-            codecs.audio = codec;
+        Repl::TestMicrophone { device_name } => {
+            let mut config = blink.get_audio_device_config().await;
+            config.set_microphone(&device_name);
+            config.test_microphone()?;
         }
-        Repl::SetAudioChannels { channels } => {
-            if !(1..=2).contains(&channels) {
-                bail!("invalid number of channels");
-            }
-            let mut codecs = CODECS.write().await;
-            let audio = AudioCodecBuiler::from(codecs.audio.clone())
-                .channels(channels)
-                .build();
-            codecs.audio = audio;
+        Repl::TestSpeaker { device_name } => {
+            let mut config = blink.get_audio_device_config().await;
+            config.set_speaker(&device_name);
+            config.test_speaker()?;
         }
         Repl::SupportedInputConfigs => {
             let host = cpal::default_host();
@@ -230,10 +222,6 @@ async fn handle_command(
                 .ok_or(anyhow::anyhow!("no input device"))?;
             let config = dev.default_input_config()?;
             println!("default input config: {config:#?}");
-            println!(
-                "default source_codec: {:#?}",
-                blink.get_audio_source_codec().await
-            );
         }
         Repl::ShowOutputConfig => {
             let host = cpal::default_host();
@@ -242,10 +230,6 @@ async fn handle_command(
                 .ok_or(anyhow::anyhow!("no input device"))?;
             let config = dev.default_output_config()?;
             println!("default output {config:#?}");
-            println!(
-                "default sink_codec: {:#?}",
-                blink.get_audio_sink_codec().await
-            );
         }
         Repl::RecordAudio { output_dir } => blink.record_call(&output_dir).await?,
         Repl::StopRecording => blink.stop_recording().await?,
@@ -259,12 +243,14 @@ async fn handle_command(
 async fn handle_blink_event_stream(mut stream: BlinkEventStream) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
         // get rid of noisy logs
-        if !matches!(
-            evt,
-            BlinkEventKind::ParticipantSpeaking { .. } | BlinkEventKind::SelfSpeaking
-        ) {
-            println!("BlinkEvent: {evt}");
-        }
+        // if !matches!(
+        //     evt,
+        //     BlinkEventKind::ParticipantSpeaking { .. } | BlinkEventKind::SelfSpeaking
+        // ) {
+        //     println!("BlinkEvent: {evt}");
+        // }
+
+        println!("BlinkEvent: {evt}");
 
         #[allow(clippy::single_match)]
         match evt {
@@ -383,7 +369,14 @@ async fn main() -> anyhow::Result<()> {
         let mut v = vec![""];
         v.extend(line.split_ascii_whitespace());
         let cli = match Repl::try_parse_from(v) {
-            Ok(r) => r,
+            Ok(r) => {
+                if matches!(r, Repl::Quit | Repl::Q) {
+                    println!("quitting");
+                    break;
+                } else {
+                    r
+                }
+            }
             Err(e) => {
                 println!("{e}");
                 continue;

@@ -789,10 +789,10 @@ pub enum EmbedState {
 #[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
-    Constellation { path: String},
+    Constellation { path: String },
 
     /// Use file from disk
-    Disk { path: PathBuf},
+    Disk { path: PathBuf },
 }
 
 #[async_trait::async_trait]
