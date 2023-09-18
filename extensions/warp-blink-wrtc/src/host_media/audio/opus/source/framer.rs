@@ -2,11 +2,11 @@ use std::cmp::Ordering;
 
 use bytes::Bytes;
 use opus::Bitrate;
-use warp::blink;
 
 use crate::host_media::audio::{
     loudness,
-    opus::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig},
+    opus::{Resampler, ResamplerConfig},
+    AudioCodec, AudioHardwareConfig,
 };
 
 pub struct Framer {
@@ -19,8 +19,6 @@ pub struct Framer {
     opus_out: Vec<u8>,
     // number of samples in a frame
     frame_size: usize,
-    // for splitting and merging audio channels
-    channel_mixer: ChannelMixer,
     // for upsampling and downsampling audio
     resampler: Resampler,
     // this is needed by the bs1770 algorithm
@@ -36,8 +34,8 @@ pub struct FramerOutput {
 impl Framer {
     pub fn init(
         frame_size: usize,
-        webrtc_codec: blink::AudioCodec,
-        source_codec: blink::AudioCodec,
+        webrtc_codec: AudioCodec,
+        source_config: AudioHardwareConfig,
     ) -> anyhow::Result<Self> {
         let loudness_calculator = loudness::Calculator::new(frame_size);
         let mut buf: Vec<f32> = Vec::new();
@@ -53,20 +51,14 @@ impl Framer {
         // todo: abstract this
         encoder.set_bitrate(Bitrate::Bits(16000))?;
 
-        let resampler_config = match webrtc_codec.sample_rate().cmp(&source_codec.sample_rate()) {
+        let resampler_config = match webrtc_codec.sample_rate().cmp(&source_config.sample_rate()) {
             Ordering::Equal => ResamplerConfig::None,
             Ordering::Greater => {
-                ResamplerConfig::UpSample(webrtc_codec.sample_rate() / source_codec.sample_rate())
+                ResamplerConfig::UpSample(webrtc_codec.sample_rate() / source_config.sample_rate())
             }
-            _ => {
-                ResamplerConfig::DownSample(source_codec.sample_rate() / webrtc_codec.sample_rate())
-            }
-        };
-
-        let channel_mixer_config = match webrtc_codec.channels().cmp(&source_codec.channels()) {
-            Ordering::Equal => ChannelMixerConfig::None,
-            Ordering::Less => ChannelMixerConfig::Merge,
-            _ => ChannelMixerConfig::Split,
+            _ => ResamplerConfig::DownSample(
+                source_config.sample_rate() / webrtc_codec.sample_rate(),
+            ),
         };
 
         Ok(Self {
@@ -75,24 +67,13 @@ impl Framer {
             opus_out,
             frame_size,
             resampler: Resampler::new(resampler_config),
-            channel_mixer: ChannelMixer::new(channel_mixer_config),
             output_sample_rate: webrtc_codec.sample_rate(),
             loudness_calculator,
         })
     }
 
     pub fn frame(&mut self, sample: f32) -> Option<FramerOutput> {
-        match self.channel_mixer.process(sample) {
-            ChannelMixerOutput::Single(sample) => {
-                self.resampler.process(sample, &mut self.raw_samples);
-            }
-            ChannelMixerOutput::Split(sample) => {
-                self.resampler.process(sample, &mut self.raw_samples);
-                self.resampler.process(sample, &mut self.raw_samples);
-            }
-            ChannelMixerOutput::None => {}
-        }
-
+        self.resampler.process(sample, &mut self.raw_samples);
         if self.raw_samples.len() == self.frame_size {
             for sample in self.raw_samples.iter() {
                 self.loudness_calculator.insert(*sample);

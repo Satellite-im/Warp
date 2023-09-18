@@ -2,19 +2,91 @@ use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use warp::blink::{self, BlinkEventKind, MimeType};
+use warp::blink::{BlinkEventKind, MimeType};
 use warp::crypto::DID;
 use webrtc::track::{
     track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote,
 };
 
 pub(crate) mod automute;
+mod hardware_config;
 mod loudness;
 mod opus;
 mod speech;
 
 pub use self::opus::sink::OpusSink;
 pub use self::opus::source::OpusSource;
+pub use hardware_config::*;
+
+// for webrtc, the number of audio channels is hardcoded to 1.
+#[derive(Debug, Clone)]
+pub struct AudioCodec {
+    pub mime: MimeType,
+    pub sample_rate: AudioSampleRate,
+}
+
+#[derive(Clone)]
+pub struct AudioHardwareConfig {
+    pub sample_rate: AudioSampleRate,
+    pub channels: u16,
+}
+
+impl AudioHardwareConfig {
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate.to_u32()
+    }
+    pub fn channels(&self) -> u16 {
+        self.channels
+    }
+}
+
+impl AudioCodec {
+    pub fn mime_type(&self) -> String {
+        self.mime.to_string()
+    }
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate.to_u32()
+    }
+    pub fn frame_size(&self) -> usize {
+        self.sample_rate.frame_size()
+    }
+}
+
+impl Default for AudioCodec {
+    fn default() -> Self {
+        Self {
+            mime: MimeType::OPUS,
+            sample_rate: AudioSampleRate::High,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum AudioSampleRate {
+    Low,
+    Medium,
+    High,
+}
+
+impl AudioSampleRate {
+    pub fn to_u32(&self) -> u32 {
+        match self {
+            AudioSampleRate::Low => 8000,
+            AudioSampleRate::Medium => 24000,
+            AudioSampleRate::High => 48000,
+        }
+    }
+
+    // this seems backwards. i'd think a greater sample rate would require a larger buffer but for some reason,
+    // 48kHz seems to work best with the lowest sample rate.
+    pub fn frame_size(&self) -> usize {
+        match self {
+            AudioSampleRate::Low => 480,
+            AudioSampleRate::Medium => 480,
+            AudioSampleRate::High => 480,
+        }
+    }
+}
 
 // stores the TrackRemote at least
 pub trait SourceTrack {
@@ -23,8 +95,8 @@ pub trait SourceTrack {
         event_ch: broadcast::Sender<BlinkEventKind>,
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
-        webrtc_codec: blink::AudioCodec,
-        source_codec: blink::AudioCodec,
+        webrtc_codec: AudioCodec,
+        source_config: AudioHardwareConfig,
     ) -> Result<Self>
     where
         Self: Sized;
@@ -35,7 +107,7 @@ pub trait SourceTrack {
     fn change_input_device(
         &mut self,
         input_device: &cpal::Device,
-        source_codec: blink::AudioCodec,
+        source_config: AudioHardwareConfig,
     ) -> Result<()>;
     fn init_mp4_logger(&mut self) -> Result<()>;
     fn remove_mp4_logger(&mut self) -> Result<()>;
@@ -48,8 +120,8 @@ pub trait SinkTrack {
         event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
-        webrtc_codec: blink::AudioCodec,
-        sink_codec: blink::AudioCodec,
+        webrtc_codec: AudioCodec,
+        sink_config: AudioHardwareConfig,
     ) -> Result<Self>
     where
         Self: Sized;
@@ -58,7 +130,7 @@ pub trait SinkTrack {
     fn change_output_device(
         &mut self,
         output_device: &cpal::Device,
-        sink_codec: blink::AudioCodec,
+        sink_config: AudioHardwareConfig,
     ) -> anyhow::Result<()>;
     fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<()>;
     fn init_mp4_logger(&mut self) -> Result<()>;
@@ -71,12 +143,9 @@ pub fn create_source_track(
     event_ch: broadcast::Sender<BlinkEventKind>,
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
-    webrtc_codec: blink::AudioCodec,
-    source_codec: blink::AudioCodec,
+    webrtc_codec: AudioCodec,
+    source_config: AudioHardwareConfig,
 ) -> Result<Box<dyn SourceTrack>> {
-    if webrtc_codec.mime_type() != source_codec.mime_type() {
-        bail!("mime types don't match");
-    }
     match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSource::init(
             own_id,
@@ -84,7 +153,7 @@ pub fn create_source_track(
             input_device,
             track,
             webrtc_codec,
-            source_codec,
+            source_config,
         )?)),
         _ => {
             bail!("unhandled mime type: {}", &webrtc_codec.mime_type());
@@ -98,12 +167,9 @@ pub fn create_sink_track(
     event_ch: broadcast::Sender<BlinkEventKind>,
     output_device: &cpal::Device,
     track: Arc<TrackRemote>,
-    webrtc_codec: blink::AudioCodec,
-    sink_codec: blink::AudioCodec,
+    webrtc_codec: AudioCodec,
+    sink_config: AudioHardwareConfig,
 ) -> Result<Box<dyn SinkTrack>> {
-    if webrtc_codec.mime_type() != sink_codec.mime_type() {
-        bail!("mime types don't match");
-    }
     match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSink::init(
             peer_id,
@@ -111,7 +177,7 @@ pub fn create_sink_track(
             output_device,
             track,
             webrtc_codec,
-            sink_codec,
+            sink_config,
         )?)),
         _ => {
             bail!("unhandled mime type: {}", &webrtc_codec.mime_type());
