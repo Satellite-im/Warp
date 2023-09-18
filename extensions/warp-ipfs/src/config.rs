@@ -32,12 +32,14 @@ pub enum Discovery {
     None,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DiscoveryType {
     #[default]
     DHT,
-    RzPoint,
+    RzPoint {
+        addresses: Vec<Multiaddr>,
+    },
 }
 
 impl Bootstrap {
@@ -174,12 +176,6 @@ impl ConnectionLimit {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct RelayServer {
-    /// Used to enable the node as a relay server. Only should be enabled if the node isnt behind a NAT or could be connected to directly
-    pub enable: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pubsub {
     pub max_transmit_size: usize,
@@ -197,7 +193,6 @@ impl Default for Pubsub {
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
-    pub relay_server: RelayServer,
     pub pubsub: Pubsub,
     pub swarm: Swarm,
     pub bootstrap: bool,
