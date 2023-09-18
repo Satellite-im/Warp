@@ -17,7 +17,10 @@ mod store;
 
 use async_trait::async_trait;
 use host_media::{
-    audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
+    audio::{
+        automute::{AutoMuteCmd, AUDIO_CMD_CH},
+        AudioCodec, AudioHardwareConfig,
+    },
     mp4_logger::Mp4LoggerConfig,
 };
 use std::{
@@ -44,7 +47,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{self, AudioCodec, Blink, BlinkEventKind, BlinkEventStream, CallInfo, MimeType},
+    blink::{AudioDeviceConfig, Blink, BlinkEventKind, BlinkEventStream, CallInfo},
     crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     module::Module,
@@ -53,6 +56,7 @@ use warp::{
 };
 
 use crate::{
+    host_media::audio::AudioSampleRate,
     signaling::{ipfs_routes, CallSignal, InitiationSignal, PeerSignal},
     simple_webrtc::events::{EmittedEvents, WebRtcEventStream},
     store::{
@@ -71,14 +75,17 @@ pub struct BlinkImpl {
     // the DID generated from Multipass, never cloned. contains the private key
     own_id: Arc<RwLock<Option<DID>>>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
-    audio_source_codec: Arc<RwLock<blink::AudioCodec>>,
-    audio_sink_codec: Arc<RwLock<blink::AudioCodec>>,
+    audio_source_config: Arc<RwLock<AudioHardwareConfig>>,
+    audio_sink_config: Arc<RwLock<AudioHardwareConfig>>,
 
     // subscribes to IPFS topic to receive incoming calls
     offer_handler: Arc<warp::sync::RwLock<JoinHandle<()>>>,
     // handles 3 streams: one for webrtc events and two IPFS topics
     // pertains to the active_call, which is stored in STATIC_DATA
     webrtc_handler: Arc<warp::sync::RwLock<Option<JoinHandle<()>>>>,
+
+    // prevents the UI from running multiple tests simultaneously
+    audio_device_config: Arc<RwLock<host_media::audio::DeviceConfig>>,
 }
 
 #[derive(Clone)]
@@ -146,29 +153,41 @@ impl BlinkImpl {
         log::trace!("initializing WebRTC");
 
         // check SupportedStreamConfigs. if those channels aren't supported, use the default.
-        let mut source_codec = blink::AudioCodec {
-            mime: MimeType::OPUS,
-            sample_rate: blink::AudioSampleRate::High,
+        let mut source_config = AudioHardwareConfig {
+            sample_rate: AudioSampleRate::High,
             channels: 1,
         };
 
-        let mut sink_codec = blink::AudioCodec {
-            mime: MimeType::OPUS,
-            sample_rate: blink::AudioSampleRate::High,
+        let mut sink_config = AudioHardwareConfig {
+            sample_rate: AudioSampleRate::High,
             channels: 1,
         };
 
+        let mut selected_speaker = None;
+        let mut selected_microphone = None;
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            source_codec.channels = Self::get_min_source_channels(&input_device)?;
-            host_media::change_audio_input(input_device, source_codec.clone()).await?;
+            selected_microphone = input_device.name().ok();
+            match Self::get_min_source_channels(&input_device) {
+                Ok(channels) => {
+                    source_config.channels = channels;
+                    host_media::change_audio_input(input_device, source_config.clone()).await?;
+                }
+                Err(e) => log::error!("{e}"),
+            }
         } else {
             log::warn!("blink started with no input device");
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            sink_codec.channels = Self::get_min_sink_channels(&output_device)?;
-            host_media::change_audio_output(output_device, sink_codec.clone()).await?;
+            selected_speaker = output_device.name().ok();
+            match Self::get_min_sink_channels(&output_device) {
+                Ok(channels) => {
+                    sink_config.channels = channels;
+                    host_media::change_audio_output(output_device, sink_config.clone()).await?;
+                }
+                Err(e) => log::error!("{e}"),
+            }
         } else {
             log::warn!("blink started with no output device");
         }
@@ -181,10 +200,14 @@ impl BlinkImpl {
             webrtc_controller: Arc::new(RwLock::new(simple_webrtc::Controller::new()?)),
             own_id: Arc::new(RwLock::new(None)),
             ui_event_ch,
-            audio_source_codec: Arc::new(RwLock::new(source_codec)),
-            audio_sink_codec: Arc::new(RwLock::new(sink_codec)),
+            audio_source_config: Arc::new(RwLock::new(source_config)),
+            audio_sink_config: Arc::new(RwLock::new(sink_config)),
             offer_handler: Arc::new(warp::sync::RwLock::new(tokio::spawn(async {}))),
             webrtc_handler: Arc::new(warp::sync::RwLock::new(None)),
+            audio_device_config: Arc::new(RwLock::new(host_media::audio::DeviceConfig::new(
+                selected_speaker,
+                selected_microphone,
+            ))),
         };
 
         let ipfs = blink_impl.ipfs.clone();
@@ -266,13 +289,13 @@ impl BlinkImpl {
         };
 
         self.active_call.write().await.replace(call.clone().into());
-        let audio_source_codec = self.audio_source_codec.read().await;
-        let webrtc_codec = call.codec();
+        let audio_source_config = self.audio_source_config.read().await;
+        let webrtc_codec = AudioCodec::default();
         // ensure there is an audio source track
         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
             mime_type: webrtc_codec.mime_type(),
             clock_rate: webrtc_codec.sample_rate(),
-            channels: webrtc_codec.channels(),
+            channels: 1,
             ..Default::default()
         };
         let track = self
@@ -286,7 +309,7 @@ impl BlinkImpl {
             self.ui_event_ch.clone(),
             track,
             webrtc_codec,
-            audio_source_codec.clone(),
+            audio_source_config.clone(),
         )
         .await?;
 
@@ -319,7 +342,7 @@ impl BlinkImpl {
         let ipfs2 = self.ipfs.clone();
         let active_call = self.active_call.clone();
         let webrtc_controller = self.webrtc_controller.clone();
-        let audio_sink_codec = self.audio_sink_codec.clone();
+        let audio_sink_config = self.audio_sink_config.clone();
         let ui_event_ch = self.ui_event_ch.clone();
         let event_ch2 = ui_event_ch.clone();
 
@@ -331,7 +354,7 @@ impl BlinkImpl {
                     ipfs: ipfs2,
                     active_call,
                     webrtc_controller,
-                    audio_sink_codec,
+                    audio_sink_config,
                     ch: ui_event_ch,
                     call_signaling_stream,
                     peer_signaling_stream,
@@ -345,12 +368,12 @@ impl BlinkImpl {
         Ok(())
     }
 
-    async fn update_audio_source_codec(
+    async fn update_audio_source_config(
         &mut self,
         input_device: &cpal::Device,
     ) -> anyhow::Result<()> {
         let min_channels = Self::get_min_source_channels(input_device)?;
-        self.audio_source_codec.write().await.channels = min_channels;
+        self.audio_source_config.write().await.channels = min_channels;
         Ok(())
     }
 
@@ -358,23 +381,22 @@ impl BlinkImpl {
         let min_channels =
             input_device
                 .supported_input_configs()?
-                .fold(None, |acc: Option<u16>, x| match x.channels() {
-                    1 => Some(1),
-                    2 if acc.is_none() => Some(2),
-                    _ => acc,
+                .fold(None, |acc: Option<u16>, x| match acc {
+                    None => Some(x.channels()),
+                    Some(y) => Some(std::cmp::min(x.channels(), y)),
                 });
         let channels = min_channels.ok_or(anyhow::anyhow!(
-            "unsupported audio input device. doesn't support 1 or 2 channel audio"
+            "unsupported audio input device - no input configuration available"
         ))?;
         Ok(channels)
     }
 
-    async fn update_audio_sink_codec(
+    async fn update_audio_sink_config(
         &mut self,
         output_device: &cpal::Device,
     ) -> anyhow::Result<()> {
         let min_channels = Self::get_min_sink_channels(output_device)?;
-        self.audio_sink_codec.write().await.channels = min_channels;
+        self.audio_sink_config.write().await.channels = min_channels;
         Ok(())
     }
 
@@ -382,15 +404,52 @@ impl BlinkImpl {
         let min_channels =
             output_device
                 .supported_output_configs()?
-                .fold(None, |acc: Option<u16>, x| match x.channels() {
-                    1 => Some(1),
-                    2 if acc.is_none() => Some(2),
-                    _ => acc,
+                .fold(None, |acc: Option<u16>, x| match acc {
+                    None => Some(x.channels()),
+                    Some(y) => Some(std::cmp::min(x.channels(), y)),
                 });
         let channels = min_channels.ok_or(anyhow::anyhow!(
-            "unsupported audio output device. doesn't support 1 or 2 channel audio"
+            "unsupported audio output device. no output configuration available"
         ))?;
         Ok(channels)
+    }
+
+    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
+        let host = cpal::default_host();
+        let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
+            host.default_input_device()
+                .ok_or(Error::AudioDeviceNotFound)?
+        } else {
+            let mut devices = host
+                .input_devices()
+                .map_err(|e| Error::AudioHostError(e.to_string()))?;
+            let r = devices.find(|x| x.name().map(|name| name == device_name).unwrap_or_default());
+            r.ok_or(Error::AudioDeviceNotFound)?
+        };
+
+        self.update_audio_source_config(&device).await?;
+        host_media::change_audio_input(device, self.audio_source_config.read().await.clone())
+            .await?;
+        Ok(())
+    }
+
+    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
+        let host = cpal::default_host();
+        let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
+            host.default_output_device()
+                .ok_or(Error::AudioDeviceNotFound)?
+        } else {
+            let mut devices = host
+                .output_devices()
+                .map_err(|e| Error::AudioHostError(e.to_string()))?;
+            let r = devices.find(|x| x.name().map(|name| name == device_name).unwrap_or_default());
+            r.ok_or(Error::AudioDeviceNotFound)?
+        };
+
+        self.update_audio_sink_config(&device).await?;
+        host_media::change_audio_output(device, self.audio_sink_config.read().await.clone())
+            .await?;
+        Ok(())
     }
 }
 
@@ -482,7 +541,7 @@ struct WebRtcHandlerParams {
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     active_call: Arc<RwLock<Option<ActiveCall>>>,
     webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
-    audio_sink_codec: Arc<RwLock<blink::AudioCodec>>,
+    audio_sink_config: Arc<RwLock<AudioHardwareConfig>>,
     ch: Sender<BlinkEventKind>,
     call_signaling_stream: SubscriptionStream,
     peer_signaling_stream: SubscriptionStream,
@@ -495,7 +554,7 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
         ipfs,
         active_call,
         webrtc_controller,
-        audio_sink_codec,
+        audio_sink_config: audio_sink_codec,
         ch,
         call_signaling_stream,
         peer_signaling_stream,
@@ -690,13 +749,12 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                         let call_id = active_call.call.call_id();
                         match event {
                             EmittedEvents::TrackAdded { peer, track } => {
-                                let webrtc_codec = active_call.call.codec();
                                 if peer == *own_id {
                                     log::warn!("got TrackAdded event for own id");
                                     continue;
                                 }
                                 let audio_sink_codec = audio_sink_codec.read().await.clone();
-                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), event_ch.clone(), track, webrtc_codec, audio_sink_codec).await {
+                                if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), event_ch.clone(), track, AudioCodec::default(), audio_sink_codec).await {
                                     log::error!("failed to send media_track command: {e}");
                                 }
                             }
@@ -815,11 +873,11 @@ impl Blink for BlinkImpl {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
+    /// webrtc_codec.channels will be assumed to be 1.
     async fn offer_call(
         &mut self,
         conversation_id: Option<Uuid>,
         mut participants: Vec<DID>,
-        webrtc_codec: AudioCodec,
     ) -> Result<Uuid, Error> {
         if self.ipfs.read().await.is_none() {
             return Err(Error::OtherWithContext(
@@ -849,7 +907,7 @@ impl Blink for BlinkImpl {
             };
         }
 
-        let call_info = CallInfo::new(conversation_id, participants.clone(), webrtc_codec);
+        let call_info = CallInfo::new(conversation_id, participants.clone());
         self.init_call(call_info.clone()).await?;
 
         let lock = self.own_id.read().await;
@@ -1034,117 +1092,34 @@ impl Blink for BlinkImpl {
 
     // ------ Select input/output devices ------
 
-    async fn get_available_microphones(&self) -> Result<Vec<String>, Error> {
-        let device_iter = match cpal::default_host().input_devices() {
-            Ok(iter) => iter,
-            Err(e) => return Err(Error::Cpal(e.to_string())),
-        };
-        Ok(device_iter
-            .map(|device| device.name().unwrap_or(String::from("unknown device")))
-            .collect())
+    async fn get_audio_device_config(&self) -> Box<dyn AudioDeviceConfig> {
+        Box::new(self.audio_device_config.read().await.clone())
     }
-    async fn get_current_microphone(&self) -> Option<String> {
-        host_media::get_input_device_name().await
-    }
-    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
-        let host = cpal::default_host();
-        let devices = match host.input_devices() {
-            Ok(d) => d,
-            Err(e) => {
-                return Err(warp::error::Error::OtherWithContext(format!(
-                    "could not get input devices: {e}"
-                )));
-            }
-        };
-        for device in devices {
-            if let Ok(name) = device.name() {
-                if name == device_name {
-                    self.update_audio_source_codec(&device).await?;
-                    host_media::change_audio_input(
-                        device,
-                        self.audio_source_codec.read().await.clone(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-        }
 
-        Err(warp::error::Error::OtherWithContext(
-            "input device not found".into(),
-        ))
-    }
-    async fn select_default_microphone(&mut self) -> Result<(), Error> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or(Error::OtherWithContext(String::from(
-                "no default input device",
-            )))?;
-        self.update_audio_source_codec(&device).await?;
-        host_media::change_audio_input(device, self.audio_source_codec.read().await.clone())
-            .await?;
+    async fn set_audio_device_config(
+        &mut self,
+        config: Box<dyn AudioDeviceConfig>,
+    ) -> Result<(), Error> {
+        let audio_device_config = host_media::audio::DeviceConfig::new(
+            config.speaker_device_name(),
+            config.microphone_device_name(),
+        );
+        *self.audio_device_config.write().await = audio_device_config;
+
+        if let Some(device_name) = config.speaker_device_name() {
+            self.select_speaker(&device_name).await?;
+        }
+        if let Some(device_name) = config.microphone_device_name() {
+            self.select_microphone(&device_name).await?;
+        }
         Ok(())
     }
-    async fn get_available_speakers(&self) -> Result<Vec<String>, Error> {
-        let device_iter = match cpal::default_host().output_devices() {
-            Ok(iter) => iter,
-            Err(e) => return Err(Error::Cpal(e.to_string())),
-        };
-        Ok(device_iter
-            .map(|device| device.name().unwrap_or(String::from("unknown device")))
-            .collect())
-    }
-    async fn get_current_speaker(&self) -> Option<String> {
-        host_media::get_output_device_name().await
-    }
-    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
-        let host = cpal::default_host();
-        let devices = match host.output_devices() {
-            Ok(d) => d,
-            Err(e) => {
-                return Err(warp::error::Error::OtherWithContext(format!(
-                    "could not get input devices: {e}"
-                )));
-            }
-        };
-        for device in devices {
-            if let Ok(name) = device.name() {
-                if name == device_name {
-                    self.update_audio_sink_codec(&device).await?;
-                    host_media::change_audio_output(
-                        device,
-                        self.audio_sink_codec.read().await.clone(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-        }
 
-        Err(warp::error::Error::OtherWithContext(
-            "output device not found".into(),
-        ))
-    }
-    async fn select_default_speaker(&mut self) -> Result<(), Error> {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or(Error::OtherWithContext(String::from(
-                "no default input device",
-            )))?;
-        self.update_audio_sink_codec(&device).await?;
-        host_media::change_audio_output(device, self.audio_sink_codec.read().await.clone()).await?;
-        Ok(())
-    }
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error> {
         Err(Error::Unimplemented)
     }
-    async fn select_camera(&mut self, _device_name: &str) -> Result<(), Error> {
-        Err(Error::Unimplemented)
-    }
 
-    async fn select_default_camera(&mut self) -> Result<(), Error> {
+    async fn select_camera(&mut self, _device_name: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
@@ -1173,7 +1148,7 @@ impl Blink for BlinkImpl {
                 host_media::init_recording(Mp4LoggerConfig {
                     call_id: call.call_id(),
                     participants: call.participants(),
-                    audio_codec: call.codec(),
+                    audio_codec: AudioCodec::default(),
                     log_path: output_dir.into(),
                 })
                 .await?;
@@ -1206,23 +1181,6 @@ impl Blink for BlinkImpl {
 
     async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error> {
         host_media::set_peer_audio_gain(peer_id, multiplier).await?;
-        Ok(())
-    }
-
-    async fn get_audio_source_codec(&self) -> AudioCodec {
-        self.audio_source_codec.read().await.clone()
-    }
-    async fn set_audio_source_codec(&mut self, codec: AudioCodec) -> Result<(), Error> {
-        *self.audio_source_codec.write().await = codec;
-        // todo: validate the codec
-        Ok(())
-    }
-    async fn get_audio_sink_codec(&self) -> AudioCodec {
-        self.audio_sink_codec.read().await.clone()
-    }
-    async fn set_audio_sink_codec(&mut self, codec: AudioCodec) -> Result<(), Error> {
-        *self.audio_sink_codec.write().await = codec;
-        // todo: validate the codec
         Ok(())
     }
 

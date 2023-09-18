@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
@@ -6,11 +6,7 @@ use cpal::{
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
-use warp::{
-    blink::{self, BlinkEventKind},
-    crypto::DID,
-    sync::RwLock,
-};
+use warp::{blink::BlinkEventKind, crypto::DID, sync::RwLock};
 
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
@@ -21,18 +17,19 @@ use crate::{
     host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
     host_media::{
         self,
+        audio::{AudioCodec, AudioHardwareConfig},
         mp4_logger::{self, Mp4LoggerInstance},
     },
 };
 
-use super::{ChannelMixer, ChannelMixerConfig, ChannelMixerOutput, Resampler, ResamplerConfig};
+use super::{Resampler, ResamplerConfig};
 
 pub struct OpusSink {
     peer_id: DID,
     // save this for changing the output device
     track: Arc<TrackRemote>,
     // same
-    webrtc_codec: blink::AudioCodec,
+    webrtc_codec: AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     decoder_handle: JoinHandle<()>,
@@ -55,43 +52,31 @@ impl OpusSink {
         event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
-        webrtc_codec: blink::AudioCodec,
-        sink_codec: blink::AudioCodec,
+        webrtc_codec: AudioCodec,
+        sink_config: AudioHardwareConfig,
     ) -> Result<Self> {
         let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
         let mp4_logger2 = mp4_logger.clone();
-        let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_codec.sample_rate()) {
+        let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_config.sample_rate()) {
             Ordering::Equal => ResamplerConfig::None,
             Ordering::Greater => {
-                ResamplerConfig::DownSample(webrtc_codec.sample_rate() / sink_codec.sample_rate())
+                ResamplerConfig::DownSample(webrtc_codec.sample_rate() / sink_config.sample_rate())
             }
-            _ => ResamplerConfig::UpSample(sink_codec.sample_rate() / webrtc_codec.sample_rate()),
+            _ => ResamplerConfig::UpSample(sink_config.sample_rate() / webrtc_codec.sample_rate()),
         };
         let resampler = Resampler::new(resampler_config);
 
-        let channel_mixer_config = match webrtc_codec.channels().cmp(&sink_codec.channels()) {
-            Ordering::Equal => ChannelMixerConfig::None,
-            Ordering::Greater => ChannelMixerConfig::Merge,
-            _ => ChannelMixerConfig::Split,
-        };
-        let channel_mixer = ChannelMixer::new(channel_mixer_config);
-
         let cpal_config = cpal::StreamConfig {
-            channels: sink_codec.channels(),
-            sample_rate: SampleRate(sink_codec.sample_rate()),
+            channels: sink_config.channels(),
+            sample_rate: SampleRate(sink_config.sample_rate()),
             buffer_size: cpal::BufferSize::Default,
         };
 
         // number of late samples allowed (for RTP)
         let max_late = 512;
         let webrtc_sample_rate = webrtc_codec.sample_rate();
-        let webrtc_channels = match webrtc_codec.channels() {
-            1 => opus::Channels::Mono,
-            2 => opus::Channels::Stereo,
-            x => bail!("invalid number of channels: {x}"),
-        };
 
-        let decoder = opus::Decoder::new(webrtc_sample_rate, webrtc_channels)?;
+        let decoder = opus::Decoder::new(webrtc_sample_rate, opus::Channels::Mono)?;
         let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
         let (producer, mut consumer) = ring.split();
 
@@ -112,7 +97,6 @@ impl OpusSink {
                 producer,
                 decoder,
                 resampler,
-                channel_mixer,
                 event_ch: event_ch2,
                 peer_id: peer_id2,
                 mp4_writer: mp4_logger2,
@@ -127,7 +111,6 @@ impl OpusSink {
         });
 
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            let mut input_fell_behind = false;
             // this is test code, left here for reference. it can be deleted later if needed.
             // if *dump_consumer_queue.read() {
             //     *dump_consumer_queue.write() = false;
@@ -135,17 +118,12 @@ impl OpusSink {
             //         consumer.advance(consumer.len());
             //     }
             // }
-            for sample in data {
-                *sample = match consumer.pop() {
-                    Some(s) => s,
-                    None => {
-                        input_fell_behind = true;
-                        0_f32
-                    }
+
+            for frame in data.chunks_mut(cpal_config.channels as _) {
+                let value = consumer.pop().unwrap_or_default();
+                for sample in frame.iter_mut() {
+                    *sample = value;
                 }
-            }
-            if input_fell_behind {
-                //log::trace!("output stream fell behind: try increasing latency");
             }
         };
         let output_stream = output_device.build_output_stream(
@@ -181,8 +159,8 @@ impl SinkTrack for OpusSink {
         event_ch: broadcast::Sender<BlinkEventKind>,
         output_device: &cpal::Device,
         track: Arc<TrackRemote>,
-        webrtc_codec: blink::AudioCodec,
-        sink_codec: blink::AudioCodec,
+        webrtc_codec: AudioCodec,
+        sink_config: AudioHardwareConfig,
     ) -> Result<Self> {
         OpusSink::init_internal(
             peer_id,
@@ -190,7 +168,7 @@ impl SinkTrack for OpusSink {
             output_device,
             track,
             webrtc_codec,
-            sink_codec,
+            sink_config,
         )
     }
 
@@ -207,7 +185,7 @@ impl SinkTrack for OpusSink {
     fn change_output_device(
         &mut self,
         output_device: &cpal::Device,
-        sink_codec: blink::AudioCodec,
+        sink_config: AudioHardwareConfig,
     ) -> Result<()> {
         self.stream.pause()?;
         self.decoder_handle.abort();
@@ -217,7 +195,7 @@ impl SinkTrack for OpusSink {
             output_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
-            sink_codec,
+            sink_config,
         )?;
         *self = new_sink;
         if !*self.muted.read() {
@@ -250,7 +228,6 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     producer: AudioSampleProducer,
     decoder: opus::Decoder,
     resampler: Resampler,
-    channel_mixer: ChannelMixer,
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
     mp4_writer: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
@@ -268,7 +245,6 @@ where
         mut producer,
         mut decoder,
         mut resampler,
-        mut channel_mixer,
         event_ch,
         peer_id,
         mp4_writer,
@@ -356,16 +332,7 @@ where
                             let _ = automute_tx
                                 .send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
                             'PROCESS_DECODED_SAMPLES: for audio_sample in to_send {
-                                match channel_mixer.process(*audio_sample * multiplier) {
-                                    ChannelMixerOutput::Single(sample) => {
-                                        resampler.process(sample, &mut raw_samples);
-                                    }
-                                    ChannelMixerOutput::Split(sample) => {
-                                        resampler.process(sample, &mut raw_samples);
-                                        resampler.process(sample, &mut raw_samples);
-                                    }
-                                    ChannelMixerOutput::None => {}
-                                }
+                                resampler.process(*audio_sample * multiplier, &mut raw_samples);
                                 for sample in raw_samples.drain(..) {
                                     if let Err(_e) = producer.push(sample) {
                                         // this is test code, left here for reference. it can be deleted later if needed.
