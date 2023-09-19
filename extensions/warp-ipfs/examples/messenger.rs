@@ -1,6 +1,7 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
+use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, ReadlineError, SharedWriter};
 use std::collections::HashMap;
 use std::io::Write;
@@ -23,7 +24,7 @@ use warp::raygun::{
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_ipfs::config::Discovery;
+use warp_ipfs::config::{Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
@@ -42,6 +43,8 @@ struct Opt {
 
     #[clap(long)]
     context: Option<String>,
+    #[clap(long)]
+    discovery_point: Option<Multiaddr>,
     #[clap(long)]
     direct: bool,
     #[clap(long)]
@@ -87,9 +90,18 @@ async fn setup<P: AsRef<Path>>(
     };
 
     if !opt.direct || !opt.no_discovery {
+        let discovery_type = match &opt.discovery_point {
+            Some(addr) => {
+                config.ipfs_setting.bootstrap = false;
+                DiscoveryType::RzPoint {
+                    addresses: vec![addr.clone()],
+                }
+            }
+            None => DiscoveryType::DHT,
+        };
         config.store_setting.discovery = Discovery::Namespace {
             namespace: opt.context.clone(),
-            discovery_type: Default::default(),
+            discovery_type,
         };
     }
     if opt.disable_relay {
