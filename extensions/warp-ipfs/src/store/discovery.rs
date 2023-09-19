@@ -96,13 +96,9 @@ impl Discovery {
                                                 discovery.relays.clone(),
                                             )
                                             .await;
-                                            if !discovery
-                                                .entries
-                                                .write()
-                                                .await
-                                                .insert(entry.clone())
+                                            if discovery.entries.write().await.insert(entry.clone())
                                             {
-                                                entry.cancel().await;
+                                                entry.start().await;
                                             }
                                         }
                                     }
@@ -199,24 +195,25 @@ impl Discovery {
                                                             entry.insert(HashSet::from_iter(
                                                                 addrs.iter().cloned(),
                                                             ));
+                                                            if !discovery.ipfs.is_connected(peer_id).await.unwrap_or_default() && discovery.ipfs.connect(peer_id).await.is_ok() {
+                                                                if !discovery.contains(peer_id).await {
+                                                                    let entry = DiscoveryEntry::new(
+                                                                        &discovery.ipfs,
+                                                                        peer_id,
+                                                                        discovery.config.clone(),
+                                                                        discovery.events.clone(),
+                                                                        discovery.relays.clone(),
+                                                                    )
+                                                                    .await;
 
-                                                            if !discovery.contains(peer_id).await {
-                                                                let entry = DiscoveryEntry::new(
-                                                                    &discovery.ipfs,
-                                                                    peer_id,
-                                                                    discovery.config.clone(),
-                                                                    discovery.events.clone(),
-                                                                    discovery.relays.clone(),
-                                                                )
-                                                                .await;
-
-                                                                if !discovery
-                                                                    .entries
-                                                                    .write()
-                                                                    .await
-                                                                    .insert(entry.clone())
-                                                                {
-                                                                    entry.cancel().await;
+                                                                    if discovery
+                                                                        .entries
+                                                                        .write()
+                                                                        .await
+                                                                        .insert(entry.clone())
+                                                                    {
+                                                                        entry.start().await;
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -268,11 +265,12 @@ impl Discovery {
             self.relays.clone(),
         )
         .await;
-        entry.enable_discovery();
+        entry.start().await;
         let prev = self.entries.write().await.replace(entry);
         if let Some(entry) = prev {
             entry.cancel().await;
         }
+
         Ok(())
     }
 
@@ -362,7 +360,7 @@ impl DiscoveryEntry {
         sender: broadcast::Sender<DID>,
         relays: Vec<Multiaddr>,
     ) -> Self {
-        let entry = Self {
+        Self {
             ipfs: ipfs.clone(),
             peer_id,
             config,
@@ -370,15 +368,25 @@ impl DiscoveryEntry {
             task: Arc::default(),
             sender,
             relays,
-        };
+        }
+    }
+
+    pub async fn start(&self) {
+        let holder = &mut *self.task.write().await;
+
+        if holder.is_some() {
+            return;
+        }
 
         let task = tokio::spawn({
-            let entry = entry.clone();
-            let ipfs = ipfs.clone();
+            let entry = self.clone();
+            let ipfs = self.ipfs.clone();
+            let peer_id = self.peer_id;
             async move {
                 let mut timer = tokio::time::interval(Duration::from_secs(5));
                 let mut sent_initial_push = false;
                 if !entry.relays.is_empty() {
+                    //Adding relay for peer to address book in case we are connected over common relays
                     for addr in entry.relays.clone() {
                         let _ = ipfs.add_peer(entry.peer_id, addr).await;
                     }
@@ -415,7 +423,7 @@ impl DiscoveryEntry {
                             DiscoveryConfig::Direct => {
                                 tokio::select! {
                                     _ = timer.tick() => {
-                                        let _ = entry.ipfs.identity(Some(entry.peer_id)).await.ok();
+                                        let _ = entry.ipfs.identity(Some(peer_id)).await.ok();
                                     }
                                     _ = async {} => {}
                                 }
@@ -461,21 +469,13 @@ impl DiscoveryEntry {
                 }
             }
         });
-        *entry.task.write().await = Some(task);
-        entry
+
+        *holder = Some(task);
     }
 
     /// Returns a peer id
     pub fn peer_id(&self) -> PeerId {
         self.peer_id
-    }
-
-    pub fn enable_discovery(&self) {
-        self.discover.store(true, Ordering::SeqCst)
-    }
-
-    pub fn disable_discovery(&self) {
-        self.discover.store(false, Ordering::SeqCst)
     }
 
     pub async fn cancel(&self) {
