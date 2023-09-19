@@ -2,10 +2,7 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 
@@ -330,7 +327,6 @@ impl Discovery {
 #[derive(Clone)]
 pub struct DiscoveryEntry {
     ipfs: Ipfs,
-    discover: Arc<AtomicBool>,
     peer_id: PeerId,
     config: DiscoveryConfig,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
@@ -364,7 +360,6 @@ impl DiscoveryEntry {
             ipfs: ipfs.clone(),
             peer_id,
             config,
-            discover: Arc::default(),
             task: Arc::default(),
             sender,
             relays,
@@ -392,9 +387,7 @@ impl DiscoveryEntry {
                     }
                 }
                 loop {
-                    if entry.discover.load(Ordering::SeqCst)
-                        && !ipfs.is_connected(peer_id).await.unwrap_or_default()
-                    {
+                    if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
                         match entry.config {
                             // Used for provider. Doesnt do anything right now
                             // TODO: Maybe have separate provider query in case
