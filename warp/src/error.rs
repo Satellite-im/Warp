@@ -217,11 +217,10 @@ pub enum Error {
     //Blink Errors
     #[error("Invalid MIME type: {mime_type}")]
     InvalidMimeType { mime_type: String },
+    #[error("CPAL: {_0}")]
+    Cpal(String),
     #[error("Device not found")]
-    AudioDeviceNotFound,
-    // indicates a problem enumerating audio I/O devices
-    #[error("AudioHostError: {_0}")]
-    AudioHostError(String),
+    DeviceNotFound,
 
     //Misc
     #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]

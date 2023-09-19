@@ -8,7 +8,10 @@ use ringbuf::HeapRb;
 
 use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
-use warp::{blink::BlinkEventKind, crypto::DID};
+use warp::{
+    blink::{self, BlinkEventKind},
+    crypto::DID,
+};
 
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
@@ -18,10 +21,7 @@ use webrtc::{
 mod framer;
 use crate::{
     host_media::audio::{speech, SourceTrack},
-    host_media::{
-        audio::{AudioCodec, AudioHardwareConfig},
-        mp4_logger::{self, Mp4LoggerInstance},
-    },
+    host_media::mp4_logger::{self, Mp4LoggerInstance},
 };
 
 use self::framer::Framer;
@@ -30,7 +30,7 @@ pub struct OpusSource {
     own_id: DID,
     // holding on to the track in case the input device is changed. in that case a new track is needed.
     track: Arc<TrackLocalStaticRTP>,
-    webrtc_codec: AudioCodec,
+    webrtc_codec: blink::AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     // used to cancel the current packetizer when the input device is changed.
@@ -52,8 +52,8 @@ impl SourceTrack for OpusSource {
         event_ch: broadcast::Sender<BlinkEventKind>,
         input_device: &cpal::Device,
         track: Arc<TrackLocalStaticRTP>,
-        webrtc_codec: AudioCodec,
-        source_config: AudioHardwareConfig,
+        webrtc_codec: blink::AudioCodec,
+        source_codec: blink::AudioCodec,
     ) -> Result<Self>
     where
         Self: Sized,
@@ -65,7 +65,7 @@ impl SourceTrack for OpusSource {
             input_device,
             track.clone(),
             webrtc_codec.clone(),
-            source_config,
+            source_codec,
             event_ch.clone(),
             mp4_logger.clone(),
             muted2,
@@ -97,7 +97,7 @@ impl SourceTrack for OpusSource {
     fn change_input_device(
         &mut self,
         input_device: &cpal::Device,
-        source_config: AudioHardwareConfig,
+        source_codec: blink::AudioCodec,
     ) -> Result<()> {
         self.stream.pause()?;
         self.packetizer_handle.abort();
@@ -105,7 +105,7 @@ impl SourceTrack for OpusSource {
             input_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
-            source_config,
+            source_codec,
             self.event_ch.clone(),
             self.mp4_logger.clone(),
             self.muted.clone(),
@@ -133,15 +133,15 @@ impl SourceTrack for OpusSource {
 fn create_source_track(
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
-    webrtc_codec: AudioCodec,
-    source_config: AudioHardwareConfig,
+    webrtc_codec: blink::AudioCodec,
+    source_codec: blink::AudioCodec,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
     muted: Arc<warp::sync::RwLock<bool>>,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
     let config = cpal::StreamConfig {
-        channels: source_config.channels(),
-        sample_rate: SampleRate(source_config.sample_rate()),
+        channels: source_codec.channels(),
+        sample_rate: SampleRate(source_codec.sample_rate()),
         buffer_size: cpal::BufferSize::Default, //Fixed(4096 * 50),
     };
 
@@ -149,13 +149,13 @@ fn create_source_track(
     let mut rng = rand::thread_rng();
     let ssrc: u32 = rng.gen();
 
-    let ring = HeapRb::<f32>::new(source_config.sample_rate() as usize * 2);
+    let ring = HeapRb::<f32>::new(source_codec.sample_rate() as usize * 2);
     let (mut producer, mut consumer) = ring.split();
 
     let mut framer = Framer::init(
-        webrtc_codec.frame_size(),
+        source_codec.frame_size(),
         webrtc_codec.clone(),
-        source_config,
+        source_codec,
     )?;
     let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
     let seq = Box::new(rtp::sequence::new_random_sequencer());
@@ -177,10 +177,8 @@ fn create_source_track(
 
     let event_ch2 = event_ch.clone();
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-        for frame in data.chunks(config.channels as _) {
-            let sum: f32 = frame.iter().sum();
-            let avg = sum / config.channels as f32;
-            let _ = producer.push(avg);
+        for sample in data {
+            let _ = producer.push(*sample);
         }
     };
     let input_stream = input_device

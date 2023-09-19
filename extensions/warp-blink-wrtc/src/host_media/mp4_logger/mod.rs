@@ -21,12 +21,10 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 
 use warp::{
-    blink::MimeType,
+    blink::{AudioCodec, MimeType},
     crypto::DID,
     sync::{Arc, RwLock},
 };
-
-use super::audio::AudioCodec;
 
 static MP4_LOGGER: Lazy<RwLock<Option<Mp4Logger>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
@@ -405,11 +403,13 @@ fn write_mp4_header(
             pre_skip: 0,
             input_sample_rate: audio_codec.sample_rate(),
             output_gain: 0,
-            channel_mapping_family: mp4::ChannelMappingFamily::Family0 { stereo: false },
+            channel_mapping_family: mp4::ChannelMappingFamily::Family0 {
+                stereo: audio_codec.channels() == 2,
+            },
         };
         let opus = OpusBox {
             data_reference_index: 1,
-            channelcount: 1,
+            channelcount: audio_codec.channels(),
             samplesize: 16, // per https://opus-codec.org/docs/opus_in_isobmff.html
             samplerate: FixedPointU16::new(audio_codec.sample_rate() as u16),
             dops,

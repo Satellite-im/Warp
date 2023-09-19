@@ -16,8 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use mime_types::*;
 use uuid::Uuid;
-mod audio_config;
-pub use audio_config::*;
+
+mod codecs;
+pub use codecs::*;
 
 use crate::{
     crypto::DID,
@@ -51,6 +52,7 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
         // This field is used for informational purposes only.
         conversation_id: Option<Uuid>,
         participants: Vec<DID>,
+        webrtc_codec: AudioCodec,
     ) -> Result<Uuid, Error>;
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error>;
@@ -61,17 +63,17 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
 
     // ------ Select input/output devices ------
 
-    /// returns an AudioDeviceConfig which can be used to view, test, and select
-    /// a speaker and microphone
-    async fn get_audio_device_config(&self) -> Box<dyn AudioDeviceConfig>;
-    /// Tell Blink to use the given AudioDeviceConfig for calling
-    async fn set_audio_device_config(
-        &mut self,
-        config: Box<dyn AudioDeviceConfig>,
-    ) -> Result<(), Error>;
-
+    async fn get_available_microphones(&self) -> Result<Vec<String>, Error>;
+    async fn get_current_microphone(&self) -> Option<String>;
+    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error>;
+    async fn select_default_microphone(&mut self) -> Result<(), Error>;
+    async fn get_available_speakers(&self) -> Result<Vec<String>, Error>;
+    async fn get_current_speaker(&self) -> Option<String>;
+    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error>;
+    async fn select_default_speaker(&mut self) -> Result<(), Error>;
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error>;
     async fn select_camera(&mut self, device_name: &str) -> Result<(), Error>;
+    async fn select_default_camera(&mut self) -> Result<(), Error>;
 
     // ------ Media controls ------
 
@@ -88,6 +90,11 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     // for the current call, multiply all audio samples for the given peer by `multiplier`.
     // large values make them sound louder. values less than 1 make them sound quieter.
     async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error>;
+
+    async fn get_audio_source_codec(&self) -> AudioCodec;
+    async fn set_audio_source_codec(&mut self, codec: AudioCodec) -> Result<(), Error>;
+    async fn get_audio_sink_codec(&self) -> AudioCodec;
+    async fn set_audio_sink_codec(&mut self, codec: AudioCodec) -> Result<(), Error>;
 
     // ------ Utility Functions ------
 
@@ -144,16 +151,18 @@ pub struct CallInfo {
     participants: Vec<DID>,
     // for call wide broadcasts
     group_key: Vec<u8>,
+    codec: AudioCodec,
 }
 
 impl CallInfo {
-    pub fn new(conversation_id: Option<Uuid>, participants: Vec<DID>) -> Self {
+    pub fn new(conversation_id: Option<Uuid>, participants: Vec<DID>, codec: AudioCodec) -> Self {
         let group_key = Aes256Gcm::generate_key(&mut OsRng).as_slice().into();
         Self {
             call_id: Uuid::new_v4(),
             conversation_id,
             participants,
             group_key,
+            codec,
         }
     }
 
@@ -171,6 +180,10 @@ impl CallInfo {
 
     pub fn group_key(&self) -> Vec<u8> {
         self.group_key.clone()
+    }
+
+    pub fn codec(&self) -> AudioCodec {
+        self.codec.clone()
     }
 }
 

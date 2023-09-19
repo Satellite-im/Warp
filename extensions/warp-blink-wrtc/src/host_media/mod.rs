@@ -8,13 +8,13 @@ use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, RwLock};
-use warp::blink::BlinkEventKind;
+use warp::blink::{self, BlinkEventKind};
 use warp::crypto::DID;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
 pub(crate) mod audio;
-use audio::{create_sink_track, create_source_track, AudioCodec, AudioHardwareConfig};
+use audio::{create_sink_track, create_source_track};
 
 use self::mp4_logger::Mp4LoggerConfig;
 
@@ -78,8 +78,8 @@ pub async fn create_audio_source_track(
     own_id: DID,
     event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
-    webrtc_codec: AudioCodec,
-    source_config: AudioHardwareConfig,
+    webrtc_codec: blink::AudioCodec,
+    source_codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
     let input_device = match unsafe { DATA.audio_input_device.as_ref() } {
@@ -95,7 +95,7 @@ pub async fn create_audio_source_track(
         input_device,
         track,
         webrtc_codec,
-        source_config,
+        source_codec,
     )
     .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
     source_track
@@ -133,8 +133,8 @@ pub async fn create_audio_sink_track(
     event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackRemote>,
     // the format to decode to. Opus supports encoding and decoding to arbitrary sample rates and number of channels.
-    webrtc_codec: AudioCodec,
-    sink_config: AudioHardwareConfig,
+    webrtc_codec: blink::AudioCodec,
+    sink_codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
     let output_device = match unsafe { DATA.audio_output_device.as_ref() } {
@@ -150,7 +150,7 @@ pub async fn create_audio_sink_track(
         output_device,
         track,
         webrtc_codec,
-        sink_config,
+        sink_codec,
     )?;
     sink_track
         .play()
@@ -175,7 +175,7 @@ pub async fn create_audio_sink_track(
 
 pub async fn change_audio_input(
     device: cpal::Device,
-    source_config: AudioHardwareConfig,
+    source_codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
@@ -186,7 +186,7 @@ pub async fn change_audio_input(
     }
 
     if let Some(source) = unsafe { DATA.audio_source_track.as_mut() } {
-        source.change_input_device(&device, source_config)?;
+        source.change_input_device(&device, source_codec)?;
     }
     unsafe {
         DATA.audio_input_device.replace(device);
@@ -196,13 +196,13 @@ pub async fn change_audio_input(
 
 pub async fn change_audio_output(
     device: cpal::Device,
-    sink_config: AudioHardwareConfig,
+    sink_codec: blink::AudioCodec,
 ) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
     // todo: if this fails, return an error or keep going?
     for (_k, v) in unsafe { DATA.audio_sink_tracks.iter_mut() } {
-        if let Err(e) = v.change_output_device(&device, sink_config.clone()) {
+        if let Err(e) = v.change_output_device(&device, sink_codec.clone()) {
             log::error!("failed to change output device: {e}");
         }
     }
