@@ -13,10 +13,10 @@ pub mod queue;
 use chrono::{DateTime, Utc};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, time::Duration};
+use std::fmt::Display;
 use uuid::Uuid;
 
-use ipfs::{Multiaddr, PeerId, Protocol, PublicKey};
+use ipfs::{PeerId, PublicKey};
 use warp::{
     crypto::{
         cipher::Cipher,
@@ -30,8 +30,6 @@ use warp::{
     raygun::{Message, MessageEvent, PinState, ReactionState},
     tesseract::Tesseract,
 };
-
-use crate::config::Discovery;
 
 pub trait PeerTopic: Display {
     fn inbox(&self) -> String {
@@ -379,51 +377,6 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
-}
-
-pub async fn discover_peer(
-    ipfs: &ipfs::Ipfs,
-    did: &DID,
-    discovery: Discovery,
-    relay: Vec<Multiaddr>,
-) -> anyhow::Result<()> {
-    let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
-
-    if matches!(
-        connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?,
-        PeerConnectionType::Connected,
-    ) {
-        return Ok(());
-    }
-
-    match discovery {
-        // Check over DHT to locate peer
-        Discovery::Provider(_) | Discovery::Direct => loop {
-            if ipfs.identity(Some(peer_id)).await.is_ok() {
-                break;
-            }
-        },
-        Discovery::None => {
-            //Attempt a direct dial via relay
-            for addr in relay.iter() {
-                let addr = addr.clone().with(Protocol::P2p(peer_id));
-                if let Err(_e) = ipfs.connect(addr).await {
-                    continue;
-                }
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-            loop {
-                if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
-                    == PeerConnectionType::Connected
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

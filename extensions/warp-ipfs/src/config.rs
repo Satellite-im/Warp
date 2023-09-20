@@ -21,12 +21,25 @@ pub enum Bootstrap {
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
     /// Uses DHT PROVIDER to find and connect to peers using the same context
-    Provider(Option<String>),
-    /// Dials out to peers directly. Using this will only work with the DID til that connection is made
+    Namespace {
+        namespace: Option<String>,
+        discovery_type: DiscoveryType,
+    },
+    /// Dials peers over relay
     Direct,
     /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
     #[default]
     None,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DiscoveryType {
+    #[default]
+    DHT,
+    RzPoint {
+        addresses: Vec<Multiaddr>,
+    },
 }
 
 impl Bootstrap {
@@ -56,8 +69,6 @@ pub struct Mdns {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
-    /// Enables relay (and dcutr) client in libp2p
-    pub enable: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// List of relays to use
     pub relay_address: Vec<Multiaddr>,
@@ -66,7 +77,6 @@ pub struct RelayClient {
 impl Default for RelayClient {
     fn default() -> Self {
         Self {
-            enable: false,
             relay_address: vec![
                 //NYC-1
                 "/ip4/146.190.184.59/tcp/4001/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(), 
@@ -166,12 +176,6 @@ impl ConnectionLimit {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct RelayServer {
-    /// Used to enable the node as a relay server. Only should be enabled if the node isnt behind a NAT or could be connected to directly
-    pub enable: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pubsub {
     pub max_transmit_size: usize,
@@ -189,7 +193,6 @@ impl Default for Pubsub {
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
-    pub relay_server: RelayServer,
     pub pubsub: Pubsub,
     pub swarm: Swarm,
     pub bootstrap: bool,
@@ -277,7 +280,10 @@ impl Default for StoreSetting {
     fn default() -> Self {
         Self {
             auto_push: None,
-            discovery: Discovery::Provider(None),
+            discovery: Discovery::Namespace {
+                namespace: None,
+                discovery_type: Default::default(),
+            },
             sync: Vec::new(),
             sync_interval: Duration::from_millis(1000),
             fetch_over_bitswap: false,
@@ -306,6 +312,7 @@ pub struct Config {
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
+    pub enable_relay: bool,
     pub debug: bool,
     pub save_phrase: bool,
     pub max_storage_size: Option<usize>,
@@ -332,6 +339,7 @@ impl Default for Config {
             },
             store_setting: Default::default(),
             debug: false,
+            enable_relay: false,
             save_phrase: false,
             max_storage_size: Some(1024 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
@@ -357,36 +365,18 @@ impl Config {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
-                    enable: true,
                     ..Default::default()
                 },
                 ..Default::default()
             },
             store_setting: StoreSetting {
-                discovery: Discovery::Provider(None),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-
-    /// Minimal production configuration
-    pub fn minimal_testing() -> Config {
-        Config {
-            bootstrap: Bootstrap::Ipfs,
-            ipfs_setting: IpfsSetting {
-                mdns: Mdns { enable: true },
-                bootstrap: false,
-                relay_client: RelayClient {
-                    enable: true,
-                    ..Default::default()
+                discovery: Discovery::Namespace {
+                    namespace: None,
+                    discovery_type: Default::default(),
                 },
                 ..Default::default()
             },
-            store_setting: StoreSetting {
-                discovery: Discovery::None,
-                ..Default::default()
-            },
+            enable_relay: true,
             ..Default::default()
         }
     }
@@ -400,7 +390,6 @@ impl Config {
                 mdns: Mdns { enable: true },
                 bootstrap: false,
                 relay_client: RelayClient {
-                    enable: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -409,6 +398,7 @@ impl Config {
                 discovery: Discovery::None,
                 ..Default::default()
             },
+            enable_relay: true,
             ..Default::default()
         }
     }
@@ -422,13 +412,15 @@ impl Config {
                 mdns: Mdns { enable: true },
                 bootstrap: true,
                 relay_client: RelayClient {
-                    enable: true,
                     ..Default::default()
                 },
                 ..Default::default()
             },
             store_setting: StoreSetting {
-                discovery: Discovery::Provider(None),
+                discovery: Discovery::Namespace {
+                    namespace: None,
+                    discovery_type: Default::default(),
+                },
                 ..Default::default()
             },
             ..Default::default()

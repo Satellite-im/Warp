@@ -67,7 +67,7 @@ pub struct IdentityStore {
 
     discovery: Discovery,
 
-    relay: Option<Vec<Multiaddr>>,
+    relay: Vec<Multiaddr>,
 
     fetch_over_bitswap: Arc<AtomicBool>,
 
@@ -180,7 +180,7 @@ impl IdentityStore {
         default_pfp_callback: Option<DefaultPfpFn>,
         (discovery, relay, fetch_over_bitswap, share_platform, update_event, disable_image): (
             Discovery,
-            Option<Vec<Multiaddr>>,
+            Vec<Multiaddr>,
             bool,
             bool,
             UpdateEvents,
@@ -245,10 +245,14 @@ impl IdentityStore {
         let did = store.get_keypair_did()?;
 
         let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
-
+        let main_stream = store
+            .ipfs
+            .pubsub_subscribe("/identity/announce".into())
+            .await?;
         tokio::spawn({
             let mut store = store.clone();
             async move {
+                let _main_stream = main_stream;
                 if let Err(e) = store.discovery.start().await {
                     warn!("Error starting discovery service: {e}. Will not be able to discover peers over namespace");
                 }
@@ -283,7 +287,7 @@ impl IdentityStore {
                             if let Some(message) = message {
                                 let entry = match message.source {
                                     Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
-                                        Some(entry) => entry.did_key().await.ok(),
+                                        Some(entry) => entry.peer_id().to_did().ok(),
                                         None => {
                                             let _ = store.discovery.insert(peer_id).await.ok();
                                             peer_id.to_did().ok()
@@ -745,7 +749,13 @@ impl IdentityStore {
     }
 
     pub async fn push_to_all(&self) {
-        let list = self.discovery.did_iter().await.collect::<Vec<_>>().await;
+        let list = self
+            .discovery
+            .list()
+            .await
+            .iter()
+            .filter_map(|entry| entry.peer_id().to_did().ok())
+            .collect::<Vec<_>>();
         self.push_iter(list).await
     }
 
@@ -1371,8 +1381,8 @@ impl IdentityStore {
         self.discovery.discovery_config()
     }
 
-    pub fn relays(&self) -> Vec<Multiaddr> {
-        self.relay.clone().unwrap_or_default()
+    pub fn relays(&self) -> &[Multiaddr] {
+        &self.relay
     }
 
     pub(crate) async fn cache(&self) -> HashSet<IdentityDocument> {

@@ -1,6 +1,7 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
+use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, ReadlineError, SharedWriter};
 use std::collections::HashMap;
 use std::io::Write;
@@ -17,12 +18,13 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    AttachmentKind, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState, Location,
+    AttachmentKind, Location, Message, MessageEvent, MessageEventKind, MessageEventStream,
+    MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun,
+    ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_ipfs::config::Discovery;
+use warp_ipfs::config::{Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
@@ -41,6 +43,8 @@ struct Opt {
 
     #[clap(long)]
     context: Option<String>,
+    #[clap(long)]
+    discovery_point: Option<Multiaddr>,
     #[clap(long)]
     direct: bool,
     #[clap(long)]
@@ -86,10 +90,22 @@ async fn setup<P: AsRef<Path>>(
     };
 
     if !opt.direct || !opt.no_discovery {
-        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+        let discovery_type = match &opt.discovery_point {
+            Some(addr) => {
+                config.ipfs_setting.bootstrap = false;
+                DiscoveryType::RzPoint {
+                    addresses: vec![addr.clone()],
+                }
+            }
+            None => DiscoveryType::DHT,
+        };
+        config.store_setting.discovery = Discovery::Namespace {
+            namespace: opt.context.clone(),
+            discovery_type,
+        };
     }
     if opt.disable_relay {
-        config.ipfs_setting.relay_client.enable = false;
+        config.enable_relay = false;
     }
     if opt.upnp {
         config.ipfs_setting.portmapping = true;
