@@ -81,7 +81,7 @@ either = "1"
 void = "1"
 
 #ipfs dependency
-rust-ipfs = "0.4.3"
+rust-ipfs = "0.4.4"
 
 # Blink related crates
 # av-data is needed to use libaom. need to ensure that Warp and libaom use the same version of av-data
