@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
@@ -16,6 +17,12 @@ pub struct IdentityDocument {
     pub short_id: [u8; SHORT_ID_SIZE],
 
     pub did: DID,
+
+    #[serde(default)]
+    pub created: DateTime<Utc>,
+
+    #[serde(default)]
+    pub modified: DateTime<Utc>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
@@ -42,11 +49,16 @@ impl From<Identity> for IdentityDocument {
         let did = identity.did_key();
         let short_id = *identity.short_id();
         let status_message = identity.status_message();
+        let created = identity.created();
+        let modified = identity.modified();
+
         IdentityDocument {
             username,
             short_id,
             did,
             status_message,
+            created,
+            modified,
             profile_picture: None,
             profile_banner: None,
             platform: None,
@@ -114,6 +126,7 @@ impl IdentityDocument {
 
     pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
         self.signature = None;
+        self.modified = Utc::now();
         let bytes = serde_json::to_vec(&self)?;
         let signature = bs58::encode(did.sign(&bytes)).into_string();
         self.signature = Some(signature);

@@ -5,6 +5,7 @@ use crate::{
     config::{DefaultPfpFn, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
 };
+use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     stream::BoxStream,
@@ -1452,6 +1453,8 @@ impl IdentityStore {
                 .try_into()
                 .map_err(anyhow::Error::from)?,
             did: public_key.into(),
+            created: Utc::now(),
+            modified: Utc::now(),
             status_message: None,
             profile_banner: None,
             profile_picture: None,
