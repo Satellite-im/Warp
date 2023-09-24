@@ -220,7 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let document = ipfs
         .ipns()
-        .resolve(DnsResolver::None, &IpfsPath::from(local_peer_id))
+        .resolve(&IpfsPath::from(local_peer_id))
         .and_then(|path| async move {
             let cid = path.root().cid().expect("ipfs path contains cid");
             ipfs.get_dag((*cid).into()).await
