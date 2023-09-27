@@ -36,3 +36,5 @@ clap = { version = "4.4", features = ["derive"] }
 zeroize = "1"
 dotenv = "0.15"
 base64 = "0.21"
+
+bs58 = "0.4"

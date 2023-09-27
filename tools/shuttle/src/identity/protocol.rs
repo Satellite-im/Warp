@@ -1,32 +1,109 @@
-use std::{iter, marker::PhantomData};
+
+use std::iter;
 
 use futures::{future::BoxFuture, AsyncRead, AsyncWrite, AsyncWriteExt};
 use rust_ipfs::libp2p::{
     core::{upgrade, UpgradeInfo},
     InboundUpgrade, OutboundUpgrade, StreamProtocol,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use warp::{crypto::DID, multipass::identity::ShortId};
 
-pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/identity");
+use super::document::IdentityDocument;
+
+pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/identity/0.0.1");
 
 const BUF_SIZE: usize = 3 * 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum WireType {
-    Request,
-    Response,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WireEvent {
+    Register(Register),
+    RegisterResponse(RegisterResponse),
+    Synchronized(Synchronized),
+    SynchronizedResponse(SynchronizedResponse),
+    Lookup(Lookup),
+    LookupResponse(LookupResponse),
+    Error(String),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Lookup {
+    Username { username: String, count: u8 },
+    ShortId { short_id: ShortId },
+    PublicKey { did: DID },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LookupError {
+    DoesntExist,
+    RateExceeded
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LookupResponse {
+    Ok { identity: Vec<IdentityDocument> },
+    Error(LookupError),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Register {
+    pub document: IdentityDocument,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RegisterResponse {
+    Ok,
+    Error(RegisterError),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RegisterError {
+    IdentityExist { did: DID },
     None,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Payload {}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Synchronized {
+    Store {
+        document: IdentityDocument,
+        package: Option<Vec<u8>>,
+    },
+    Fetch {
+        did: Option<DID>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SynchronizedResponse {
+    Ok {
+        identity: Option<IdentityDocument>,
+        package: Option<Vec<u8>>,
+    },
+    Error(SynchronizedError),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SynchronizedError {
+    DoesntExist,
+    Forbidden,
+    NotRegistered,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct WirePayload {
-    pub wire_type: WireType,
-    pub payload: (),
+pub struct Payload {
+    pub id: Uuid,
+    pub event: WireEvent,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub signature: Vec<u8>,
 }
 
@@ -46,7 +123,7 @@ impl<TSocket> InboundUpgrade<TSocket> for IdentityProtocol
 where
     TSocket: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Output = WirePayload;
+    type Output = Payload;
     type Error = warp::error::Error;
     type Future = BoxFuture<'static, Result<Self::Output, Self::Error>>;
 
@@ -60,7 +137,7 @@ where
     }
 }
 
-impl UpgradeInfo for WirePayload {
+impl UpgradeInfo for Payload {
     type Info = StreamProtocol;
     type InfoIter = iter::Once<Self::Info>;
 
@@ -69,7 +146,7 @@ impl UpgradeInfo for WirePayload {
     }
 }
 
-impl<TSocket> OutboundUpgrade<TSocket> for WirePayload
+impl<TSocket> OutboundUpgrade<TSocket> for Payload
 where
     TSocket: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
@@ -92,13 +169,13 @@ where
 #[allow(clippy::large_enum_variant)]
 pub enum Message {
     Sent,
-    Received { event: WirePayload },
+    Received { payload: Payload },
 }
 
-impl From<WirePayload> for Message {
+impl From<Payload> for Message {
     #[inline]
-    fn from(event: WirePayload) -> Self {
-        Self::Received { event }
+    fn from(payload: Payload) -> Self {
+        Self::Received { payload }
     }
 }
 

@@ -1,8 +1,19 @@
+// use libipld::serde::from_ipld;
+use shuttle::identity::{
+    self,
+    document::IdentityDocument,
+    // document::IdentityDocument,
+    protocol::{
+        Lookup, LookupResponse, Register, RegisterResponse, Synchronized, SynchronizedResponse,
+        WireEvent,
+    },
+};
+use warp::crypto::DID;
+
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     str::FromStr,
-    task::{Context, Poll},
     time::Duration,
 };
 
@@ -12,14 +23,11 @@ use base64::{
     Engine,
 };
 use clap::Parser;
-use futures::{pin_mut, SinkExt, StreamExt, TryFutureExt};
-use rust_ipfs::{libp2p, p2p::DnsResolver, IpfsPath};
+use futures::StreamExt;
+use rust_ipfs::{libp2p, Ipfs, IpfsPath, PeerId};
 use rust_ipfs::{
     libp2p::swarm::NetworkBehaviour,
-    p2p::{
-        IdentifyConfiguration, RateLimit, RelayConfig, SwarmConfig, TransportConfig, UpdateMode,
-        UpgradeVersion,
-    },
+    p2p::{IdentifyConfiguration, RateLimit, RelayConfig, TransportConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
@@ -60,7 +68,8 @@ fn encode_kp(kp: &Keypair) -> anyhow::Result<String> {
 #[derive(NetworkBehaviour)]
 #[behaviour(prelude = "libp2p::swarm::derive_prelude", to_swarm = "void::Void")]
 pub struct Behaviour {
-    pub dummy: ext_behaviour::Behaviour,
+    identity: identity::Behaviour,
+    dummy: ext_behaviour::Behaviour,
 }
 
 #[derive(Debug, Parser)]
@@ -125,8 +134,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let local_peer_id = keypair.public().to_peer_id();
 
+    let (id_event_tx, mut id_event_rx) = futures::channel::mpsc::channel(1);
+
     let mut uninitialized = UninitializedIpfs::empty()
         .set_custom_behaviour(Behaviour {
+            identity: identity::Behaviour::new(&keypair, id_event_tx, None),
             dummy: ext_behaviour::Behaviour,
         })
         .disable_kad()
@@ -218,16 +230,91 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ipfs = uninitialized.start().await?;
 
-    let document = ipfs
-        .ipns()
-        .resolve(&IpfsPath::from(local_peer_id))
-        .and_then(|path| async move {
-            let cid = path.root().cid().expect("ipfs path contains cid");
-            ipfs.get_dag((*cid).into()).await
-        })
-        .await?;
+    initialize_document(&ipfs, local_peer_id).await?;
+    let mut temp_registeration: HashMap<DID, IdentityDocument> = HashMap::new();
+
+    while let Some((_id, event, res)) = id_event_rx.next().await {
+        match event {
+            WireEvent::Register(Register { document }) => {
+                if temp_registeration.contains_key(&document.did) {
+                    let _ = res.send(WireEvent::RegisterResponse(RegisterResponse::Error(
+                        identity::protocol::RegisterError::IdentityExist { did: document.did },
+                    )));
+                    continue;
+                }
+
+                temp_registeration.insert(document.did.clone(), document);
+
+                let _ = res.send(WireEvent::RegisterResponse(
+                    identity::protocol::RegisterResponse::Ok,
+                ));
+                // let did_key = document.did.to_string();
+                // let ipfs = ipfs.clone();
+                // let _result = async move {
+                //     let path = IpfsPath::from(local_peer_id);
+
+                //     if ipfs
+                //         .get_dag(path.sub_path("identities")?.sub_path(&did_key)?)
+                //         .await
+                //         .is_ok()
+                //     {
+                //         return Err(Box::new(warp::error::Error::IdentityExist) as Box<_>);
+                //     }
+
+                //     Ok::<_, Box<dyn std::error::Error>>(())
+                // };
+            }
+            WireEvent::RegisterResponse(RegisterResponse::Ok) => {}
+            WireEvent::RegisterResponse(RegisterResponse::Error(..)) => {}
+            WireEvent::Synchronized(Synchronized::Store { .. }) => {}
+            WireEvent::Synchronized(Synchronized::Fetch { .. }) => {}
+            WireEvent::SynchronizedResponse(SynchronizedResponse::Ok { .. }) => {}
+            WireEvent::SynchronizedResponse(SynchronizedResponse::Error { .. }) => {}
+            WireEvent::Lookup(Lookup::PublicKey { did }) => {
+                let event = match temp_registeration.get(&did) {
+                    Some(document) => WireEvent::LookupResponse(LookupResponse::Ok {
+                        identity: vec![document.clone()],
+                    }),
+                    None => WireEvent::LookupResponse(LookupResponse::Error(
+                        identity::protocol::LookupError::DoesntExist,
+                    )),
+                };
+
+                let _ = res.send(event);
+            }
+            WireEvent::Lookup(Lookup::Username { .. }) => {}
+            WireEvent::Lookup(Lookup::ShortId { .. }) => {}
+            WireEvent::LookupResponse(LookupResponse::Ok { .. }) => {}
+            WireEvent::LookupResponse(LookupResponse::Error { .. }) => {}
+            WireEvent::Error(_) => {}
+        }
+    }
 
     tokio::signal::ctrl_c().await?;
+
+    Ok(())
+}
+
+async fn initialize_document(
+    ipfs: &Ipfs,
+    local_id: PeerId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if ipfs.get_dag(IpfsPath::from(local_id)).await.is_ok() {
+        return Ok(());
+    }
+
+    // let document = libipld::ipld!({
+    //     "registered": libipld::ipld!({}),
+    //     "identities": libipld::ipld!({}),
+    // });
+
+    // let cid = ipfs.put_dag(document).await?;
+
+    // if ipfs.is_pinned(&cid).await? {
+    //     return Ok(());
+    // }
+
+    // ipfs.insert_pin(&cid, true).await?;
 
     Ok(())
 }
