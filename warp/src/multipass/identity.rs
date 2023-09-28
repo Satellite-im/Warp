@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::crypto::DID;
+use crate::{crypto::DID, error::Error};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
@@ -127,6 +127,17 @@ impl Relationship {
     Default, Hash, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Ord,
 )]
 pub struct ShortId([u8; SHORT_ID_SIZE]);
+
+impl TryFrom<String> for ShortId {
+    type Error = Error;
+    fn try_from(short_id: String) -> Result<Self, Self::Error> {
+        let bytes = short_id.as_bytes();
+        let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
+            .try_into()
+            .map_err(|_| Error::InvalidPublicKeyLength)?;
+        Ok(ShortId::from(short_id))
+    }
+}
 
 impl core::ops::Deref for ShortId {
     type Target = [u8; SHORT_ID_SIZE];

@@ -102,6 +102,8 @@ struct Opt {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt().init();
+
     dotenv::dotenv().ok();
     let opts = Opt::parse();
 
@@ -133,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let local_peer_id = keypair.public().to_peer_id();
-
+    println!("Local PeerID: {local_peer_id}");
     let (id_event_tx, mut id_event_rx) = futures::channel::mpsc::channel(1);
 
     let mut uninitialized = UninitializedIpfs::empty()
@@ -278,6 +280,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     None => WireEvent::LookupResponse(LookupResponse::Error(
                         identity::protocol::LookupError::DoesntExist,
                     )),
+                };
+
+                let _ = res.send(event);
+            }
+            WireEvent::Lookup(Lookup::PublicKeys { dids }) => {
+                let list = dids
+                    .iter()
+                    .filter_map(|did| temp_registeration.get(did))
+                    .cloned()
+                    .collect::<Vec<_>>();
+
+                let event = match list.is_empty() {
+                    true => WireEvent::LookupResponse(LookupResponse::Error(
+                        identity::protocol::LookupError::DoesntExist,
+                    )),
+                    false => WireEvent::LookupResponse(LookupResponse::Ok { identity: list }),
                 };
 
                 let _ = res.send(event);

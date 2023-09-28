@@ -269,8 +269,15 @@ impl WarpIpfs {
         }
 
         let (pb_tx, pb_rx) = channel(50);
+        let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
+        let (id_sh_p_tx, id_sh_p_rx) = futures::channel::mpsc::channel(1);
 
         let behaviour = behaviour::Behaviour {
+            shuttle_identity: shuttle::identity::Behaviour::new(
+                &keypair,
+                id_sh_p_tx,
+                Some(id_sh_rx),
+            ),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
             rz_discovery: None.into(),
         };
@@ -470,6 +477,8 @@ impl WarpIpfs {
                 config.store_setting.share_platform,
                 config.store_setting.update_events,
                 config.store_setting.disable_images,
+                Some(id_sh_tx),
+                Some(id_sh_p_rx),
             ),
         )
         .await?;

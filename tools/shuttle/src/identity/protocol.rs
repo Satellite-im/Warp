@@ -1,4 +1,3 @@
-
 use std::iter;
 
 use futures::{future::BoxFuture, AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -34,13 +33,14 @@ pub enum Lookup {
     Username { username: String, count: u8 },
     ShortId { short_id: ShortId },
     PublicKey { did: DID },
+    PublicKeys { dids: Vec<DID> },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LookupError {
     DoesntExist,
-    RateExceeded
+    RateExceeded,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -56,6 +56,38 @@ impl From<Identity> for IdentityDocument {
     }
 }
 
+impl From<shuttle::identity::document::IdentityDocument> for IdentityDocument {
+    fn from(document: shuttle::identity::document::IdentityDocument) -> Self {
+        Self {
+            username: document.username,
+            did: document.did,
+            short_id: document.short_id,
+            status_message: document.status_message,
+            profile_picture: document.profile_picture,
+            profile_banner: document.profile_banner,
+            platform: document.platform,
+            status: document.status,
+            signature: document.signature,
+        }
+    }
+}
+
+impl From<IdentityDocument> for shuttle::identity::document::IdentityDocument {
+    fn from(document: IdentityDocument) -> Self {
+        Self {
+            username: document.username,
+            did: document.did,
+            short_id: document.short_id,
+            status_message: document.status_message,
+            profile_picture: document.profile_picture,
+            profile_banner: document.profile_banner,
+            platform: document.platform,
+            status: document.status,
+            signature: document.signature,
+        }
+    }
+}
+
 impl From<IdentityDocument> for Identity {
     fn from(document: IdentityDocument) -> Self {
         let mut identity = Identity::default();

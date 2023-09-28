@@ -172,7 +172,6 @@ impl NetworkBehaviour for Behaviour {
         let payload = match event {
             Message::Received { payload } => payload,
             Message::Sent => {
-                //TODO: Await response before timing out oneshot handler
                 return;
             }
         };
@@ -236,6 +235,29 @@ impl NetworkBehaviour for Behaviour {
                             event: payload,
                         });
                         return;
+                    }
+                }
+                Lookup::PublicKeys { dids } => {
+                    let list = dids
+                        .iter()
+                        .filter_map(|did| {
+                            self.identity_cache.iter().find(|(doc, _)| doc.did.eq(did))
+                        })
+                        .map(|(document, _)| document)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if !list.is_empty() {
+                        if let Ok(payload) = self.construct_payload(
+                            Some(id),
+                            WireEvent::LookupResponse(LookupResponse::Ok { identity: list }),
+                        ) {
+                            self.pending_events.push_back(ToSwarm::NotifyHandler {
+                                peer_id,
+                                handler: NotifyHandler::Any,
+                                event: payload,
+                            });
+                            return;
+                        }
                     }
                 }
                 Lookup::ShortId { short_id } => {
@@ -448,7 +470,7 @@ impl NetworkBehaviour for Behaviour {
                                 id,
                                 (
                                     IdentityResponse::Lookup { response },
-                                    Delay::new(Duration::from_secs(30)),
+                                    Delay::new(Duration::from_secs(10)),
                                 ),
                             );
                         }
@@ -499,6 +521,7 @@ impl NetworkBehaviour for Behaviour {
                         handler: NotifyHandler::Any,
                         event: payload,
                     });
+
                     false
                 }
                 Poll::Ready(Err(Canceled)) => false,

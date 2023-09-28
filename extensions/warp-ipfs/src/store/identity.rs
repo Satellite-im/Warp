@@ -2,15 +2,18 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::{DefaultPfpFn, Discovery as DiscoveryConfig, UpdateEvents},
+    config::{DefaultPfpFn, Discovery as DiscoveryConfig, DiscoveryType, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
 };
 use futures::{
-    channel::{mpsc, oneshot},
+    channel::{
+        mpsc,
+        oneshot::{self, Canceled},
+    },
     stream::BoxStream,
-    StreamExt,
+    SinkExt, StreamExt,
 };
-use ipfs::{Ipfs, IpfsPath, Keypair, Multiaddr};
+use ipfs::{p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, Multiaddr};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -20,6 +23,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
+use uuid::Uuid;
 
 use tokio::sync::broadcast;
 use tracing::{
@@ -51,6 +55,7 @@ use super::{
     libp2p_pub_to_did,
 };
 
+#[allow(clippy::type_complexity)]
 #[derive(Clone)]
 pub struct IdentityStore {
     ipfs: Ipfs,
@@ -93,6 +98,17 @@ pub struct IdentityStore {
     friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
 
     default_pfp_callback: Option<DefaultPfpFn>,
+
+    _process_identity_event: Arc<
+        Option<
+            futures::channel::mpsc::Receiver<(
+                Uuid,
+                shuttle::identity::protocol::WireEvent,
+                futures::channel::oneshot::Sender<shuttle::identity::protocol::WireEvent>,
+            )>,
+        >,
+    >,
+    identity_command: Option<futures::channel::mpsc::Sender<shuttle::identity::IdentityCommand>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -171,6 +187,7 @@ impl std::fmt::Debug for ResponseOption {
 }
 
 impl IdentityStore {
+    #[allow(clippy::type_complexity)]
     pub async fn new(
         ipfs: Ipfs,
         path: Option<PathBuf>,
@@ -178,13 +195,30 @@ impl IdentityStore {
         interval: Option<Duration>,
         tx: broadcast::Sender<MultiPassEventKind>,
         default_pfp_callback: Option<DefaultPfpFn>,
-        (discovery, relay, fetch_over_bitswap, share_platform, update_event, disable_image): (
+        (
+            discovery,
+            relay,
+            fetch_over_bitswap,
+            share_platform,
+            update_event,
+            disable_image,
+            identity_command,
+            _process_identity_event,
+        ): (
             Discovery,
             Vec<Multiaddr>,
             bool,
             bool,
             UpdateEvents,
             bool,
+            Option<futures::channel::mpsc::Sender<shuttle::identity::IdentityCommand>>,
+            Option<
+                futures::channel::mpsc::Receiver<(
+                    Uuid,
+                    shuttle::identity::protocol::WireEvent,
+                    futures::channel::oneshot::Sender<shuttle::identity::protocol::WireEvent>,
+                )>,
+            >,
         ),
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
@@ -226,6 +260,8 @@ impl IdentityStore {
             update_event,
             disable_image,
             default_pfp_callback,
+            identity_command,
+            _process_identity_event: Arc::new(_process_identity_event),
         };
 
         if store.path.is_some() {
@@ -1477,11 +1513,53 @@ impl IdentityStore {
         // Pin the dag
         self.ipfs.insert_pin(&root_cid, true).await?;
 
-        let identity = identity.resolve()?;
-
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
         self.enable_event();
+        
+        if let Some(sender) = self.identity_command.as_mut() {
+            if let DiscoveryConfig::Namespace {
+                discovery_type: DiscoveryType::RzPoint { addresses },
+                ..
+            } = self.discovery.discovery_config()
+            {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                for addr in addresses {
+                    let Some(peer_id) = addr.peer_id() else {
+                        continue;
+                    };
+                    if !self.ipfs.is_connected(peer_id).await.unwrap_or_default() {
+                        continue;
+                    }
+
+                    let (tx, rx) = futures::channel::oneshot::channel();
+                    let _ = sender
+                        .clone()
+                        .send(shuttle::identity::IdentityCommand::Register {
+                            peer_id,
+                            identity: identity.clone().into(),
+                            response: tx,
+                        })
+                        .await;
+
+                    match rx.await {
+                        Ok(Ok(_)) => {
+                            break;
+                        }
+                        Ok(Err(e)) => {
+                            log::error!("Error registering identity to {peer_id}: {e}");
+                            break;
+                        }
+                        Err(Canceled) => {
+                            log::error!("Channel been unexpectedly closed for {peer_id}");
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        let identity = identity.resolve()?;
         Ok(identity)
     }
 
@@ -1503,7 +1581,7 @@ impl IdentityStore {
 
         let mut preidentity = vec![];
 
-        let idents_docs = match &lookup {
+        let mut idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
             LookupBy::DidKey(pubkey) => {
@@ -1616,6 +1694,59 @@ impl IdentityStore {
                 .cloned()
                 .collect::<Vec<_>>(),
         };
+        if idents_docs.is_empty() {
+            if let Some(sender) = self.identity_command.clone().as_mut() {
+                let kind = match lookup {
+                    LookupBy::DidKey(did) => shuttle::identity::protocol::Lookup::PublicKey { did },
+                    LookupBy::DidKeys(list) => {
+                        shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
+                    }
+                    LookupBy::Username(username) => {
+                        shuttle::identity::protocol::Lookup::Username { username, count: 0 }
+                    }
+                    LookupBy::ShortId(short_id) => shuttle::identity::protocol::Lookup::ShortId {
+                        short_id: short_id.try_into()?,
+                    },
+                };
+                if let DiscoveryConfig::Namespace {
+                    discovery_type: DiscoveryType::RzPoint { addresses },
+                    ..
+                } = self.discovery.discovery_config()
+                {
+                    for addr in addresses {
+                        let Some(peer_id) = addr.peer_id() else {
+                            continue;
+                        };
+                        if !self.ipfs.is_connected(peer_id).await.unwrap_or_default() {
+                            continue;
+                        }
+
+                        let (tx, rx) = futures::channel::oneshot::channel();
+                        let _ = sender
+                            .send(shuttle::identity::IdentityCommand::Lookup {
+                                peer_id,
+                                kind: kind.clone(),
+                                response: tx,
+                            })
+                            .await;
+
+                        match rx.await {
+                            Ok(Ok(list)) => {
+                                idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
+                                break;
+                            }
+                            Ok(Err(e)) => {
+                                error!("Error registering identity to {peer_id}: {e}");
+                            }
+                            Err(Canceled) => {
+                                error!("Channel been unexpectedly closed for {peer_id}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         let mut list = idents_docs
             .iter()

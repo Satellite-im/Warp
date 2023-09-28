@@ -38,3 +38,5 @@ dotenv = "0.15"
 base64 = "0.21"
 
 bs58 = "0.4"
+
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -39,6 +39,8 @@ bincode.workspace = true
 bayespam = "1.1.0"
 bytes.workspace = true
 
+shuttle = { path = "../../tools/shuttle" }
+
 [dev-dependencies]
 fdlimit = "0.2"
 bs58 = "0.4"
