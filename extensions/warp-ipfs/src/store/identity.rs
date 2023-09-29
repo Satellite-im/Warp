@@ -1560,16 +1560,20 @@ impl IdentityStore {
                         })
                         .await;
 
-                    match rx.await {
-                        Ok(Ok(_)) => {
+                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                        Ok(Ok(Ok(_))) => {
                             break;
                         }
-                        Ok(Err(e)) => {
+                        Ok(Ok(Err(e))) => {
                             log::error!("Error registering identity to {peer_id}: {e}");
                             break;
                         }
-                        Err(Canceled) => {
+                        Ok(Err(Canceled)) => {
                             log::error!("Channel been unexpectedly closed for {peer_id}");
+                            continue;
+                        }
+                        Err(_) => {
+                            log::error!("Request timeout for {peer_id}");
                             continue;
                         }
                     }
@@ -1745,17 +1749,22 @@ impl IdentityStore {
                             })
                             .await;
 
-                        match rx.await {
-                            Ok(Ok(list)) => {
+                        match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                            Ok(Ok(Ok(list))) => {
+                                //TODO: Store into dag for caching
                                 idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
                                 break;
                             }
-                            Ok(Err(e)) => {
+                            Ok(Ok(Err(e))) => {
                                 error!("Error registering identity to {peer_id}: {e}");
                                 break;
                             }
-                            Err(Canceled) => {
+                            Ok(Err(Canceled)) => {
                                 error!("Channel been unexpectedly closed for {peer_id}");
+                                continue;
+                            }
+                            Err(_) => {
+                                error!("Request timed out for {peer_id}");
                                 continue;
                             }
                         }

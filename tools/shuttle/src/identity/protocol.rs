@@ -82,7 +82,7 @@ pub enum Synchronized {
 #[serde(rename_all = "snake_case")]
 pub enum SynchronizedResponse {
     Ok {
-        identity: Option<IdentityDocument>,
+        identity: IdentityDocument,
         package: Option<Vec<u8>>,
     },
     Error(SynchronizedError),
