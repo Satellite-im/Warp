@@ -68,7 +68,7 @@ use warp::multipass::{
     MultiPass, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 
-use crate::config::Bootstrap;
+use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
 use crate::store::{ecdh_decrypt, ecdh_encrypt};
 
@@ -456,6 +456,27 @@ impl WarpIpfs {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
+
+        if let config::Discovery::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = &config.store_setting.discovery
+        {
+            for mut addr in addresses.iter().cloned() {
+                let Some(peer_id) = addr.extract_peer_id() else {
+                    continue;
+                };
+
+                if let Err(e) = ipfs.add_peer(peer_id, addr).await {
+                    error!("Error adding peer to address book {e}");
+                    continue;
+                }
+
+                if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
+                    let _ = ipfs.connect(peer_id).await;
+                }
+            }
+        }
 
         let discovery = Discovery::new(
             ipfs.clone(),

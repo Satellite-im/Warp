@@ -118,11 +118,6 @@ impl Discovery {
                         continue;
                     };
 
-                    if let Err(e) = self.ipfs.add_peer(peer_id, addr).await {
-                        log::error!("Error adding peer to address book {e}");
-                        continue;
-                    }
-
                     peers.push(peer_id);
                 }
 
