@@ -391,23 +391,19 @@ impl ConversationDocument {
                         continue
                     }
                 }
-
                 if let Ok(message) = document.resolve(&ipfs, &did, keystore.as_ref()).await {
                     if option.pinned() && !message.pinned() {
                         continue;
                     }
-                    if let Some(keyword) = option.keyword() {
-                        if message
+                    let should_yield = if let Some(keyword) = option.keyword() {
+                         message
                             .value()
                             .iter()
                             .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
-                        {
-                            if let Some(remaining) = remaining.as_mut() {
-                                *remaining = remaining.saturating_sub(1);
-                            }
-                            yield message;
-                        }
                     } else {
+                        true
+                    };
+                    if should_yield {
                         if let Some(remaining) = remaining.as_mut() {
                             *remaining = remaining.saturating_sub(1);
                         }
