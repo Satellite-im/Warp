@@ -376,8 +376,11 @@ impl ConversationDocument {
 
         let ipfs = ipfs.clone();
         let stream = async_stream::stream! {
-
+            let mut remaining: Option<i64> = option.limit();
             for (index, document) in messages.iter().enumerate() {
+                if remaining.as_ref().map(|x| *x == 0).unwrap_or_default() {
+                    break;
+                }
                 if let Some(range) = option.range() {
                     if range.start > index || range.end < index {
                         continue
@@ -399,9 +402,15 @@ impl ConversationDocument {
                             .iter()
                             .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
                         {
+                            if let Some(remaining) = remaining.as_mut() {
+                                *remaining = remaining.saturating_sub(1);
+                            }
                             yield message;
                         }
                     } else {
+                        if let Some(remaining) = remaining.as_mut() {
+                            *remaining = remaining.saturating_sub(1);
+                        }
                         yield message;
                     }
                 }
