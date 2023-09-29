@@ -2,57 +2,63 @@ pub mod document;
 pub mod protocol;
 
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::HashMap,
     task::{Context, Poll},
     time::Duration,
 };
 
+use either::Either;
 use futures::{channel::oneshot::Canceled, FutureExt, StreamExt};
 use futures_timer::Delay;
 use rust_ipfs::{
     libp2p::{
         core::Endpoint,
+        request_response::{RequestId, ResponseChannel},
         swarm::{
-            derive_prelude::ConnectionEstablished, ConnectionClosed, ConnectionDenied,
-            ConnectionId, FromSwarm, NotifyHandler, OneShotHandler, PollParameters, THandler,
-            THandlerInEvent, THandlerOutEvent, ToSwarm,
+            ConnectionDenied, ConnectionId, FromSwarm, PollParameters, THandler, THandlerInEvent,
+            THandlerOutEvent, ToSwarm,
         },
     },
     Keypair, Multiaddr, NetworkBehaviour, PeerId,
 };
-use uuid::Uuid;
 
-use crate::PeerIdExt;
+use rust_ipfs::libp2p::request_response;
+use warp::crypto::DID;
 
 use self::{
     document::IdentityDocument,
-    protocol::{
-        IdentityProtocol, Lookup, LookupResponse, Message, Payload, Register, RegisterResponse,
-        WireEvent,
-    },
+    protocol::{Lookup, LookupResponse, Register, RegisterResponse, Request, Response},
 };
 
+#[allow(clippy::type_complexity)]
+#[allow(dead_code)]
 pub struct Behaviour {
-    pending_events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
-
-    connections: HashMap<PeerId, Vec<ConnectionId>>,
-
-    identity_cache: Vec<(IdentityDocument, Delay)>,
+    inner: request_response::json::Behaviour<protocol::Request, protocol::Response>,
+    registeration: HashMap<DID, IdentityDocument>,
+    identity_cache: HashMap<DID, (IdentityDocument, Delay)>,
 
     keypair: Keypair,
 
-    waiting_on_request: HashMap<Uuid, (PeerId, futures::channel::oneshot::Receiver<WireEvent>)>,
-    waiting_on_response: HashMap<Uuid, (IdentityResponse, Delay)>,
+    waiting_on_request: HashMap<
+        RequestId,
+        futures::channel::oneshot::Receiver<(ResponseChannel<Response>, Either<Request, Response>)>,
+    >,
+
+    waiting_on_response: HashMap<RequestId, IdentityResponse>,
 
     process_event: futures::channel::mpsc::Sender<(
-        Uuid,
-        WireEvent,
-        futures::channel::oneshot::Sender<WireEvent>,
+        RequestId,
+        ResponseChannel<Response>,
+        either::Either<Request, Response>,
+        futures::channel::oneshot::Sender<(
+            ResponseChannel<Response>,
+            either::Either<Request, Response>,
+        )>,
     )>,
 
     process_command: Option<futures::channel::mpsc::Receiver<IdentityCommand>>,
 
-    queue_event: HashMap<PeerId, Vec<(Uuid, WireEvent)>>,
+    queue_event: HashMap<RequestId, (Option<ResponseChannel<Response>>, Either<Request, Response>)>,
 }
 
 #[derive(Debug)]
@@ -81,18 +87,26 @@ enum IdentityResponse {
 }
 
 impl Behaviour {
+    #[allow(clippy::type_complexity)]
     pub fn new(
         keypair: &Keypair,
         process_event: futures::channel::mpsc::Sender<(
-            Uuid,
-            WireEvent,
-            futures::channel::oneshot::Sender<WireEvent>,
+            RequestId,
+            ResponseChannel<Response>,
+            either::Either<Request, Response>,
+            futures::channel::oneshot::Sender<(
+                ResponseChannel<Response>,
+                either::Either<Request, Response>,
+            )>,
         )>,
         process_command: Option<futures::channel::mpsc::Receiver<IdentityCommand>>,
     ) -> Self {
         Self {
-            pending_events: Default::default(),
-            connections: Default::default(),
+            inner: request_response::json::Behaviour::new(
+                [(protocol::PROTOCOL, request_response::ProtocolSupport::Full)],
+                Default::default(),
+            ),
+            registeration: Default::default(),
             identity_cache: Default::default(),
             keypair: keypair.clone(),
             process_event,
@@ -103,137 +117,24 @@ impl Behaviour {
         }
     }
 
-    fn construct_payload(
-        &self,
-        id: Option<Uuid>,
-        event: WireEvent,
-    ) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
-        construct_payload(id, &self.keypair, event)
-    }
-
-    fn validate_payload(
-        &self,
-        peer_id: PeerId,
-        payload: Payload,
-    ) -> Result<Option<WireEvent>, Box<dyn std::error::Error + Send + Sync>> {
-        validate_payload(peer_id, payload)
-    }
-}
-
-impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = OneShotHandler<IdentityProtocol, Payload, protocol::Message>;
-    type ToSwarm = void::Void;
-
-    fn handle_pending_inbound_connection(
+    fn process_request(
         &mut self,
-        _: ConnectionId,
-        _: &Multiaddr,
-        _: &Multiaddr,
-    ) -> Result<(), ConnectionDenied> {
-        Ok(())
-    }
-
-    fn handle_pending_outbound_connection(
-        &mut self,
-        _: ConnectionId,
-        _: Option<PeerId>,
-        _: &[Multiaddr],
-        _: Endpoint,
-    ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
-        Ok(vec![])
-    }
-
-    fn handle_established_inbound_connection(
-        &mut self,
-        _: ConnectionId,
-        _: PeerId,
-        _: &Multiaddr,
-        _: &Multiaddr,
-    ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(OneShotHandler::default())
-    }
-
-    fn handle_established_outbound_connection(
-        &mut self,
-        _: ConnectionId,
-        _: PeerId,
-        _: &Multiaddr,
-        _: Endpoint,
-    ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(OneShotHandler::default())
-    }
-
-    fn on_connection_handler_event(
-        &mut self,
-        peer_id: PeerId,
-        _: ConnectionId,
-        event: THandlerOutEvent<Self>,
+        request_id: RequestId,
+        request: Request,
+        channel: ResponseChannel<Response>,
     ) {
-        let payload = match event {
-            Message::Received { payload } => payload,
-            Message::Sent => {
-                return;
-            }
-        };
-
-        let id = payload.id;
-
-        let event = match self.validate_payload(peer_id, payload) {
-            Ok(Some(event)) => event,
-            Ok(None) => {
-                let Ok(payload) = self.construct_payload(
-                    Some(id),
-                    WireEvent::Error("Payload was invalid or corrupted".into()),
-                ) else {
-                    return;
-                };
-
-                //TODO: Score against peer so if this happens multiple times that the peer would be blacklisted for a duration
-
-                self.pending_events.push_back(ToSwarm::NotifyHandler {
-                    peer_id,
-                    handler: NotifyHandler::Any,
-                    event: payload,
-                });
-                return;
-            }
-            Err(e) => {
-                let Ok(payload) = self.construct_payload(Some(id), WireEvent::Error(e.to_string()))
-                else {
-                    return;
-                };
-                self.pending_events.push_back(ToSwarm::NotifyHandler {
-                    peer_id,
-                    handler: NotifyHandler::Any,
-                    event: payload,
-                });
-                return;
-            }
-        };
-
-        match &event {
-            WireEvent::Lookup(event) => match event {
+        if let Request::Lookup(event) = &request {
+            match event {
                 Lookup::PublicKey { did } => {
-                    if let Some(payload) = self
-                        .identity_cache
-                        .iter()
-                        .map(|(document, _)| document)
-                        .find(|document| document.did.eq(did))
-                        .and_then(|document| {
-                            self.construct_payload(
-                                Some(id),
-                                WireEvent::LookupResponse(LookupResponse::Ok {
-                                    identity: vec![document.clone()],
-                                }),
-                            )
-                            .ok()
+                    if let Some(response) =
+                        self.identity_cache.get_mut(did).map(|(document, delay)| {
+                            delay.reset(Duration::from_secs(30));
+                            Response::LookupResponse(LookupResponse::Ok {
+                                identity: vec![document.clone()],
+                            })
                         })
                     {
-                        self.pending_events.push_back(ToSwarm::NotifyHandler {
-                            peer_id,
-                            handler: NotifyHandler::Any,
-                            event: payload,
-                        });
+                        let _ = self.inner.send_response(channel, response);
                         return;
                     }
                 }
@@ -241,81 +142,120 @@ impl NetworkBehaviour for Behaviour {
                     let list = dids
                         .iter()
                         .filter_map(|did| {
-                            self.identity_cache.iter().find(|(doc, _)| doc.did.eq(did))
+                            self.identity_cache.get_mut(did).map(|(document, delay)| {
+                                delay.reset(Duration::from_secs(30));
+                                document.clone()
+                            })
                         })
-                        .map(|(document, _)| document)
-                        .cloned()
                         .collect::<Vec<_>>();
+
                     if !list.is_empty() {
-                        if let Ok(payload) = self.construct_payload(
-                            Some(id),
-                            WireEvent::LookupResponse(LookupResponse::Ok { identity: list }),
-                        ) {
-                            self.pending_events.push_back(ToSwarm::NotifyHandler {
-                                peer_id,
-                                handler: NotifyHandler::Any,
-                                event: payload,
-                            });
-                            return;
-                        }
+                        let response =
+                            Response::LookupResponse(LookupResponse::Ok { identity: list });
+
+                        let _ = self.inner.send_response(channel, response);
+                        return;
                     }
                 }
                 Lookup::ShortId { short_id } => {
-                    if let Some(payload) = self
+                    if let Some(response) = self
                         .identity_cache
-                        .iter()
-                        .map(|(document, _)| document)
-                        .find(|document| document.short_id.eq(short_id.as_ref()))
-                        .and_then(|document| {
-                            self.construct_payload(
-                                Some(id),
-                                WireEvent::LookupResponse(LookupResponse::Ok {
-                                    identity: vec![document.clone()],
-                                }),
-                            )
-                            .ok()
+                        .values_mut()
+                        .find(|(document, _)| document.short_id.eq(short_id.as_ref()))
+                        .map(|(document, delay)| {
+                            delay.reset(Duration::from_secs(30));
+                            Response::LookupResponse(LookupResponse::Ok {
+                                identity: vec![document.clone()],
+                            })
                         })
                     {
-                        self.pending_events.push_back(ToSwarm::NotifyHandler {
-                            peer_id,
-                            handler: NotifyHandler::Any,
-                            event: payload,
-                        });
+                        let _ = self.inner.send_response(channel, response);
                         return;
                     }
+                }
+                Lookup::Username { username, .. } if username.contains('#') => {
+                    //TODO: Score against invalid username scheme
+                    let split_data = username.split('#').collect::<Vec<&str>>();
+
+                    let list = if split_data.len() != 2 {
+                        self.identity_cache
+                            .values_mut()
+                            .filter(|(document, _)| {
+                                document
+                                    .username
+                                    .to_lowercase()
+                                    .eq(&username.to_lowercase())
+                            })
+                            .map(|(document, delay)| {
+                                delay.reset(Duration::from_secs(30));
+                                document.clone()
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        match (
+                            split_data.first().map(|s| s.to_lowercase()),
+                            split_data.last().map(|s| s.to_lowercase()),
+                        ) {
+                            (Some(name), Some(code)) => self
+                                .identity_cache
+                                .values_mut()
+                                .filter(|(ident, _)| {
+                                    ident.username.to_lowercase().eq(&name)
+                                        && String::from_utf8_lossy(&ident.short_id)
+                                            .to_lowercase()
+                                            .eq(&code)
+                                })
+                                .map(|(document, delay)| {
+                                    delay.reset(Duration::from_secs(30));
+                                    document.clone()
+                                })
+                                .collect::<Vec<_>>(),
+                            _ => vec![],
+                        }
+                    };
+
+                    if !list.is_empty() {
+                        let _ = self.inner.send_response(
+                            channel,
+                            Response::LookupResponse(LookupResponse::Ok { identity: list }),
+                        );
+                        return;
+                    };
                 }
                 Lookup::Username { username, .. } => {
                     let identity = self
                         .identity_cache
-                        .iter()
-                        .map(|(document, _)| document)
-                        .filter(|document| {
+                        .values_mut()
+                        .filter(|(document, _)| {
                             document
                                 .username
                                 .to_lowercase()
                                 .eq(&username.to_lowercase())
                         })
-                        .cloned()
+                        .map(|(document, delay)| {
+                            delay.reset(Duration::from_secs(30));
+                            document.clone()
+                        })
                         .collect::<Vec<_>>();
 
                     if !identity.is_empty() {
-                        let payload = self
-                            .construct_payload(
-                                Some(id),
-                                WireEvent::LookupResponse(LookupResponse::Ok { identity }),
-                            )
-                            .expect("To construct");
-                        self.pending_events.push_back(ToSwarm::NotifyHandler {
-                            peer_id,
-                            handler: NotifyHandler::Any,
-                            event: payload,
-                        });
+                        let response = Response::LookupResponse(LookupResponse::Ok { identity });
+
+                        let _ = self.inner.send_response(channel, response);
                         return;
                     }
                 }
-            },
-            WireEvent::RegisterResponse(response) => {
-                let res = match self.waiting_on_response.remove(&id).map(|(r, _)| r) {
+            }
+        }
+
+        self.queue_event
+            .insert(request_id, (Some(channel), Either::Left(request)));
+    }
+
+    fn process_response(&mut self, id: RequestId, response: Response) {
+        match response {
+            Response::RegisterResponse(response) => {
+                let res = match self.waiting_on_response.remove(&id) {
                     Some(IdentityResponse::Register { response }) => response,
                     _ => return,
                 };
@@ -324,24 +264,33 @@ impl NetworkBehaviour for Behaviour {
                     RegisterResponse::Ok => {
                         let _ = res.send(Ok(()));
                     }
-                    RegisterResponse::Error(protocol::RegisterError::IdentityExist { .. }) => {
+                    RegisterResponse::Error(protocol::RegisterError::IdentityExist) => {
                         let _ = res.send(Err(warp::error::Error::IdentityExist));
+                    }
+                    RegisterResponse::Error(
+                        protocol::RegisterError::IdentityVerificationFailed,
+                    ) => {
+                        let _ = res.send(Err(warp::error::Error::IdentityInvalid));
                     }
                     RegisterResponse::Error(protocol::RegisterError::None) => {
                         //TODO?
                         let _ = res.send(Ok(()));
                     }
                 }
-                return;
             }
-            WireEvent::LookupResponse(response) => {
-                let res = match self.waiting_on_response.remove(&id).map(|(r, _)| r) {
+            Response::LookupResponse(response) => {
+                let res = match self.waiting_on_response.remove(&id) {
                     Some(IdentityResponse::Lookup { response }) => response,
                     _ => return,
                 };
 
                 match response {
                     LookupResponse::Ok { identity } => {
+                        for id in identity.iter().map(|doc| &doc.did) {
+                            if let Some((_, delay)) = self.identity_cache.get_mut(id) {
+                                delay.reset(Duration::from_secs(30));
+                            }
+                        }
                         let _ = res.send(Ok(identity.clone()));
                     }
                     LookupResponse::Error(
@@ -350,60 +299,89 @@ impl NetworkBehaviour for Behaviour {
                         let _ = res.send(Err(warp::error::Error::IdentityDoesntExist));
                     }
                 }
-                return;
             }
             _ => {}
         }
+    }
+}
 
-        self.queue_event
-            .entry(peer_id)
-            .or_default()
-            .push((id, event));
+impl NetworkBehaviour for Behaviour {
+    type ConnectionHandler = <request_response::json::Behaviour<
+        protocol::Request,
+        protocol::Response,
+    > as NetworkBehaviour>::ConnectionHandler;
+    type ToSwarm = void::Void;
+
+    fn handle_pending_inbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<(), ConnectionDenied> {
+        self.inner
+            .handle_pending_inbound_connection(connection_id, local_addr, remote_addr)
+    }
+
+    fn handle_pending_outbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        maybe_peer: Option<PeerId>,
+        addresses: &[Multiaddr],
+        effective_role: Endpoint,
+    ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
+        self.inner.handle_pending_outbound_connection(
+            connection_id,
+            maybe_peer,
+            addresses,
+            effective_role,
+        )
+    }
+
+    fn handle_established_inbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer: PeerId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        self.inner.handle_established_inbound_connection(
+            connection_id,
+            peer,
+            local_addr,
+            remote_addr,
+        )
+    }
+
+    fn handle_established_outbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer: PeerId,
+        addr: &Multiaddr,
+        role_override: Endpoint,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        self.inner
+            .handle_established_outbound_connection(connection_id, peer, addr, role_override)
+    }
+
+    fn on_connection_handler_event(
+        &mut self,
+        peer_id: PeerId,
+        connection_id: ConnectionId,
+        event: THandlerOutEvent<Self>,
+    ) {
+        self.inner
+            .on_connection_handler_event(peer_id, connection_id, event)
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
-        match event {
-            FromSwarm::ConnectionEstablished(ConnectionEstablished {
-                peer_id,
-                connection_id,
-                ..
-            }) => match self.connections.entry(peer_id) {
-                Entry::Occupied(mut entry) => {
-                    let connections = entry.get_mut();
-                    if !connections.contains(&connection_id) {
-                        connections.push(connection_id);
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(vec![connection_id]);
-                }
-            },
-            FromSwarm::ConnectionClosed(ConnectionClosed {
-                peer_id,
-                connection_id,
-                ..
-            }) => {
-                if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
-                    let connections = entry.get_mut();
-                    connections.retain(|conn| conn != &connection_id);
-                    if connections.is_empty() {
-                        entry.remove();
-                    }
-                }
-            }
-            _ => {}
-        }
+        self.inner.on_swarm_event(event)
     }
 
     fn poll(
         &mut self,
         cx: &mut Context,
-        _: &mut impl PollParameters,
+        params: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
-        if let Some(event) = self.pending_events.pop_front() {
-            return Poll::Ready(event);
-        }
-
         if let Some(rx) = self.process_command.as_mut() {
             loop {
                 match rx.poll_next_unpin(cx) {
@@ -413,66 +391,22 @@ impl NetworkBehaviour for Behaviour {
                             identity,
                             response,
                         } => {
-                            let payload = match construct_payload(
-                                None,
-                                &self.keypair,
-                                WireEvent::Register(Register { document: identity }),
-                            ) {
-                                Ok(payload) => payload,
-                                Err(e) => {
-                                    let _ = response.send(Err(warp::error::Error::Boxed(e)));
-                                    continue;
-                                }
-                            };
-
-                            let id = payload.id;
-
-                            self.pending_events.push_back(ToSwarm::NotifyHandler {
-                                peer_id,
-                                handler: NotifyHandler::Any,
-                                event: payload,
-                            });
-
-                            self.waiting_on_response.insert(
-                                id,
-                                (
-                                    IdentityResponse::Register { response },
-                                    Delay::new(Duration::from_secs(30)),
-                                ),
+                            let id = self.inner.send_request(
+                                &peer_id,
+                                Request::Register(Register { document: identity }),
                             );
+                            self.waiting_on_response
+                                .insert(id, IdentityResponse::Register { response });
                         }
                         IdentityCommand::Lookup {
                             peer_id,
                             kind,
                             response,
                         } => {
-                            let payload = match construct_payload(
-                                None,
-                                &self.keypair,
-                                WireEvent::Lookup(kind),
-                            ) {
-                                Ok(payload) => payload,
-                                Err(e) => {
-                                    let _ = response.send(Err(warp::error::Error::Boxed(e)));
-                                    continue;
-                                }
-                            };
+                            let id = self.inner.send_request(&peer_id, Request::Lookup(kind));
 
-                            let id = payload.id;
-
-                            self.pending_events.push_back(ToSwarm::NotifyHandler {
-                                peer_id,
-                                handler: NotifyHandler::Any,
-                                event: payload,
-                            });
-
-                            self.waiting_on_response.insert(
-                                id,
-                                (
-                                    IdentityResponse::Lookup { response },
-                                    Delay::new(Duration::from_secs(10)),
-                                ),
-                            );
+                            self.waiting_on_response
+                                .insert(id, IdentityResponse::Lookup { response });
                         }
                     },
                     Poll::Ready(None) => {
@@ -484,44 +418,121 @@ impl NetworkBehaviour for Behaviour {
             }
         }
 
-        self.waiting_on_response
-            .retain(|_, (_, timer)| timer.poll_unpin(cx).is_pending());
+        loop {
+            match self.inner.poll(cx, params) {
+                Poll::Ready(ToSwarm::GenerateEvent(request_response::Event::Message {
+                    peer: _,
+                    message,
+                })) => {
+                    match message {
+                        request_response::Message::Request {
+                            request_id,
+                            request,
+                            channel,
+                        } => self.process_request(request_id, request, channel),
 
-        self.queue_event.retain(|peer_id, events| {
-            if events.is_empty() {
-                return false;
-            }
+                        request_response::Message::Response {
+                            request_id,
+                            response,
+                        } => self.process_response(request_id, response),
+                    }
 
-            match self.process_event.poll_ready(cx) {
+                    continue;
+                }
+                Poll::Ready(ToSwarm::GenerateEvent(request_response::Event::InboundFailure {
+                    peer: _,
+                    request_id,
+                    error,
+                })) => {
+                    if let Some(ch) = self.waiting_on_response.remove(&request_id) {
+                        match ch {
+                            IdentityResponse::Register { response } => {
+                                let _ =
+                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
+                            IdentityResponse::Lookup { response } => {
+                                let _ =
+                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
+                        }
+                    }
+                    self.queue_event.remove(&request_id);
+                    self.waiting_on_request.remove(&request_id);
+                    continue;
+                }
+                Poll::Ready(ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
+                    peer: _,
+                    request_id: _,
+                })) => {
+                    continue;
+                }
+                Poll::Ready(ToSwarm::GenerateEvent(request_response::Event::OutboundFailure {
+                    peer: _,
+                    request_id,
+                    error,
+                })) => {
+                    if let Some(ch) = self.waiting_on_response.remove(&request_id) {
+                        match ch {
+                            IdentityResponse::Register { response } => {
+                                let _ =
+                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
+                            IdentityResponse::Lookup { response } => {
+                                let _ =
+                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
+                        }
+                    }
+                    self.queue_event.remove(&request_id);
+                    self.waiting_on_request.remove(&request_id);
+                    continue;
+                }
+                Poll::Ready(
+                    other @ (ToSwarm::ExternalAddrConfirmed(_)
+                    | ToSwarm::ExternalAddrExpired(_)
+                    | ToSwarm::NewExternalAddrCandidate(_)
+                    | ToSwarm::NotifyHandler { .. }
+                    | ToSwarm::Dial { .. }
+                    | ToSwarm::CloseConnection { .. }
+                    | ToSwarm::ListenOn { .. }
+                    | ToSwarm::RemoveListener { .. }),
+                ) => {
+                    let new_to_swarm =
+                        other.map_out(|_| unreachable!("we manually map `GenerateEvent` variants"));
+                    return Poll::Ready(new_to_swarm);
+                }
+                Poll::Pending => break,
+            };
+        }
+
+        self.queue_event.retain(
+            |id, (channel, req_res)| match self.process_event.poll_ready(cx) {
                 Poll::Ready(Ok(_)) => {
-                    let (id, event) = events.pop().expect("Events not empty");
                     let (tx, rx) = futures::channel::oneshot::channel();
-                    self.waiting_on_request.insert(id, (*peer_id, rx));
+                    if let Some(channel) = channel.take() {
+                        self.waiting_on_request.insert(*id, rx);
+                        let _ = self
+                            .process_event
+                            .start_send((*id, channel, req_res.clone(), tx));
+                    }
 
-                    let _ = self.process_event.start_send((id, event, tx));
-
-                    !events.is_empty()
+                    false
                 }
                 Poll::Ready(Err(_)) => false,
                 Poll::Pending => true,
-            }
-        });
+            },
+        );
 
         //
         self.waiting_on_request
-            .retain(|id, (peer_id, receiver)| match receiver.poll_unpin(cx) {
-                Poll::Ready(Ok(event)) => {
-                    let payload = match construct_payload(Some(*id), &self.keypair, event) {
-                        Ok(event) => event,
-                        Err(_e) => return false,
+            .retain(|_id, receiver| match receiver.poll_unpin(cx) {
+                Poll::Ready(Ok((ch, which))) => {
+                    match which {
+                        Either::Left(_req) => unreachable!(),
+                        Either::Right(res) => {
+                            let _ = self.inner.send_response(ch, res);
+                        }
                     };
-
-                    self.pending_events.push_back(ToSwarm::NotifyHandler {
-                        peer_id: *peer_id,
-                        handler: NotifyHandler::Any,
-                        event: payload,
-                    });
-
                     false
                 }
                 Poll::Ready(Err(Canceled)) => false,
@@ -530,50 +541,51 @@ impl NetworkBehaviour for Behaviour {
 
         // Clear out any cache if which timer expired
         self.identity_cache
-            .retain_mut(|(_, timer)| timer.poll_unpin(cx).is_pending());
+            .retain(|_, (_, timer)| timer.poll_unpin(cx).is_pending());
+
         Poll::Pending
     }
 }
 
-fn construct_payload(
-    id: Option<Uuid>,
-    keypair: &Keypair,
-    event: WireEvent,
-) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
-    let id = id.unwrap_or_else(Uuid::new_v4);
-    let mut payload = Payload {
-        id,
-        event,
-        signature: vec![],
-    };
+// fn construct_payload(
+//     id: Option<Uuid>,
+//     keypair: &Keypair,
+//     event: WireEvent,
+// ) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
+//     let id = id.unwrap_or_else(Uuid::new_v4);
+//     let mut payload = Payload {
+//         id,
+//         event,
+//         signature: vec![],
+//     };
 
-    let bytes = serde_json::to_vec(&payload)?;
+//     let bytes = serde_json::to_vec(&payload)?;
 
-    let signature = keypair.sign(&bytes)?;
+//     let signature = keypair.sign(&bytes)?;
 
-    payload.signature = signature;
+//     payload.signature = signature;
 
-    Ok(payload)
-}
+//     Ok(payload)
+// }
 
-fn validate_payload(
-    peer_id: PeerId,
-    payload: Payload,
-) -> Result<Option<WireEvent>, Box<dyn std::error::Error + Send + Sync>> {
-    let mut payload = payload.clone();
-    let public_key = peer_id.to_public_key()?;
+// fn validate_payload(
+//     peer_id: PeerId,
+//     payload: Payload,
+// ) -> Result<Option<WireEvent>, Box<dyn std::error::Error + Send + Sync>> {
+//     let mut payload = payload.clone();
+//     let public_key = peer_id.to_public_key()?;
 
-    let signature = std::mem::take(&mut payload.signature);
+//     let signature = std::mem::take(&mut payload.signature);
 
-    if signature.is_empty() {
-        return Ok(None);
-    }
+//     if signature.is_empty() {
+//         return Ok(None);
+//     }
 
-    let bytes = serde_json::to_vec(&payload)?;
+//     let bytes = serde_json::to_vec(&payload)?;
 
-    if !public_key.verify(&bytes, &signature) {
-        return Ok(None);
-    }
+//     if !public_key.verify(&bytes, &signature) {
+//         return Ok(None);
+//     }
 
-    Ok(Some(payload.event))
-}
+//     Ok(Some(payload.event))
+// }

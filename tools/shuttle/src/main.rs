@@ -1,21 +1,14 @@
+use either::Either;
 // use libipld::serde::from_ipld;
 use shuttle::identity::{
     self,
     document::IdentityDocument,
     // document::IdentityDocument,
-    protocol::{
-        Lookup, LookupResponse, Register, RegisterResponse, Synchronized, SynchronizedResponse,
-        WireEvent,
-    },
+    protocol::{Lookup, LookupResponse, Register, RegisterResponse, Response},
 };
 use warp::crypto::DID;
 
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    str::FromStr,
-    time::Duration,
-};
+use std::{collections::HashMap, path::PathBuf, str::FromStr, time::Duration};
 
 use base64::{
     alphabet::STANDARD,
@@ -95,6 +88,9 @@ struct Opt {
     #[clap(long)]
     trusted_nodes: Vec<Multiaddr>,
 
+    #[clap(long)]
+    keyfile: Option<PathBuf>,
+
     /// Path to the ipfs instance
     #[clap(long)]
     path: Option<PathBuf>,
@@ -107,18 +103,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
     let opts = Opt::parse();
 
-    let keypair_str = std::env::var("KEYPAIR").ok().map(PathBuf::from);
-    let path = std::env::var("PATH").ok().map(PathBuf::from);
-    let listen_addr = std::env::var("LISTEN_ADDR").ok();
+    // let keypair_str = std::env::var("KEYPAIR").ok().map(PathBuf::from);
+    // let path = std::env::var("PATH").ok().map(PathBuf::from);
+    // let listen_addr = std::env::var("LISTEN_ADDR").ok();
+    let path = opts.path;
 
-    let path = match (path, opts.path) {
-        (Some(path), None) => Some(path),
-        (None, Some(path)) => Some(path),
-        (Some(path_env), Some(cli_path)) => path_env.eq(&cli_path).then_some(path_env),
-        (None, None) => None,
-    };
+    if let Some(path) = path.as_ref() {
+        tokio::fs::create_dir_all(path).await?;
+    }
 
-    let keypair = match keypair_str {
+    let keypair = match opts.keyfile {
         Some(kp) => match kp.is_file() {
             true => {
                 let kp_str = tokio::fs::read_to_string(&kp).await?;
@@ -127,7 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             false => {
                 let k = Keypair::generate_ed25519();
                 let encoded_kp = encode_kp(&k)?;
-                tokio::fs::write(&kp, &encoded_kp).await?;
+                let kp = path.as_ref().map(|p| p.join(kp.clone())).unwrap_or(kp);
+                tokio::fs::write(kp, &encoded_kp).await?;
                 k
             }
         },
@@ -190,38 +185,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             enable_quic: true,
             support_quic_draft_29: true,
             ..Default::default()
-        });
+        })
+        .listen_as_external_addr();
 
-    let str_to_maddr = |addr: &str| -> Vec<Multiaddr> {
-        let mut addrs = addr
-            .split(',')
-            .filter_map(|addr| Multiaddr::from_str(addr).ok())
-            .collect::<Vec<_>>();
+    // let str_to_maddr = |addr: &str| -> Vec<Multiaddr> {
+    //     let mut addrs = addr
+    //         .split(',')
+    //         .filter_map(|addr| Multiaddr::from_str(addr).ok())
+    //         .collect::<Vec<_>>();
 
-        if addrs.is_empty() {
-            addrs = vec![
-                "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
-                "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
-            ];
-        }
-        addrs
-    };
+    //     if addrs.is_empty() {
+    //         addrs = vec![
+    //             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+    //             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+    //         ];
+    //     }
+    //     addrs
+    // };
 
-    let addrs = match (listen_addr, opts.listen_addr.as_slice()) {
-        (Some(addr), []) => str_to_maddr(&addr),
-        (None, []) => vec![
+    let addrs = match opts.listen_addr.as_slice() {
+        [] => vec![
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
         ],
-        (None, addrs) => addrs.to_vec(),
-        (Some(maddr), addrs) => {
-            let mut merged: HashSet<Multiaddr> = HashSet::from_iter(addrs.iter().cloned());
-            let addrs = str_to_maddr(&maddr);
-
-            merged.extend(addrs);
-
-            Vec::from_iter(merged)
-        }
+        addrs => addrs.to_vec(),
     };
 
     if let Some(path) = path {
@@ -233,79 +220,195 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ipfs = uninitialized.start().await?;
 
     initialize_document(&ipfs, local_peer_id).await?;
-    let mut temp_registeration: HashMap<DID, IdentityDocument> = HashMap::new();
 
-    while let Some((_id, event, res)) = id_event_rx.next().await {
-        match event {
-            WireEvent::Register(Register { document }) => {
-                if temp_registeration.contains_key(&document.did) {
-                    let _ = res.send(WireEvent::RegisterResponse(RegisterResponse::Error(
-                        identity::protocol::RegisterError::IdentityExist { did: document.did },
-                    )));
-                    continue;
+    //TODO: Move into ipld once protocol is setup
+    let mut temp_registeration: HashMap<DID, IdentityDocument> = HashMap::new();
+    let mut _temp_package: HashMap<DID, Vec<u8>> = HashMap::new();
+    let mut _friends_router: HashMap<DID, ()> = HashMap::new();
+
+    while let Some((_id, ch, which, resp)) = id_event_rx.next().await {
+        match which {
+            Either::Left(req) => match req {
+                identity::protocol::Request::Register(Register { document }) => {
+                    if temp_registeration.contains_key(&document.did) {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityExist,
+                            ))),
+                        ));
+                        continue;
+                    }
+                    if document.verify().is_err() {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            ))),
+                        ));
+
+                        continue;
+                    }
+
+                    temp_registeration.insert(document.did.clone(), document);
+
+                    let _ = resp.send((
+                        ch,
+                        Either::Right(Response::RegisterResponse(RegisterResponse::Ok)),
+                    ));
+
+                    // let did_key = document.did.to_string();
+                    // let ipfs = ipfs.clone();
+                    // let _result = async move {
+                    //     let path = IpfsPath::from(local_peer_id);
+
+                    //     if ipfs
+                    //         .get_dag(path.sub_path("identities")?.sub_path(&did_key)?)
+                    //         .await
+                    //         .is_ok()
+                    //     {
+                    //         return Err(Box::new(warp::error::Error::IdentityExist) as Box<_>);
+                    //     }
+
+                    //     Ok::<_, Box<dyn std::error::Error>>(())
+                    // };
+                }
+                identity::protocol::Request::Synchronized(_) => todo!(),
+                identity::protocol::Request::Lookup(Lookup::PublicKey { did }) => {
+                    let event = match temp_registeration.get(&did) {
+                        Some(document) => {
+                            Either::Right(Response::LookupResponse(LookupResponse::Ok {
+                                identity: vec![document.clone()],
+                            }))
+                        }
+                        None => Either::Right(Response::LookupResponse(LookupResponse::Error(
+                            identity::protocol::LookupError::DoesntExist,
+                        ))),
+                    };
+
+                    let _ = resp.send((ch, event));
+                }
+                identity::protocol::Request::Lookup(Lookup::PublicKeys { dids }) => {
+                    let list = dids
+                        .iter()
+                        .filter_map(|did| temp_registeration.get(did))
+                        .cloned()
+                        .collect::<Vec<_>>();
+
+                    let event = match list.is_empty() {
+                        false => Either::Right(Response::LookupResponse(LookupResponse::Ok {
+                            identity: list,
+                        })),
+                        true => Either::Right(Response::LookupResponse(LookupResponse::Error(
+                            identity::protocol::LookupError::DoesntExist,
+                        ))),
+                    };
+
+                    let _ = resp.send((ch, event));
                 }
 
-                temp_registeration.insert(document.did.clone(), document);
+                identity::protocol::Request::Lookup(Lookup::Username { username, .. })
+                    if username.contains('#') =>
+                {
+                    //TODO: Score against invalid username scheme
+                    let split_data = username.split('#').collect::<Vec<&str>>();
 
-                let _ = res.send(WireEvent::RegisterResponse(
-                    identity::protocol::RegisterResponse::Ok,
-                ));
-                // let did_key = document.did.to_string();
-                // let ipfs = ipfs.clone();
-                // let _result = async move {
-                //     let path = IpfsPath::from(local_peer_id);
+                    let list = if split_data.len() != 2 {
+                        temp_registeration
+                            .values()
+                            .filter(|document| {
+                                document
+                                    .username
+                                    .to_lowercase()
+                                    .eq(&username.to_lowercase())
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    } else {
+                        match (
+                            split_data.first().map(|s| s.to_lowercase()),
+                            split_data.last().map(|s| s.to_lowercase()),
+                        ) {
+                            (Some(name), Some(code)) => temp_registeration
+                                .values()
+                                .filter(|ident| {
+                                    ident.username.to_lowercase().eq(&name)
+                                        && String::from_utf8_lossy(&ident.short_id)
+                                            .to_lowercase()
+                                            .eq(&code)
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                            _ => vec![],
+                        }
+                    };
 
-                //     if ipfs
-                //         .get_dag(path.sub_path("identities")?.sub_path(&did_key)?)
-                //         .await
-                //         .is_ok()
-                //     {
-                //         return Err(Box::new(warp::error::Error::IdentityExist) as Box<_>);
-                //     }
+                    let event = match list.is_empty() {
+                        false => Either::Right(Response::LookupResponse(LookupResponse::Ok {
+                            identity: list,
+                        })),
+                        true => Either::Right(Response::LookupResponse(LookupResponse::Error(
+                            identity::protocol::LookupError::DoesntExist,
+                        ))),
+                    };
 
-                //     Ok::<_, Box<dyn std::error::Error>>(())
-                // };
-            }
-            WireEvent::RegisterResponse(RegisterResponse::Ok) => {}
-            WireEvent::RegisterResponse(RegisterResponse::Error(..)) => {}
-            WireEvent::Synchronized(Synchronized::Store { .. }) => {}
-            WireEvent::Synchronized(Synchronized::Fetch { .. }) => {}
-            WireEvent::SynchronizedResponse(SynchronizedResponse::Ok { .. }) => {}
-            WireEvent::SynchronizedResponse(SynchronizedResponse::Error { .. }) => {}
-            WireEvent::Lookup(Lookup::PublicKey { did }) => {
-                let event = match temp_registeration.get(&did) {
-                    Some(document) => WireEvent::LookupResponse(LookupResponse::Ok {
-                        identity: vec![document.clone()],
-                    }),
-                    None => WireEvent::LookupResponse(LookupResponse::Error(
-                        identity::protocol::LookupError::DoesntExist,
-                    )),
-                };
+                    let _ = resp.send((ch, event));
+                }
+                identity::protocol::Request::Lookup(Lookup::Username { username, .. }) => {
+                    //TODO: Score against invalid username scheme
+                    let list = temp_registeration
+                        .values()
+                        .filter(|document| {
+                            document
+                                .username
+                                .to_lowercase()
+                                .contains(&username.to_lowercase())
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
 
-                let _ = res.send(event);
-            }
-            WireEvent::Lookup(Lookup::PublicKeys { dids }) => {
-                let list = dids
-                    .iter()
-                    .filter_map(|did| temp_registeration.get(did))
-                    .cloned()
-                    .collect::<Vec<_>>();
+                    let event = match list.is_empty() {
+                        false => Either::Right(Response::LookupResponse(LookupResponse::Ok {
+                            identity: list,
+                        })),
+                        true => Either::Right(Response::LookupResponse(LookupResponse::Error(
+                            identity::protocol::LookupError::DoesntExist,
+                        ))),
+                    };
 
-                let event = match list.is_empty() {
-                    true => WireEvent::LookupResponse(LookupResponse::Error(
-                        identity::protocol::LookupError::DoesntExist,
-                    )),
-                    false => WireEvent::LookupResponse(LookupResponse::Ok { identity: list }),
-                };
+                    let _ = resp.send((ch, event));
+                }
+                identity::protocol::Request::Lookup(Lookup::ShortId { short_id }) => {
+                    let Some(document) = temp_registeration
+                        .values()
+                        .find(|document| document.short_id.eq(short_id.as_ref()))
+                    else {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::LookupResponse(LookupResponse::Error(
+                                identity::protocol::LookupError::DoesntExist,
+                            ))),
+                        ));
+                        continue;
+                    };
 
-                let _ = res.send(event);
-            }
-            WireEvent::Lookup(Lookup::Username { .. }) => {}
-            WireEvent::Lookup(Lookup::ShortId { .. }) => {}
-            WireEvent::LookupResponse(LookupResponse::Ok { .. }) => {}
-            WireEvent::LookupResponse(LookupResponse::Error { .. }) => {}
-            WireEvent::Error(_) => {}
+                    let _ = resp.send((
+                        ch,
+                        Either::Right(Response::LookupResponse(LookupResponse::Ok {
+                            identity: vec![document.clone()],
+                        })),
+                    ));
+                }
+            },
+            Either::Right(_res) => {}
         }
+        // match event {
+        //     WireEvent::Lookup(Lookup::Username { .. }) => {}
+        //     WireEvent::Lookup(Lookup::ShortId { .. }) => {}
+        //     WireEvent::LookupResponse(LookupResponse::Ok { .. }) => {}
+        //     WireEvent::LookupResponse(LookupResponse::Error { .. }) => {}
+        //     WireEvent::Error(_) => {}
+        // }
     }
 
     tokio::signal::ctrl_c().await?;

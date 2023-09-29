@@ -13,7 +13,11 @@ use futures::{
     stream::BoxStream,
     SinkExt, StreamExt,
 };
-use ipfs::{p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, Multiaddr};
+use ipfs::{
+    libp2p::request_response::{RequestId, ResponseChannel},
+    p2p::MultiaddrExt,
+    Ipfs, IpfsPath, Keypair, Multiaddr,
+};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -23,7 +27,6 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
-use uuid::Uuid;
 
 use tokio::sync::broadcast;
 use tracing::{
@@ -102,9 +105,19 @@ pub struct IdentityStore {
     _process_identity_event: Arc<
         Option<
             futures::channel::mpsc::Receiver<(
-                Uuid,
-                shuttle::identity::protocol::WireEvent,
-                futures::channel::oneshot::Sender<shuttle::identity::protocol::WireEvent>,
+                RequestId,
+                ResponseChannel<shuttle::identity::protocol::Response>,
+                either::Either<
+                    shuttle::identity::protocol::Request,
+                    shuttle::identity::protocol::Response,
+                >,
+                futures::channel::oneshot::Sender<(
+                    ResponseChannel<shuttle::identity::protocol::Response>,
+                    either::Either<
+                        shuttle::identity::protocol::Request,
+                        shuttle::identity::protocol::Response,
+                    >,
+                )>,
             )>,
         >,
     >,
@@ -214,9 +227,19 @@ impl IdentityStore {
             Option<futures::channel::mpsc::Sender<shuttle::identity::IdentityCommand>>,
             Option<
                 futures::channel::mpsc::Receiver<(
-                    Uuid,
-                    shuttle::identity::protocol::WireEvent,
-                    futures::channel::oneshot::Sender<shuttle::identity::protocol::WireEvent>,
+                    RequestId,
+                    ResponseChannel<shuttle::identity::protocol::Response>,
+                    either::Either<
+                        shuttle::identity::protocol::Request,
+                        shuttle::identity::protocol::Response,
+                    >,
+                    futures::channel::oneshot::Sender<(
+                        ResponseChannel<shuttle::identity::protocol::Response>,
+                        either::Either<
+                            shuttle::identity::protocol::Request,
+                            shuttle::identity::protocol::Response,
+                        >,
+                    )>,
                 )>,
             >,
         ),
@@ -1516,25 +1539,20 @@ impl IdentityStore {
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
         self.enable_event();
-        
+
         if let Some(sender) = self.identity_command.as_mut() {
             if let DiscoveryConfig::Namespace {
                 discovery_type: DiscoveryType::RzPoint { addresses },
                 ..
             } = self.discovery.discovery_config()
             {
-                tokio::time::sleep(Duration::from_secs(2)).await;
                 for addr in addresses {
                     let Some(peer_id) = addr.peer_id() else {
                         continue;
                     };
-                    if !self.ipfs.is_connected(peer_id).await.unwrap_or_default() {
-                        continue;
-                    }
 
                     let (tx, rx) = futures::channel::oneshot::channel();
                     let _ = sender
-                        .clone()
                         .send(shuttle::identity::IdentityCommand::Register {
                             peer_id,
                             identity: identity.clone().into(),
@@ -1717,9 +1735,6 @@ impl IdentityStore {
                         let Some(peer_id) = addr.peer_id() else {
                             continue;
                         };
-                        if !self.ipfs.is_connected(peer_id).await.unwrap_or_default() {
-                            continue;
-                        }
 
                         let (tx, rx) = futures::channel::oneshot::channel();
                         let _ = sender
@@ -1737,6 +1752,7 @@ impl IdentityStore {
                             }
                             Ok(Err(e)) => {
                                 error!("Error registering identity to {peer_id}: {e}");
+                                break;
                             }
                             Err(Canceled) => {
                                 error!("Channel been unexpectedly closed for {peer_id}");
