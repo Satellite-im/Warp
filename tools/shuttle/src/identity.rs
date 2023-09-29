@@ -34,7 +34,6 @@ use self::{
 #[allow(dead_code)]
 pub struct Behaviour {
     inner: request_response::json::Behaviour<protocol::Request, protocol::Response>,
-    registeration: HashMap<DID, IdentityDocument>,
     identity_cache: HashMap<DID, (IdentityDocument, Delay)>,
 
     keypair: Keypair,
@@ -106,7 +105,6 @@ impl Behaviour {
                 [(protocol::PROTOCOL, request_response::ProtocolSupport::Full)],
                 Default::default(),
             ),
-            registeration: Default::default(),
             identity_cache: Default::default(),
             keypair: keypair.clone(),
             process_event,
