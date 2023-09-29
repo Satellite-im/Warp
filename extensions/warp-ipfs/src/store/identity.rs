@@ -1585,6 +1585,97 @@ impl IdentityStore {
         Ok(identity)
     }
 
+    pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
+        if let Some(sender) = self.identity_command.as_mut() {
+            if let DiscoveryConfig::Namespace {
+                discovery_type: DiscoveryType::RzPoint { addresses },
+                ..
+            } = self.discovery.discovery_config()
+            {
+                for addr in addresses {
+                    let Some(peer_id) = addr.peer_id() else {
+                        continue;
+                    };
+
+                    let (tx, rx) = futures::channel::oneshot::channel();
+                    let _ = sender
+                        .send(shuttle::identity::IdentityCommand::Fetch {
+                            peer_id,
+                            did: did.clone(),
+                            response: tx,
+                        })
+                        .await;
+
+                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                        Ok(Ok(Ok(package))) => {
+                            return Ok(package);
+                        }
+                        Ok(Ok(Err(e))) => {
+                            log::error!("Error registering identity to {peer_id}: {e}");
+                            break;
+                        }
+                        Ok(Err(Canceled)) => {
+                            log::error!("Channel been unexpectedly closed for {peer_id}");
+                            continue;
+                        }
+                        Err(_) => {
+                            log::error!("Request timeout for {peer_id}");
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        Err(Error::IdentityDoesntExist)
+    }
+
+    pub async fn export_identity_remote(&mut self, package: Vec<u8>) -> Result<(), Error> {
+        let document = self.own_identity_document().await?;
+
+        if let Some(sender) = self.identity_command.as_mut() {
+            if let DiscoveryConfig::Namespace {
+                discovery_type: DiscoveryType::RzPoint { addresses },
+                ..
+            } = self.discovery.discovery_config()
+            {
+                for addr in addresses {
+                    let Some(peer_id) = addr.peer_id() else {
+                        continue;
+                    };
+
+                    let (tx, rx) = futures::channel::oneshot::channel();
+                    let _ = sender
+                        .send(shuttle::identity::IdentityCommand::Synchronized {
+                            peer_id,
+                            identity: document.clone().into(),
+                            package: Some(package.clone()),
+                            response: tx,
+                        })
+                        .await;
+
+                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                        Ok(Ok(Ok(_))) => {
+                            break;
+                        }
+                        Ok(Ok(Err(e))) => {
+                            log::error!("Error registering identity to {peer_id}: {e}");
+                            break;
+                        }
+                        Ok(Err(Canceled)) => {
+                            log::error!("Channel been unexpectedly closed for {peer_id}");
+                            continue;
+                        }
+                        Err(_) => {
+                            log::error!("Request timeout for {peer_id}");
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn local_id_created(&self) -> bool {
         self.identity.read().await.is_some()
     }

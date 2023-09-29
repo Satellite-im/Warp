@@ -1065,13 +1065,39 @@ impl MultiPassImportExport for WarpIpfs {
             }
             IdentityImportOption::Locate {
                 location: ImportLocation::Remote,
-                ..
-            } => return Err(Error::Unimplemented),
+                passphrase,
+            } => {
+                let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
+                let bytes = Zeroizing::new(keypair.private_key_bytes());
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut self.tesseract,
+                    &passphrase,
+                    None,
+                    self.config.save_phrase,
+                    false,
+                )?;
+
+                self.init_ipfs(
+                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                        .map_err(|_| Error::PrivateKeyInvalid)?,
+                )
+                .await?;
+
+                let mut store = self.identity_store(false).await?;
+
+                let package = store.import_identity_remote(keypair.clone()).await?;
+                let decrypted_bundle = ecdh_decrypt(&keypair, None, package)?;
+                let exported_document =
+                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+
+                exported_document.verify()?;
+                return store.import_identity(exported_document).await;
+            }
         }
     }
 
     async fn export_identity<'a>(&mut self, location: ImportLocation<'a>) -> Result<(), Error> {
-        let store = self.identity_store(true).await?;
+        let mut store = self.identity_store(true).await?;
         let kp = store.get_keypair_did()?;
         let ipfs = self.ipfs()?;
         let document = store.get_root_document().await?;
@@ -1090,7 +1116,10 @@ impl MultiPassImportExport for WarpIpfs {
                 *buffer = encrypted_bundle;
                 Ok(())
             }
-            ImportLocation::Remote => return Err(Error::Unimplemented),
+            ImportLocation::Remote => {
+                store.export_identity_remote(encrypted_bundle).await?;
+                Ok(())
+            }
         }
     }
 }

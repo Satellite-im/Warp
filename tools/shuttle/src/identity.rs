@@ -73,6 +73,17 @@ pub enum IdentityCommand {
         response:
             futures::channel::oneshot::Sender<Result<Vec<IdentityDocument>, warp::error::Error>>,
     },
+    Synchronized {
+        peer_id: PeerId,
+        identity: IdentityDocument,
+        package: Option<Vec<u8>>,
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    Fetch {
+        peer_id: PeerId,
+        did: DID,
+        response: futures::channel::oneshot::Sender<Result<Vec<u8>, warp::error::Error>>,
+    },
 }
 
 enum IdentityResponse {
@@ -82,6 +93,12 @@ enum IdentityResponse {
     Lookup {
         response:
             futures::channel::oneshot::Sender<Result<Vec<IdentityDocument>, warp::error::Error>>,
+    },
+    Synchronized {
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    SynchronizedFetch {
+        response: futures::channel::oneshot::Sender<Result<Vec<u8>, warp::error::Error>>,
     },
 }
 
@@ -298,6 +315,37 @@ impl Behaviour {
                     }
                 }
             }
+            Response::SynchronizedResponse(response) => match response {
+                protocol::SynchronizedResponse::Ok { package, .. } => {
+                    match self.waiting_on_response.remove(&id) {
+                        Some(IdentityResponse::Synchronized { response }) => {
+                            let _ = response.send(Ok(()));
+                        }
+                        Some(IdentityResponse::SynchronizedFetch { response }) => {
+                            let package = package.ok_or(warp::error::Error::IdentityDoesntExist);
+                            let _ = response.send(package);
+                        }
+                        _ => {}
+                    };
+                }
+                protocol::SynchronizedResponse::Error(e) => {
+                    let e = match e {
+                        protocol::SynchronizedError::DoesntExist => warp::error::Error::IdentityDoesntExist,
+                        protocol::SynchronizedError::Forbidden => warp::error::Error::IdentityInvalid,
+                        protocol::SynchronizedError::NotRegistered => warp::error::Error::IdentityNotCreated,
+                        protocol::SynchronizedError::Invalid => warp::error::Error::IdentityInvalid,
+                    };
+                    match self.waiting_on_response.remove(&id) {
+                        Some(IdentityResponse::Synchronized { response }) => {
+                            let _ = response.send(Err(e));
+                        }
+                        Some(IdentityResponse::SynchronizedFetch { response }) => {
+                            let _ = response.send(Err(e));
+                        }
+                        _ => {}
+                    };
+                },
+            },
             _ => {}
         }
     }
@@ -406,6 +454,36 @@ impl NetworkBehaviour for Behaviour {
                             self.waiting_on_response
                                 .insert(id, IdentityResponse::Lookup { response });
                         }
+                        IdentityCommand::Synchronized {
+                            peer_id,
+                            identity,
+                            package,
+                            response,
+                        } => {
+                            let id = self.inner.send_request(
+                                &peer_id,
+                                Request::Synchronized(protocol::Synchronized::Store {
+                                    document: identity,
+                                    package,
+                                }),
+                            );
+
+                            self.waiting_on_response
+                                .insert(id, IdentityResponse::Synchronized { response });
+                        }
+                        IdentityCommand::Fetch {
+                            peer_id,
+                            did,
+                            response,
+                        } => {
+                            let id = self.inner.send_request(
+                                &peer_id,
+                                Request::Synchronized(protocol::Synchronized::Fetch { did }),
+                            );
+
+                            self.waiting_on_response
+                                .insert(id, IdentityResponse::SynchronizedFetch { response });
+                        }
                     },
                     Poll::Ready(None) => {
                         self.process_command.take();
@@ -452,6 +530,14 @@ impl NetworkBehaviour for Behaviour {
                                 let _ =
                                     response.send(Err(warp::error::Error::Boxed(Box::new(error))));
                             }
+                            IdentityResponse::Synchronized { response } => {
+                                let _ =
+                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
+                            IdentityResponse::SynchronizedFetch { response } => {
+                                let _ =
+                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
                         }
                     }
                     self.queue_event.remove(&request_id);
@@ -476,6 +562,14 @@ impl NetworkBehaviour for Behaviour {
                                     response.send(Err(warp::error::Error::Boxed(Box::new(error))));
                             }
                             IdentityResponse::Lookup { response } => {
+                                let _ =
+                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
+                            IdentityResponse::Synchronized { response } => {
+                                let _ =
+                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
+                            IdentityResponse::SynchronizedFetch { response } => {
                                 let _ =
                                     response.send(Err(warp::error::Error::Boxed(Box::new(error))));
                             }

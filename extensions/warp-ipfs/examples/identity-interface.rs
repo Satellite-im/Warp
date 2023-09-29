@@ -131,6 +131,14 @@ async fn account(
                     })
                     .await?;
             }
+            (None, Some(passphrase)) => {
+                account
+                    .import_identity(IdentityImportOption::Locate {
+                        location: ImportLocation::Remote,
+                        passphrase,
+                    })
+                    .await?;
+            }
             _ => {
                 profile = Some(account.create_identity(username, None).await?);
             }
@@ -358,6 +366,13 @@ async fn main() -> anyhow::Result<()> {
                     match cmd_line.next() {
                         Some("export") => {
                             if let Err(e) = account.export_identity(warp::multipass::ImportLocation::Local { path: PathBuf::from("account.bin") }).await {
+                                writeln!(stdout, "Error exporting identity: {e}")?;
+                                continue;
+                            }
+                            writeln!(stdout, "Identity been exported")?;
+                        }
+                        Some("export-remote") => {
+                            if let Err(e) = account.export_identity(warp::multipass::ImportLocation::Remote ).await {
                                 writeln!(stdout, "Error exporting identity: {e}")?;
                                 continue;
                             }

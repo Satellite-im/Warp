@@ -4,7 +4,10 @@ use shuttle::identity::{
     self,
     document::IdentityDocument,
     // document::IdentityDocument,
-    protocol::{Lookup, LookupResponse, Register, RegisterResponse, Response},
+    protocol::{
+        Lookup, LookupResponse, Register, RegisterResponse, Response, Synchronized,
+        SynchronizedError, SynchronizedResponse,
+    },
 };
 use warp::crypto::DID;
 
@@ -273,7 +276,80 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     //     Ok::<_, Box<dyn std::error::Error>>(())
                     // };
                 }
-                identity::protocol::Request::Synchronized(_) => todo!(),
+                identity::protocol::Request::Synchronized(Synchronized::Store {
+                    document,
+                    package,
+                }) => {
+                    if document.verify().is_err() {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::SynchronizedResponse(
+                                SynchronizedResponse::Error(SynchronizedError::Invalid),
+                            )),
+                        ));
+
+                        continue;
+                    }
+                    let did = document.did.clone();
+
+                    if !temp_registeration.contains_key(&did) {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::NotRegistered,
+                                ),
+                            )),
+                        ));
+
+                        continue;
+                    }
+
+                    temp_registeration.insert(did.clone(), document);
+                    if let Some(package) = package {
+                        _temp_package.insert(did, package);
+                    }
+
+                    let _ = resp.send((
+                        ch,
+                        Either::Right(Response::SynchronizedResponse(SynchronizedResponse::Ok {
+                            identity: None,
+                            package: None,
+                        })),
+                    ));
+                    continue;
+                }
+                identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
+                    if !temp_registeration.contains_key(&did) {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::NotRegistered,
+                                ),
+                            )),
+                        ));
+
+                        continue;
+                    }
+
+                    let event = match _temp_package.get(&did) {
+                        Some(package) => Either::Right(Response::SynchronizedResponse(
+                            SynchronizedResponse::Ok {
+                                identity: None,
+                                package: Some(package.clone()),
+                            },
+                        )),
+                        None => Either::Right(Response::SynchronizedResponse(
+                            identity::protocol::SynchronizedResponse::Error(
+                                SynchronizedError::DoesntExist,
+                            ),
+                        )),
+                    };
+
+                    let _ = resp.send((ch, event));
+                    continue;
+                }
                 identity::protocol::Request::Lookup(Lookup::PublicKey { did }) => {
                     let event = match temp_registeration.get(&did) {
                         Some(document) => {
@@ -402,13 +478,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             Either::Right(_res) => {}
         }
-        // match event {
-        //     WireEvent::Lookup(Lookup::Username { .. }) => {}
-        //     WireEvent::Lookup(Lookup::ShortId { .. }) => {}
-        //     WireEvent::LookupResponse(LookupResponse::Ok { .. }) => {}
-        //     WireEvent::LookupResponse(LookupResponse::Error { .. }) => {}
-        //     WireEvent::Error(_) => {}
-        // }
     }
 
     tokio::signal::ctrl_c().await?;

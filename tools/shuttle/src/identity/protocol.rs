@@ -74,7 +74,7 @@ pub enum Synchronized {
         package: Option<Vec<u8>>,
     },
     Fetch {
-        did: Option<DID>,
+        did: DID,
     },
 }
 
@@ -82,7 +82,7 @@ pub enum Synchronized {
 #[serde(rename_all = "snake_case")]
 pub enum SynchronizedResponse {
     Ok {
-        identity: IdentityDocument,
+        identity: Option<IdentityDocument>,
         package: Option<Vec<u8>>,
     },
     Error(SynchronizedError),
@@ -94,4 +94,5 @@ pub enum SynchronizedError {
     DoesntExist,
     Forbidden,
     NotRegistered,
+    Invalid,
 }
