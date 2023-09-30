@@ -1611,7 +1611,7 @@ impl IdentityStore {
                             return Ok(package);
                         }
                         Ok(Ok(Err(e))) => {
-                            log::error!("Error registering identity to {peer_id}: {e}");
+                            log::error!("Error importing from {peer_id}: {e}");
                             break;
                         }
                         Ok(Err(Canceled)) => {
@@ -1627,6 +1627,53 @@ impl IdentityStore {
             }
         }
         Err(Error::IdentityDoesntExist)
+    }
+
+    pub async fn export_identity_document(&mut self) -> Result<(), Error> {
+        let document = self.own_identity_document().await?;
+
+        if let Some(sender) = self.identity_command.as_mut() {
+            if let DiscoveryConfig::Namespace {
+                discovery_type: DiscoveryType::RzPoint { addresses },
+                ..
+            } = self.discovery.discovery_config()
+            {
+                for addr in addresses {
+                    let Some(peer_id) = addr.peer_id() else {
+                        continue;
+                    };
+
+                    let (tx, rx) = futures::channel::oneshot::channel();
+                    let _ = sender
+                        .send(shuttle::identity::IdentityCommand::Synchronized {
+                            peer_id,
+                            identity: document.clone().into(),
+                            package: None,
+                            response: tx,
+                        })
+                        .await;
+
+                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                        Ok(Ok(Ok(_))) => {
+                            break;
+                        }
+                        Ok(Ok(Err(e))) => {
+                            log::error!("Error exporting to {peer_id}: {e}");
+                            break;
+                        }
+                        Ok(Err(Canceled)) => {
+                            log::error!("Channel been unexpectedly closed for {peer_id}");
+                            continue;
+                        }
+                        Err(_) => {
+                            log::error!("Request timeout for {peer_id}");
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn export_identity_remote(&mut self, package: Vec<u8>) -> Result<(), Error> {
@@ -1658,7 +1705,7 @@ impl IdentityStore {
                             break;
                         }
                         Ok(Ok(Err(e))) => {
-                            log::error!("Error registering identity to {peer_id}: {e}");
+                            log::error!("Error exporting to {peer_id}: {e}");
                             break;
                         }
                         Ok(Err(Canceled)) => {
@@ -1866,6 +1913,7 @@ impl IdentityStore {
 
         let mut list = idents_docs
             .iter()
+            .filter(|document| document.did != own_did)
             .filter_map(|doc| doc.resolve().ok())
             .collect::<Vec<_>>();
 
@@ -1883,7 +1931,9 @@ impl IdentityStore {
         let ident_cid = identity.to_cid(&self.ipfs).await?;
         root_document.identity = ident_cid;
 
-        self.set_root_document(root_document).await
+        self.set_root_document(root_document).await?;
+        let _ = self.export_identity_document().await;
+        Ok(())
     }
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
