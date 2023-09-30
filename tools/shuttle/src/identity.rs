@@ -486,6 +486,8 @@ impl NetworkBehaviour for Behaviour {
                         }
                     },
                     Poll::Ready(None) => {
+                        //There is no point in keeping a stream if it already closed, though we should probably panic here
+                        //but there may be cases where the rest of the behaviour should be proceeding 
                         self.process_command.take();
                         break;
                     }
