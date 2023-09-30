@@ -219,6 +219,19 @@ pub enum UpdateEvents {
 pub type DefaultPfpFn =
     std::sync::Arc<dyn Fn(&Identity) -> Result<Vec<u8>, std::io::Error> + Send + Sync + 'static>;
 
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub enum StoreOffline {
+    Remote,
+    Local {
+        path: PathBuf,
+    },
+    RemoteAndLocal {
+        path: PathBuf,
+    },
+    #[default]
+    None,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     /// Allow only interactions with `MultiPass` friends
@@ -234,9 +247,9 @@ pub struct StoreSetting {
     pub discovery: Discovery,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// Placeholder for a offline agents to obtain information regarding one own identity
-    pub sync: Vec<Multiaddr>,
-    /// Interval to push or check node
-    pub sync_interval: Duration,
+    pub offline_agent: Vec<Multiaddr>,
+    /// Export account on update
+    pub store_offline: StoreOffline,
     /// Fetch data over bitswap instead of pubsub
     pub fetch_over_bitswap: bool,
     /// Enables sharing platform (Desktop, Mobile, Web) information to another user
@@ -284,8 +297,8 @@ impl Default for StoreSetting {
                 namespace: None,
                 discovery_type: Default::default(),
             },
-            sync: Vec::new(),
-            sync_interval: Duration::from_millis(1000),
+            offline_agent: Vec::new(),
+            store_offline: StoreOffline::None,
             fetch_over_bitswap: false,
             share_platform: false,
             use_phonebook: true,
