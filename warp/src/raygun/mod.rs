@@ -403,6 +403,8 @@ pub struct Conversation {
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
     creator: Option<DID>,
+    creation: DateTime<Utc>,
+    modified: DateTime<Utc>,
     conversation_type: ConversationType,
     recipients: Vec<DID>,
 }
@@ -426,10 +428,13 @@ impl Default for Conversation {
         let creator = None;
         let conversation_type = ConversationType::Direct;
         let recipients = Vec::new();
+        let timestamp = Utc::now();
         Self {
             id,
             name,
             creator,
+            creation: timestamp,
+            modified: timestamp,
             conversation_type,
             recipients,
         }
@@ -447,6 +452,14 @@ impl Conversation {
 
     pub fn creator(&self) -> Option<DID> {
         self.creator.clone()
+    }
+
+    pub fn creation(&self) -> DateTime<Utc> {
+        self.creation
+    }
+
+    pub fn modified(&self) -> DateTime<Utc> {
+        self.modified
     }
 
     pub fn conversation_type(&self) -> ConversationType {
@@ -469,6 +482,14 @@ impl Conversation {
 
     pub fn set_creator(&mut self, creator: Option<DID>) {
         self.creator = creator;
+    }
+
+    pub fn set_creation(&mut self, creation: DateTime<Utc>) {
+        self.creation = creation;
+    }
+
+    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
+        self.modified = modified;
     }
 
     pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {

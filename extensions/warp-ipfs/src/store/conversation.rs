@@ -36,6 +36,10 @@ pub struct ConversationDocument {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<DID>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creation: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<DateTime<Utc>>,
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
@@ -57,7 +61,8 @@ impl From<&Conversation> for ConversationDocument {
             id: conversation.id(),
             name: conversation.name(),
             creator: conversation.creator(),
-
+            creation: Some(conversation.creation()),
+            modified: Some(conversation.modified()),
             conversation_type: conversation.conversation_type(),
             recipients: conversation.recipients(),
             excluded: Default::default(),
@@ -129,6 +134,7 @@ impl ConversationDocument {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl ConversationDocument {
     pub fn new(
         did: &DID,
@@ -136,6 +142,8 @@ impl ConversationDocument {
         mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
+        creation: Option<DateTime<Utc>>,
+        modified: Option<DateTime<Utc>>,
         creator: Option<DID>,
         signature: Option<String>,
     ) -> Result<Self, Error> {
@@ -157,6 +165,8 @@ impl ConversationDocument {
             name,
             recipients,
             creator,
+            creation,
+            modified,
             conversation_type,
             excluded,
             messages,
@@ -196,6 +206,8 @@ impl ConversationDocument {
             ConversationType::Direct,
             None,
             None,
+            None,
+            None,
         )
     }
 
@@ -207,6 +219,8 @@ impl ConversationDocument {
             recipients.to_vec(),
             conversation_id,
             ConversationType::Group,
+            None,
+            None,
             Some(did.clone()),
             None,
         )
@@ -560,13 +574,7 @@ impl ConversationDocument {
 
 impl From<ConversationDocument> for Conversation {
     fn from(document: ConversationDocument) -> Self {
-        let mut conversation = Conversation::default();
-        conversation.set_id(document.id);
-        conversation.set_name(document.name());
-        conversation.set_creator(document.creator.clone());
-        conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(document.recipients());
-        conversation
+        Self::from(&document)
     }
 }
 
@@ -577,6 +585,8 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_name(document.name.clone());
         conversation.set_creator(document.creator.clone());
         conversation.set_conversation_type(document.conversation_type);
+        conversation.set_creation(document.creation.unwrap_or_default());
+        conversation.set_modified(document.modified.unwrap_or_default());
         conversation.set_recipients(document.recipients());
         conversation
     }

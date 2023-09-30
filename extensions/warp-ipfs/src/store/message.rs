@@ -247,6 +247,12 @@ impl MessageStore {
             while let Some(event) = rx.next().await {
                 match event {
                     ConversationEventHandle::Set(mut document, ret) => {
+                        if document.creation.is_none() {
+                            document.creation = Some(Utc::now());
+                        }
+
+                        document.modified = Some(Utc::now());
+
                         let result = {
                             let own_did = own_did.clone();
                             let ipfs = ipfs.clone();
@@ -1520,6 +1526,8 @@ impl MessageStore {
                     list.clone(),
                     Some(conversation_id),
                     ConversationType::Group,
+                    None,
+                    None,
                     Some(creator),
                     signature,
                 )?;
