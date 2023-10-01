@@ -330,9 +330,15 @@ impl Behaviour {
                 }
                 protocol::SynchronizedResponse::Error(e) => {
                     let e = match e {
-                        protocol::SynchronizedError::DoesntExist => warp::error::Error::IdentityDoesntExist,
-                        protocol::SynchronizedError::Forbidden => warp::error::Error::IdentityInvalid,
-                        protocol::SynchronizedError::NotRegistered => warp::error::Error::IdentityNotCreated,
+                        protocol::SynchronizedError::DoesntExist => {
+                            warp::error::Error::IdentityDoesntExist
+                        }
+                        protocol::SynchronizedError::Forbidden => {
+                            warp::error::Error::IdentityInvalid
+                        }
+                        protocol::SynchronizedError::NotRegistered => {
+                            warp::error::Error::IdentityNotCreated
+                        }
                         protocol::SynchronizedError::Invalid => warp::error::Error::IdentityInvalid,
                     };
                     match self.waiting_on_response.remove(&id) {
@@ -344,7 +350,7 @@ impl Behaviour {
                         }
                         _ => {}
                     };
-                },
+                }
             },
             _ => {}
         }
@@ -487,7 +493,7 @@ impl NetworkBehaviour for Behaviour {
                     },
                     Poll::Ready(None) => {
                         //There is no point in keeping a stream if it already closed, though we should probably panic here
-                        //but there may be cases where the rest of the behaviour should be proceeding 
+                        //but there may be cases where the rest of the behaviour should be proceeding
                         self.process_command.take();
                         break;
                     }

@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
-use libipld::{DagCbor, Cid};
-use serde::{Serialize, Deserialize};
-
-
+use libipld::{Cid, DagCbor};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, DagCbor)]
 pub struct IdentityRoot {
     identities: BTreeMap<String, Cid>,
-    prev_block: Option<Cid>,
+    package: BTreeMap<String, Cid>,
 }
 
+#[derive(Serialize, Deserialize, DagCbor)]
+pub struct FriendRouterRoot {}
