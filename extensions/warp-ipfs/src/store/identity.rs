@@ -1889,7 +1889,12 @@ impl IdentityStore {
 
                         match tokio::time::timeout(Duration::from_secs(20), rx).await {
                             Ok(Ok(Ok(list))) => {
-                                //TODO: Store into dag for caching
+                                for ident in &list {
+                                    if self.discovery.contains(&ident.did).await {
+                                        continue;
+                                    }
+                                    let _ = self.discovery.insert(&ident.did).await;
+                                }
                                 idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
                                 break;
                             }
