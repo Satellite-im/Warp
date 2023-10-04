@@ -24,7 +24,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
 # RUN . $HOME/.cargo/env && rustup target add aarch64-unknown-linux-gnu
 # RUN . $HOME/.cargo/env && rustup toolchain install stable-aarch64-unknown-linux-gnu
 RUN . $HOME/.cargo/env && rustup target add aarch64-linux-android
-RUN . $HOME/.cargo/env && cargo install --git https://github.com/tauri-apps/tauri-mobile
+RUN . $HOME/.cargo/env && cargo install --git https://github.com/tauri-apps/cargo-mobile2
 
 WORKDIR /root/cmake
 RUN wget https://github.com/Kitware/CMake/releases/download/v3.23.1/cmake-3.23.1.tar.gz
