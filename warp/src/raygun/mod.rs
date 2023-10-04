@@ -201,13 +201,11 @@ impl MessageOptions {
 
     pub fn set_range(mut self, range: Range<usize>) -> MessageOptions {
         self.range = Some(range);
-        self.limit = None;
         self
     }
 
     pub fn set_limit(mut self, limit: u8) -> MessageOptions {
         self.limit = Some(limit);
-        self.range = None;
         self
     }
 
