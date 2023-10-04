@@ -189,7 +189,7 @@ pub struct MessageOptions {
     keyword: Option<String>,
     pinned: bool,
     range: Option<Range<usize>>,
-    limit: Option<i64>,
+    limit: Option<u8>,
     skip: Option<i64>,
 }
 
@@ -205,7 +205,7 @@ impl MessageOptions {
         self
     }
 
-    pub fn set_limit(mut self, limit: i64) -> MessageOptions {
+    pub fn set_limit(mut self, limit: u8) -> MessageOptions {
         self.limit = Some(limit);
         self.range = None;
         self
@@ -255,7 +255,7 @@ impl MessageOptions {
 }
 
 impl MessageOptions {
-    pub fn limit(&self) -> Option<i64> {
+    pub fn limit(&self) -> Option<u8> {
         self.limit
     }
 

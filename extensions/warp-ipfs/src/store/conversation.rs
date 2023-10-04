@@ -376,7 +376,7 @@ impl ConversationDocument {
 
         let ipfs = ipfs.clone();
         let stream = async_stream::stream! {
-            let mut remaining: Option<i64> = option.limit();
+            let mut remaining = option.limit();
             for (index, document) in messages.iter().enumerate() {
                 if remaining.as_ref().map(|x| *x == 0).unwrap_or_default() {
                     break;
