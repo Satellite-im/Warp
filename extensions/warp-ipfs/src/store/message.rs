@@ -3500,14 +3500,13 @@ impl MessageStore {
                     return;
                 }
             };
+
             yield Progression::CurrentProgress {
                 name: attachment.name(),
                 current: 0,
                 total: Some(attachment.size()),
             };
 
-            let mut failed = false;
-            let mut final_written = 0;
             for await event in stream {
                 match event {
                     rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
@@ -3517,16 +3516,16 @@ impl MessageStore {
                             total: total_size
                         };
                     },
-                    rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { written, total_size, .. } => {
-                        final_written = written;
-                        yield Progression::CurrentProgress {
-                                name: attachment.name(),
-                                current: written,
-                                total: total_size,
+                    rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
+                        yield Progression::ProgressComplete {
+                            name: attachment.name(),
+                            total: total_size,
                         };
                     },
                     rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
-                        failed = true;
+                        if let Err(e) = tokio::fs::remove_file(&path).await {
+                            error!("Error removing file: {e}");
+                        }
                         yield Progression::ProgressFailed {
                             name: attachment.name(),
                             last_size: Some(written),
@@ -3535,22 +3534,6 @@ impl MessageStore {
                     },
                 }
             }
-
-            match failed {
-                true => {
-                    if let Err(e) = tokio::fs::remove_file(&path).await {
-                        error!("Error removing file: {e}");
-                    }
-                }
-                false => {
-                    yield Progression::ProgressComplete {
-                        name: attachment.name(),
-                        total: Some(final_written),
-                    };
-                }
-            }
-
-
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
