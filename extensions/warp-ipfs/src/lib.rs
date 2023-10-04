@@ -462,15 +462,8 @@ impl WarpIpfs {
             tesseract.clone(),
             config.store_setting.auto_push,
             self.multipass_tx.clone(),
-            config.store_setting.default_profile_picture.clone(),
-            (
-                discovery.clone(),
-                relays,
-                config.store_setting.fetch_over_bitswap,
-                config.store_setting.share_platform,
-                config.store_setting.update_events,
-                config.store_setting.disable_images,
-            ),
+            &config,
+            discovery.clone(),
         )
         .await?;
         info!("Identity store initialized");
@@ -511,9 +504,7 @@ impl WarpIpfs {
             self.raygun_tx.clone(),
             (
                 config.store_setting.check_spam,
-                config.store_setting.disable_sender_event_emit,
                 config.store_setting.with_friends,
-                config.store_setting.conversation_load_task,
             ),
         )
         .await

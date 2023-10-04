@@ -10,6 +10,39 @@ use warp::multipass::identity::Identity;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+pub enum Network {
+    /// IPFS Public Network
+    #[default]
+    Ipfs,
+    /// Satellite Network
+    Satellite { addresses: Vec<NetworkAddress> },
+    /// Custom Network
+    Custom { addresses: Vec<NetworkAddress> },
+    /// No network selection.
+    None,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct NetworkAddress {
+    /// Address of the node
+    pub address: Multiaddr,
+    /// Type for the network.
+    /// - DHT
+    /// - Relay
+    /// - RzPoint
+    pub network_type: Vec<NetworkType>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkType {
+    DHT,
+    RzPoint,
+    Relay,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Bootstrap {
     #[default]
     Ipfs,
@@ -232,19 +265,13 @@ pub struct StoreSetting {
     pub auto_push: Option<Duration>,
     /// Discovery type
     pub discovery: Discovery,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    /// Placeholder for a offline agents to obtain information regarding one own identity
-    pub sync: Vec<Multiaddr>,
-    /// Interval to push or check node
-    pub sync_interval: Duration,
     /// Fetch data over bitswap instead of pubsub
     pub fetch_over_bitswap: bool,
     /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
-    /// Enables phonebook service
-    pub use_phonebook: bool,
     /// Emit event for when a friend comes online or offline
     pub emit_online_event: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<Duration>,
     /// Options to allow emitting identity events to all or just friends
@@ -253,21 +280,21 @@ pub struct StoreSetting {
     pub disable_images: bool,
     /// Enables spam check
     pub check_spam: bool,
-
-    /// Load conversation in a separate task
-    /// Note: While this is loaded in a separate task, not all conversations will be made available up front.
-    ///       If any conversations are corrupted for whatever reason they will not be made available
-    pub conversation_load_task: bool,
-
-    /// Attaches recipients to the local message block
-    pub attach_recipients_on_storing: bool,
-
-    /// Disables emitting an event on stream for creating a conversation
-    pub disable_sender_event_emit: bool,
-
     /// Function to call to provide data for a default profile picture if one is not apart of the identity
     #[serde(skip)]
     pub default_profile_picture: Option<DefaultPfpFn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SynchronizeType {
+    /// Export locally to a file
+    Local { path: PathBuf },
+    /// Export remotely to a service
+    Remote,
+    /// Export locally and remotely
+    RemoteLocal { path: PathBuf },
+    /// Dont export
+    None,
 }
 
 impl std::fmt::Debug for StoreSetting {
@@ -284,19 +311,13 @@ impl Default for StoreSetting {
                 namespace: None,
                 discovery_type: Default::default(),
             },
-            sync: Vec::new(),
-            sync_interval: Duration::from_millis(1000),
             fetch_over_bitswap: false,
             share_platform: false,
-            use_phonebook: true,
             friend_request_response_duration: None,
             emit_online_event: false,
             update_events: Default::default(),
             disable_images: false,
             check_spam: true,
-            attach_recipients_on_storing: false,
-            conversation_load_task: false,
-            disable_sender_event_emit: false,
             with_friends: false,
             default_profile_picture: None,
         }
@@ -307,13 +328,13 @@ impl Default for StoreSetting {
 pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
+    pub network: Network,
     pub bootstrap: Bootstrap,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
     pub enable_relay: bool,
-    pub debug: bool,
     pub save_phrase: bool,
     pub max_storage_size: Option<usize>,
     pub max_file_size: Option<usize>,
@@ -321,12 +342,14 @@ pub struct Config {
     pub chunking: Option<usize>,
     pub thumbnail_task: bool,
     pub thumbnail_exact_format: bool,
+    pub synchronize_type: SynchronizeType,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             path: None,
+            network: Network::Ipfs,
             bootstrap: Bootstrap::Ipfs,
             listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
                 .iter()
@@ -338,7 +361,6 @@ impl Default for Config {
                 ..Default::default()
             },
             store_setting: Default::default(),
-            debug: false,
             enable_relay: false,
             save_phrase: false,
             max_storage_size: Some(1024 * 1024 * 1024),
@@ -347,6 +369,7 @@ impl Default for Config {
             chunking: None,
             thumbnail_task: false,
             thumbnail_exact_format: true,
+            synchronize_type: SynchronizeType::None,
         }
     }
 }

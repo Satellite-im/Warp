@@ -2,7 +2,7 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::{DefaultPfpFn, Discovery as DiscoveryConfig, UpdateEvents},
+    config::{self, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
 };
 use futures::{
@@ -10,14 +10,13 @@ use futures::{
     stream::BoxStream,
     StreamExt,
 };
-use ipfs::{Ipfs, IpfsPath, Keypair, Multiaddr};
+use ipfs::{Ipfs, IpfsPath, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashSet,
     path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
@@ -67,15 +66,7 @@ pub struct IdentityStore {
 
     discovery: Discovery,
 
-    relay: Vec<Multiaddr>,
-
-    fetch_over_bitswap: Arc<AtomicBool>,
-
-    share_platform: Arc<AtomicBool>,
-
-    start_event: Arc<AtomicBool>,
-
-    end_event: Arc<AtomicBool>,
+    config: config::Config,
 
     tesseract: Tesseract,
 
@@ -86,13 +77,7 @@ pub struct IdentityStore {
 
     event: broadcast::Sender<MultiPassEventKind>,
 
-    update_event: UpdateEvents,
-
-    disable_image: bool,
-
     friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
-
-    default_pfp_callback: Option<DefaultPfpFn>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -171,35 +156,25 @@ impl std::fmt::Debug for ResponseOption {
 }
 
 impl IdentityStore {
-    pub async fn new(
+    pub async fn  new(
         ipfs: Ipfs,
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: Option<Duration>,
         tx: broadcast::Sender<MultiPassEventKind>,
-        default_pfp_callback: Option<DefaultPfpFn>,
-        (discovery, relay, fetch_over_bitswap, share_platform, update_event, disable_image): (
-            Discovery,
-            Vec<Multiaddr>,
-            bool,
-            bool,
-            UpdateEvents,
-            bool,
-        ),
+        config: &config::Config,
+        discovery: Discovery,
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
             }
         }
+        let config = config.clone();
         let identity = Arc::new(Default::default());
-        let start_event = Arc::new(Default::default());
-        let end_event = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
         let cache_cid = Arc::new(Default::default());
-        let fetch_over_bitswap = Arc::new(AtomicBool::new(fetch_over_bitswap));
         let online_status = Arc::default();
-        let share_platform = Arc::new(AtomicBool::new(share_platform));
         let root_task = Arc::default();
         let task_send = Arc::default();
         let event = tx;
@@ -212,20 +187,13 @@ impl IdentityStore {
             cache_cid,
             identity,
             online_status,
-            start_event,
-            share_platform,
-            end_event,
             discovery,
-            relay,
+            config,
             tesseract,
-            fetch_over_bitswap,
             root_task,
             task_send,
             event,
             friend_store,
-            update_event,
-            disable_image,
-            default_pfp_callback,
         };
 
         if store.path.is_some() {
@@ -239,7 +207,6 @@ impl IdentityStore {
         if let Ok(ident) = store.own_identity().await {
             log::info!("Identity loaded with {}", ident.did_key());
             *store.identity.write().await = Some(ident);
-            store.start_event.store(true, Ordering::SeqCst);
         }
 
         let did = store.get_keypair_did()?;
@@ -249,6 +216,11 @@ impl IdentityStore {
             .ipfs
             .pubsub_subscribe("/identity/announce".into())
             .await?;
+
+        store.discovery.start().await?;
+
+        let mut discovery_rx = store.discovery.events();
+
         tokio::spawn({
             let mut store = store.clone();
             async move {
@@ -272,16 +244,8 @@ impl IdentityStore {
                     .unwrap_or(Duration::from_millis(300000));
 
                 let mut tick = tokio::time::interval(interval);
-                let mut rx = store.discovery.events();
-                loop {
-                    if store.end_event.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    if !store.start_event.load(Ordering::SeqCst) {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                        continue;
-                    }
 
+                loop {
                     tokio::select! {
                         message = event_stream.next() => {
                             if let Some(message) = message {
@@ -303,18 +267,13 @@ impl IdentityStore {
                             }
                         }
                         // Used as the initial request/push
-                        Ok(push) = rx.recv() => {
-                            tokio::spawn({
-                                let store = store.clone();
-                                async move {
-                                    if let Err(e) = store.request(&push, RequestOption::Identity).await {
-                                        error!("Error requesting identity: {e}");
-                                    }
-                                    if let Err(e) = store.push(&push).await {
-                                        error!("Error pushing identity: {e}");
-                                    }
-                                }
-                            });
+                        Ok(push) = discovery_rx.recv() => {
+                            if let Err(e) = store.request(&push, RequestOption::Identity).await {
+                                error!("Error requesting identity: {e}");
+                            }
+                            if let Err(e) = store.push(&push).await {
+                                error!("Error pushing identity: {e}");
+                            }
                         }
                         _ = tick.tick() => {
                             if auto_push {
@@ -812,7 +771,7 @@ impl IdentityStore {
             _ => false,
         };
 
-        let share_platform = self.share_platform.load(Ordering::SeqCst);
+        let share_platform = self.config.store_setting.share_platform;
 
         let platform =
             (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
@@ -826,11 +785,13 @@ impl IdentityStore {
         let profile_picture = identity.profile_picture;
         let profile_banner = identity.profile_banner;
 
-        let include_pictures = (matches!(self.update_event, UpdateEvents::Enabled)
-            || matches!(
-                self.update_event,
-                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-            ) && is_friend)
+        let include_pictures = (matches!(
+            self.config.store_setting.update_events,
+            UpdateEvents::Enabled
+        ) || matches!(
+            self.config.store_setting.update_events,
+            UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+        ) && is_friend)
             && (!is_blocked && !is_blocked_by);
 
         log::trace!("Including cid in push: {include_pictures}");
@@ -1055,10 +1016,13 @@ impl IdentityStore {
                             }
                             let mut emit = false;
 
-                            if matches!(self.update_event, UpdateEvents::Enabled) {
+                            if matches!(
+                                self.config.store_setting.update_events,
+                                UpdateEvents::Enabled
+                            ) {
                                 emit = true;
                             } else if matches!(
-                                self.update_event,
+                                self.config.store_setting.update_events,
                                 UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
                             ) {
                                 if let Ok(store) = self.friend_store().await {
@@ -1078,7 +1042,7 @@ impl IdentityStore {
                                             identity.did
                                         );
 
-                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
+                                        if !store.config.store_setting.fetch_over_bitswap {
                                             if let Err(e) = store
                                                 .request(
                                                     &in_did,
@@ -1135,7 +1099,7 @@ impl IdentityStore {
                                             identity.did
                                         );
 
-                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
+                                        if !store.config.store_setting.fetch_over_bitswap {
                                             if let Err(e) = store
                                                 .request(
                                                     &in_did,
@@ -1212,16 +1176,22 @@ impl IdentityStore {
                             self.ipfs.remove_block(old_cid).await?;
                         }
 
-                        if matches!(self.update_event, UpdateEvents::Enabled) {
+                        if matches!(
+                            self.config.store_setting.update_events,
+                            UpdateEvents::Enabled
+                        ) {
                             let did = document_did.clone();
                             self.emit_event(MultiPassEventKind::IdentityUpdate { did });
                         }
 
                         let mut emit = false;
-                        if matches!(self.update_event, UpdateEvents::Enabled) {
+                        if matches!(
+                            self.config.store_setting.update_events,
+                            UpdateEvents::Enabled
+                        ) {
                             emit = true;
                         } else if matches!(
-                            self.update_event,
+                            self.config.store_setting.update_events,
                             UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
                         ) {
                             if let Ok(store) = self.friend_store().await {
@@ -1247,7 +1217,7 @@ impl IdentityStore {
                                     }
 
                                     if banner.is_some() || picture.is_some() {
-                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
+                                        if !store.config.store_setting.fetch_over_bitswap {
                                             store
                                                 .request(
                                                     &in_did,
@@ -1356,7 +1326,7 @@ impl IdentityStore {
     }
 
     fn own_platform(&self) -> Platform {
-        if self.share_platform.load(Ordering::Relaxed) {
+        if self.config.store_setting.share_platform {
             if cfg!(any(
                 target_os = "windows",
                 target_os = "macos",
@@ -1379,10 +1349,6 @@ impl IdentityStore {
 
     pub fn discovery_type(&self) -> &DiscoveryConfig {
         self.discovery.discovery_config()
-    }
-
-    pub fn relays(&self) -> &[Multiaddr] {
-        &self.relay
     }
 
     pub(crate) async fn cache(&self) -> HashSet<IdentityDocument> {
@@ -1413,15 +1379,14 @@ impl IdentityStore {
 
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
-        self.enable_event();
 
         if let Ok(store) = self.friend_store().await {
             log::info!("Loading friends list into phonebook");
             if let Ok(friends) = store.friends_list().await {
-                if let Some(phonebook) = store.phonebook() {
-                    if let Err(_e) = phonebook.add_friend_list(friends).await {
-                        error!("Error adding friends in phonebook: {_e}");
-                    }
+                let phonebook = store.phonebook();
+
+                if let Err(_e) = phonebook.add_friend_list(friends).await {
+                    error!("Error adding friends in phonebook: {_e}");
                 }
             }
         }
@@ -1481,7 +1446,6 @@ impl IdentityStore {
 
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
-        self.enable_event();
         Ok(identity)
     }
 
@@ -1996,7 +1960,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn identity_picture(&self, did: &DID) -> Result<String, Error> {
-        if self.disable_image {
+        if self.config.store_setting.disable_images {
             return Err(Error::InvalidIdentityPicture);
         }
 
@@ -2011,8 +1975,6 @@ impl IdentityStore {
                 .ok_or(Error::IdentityDoesntExist)?,
         };
 
-        let cb = self.default_pfp_callback.clone();
-
         if let Some(cid) = document.profile_picture {
             if let Ok(data) = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
             {
@@ -2023,7 +1985,7 @@ impl IdentityStore {
             }
         }
 
-        if let Some(cb) = cb {
+        if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
             let identity = document.resolve()?;
             let picture = cb(&identity)?;
             return Ok(String::from_utf8_lossy(&picture).to_string());
@@ -2034,7 +1996,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn identity_banner(&self, did: &DID) -> Result<String, Error> {
-        if self.disable_image {
+        if self.config.store_setting.disable_images {
             return Err(Error::InvalidIdentityBanner);
         }
 
@@ -2049,8 +2011,6 @@ impl IdentityStore {
                 .ok_or(Error::IdentityDoesntExist)?,
         };
 
-        let cb = self.default_pfp_callback.clone();
-
         if let Some(cid) = document.profile_banner {
             if let Ok(data) = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
             {
@@ -2061,7 +2021,7 @@ impl IdentityStore {
             }
         }
 
-        if let Some(cb) = cb {
+        if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
             let identity = document.resolve()?;
             let picture = cb(&identity)?;
             return Ok(String::from_utf8_lossy(&picture).to_string());
@@ -2201,18 +2161,6 @@ impl IdentityStore {
             }
         }
         Ok(())
-    }
-
-    pub fn enable_event(&mut self) {
-        self.start_event.store(true, Ordering::SeqCst);
-    }
-
-    pub fn disable_event(&mut self) {
-        self.start_event.store(false, Ordering::SeqCst);
-    }
-
-    pub fn end_event(&mut self) {
-        self.end_event.store(true, Ordering::SeqCst);
     }
 
     pub fn clear_internal_cache(&mut self) {}

@@ -109,8 +109,6 @@ pub struct MessageStore {
     spam_filter: Arc<Option<SpamFilter>>,
 
     with_friends: Arc<AtomicBool>,
-
-    disable_sender_event_emit: Arc<AtomicBool>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -125,12 +123,7 @@ impl MessageStore {
         _: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, disable_sender_event_emit, with_friends, conversation_load_task): (
-            bool,
-            bool,
-            bool,
-            bool,
-        ),
+        (check_spam, with_friends): (bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
 
@@ -146,7 +139,6 @@ impl MessageStore {
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());
-        let disable_sender_event_emit = Arc::new(AtomicBool::new(disable_sender_event_emit));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
         let stream_sender = Arc::new(Default::default());
         let conversation_lock = Arc::new(Default::default());
@@ -175,14 +167,13 @@ impl MessageStore {
             did,
             event,
             spam_filter,
-            disable_sender_event_emit,
             with_friends,
             conversation_keystore_cid,
             stream_conversation_task,
         };
 
         info!("Loading existing conversations task");
-        if let Err(_e) = store.load_conversations(conversation_load_task).await {}
+        if let Err(_e) = store.load_conversations().await {}
 
         tokio::spawn({
             let mut store = store.clone();
@@ -1900,12 +1891,10 @@ impl MessageStore {
             }
         }
 
-        if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
-            if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            }) {
-                error!("Error broadcasting event: {e}");
-            }
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
         }
 
         if let Some(path) = self.path.as_ref() {
@@ -2049,12 +2038,10 @@ impl MessageStore {
             }
         }
 
-        if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
-            if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            }) {
-                error!("Error broadcasting event: {e}");
-            }
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
         }
 
         tokio::spawn({
@@ -2246,7 +2233,7 @@ impl MessageStore {
             .map_err(Error::from)
     }
 
-    pub async fn load_conversations(&self, background: bool) -> Result<(), Error> {
+    pub async fn load_conversations(&self) -> Result<(), Error> {
         let Some(path) = self.path.as_ref() else {
             return Ok(());
         };
@@ -2318,9 +2305,7 @@ impl MessageStore {
                             }
                         };
 
-                        if background {
-                            tokio::spawn(task);
-                        } else if let Err(e) = task.await {
+                        if let Err(e) = task.await {
                             error!("Error loading conversation: {e}");
                         }
                     }

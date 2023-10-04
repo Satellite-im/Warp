@@ -40,7 +40,7 @@ pub struct FriendsStore {
     // Queue to handle sending friend request
     queue: Queue,
 
-    phonebook: Option<PhoneBook>,
+    phonebook: PhoneBook,
 
     wait_on_response: Option<Duration>,
 
@@ -135,13 +135,13 @@ impl FriendsStore {
             discovery.clone(),
         );
 
-        let phonebook = config.store_setting.use_phonebook.then_some(PhoneBook::new(
+        let phonebook = PhoneBook::new(
             ipfs.clone(),
             discovery.clone(),
             tx.clone(),
             config.store_setting.emit_online_event,
             pb_tx,
-        ));
+        );
 
         let signal = Default::default();
         let wait_on_response = config.store_setting.friend_request_response_duration;
@@ -157,24 +157,38 @@ impl FriendsStore {
             wait_on_response,
         };
 
+        log::info!("Loading queue");
+        if let Err(_e) = store.queue.load().await {}
+
+        let phonebook = store.phonebook();
+        log::info!("Loading friends list into phonebook");
+        if let Ok(friends) = store.friends_list().await {
+            if let Err(_e) = phonebook.add_friend_list(friends).await {
+                error!("Error adding friends in phonebook: {_e}");
+            }
+        }
+
+        // scan through friends list to see if there is any incoming request or outgoing request matching
+        // and clear them out of the request list as a precautionary measure
+        let friends = store.friends_list().await.unwrap_or_default();
+
+        for friend in friends {
+            let list = store.list_all_raw_request().await.unwrap_or_default();
+
+            // cleanup outgoing
+            for req in list.iter().filter(|req| req.did().eq(&friend)) {
+                let _ = store.identity.root_document_remove_request(req).await.ok();
+            }
+        }
+
+        let stream = store
+            .ipfs
+            .pubsub_subscribe(store.did_key.inbox())
+            .await?;
+
         tokio::spawn({
             let mut store = store.clone();
             async move {
-                log::info!("Loading queue");
-                tokio::spawn({
-                    let store = store.clone();
-                    async move { if let Err(_e) = store.queue.load().await {} }
-                });
-
-                if let Some(phonebook) = store.phonebook.as_ref() {
-                    log::info!("Loading friends list into phonebook");
-                    if let Ok(friends) = store.friends_list().await {
-                        if let Err(_e) = phonebook.add_friend_list(friends).await {
-                            error!("Error adding friends in phonebook: {_e}");
-                        }
-                    }
-                }
-
                 // autoban the blocklist
                 // TODO: implement configuration open to autoban at the libp2p level
                 // Note: If this is done, we would need to attempt reconnection if the user
@@ -194,36 +208,6 @@ impl FriendsStore {
                 //         error!("Error loading block list: {e}");
                 //     }
                 // };
-
-                // scan through friends list to see if there is any incoming request or outgoing request matching
-                // and clear them out of the request list as a precautionary measure
-                tokio::spawn({
-                    let store = store.clone();
-                    async move {
-                        let friends = match store.friends_list().await {
-                            Ok(list) => list,
-                            _ => return,
-                        };
-
-                        for friend in friends.iter() {
-                            let list = store.list_all_raw_request().await.unwrap_or_default();
-
-                            // cleanup outgoing
-                            for req in list.iter().filter(|req| req.did().eq(friend)) {
-                                let _ = store.identity.root_document_remove_request(req).await.ok();
-                            }
-                        }
-                    }
-                });
-
-                let stream = match store.ipfs.pubsub_subscribe(store.did_key.inbox()).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        //TODO: Maybe panic as a means of notifying about this being a fatal error?
-                        log::error!("Error subscribing to topic: {e}");
-                        return;
-                    }
-                };
 
                 futures::pin_mut!(stream);
 
@@ -250,8 +234,8 @@ impl FriendsStore {
         Ok(store)
     }
 
-    pub(crate) fn phonebook(&self) -> Option<&PhoneBook> {
-        self.phonebook.as_ref()
+    pub(crate) fn phonebook(&self) -> &PhoneBook {
+        &self.phonebook
     }
 
     //TODO: Implement Errors
@@ -815,10 +799,9 @@ impl FriendsStore {
 
         self.identity.root_document_add_friend(pubkey).await?;
 
-        if let Some(phonebook) = self.phonebook.as_ref() {
-            if let Err(_e) = phonebook.add_friend(pubkey).await {
-                error!("Error: {_e}");
-            }
+        let phonebook = self.phonebook();
+        if let Err(_e) = phonebook.add_friend(pubkey).await {
+            error!("Error: {_e}");
         }
 
         // Push to give an update in the event any wasnt transmitted during the initial push
@@ -840,10 +823,10 @@ impl FriendsStore {
 
         self.identity.root_document_remove_friend(pubkey).await?;
 
-        if let Some(phonebook) = self.phonebook.as_ref() {
-            if let Err(_e) = phonebook.remove_friend(pubkey).await {
-                error!("Error: {_e}");
-            }
+        let phonebook = self.phonebook();
+
+        if let Err(_e) = phonebook.remove_friend(pubkey).await {
+            error!("Error: {_e}");
         }
 
         if broadcast {

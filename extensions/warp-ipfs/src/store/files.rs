@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use futures::{
     pin_mut,
     stream::{self, BoxStream},
-    StreamExt,
+    StreamExt, TryStreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{
@@ -21,7 +21,11 @@ use warp::{
     sync::RwLock,
 };
 
-use crate::{config::Config, thumbnail::ThumbnailGenerator, to_file_type};
+use crate::{
+    config::{self, Config},
+    thumbnail::ThumbnailGenerator,
+    to_file_type,
+};
 
 use super::{ecdh_decrypt, ecdh_encrypt, get_keypair_did};
 
@@ -39,11 +43,7 @@ pub struct FileStore {
     ipfs: Ipfs,
     constellation_tx: broadcast::Sender<ConstellationEventKind>,
 
-    max_storage_size: Option<usize>,
-    max_file_size: Option<usize>,
-    thumbnail_size: (u32, u32),
-    thumbnail_task: bool,
-    thumbnail_exact_format: bool,
+    config: config::Config,
 }
 
 impl FileStore {
@@ -72,17 +72,14 @@ impl FileStore {
             }
         }
 
+        let config = config.clone();
+
         let index = Directory::new("root");
         let path = Arc::default();
         let modified = Utc::now();
         let index_cid = Arc::new(RwLock::new(index_cid));
         let thumbnail_store = ThumbnailGenerator::default();
 
-        let max_storage_size = config.max_storage_size;
-        let max_file_size = config.max_file_size;
-        let thumbnail_size = config.thumbnail_size;
-        let thumbnail_exact_format = config.thumbnail_exact_format;
-        let thumbnail_task = config.thumbnail_task;
         let location_path = config.path.clone();
 
         let store = FileStore {
@@ -94,11 +91,7 @@ impl FileStore {
             location_path,
             ipfs,
             constellation_tx,
-            max_storage_size,
-            max_file_size,
-            thumbnail_size,
-            thumbnail_exact_format,
-            thumbnail_task,
+            config,
         };
 
         if let Err(e) = store.import().await {
@@ -121,33 +114,35 @@ impl FileStore {
     }
 
     async fn import(&self) -> Result<(), Error> {
-        if self.location_path.is_some() {
-            let cid = (*self.index_cid.read()).ok_or(Error::Other)?;
-
-            let mut index_stream = self
-                .ipfs
-                .unixfs()
-                .cat(IpfsPath::from(cid), None, &[], true)
-                .await
-                .map_err(anyhow::Error::from)?
-                .boxed();
-
-            let mut data = vec![];
-
-            while let Some(result) = index_stream.next().await {
-                let mut bytes = result.map_err(anyhow::Error::from)?;
-                data.append(&mut bytes);
-            }
-
-            let key = self.ipfs.keypair().and_then(get_keypair_did)?;
-
-            let index_bytes = ecdh_decrypt(&key, None, data)?;
-
-            let mut directory_index: Directory = serde_json::from_slice(&index_bytes)?;
-            directory_index.rebuild_paths();
-
-            self.index.set_items(directory_index.get_items());
+        if self.config.path.is_none() {
+            return Ok(());
         }
+
+        let cid = (*self.index_cid.read()).ok_or(Error::Other)?;
+
+        let mut index_stream = self
+            .ipfs
+            .unixfs()
+            .cat(IpfsPath::from(cid), None, &[], true)
+            .await
+            .map_err(anyhow::Error::from)?
+            .boxed();
+
+        let mut data = vec![];
+
+        while let Some(bytes) = index_stream.try_next().await.map_err(anyhow::Error::from)? {
+            data.extend(bytes);
+        }
+
+        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+
+        let index_bytes = ecdh_decrypt(&key, None, data)?;
+
+        let mut directory_index: Directory = serde_json::from_slice(&index_bytes)?;
+        directory_index.rebuild_paths();
+
+        self.index.set_items(directory_index.get_items());
+
         Ok(())
     }
 
@@ -241,7 +236,7 @@ impl FileStore {
             }
         }
 
-        if let Some(path) = self.location_path.as_ref() {
+        if let Some(path) = self.config.path.as_ref() {
             if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
                 tracing::error!("Error writing index: {_e}");
             }
@@ -281,7 +276,7 @@ impl FileStore {
     }
 
     pub fn max_size(&self) -> usize {
-        self.max_storage_size.unwrap_or(1024 * 1024 * 1024)
+        self.config.max_storage_size.unwrap_or(1024 * 1024 * 1024)
     }
 
     pub async fn put(
@@ -327,14 +322,17 @@ impl FileStore {
             return Err(Error::FileExist);
         }
 
-        let ((width, height), exact) = (self.thumbnail_size, self.thumbnail_exact_format);
+        let ((width, height), exact) = (
+            self.config.thumbnail_size,
+            self.config.thumbnail_exact_format,
+        );
 
         let ticket = self
             .thumbnail_store
             .insert(&path, width, height, exact)
             .await?;
 
-        let background = self.thumbnail_task;
+        let background = self.config.thumbnail_task;
 
         let name = name.to_string();
         let fs = self.clone();
@@ -518,7 +516,10 @@ impl FileStore {
             return Err(Error::FileExist);
         }
 
-        let ((width, height), exact) = (self.thumbnail_size, self.thumbnail_exact_format);
+        let ((width, height), exact) = (
+            self.config.thumbnail_size,
+            self.config.thumbnail_exact_format,
+        );
 
         let ticket = self
             .thumbnail_store
@@ -932,7 +933,10 @@ impl FileStore {
             buffer.extend(bytes);
         }
 
-        let ((width, height), exact) = (self.thumbnail_size, self.thumbnail_exact_format);
+        let ((width, height), exact) = (
+            self.config.thumbnail_size,
+            self.config.thumbnail_exact_format,
+        );
 
         // Generate the thumbnail for the file
         let id = self
