@@ -1166,6 +1166,7 @@ impl IdentityStore {
                                                             None,
                                                             &[],
                                                             false,
+                                                            None,
                                                         )
                                                         .await?
                                                         .boxed();
@@ -1222,6 +1223,7 @@ impl IdentityStore {
                                                             None,
                                                             &[],
                                                             false,
+                                                            None,
                                                         )
                                                         .await?
                                                         .boxed();
@@ -1322,7 +1324,7 @@ impl IdentityStore {
                                                     async move {
                                                         let mut stream = ipfs
                                                             .unixfs()
-                                                            .cat(picture, None, &[], false)
+                                                            .cat(picture, None, &[], false, None)
                                                             .await?
                                                             .boxed();
 
@@ -1350,7 +1352,7 @@ impl IdentityStore {
                                                     async move {
                                                         let mut stream = ipfs
                                                             .unixfs()
-                                                            .cat(banner, None, &[], false)
+                                                            .cat(banner, None, &[], false, None)
                                                             .await?
                                                             .boxed();
                                                         while let Some(_d) = stream.next().await {
