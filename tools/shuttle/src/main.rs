@@ -186,7 +186,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .default_record_key_validator()
         .set_transport_configuration(TransportConfig {
             enable_quic: true,
-            support_quic_draft_29: true,
             ..Default::default()
         })
         .listen_as_external_addr();
