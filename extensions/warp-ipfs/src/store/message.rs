@@ -3487,8 +3487,13 @@ impl MessageStore {
 
         let ipfs = self.ipfs.clone();
         let _constellation = constellation.clone();
-
         let progress_stream = async_stream::stream! {
+            yield Progression::CurrentProgress {
+                name: attachment.name(),
+                current: 0,
+                total: Some(attachment.size()),
+            };
+
             let stream = match ipfs.get_unixfs(reference, &path).await {
                 Ok(stream) => stream,
                 Err(e) => {
@@ -3498,13 +3503,7 @@ impl MessageStore {
                         error: Some(e.to_string()),
                     };
                     return;
-                }
-            };
-
-            yield Progression::CurrentProgress {
-                name: attachment.name(),
-                current: 0,
-                total: Some(attachment.size()),
+                },
             };
 
             for await event in stream {
