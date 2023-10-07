@@ -2215,7 +2215,7 @@ impl IdentityStore {
     pub async fn own_identity_document(&self) -> Result<IdentityDocument, Error> {
         let root_document = self.get_root_document().await?;
         let path = IpfsPath::from(root_document.identity);
-        let identity = self.get_local_dag::<IdentityDocument>(path).await?;
+        let identity: IdentityDocument = path.get_local_dag(&self.ipfs).await?;
         identity.verify()?;
         Ok(identity)
     }
@@ -2460,10 +2460,6 @@ impl IdentityStore {
             .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
-    pub async fn get_root_cid(&self) -> Result<Cid, Error> {
-        (self.root_cid.read().await).ok_or(Error::IdentityDoesntExist)
-    }
-
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
         self.validate_identity(&ident)?;
@@ -2534,7 +2530,7 @@ impl IdentityStore {
 impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (&*self.did_key).clone();
+        let local_public_key = (*self.did_key).clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotSendSelfFriendRequest);
@@ -2576,7 +2572,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (&*self.did_key).clone();
+        let local_public_key = (*self.did_key).clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotAcceptSelfAsFriend);
@@ -2617,7 +2613,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (&*self.did_key).clone();
+        let local_public_key = (*self.did_key).clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotDenySelfAsFriend);
@@ -2649,7 +2645,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (&*self.did_key).clone();
+        let local_public_key = (*self.did_key).clone();
 
         let list = self.list_all_raw_request().await?;
 
@@ -2704,7 +2700,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (&*self.did_key).clone();
+        let local_public_key = (*self.did_key).clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotBlockOwnKey);
@@ -2749,7 +2745,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (&*self.did_key).clone();
+        let local_public_key = (*self.did_key).clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotUnblockOwnKey);
