@@ -52,6 +52,7 @@ use super::{
 };
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct IdentityStore {
     ipfs: Ipfs,
 
@@ -238,7 +239,6 @@ impl IdentityStore {
         ipfs: Ipfs,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        interval: Option<Duration>,
         tx: broadcast::Sender<MultiPassEventKind>,
         pb_tx: futures::channel::mpsc::Sender<PhoneBookCommand>,
         config: &config::Config,
@@ -357,9 +357,12 @@ impl IdentityStore {
                 futures::pin_mut!(event_stream);
                 futures::pin_mut!(friend_stream);
 
-                let auto_push = interval.is_some();
+                let auto_push = store.config.store_setting.auto_push.is_some();
 
-                let interval = interval
+                let interval = store
+                    .config
+                    .store_setting
+                    .auto_push
                     .map(|i| {
                         if i.as_millis() < 300000 {
                             Duration::from_millis(300000)
@@ -2829,7 +2832,7 @@ impl IdentityStore {
         }
 
         if broadcast {
-            let local_public_key = (&*self.did_key).clone();
+            let local_public_key = (*self.did_key).clone();
 
             let payload = RequestResponsePayload {
                 sender: local_public_key,

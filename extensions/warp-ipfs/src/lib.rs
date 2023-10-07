@@ -451,35 +451,20 @@ impl WarpIpfs {
             relays.clone(),
         );
 
+        info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
-            config.store_setting.auto_push,
             self.multipass_tx.clone(),
             pb_tx,
             &config,
             discovery.clone(),
         )
         .await?;
-        info!("Identity store initialized");
-
-        // let friend_store = FriendsStore::new(
-        //     ipfs.clone(),
-        //     identity_store.clone(),
-        //     discovery.clone(),
-        //     config.clone(),
-        //     tesseract.clone(),
-        //     self.multipass_tx.clone(),
-        //
-        // )
-        // .await?;
-        // info!("friends store initialized");
-
-        // identity_store.set_friend_store(friend_store.clone()).await;
+        info!("Identity initialized");
 
         *self.identity_store.write() = Some(identity_store.clone());
-        // *self.friend_store.write() = Some(friend_store.clone());
 
         *self.ipfs.write() = Some(ipfs.clone());
 
