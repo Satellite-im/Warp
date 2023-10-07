@@ -28,7 +28,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::document::ExtractedRootDocument;
 use store::files::FileStore;
-use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
 use tokio::sync::broadcast;
@@ -78,7 +77,6 @@ pub struct WarpIpfs {
     identity_guard: Arc<tokio::sync::Mutex<()>>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
-    friend_store: Arc<RwLock<Option<FriendsStore>>>,
     identity_store: Arc<RwLock<Option<IdentityStore>>>,
     message_store: Arc<RwLock<Option<MessageStore>>>,
     file_store: Arc<RwLock<Option<FileStore>>>,
@@ -148,7 +146,6 @@ impl WarpIpfs {
             config,
             tesseract,
             ipfs: Default::default(),
-            friend_store: Default::default(),
             identity_store: Default::default(),
             message_store: Default::default(),
             file_store: Default::default(),
@@ -179,9 +176,7 @@ impl WarpIpfs {
     async fn initialize_store(&self, init: bool) -> anyhow::Result<()> {
         let tesseract = self.tesseract.clone();
 
-        if init && self.identity_store.read().is_some() && self.friend_store.read().is_some()
-            || self.initialized.load(Ordering::SeqCst)
-        {
+        if init && self.identity_store.read().is_some() || self.initialized.load(Ordering::SeqCst) {
             warn!("Identity is already loaded");
             anyhow::bail!(Error::IdentityExist)
         }
@@ -462,28 +457,29 @@ impl WarpIpfs {
             tesseract.clone(),
             config.store_setting.auto_push,
             self.multipass_tx.clone(),
+            pb_tx,
             &config,
             discovery.clone(),
         )
         .await?;
         info!("Identity store initialized");
 
-        let friend_store = FriendsStore::new(
-            ipfs.clone(),
-            identity_store.clone(),
-            discovery.clone(),
-            config.clone(),
-            tesseract.clone(),
-            self.multipass_tx.clone(),
-            pb_tx,
-        )
-        .await?;
-        info!("friends store initialized");
+        // let friend_store = FriendsStore::new(
+        //     ipfs.clone(),
+        //     identity_store.clone(),
+        //     discovery.clone(),
+        //     config.clone(),
+        //     tesseract.clone(),
+        //     self.multipass_tx.clone(),
+        //
+        // )
+        // .await?;
+        // info!("friends store initialized");
 
-        identity_store.set_friend_store(friend_store.clone()).await;
+        // identity_store.set_friend_store(friend_store.clone()).await;
 
         *self.identity_store.write() = Some(identity_store.clone());
-        *self.friend_store.write() = Some(friend_store.clone());
+        // *self.friend_store.write() = Some(friend_store.clone());
 
         *self.ipfs.write() = Some(ipfs.clone());
 
@@ -496,7 +492,7 @@ impl WarpIpfs {
             ipfs.clone(),
             config.path.map(|path| path.join("messages")),
             identity_store,
-            friend_store,
+            // friend_store,
             discovery,
             Some(Box::new(self.clone()) as Box<dyn Constellation>),
             false,
@@ -515,14 +511,6 @@ impl WarpIpfs {
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
         Ok(())
-    }
-
-    pub(crate) async fn friend_store(&self) -> Result<FriendsStore, Error> {
-        self.identity_store(true).await?;
-        self.friend_store
-            .read()
-            .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
     pub(crate) async fn identity_store(&self, created: bool) -> Result<IdentityStore, Error> {
@@ -578,8 +566,8 @@ impl WarpIpfs {
     }
 
     pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
-        let friends = self.friend_store().await?;
-        friends.is_blocked_by(pubkey).await
+        let identity = self.identity_store(true).await?;
+        identity.is_blocked_by(pubkey).await
     }
 }
 
@@ -1059,77 +1047,77 @@ impl MultiPassImportExport for WarpIpfs {
 #[async_trait::async_trait]
 impl Friends for WarpIpfs {
     async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.send_request(pubkey).await
     }
 
     async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.accept_request(pubkey).await
     }
 
     async fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.reject_request(pubkey).await
     }
 
     async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.close_request(pubkey).await
     }
 
     async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.list_incoming_request().await
     }
 
     async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.list_outgoing_request().await
     }
 
     async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.received_friend_request_from(did).await
     }
 
     async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.sent_friend_request_to(did).await
     }
 
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.remove_friend(pubkey, true).await
     }
 
     async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.block(pubkey).await
     }
 
     async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.is_blocked(did).await
     }
 
     async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.unblock(pubkey).await
     }
 
     async fn block_list(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.block_list().await.map(Vec::from_iter)
     }
 
     async fn list_friends(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.friends_list().await.map(Vec::from_iter)
     }
 
     async fn has_friend(&self, pubkey: &DID) -> Result<bool, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.is_friend(pubkey).await
     }
 }

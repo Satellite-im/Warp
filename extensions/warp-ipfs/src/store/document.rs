@@ -19,7 +19,7 @@ use crate::store::get_keypair_did;
 
 use self::{identity::IdentityDocument, utils::GetLocalDag};
 
-use super::friends::Request;
+use super::identity::Request;
 
 #[async_trait::async_trait]
 pub(crate) trait ToCid: Sized {
@@ -76,7 +76,7 @@ pub struct ExtractedRootDocument {
     pub friends: Vec<DID>,
     pub block_list: Vec<DID>,
     pub block_by_list: Vec<DID>,
-    pub request: Vec<super::friends::Request>,
+    pub request: Vec<super::identity::Request>,
     pub signature: Option<Vec<u8>>,
 }
 

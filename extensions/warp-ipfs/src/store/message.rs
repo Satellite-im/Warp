@@ -44,7 +44,6 @@ use crate::store::{
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::discovery::Discovery;
 use super::document::utils::{GetLocalDag, ToCid};
-use super::friends::FriendsStore;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
 use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, DidExt, MessagingEvents};
@@ -83,7 +82,7 @@ pub struct MessageStore {
     identity: IdentityStore,
 
     // friend store
-    friends: FriendsStore,
+    // friends: FriendsStore,
 
     // discovery
     discovery: Discovery,
@@ -117,7 +116,7 @@ impl MessageStore {
         ipfs: Ipfs,
         path: Option<PathBuf>,
         identity: IdentityStore,
-        friends: FriendsStore,
+        // friends: FriendsStore,
         discovery: Discovery,
         filesystem: Option<Box<dyn Constellation>>,
         _: bool,
@@ -160,7 +159,7 @@ impl MessageStore {
             conversation_sender,
             conversation_task_tx,
             identity,
-            friends,
+            // friends,
             discovery,
             filesystem,
             queue,
@@ -1433,7 +1432,7 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                if let Ok(true) = self.friends.is_blocked(&recipient).await {
+                if let Ok(true) = self.identity.is_blocked(&recipient).await {
                     //TODO: Signal back to close conversation
                     warn!("{recipient} is blocked");
                     return Ok(());
@@ -1800,11 +1799,11 @@ impl MessageStore {
 
 impl MessageStore {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
-        if self.with_friends.load(Ordering::SeqCst) && !self.friends.is_friend(did_key).await? {
+        if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did_key).await? {
             return Err(Error::FriendDoesntExist);
         }
 
-        if let Ok(true) = self.friends.is_blocked(did_key).await {
+        if let Ok(true) = self.identity.is_blocked(did_key).await {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -1935,12 +1934,12 @@ impl MessageStore {
         let mut removal = vec![];
 
         for did in recipients.iter() {
-            if self.with_friends.load(Ordering::SeqCst) && !self.friends.is_friend(did).await? {
+            if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did).await? {
                 info!("{did} is not on the friends list.. removing from list");
                 removal.push(did.clone());
             }
 
-            if let Ok(true) = self.friends.is_blocked(did).await {
+            if let Ok(true) = self.identity.is_blocked(did).await {
                 info!("{did} is blocked.. removing from list");
                 removal.push(did.clone());
             }
@@ -2749,7 +2748,7 @@ impl MessageStore {
             return Err(Error::PublicKeyInvalid);
         }
 
-        if self.friends.is_blocked(did_key).await? {
+        if self.identity.is_blocked(did_key).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
 
