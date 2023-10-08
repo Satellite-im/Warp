@@ -4,12 +4,12 @@
 use crate::{
     behaviour::phonebook::PhoneBookCommand,
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
+    store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic, VecExt},
 };
 use futures::{
     channel::{mpsc, oneshot},
     stream::BoxStream,
-    StreamExt,
+    StreamExt, TryStreamExt,
 };
 use ipfs::{Ipfs, IpfsPath, Keypair};
 use libipld::Cid;
@@ -1421,14 +1421,20 @@ impl IdentityStore {
                                         let store = self.clone();
                                         let did = in_did.clone();
                                         async move {
+                                            let peer_id = vec![did.to_peer_id()?];
+
                                             let mut stream = ipfs
                                                 .unixfs()
-                                                .cat(identity_profile_picture, None, &[], false)
+                                                .cat(
+                                                    identity_profile_picture,
+                                                    None,
+                                                    &peer_id,
+                                                    false,
+                                                )
                                                 .await?
                                                 .boxed();
-                                            while let Some(_d) = stream.next().await {
-                                                let _d = _d.map_err(anyhow::Error::from)?;
-                                            }
+
+                                            while let Some(_d) = stream.try_next().await? {}
 
                                             if emit {
                                                 store.emit_event(
@@ -1470,15 +1476,15 @@ impl IdentityStore {
                                         let did = in_did.clone();
                                         let store = self.clone();
                                         async move {
+                                            let peer_id = vec![did.to_peer_id()?];
+
                                             let mut stream = ipfs
                                                 .unixfs()
-                                                .cat(identity_profile_banner, None, &[], false)
+                                                .cat(identity_profile_banner, None, &peer_id, false)
                                                 .await?
                                                 .boxed();
 
-                                            while let Some(_d) = stream.next().await {
-                                                let _d = _d.map_err(anyhow::Error::from)?;
-                                            }
+                                            while let Some(_d) = stream.try_next().await? {}
 
                                             if emit {
                                                 store.emit_event(
