@@ -1809,16 +1809,10 @@ impl IdentityStore {
                 if *pubkey == own_did {
                     return self.own_identity().await.map(|i| vec![i]);
                 }
-                tokio::spawn({
-                    let discovery = self.discovery.clone();
-                    let pubkey = pubkey.clone();
-                    async move {
-                        if !discovery.contains(&pubkey).await {
-                            discovery.insert(&pubkey).await?;
-                        }
-                        Ok::<_, Error>(())
-                    }
-                });
+
+                if !self.discovery.contains(pubkey).await {
+                    self.discovery.insert(pubkey).await?;
+                }
 
                 self.cache()
                     .await
@@ -1831,19 +1825,13 @@ impl IdentityStore {
                 let mut items = HashSet::new();
                 let cache = self.cache().await;
 
-                tokio::spawn({
-                    let discovery = self.discovery.clone();
-                    let list = list.clone();
-                    let own_did = own_did.clone();
-                    async move {
-                        for pubkey in list {
-                            if !pubkey.eq(&own_did) && !discovery.contains(&pubkey).await {
-                                discovery.insert(&pubkey).await?;
-                            }
+                for pubkey in list {
+                    if !pubkey.eq(&own_did) && !self.discovery.contains(pubkey).await {
+                        if let Err(e) = self.discovery.insert(pubkey).await {
+                            log::error!("Error inserting {pubkey} into discovery: {e}")
                         }
-                        Ok::<_, Error>(())
                     }
-                });
+                }
 
                 for pubkey in list {
                     if own_did.eq(pubkey) {
