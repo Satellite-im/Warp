@@ -376,6 +376,7 @@ impl IdentityStore {
 
                 loop {
                     tokio::select! {
+                        biased;
                         Some(message) = event_stream.next() => {
                             let entry = match message.source {
                                 Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
