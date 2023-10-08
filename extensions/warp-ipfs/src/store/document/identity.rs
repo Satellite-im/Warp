@@ -4,7 +4,7 @@ use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, time::Duration};
 use warp::{
-    crypto::{did_key::CoreSign, DID},
+    crypto::{did_key::CoreSign, Fingerprint, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
@@ -123,7 +123,45 @@ impl IdentityDocument {
     pub fn verify(&self) -> Result<(), Error> {
         let mut payload = self.clone();
 
-        //TODO: Validate username, short id, and status message
+        if payload.username.is_empty() {
+            return Err(Error::IdentityInvalid); //TODO: Invalid username
+        }
+
+        if !(4..=64).contains(&payload.username.len()) {
+            return Err(Error::InvalidLength {
+                context: "username".into(),
+                current: payload.username.len(),
+                minimum: Some(4),
+                maximum: Some(64),
+            });
+        }
+
+        if payload.short_id.is_empty() {
+            return Err(Error::IdentityInvalid); //TODO: Invalid short id
+        }
+
+        let fingerprint = payload.did.fingerprint();
+
+        let bytes = fingerprint.as_bytes();
+
+        let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
+            .try_into()
+            .map_err(anyhow::Error::from)?;
+
+        if payload.short_id != short_id {
+            return Err(Error::IdentityInvalid); //TODO: Invalid short id
+        }
+
+        if let Some(status) = &payload.status_message {
+            if status.len() > 256 {
+                return Err(Error::InvalidLength {
+                    context: "identity status message".into(),
+                    current: status.len(),
+                    minimum: None,
+                    maximum: Some(256),
+                });
+            }
+        }
 
         let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
         let signature_bytes = bs58::decode(signature).into_vec()?;
