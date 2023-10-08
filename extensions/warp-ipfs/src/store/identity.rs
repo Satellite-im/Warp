@@ -1430,6 +1430,7 @@ impl IdentityStore {
                                                     None,
                                                     &peer_id,
                                                     false,
+                                                    None,
                                                 )
                                                 .await?
                                                 .boxed();
@@ -1480,7 +1481,13 @@ impl IdentityStore {
 
                                             let mut stream = ipfs
                                                 .unixfs()
-                                                .cat(identity_profile_banner, None, &peer_id, false)
+                                                .cat(
+                                                    identity_profile_banner,
+                                                    None,
+                                                    &peer_id,
+                                                    false,
+                                                    None,
+                                                )
                                                 .await?
                                                 .boxed();
 
@@ -1570,7 +1577,7 @@ impl IdentityStore {
                                             async move {
                                                 let mut stream = ipfs
                                                     .unixfs()
-                                                    .cat(picture, None, &[], false)
+                                                    .cat(picture, None, &[], false, None)
                                                     .await?
                                                     .boxed();
 
@@ -1595,7 +1602,7 @@ impl IdentityStore {
                                             async move {
                                                 let mut stream = ipfs
                                                     .unixfs()
-                                                    .cat(banner, None, &[], false)
+                                                    .cat(banner, None, &[], false, None)
                                                     .await?
                                                     .boxed();
                                                 while let Some(_d) = stream.next().await {

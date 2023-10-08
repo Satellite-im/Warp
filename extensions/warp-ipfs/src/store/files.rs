@@ -123,7 +123,7 @@ impl FileStore {
         let mut index_stream = self
             .ipfs
             .unixfs()
-            .cat(IpfsPath::from(cid), None, &[], true)
+            .cat(IpfsPath::from(cid), None, &[], true, None)
             .await
             .map_err(anyhow::Error::from)?
             .boxed();

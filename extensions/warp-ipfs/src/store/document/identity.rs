@@ -145,7 +145,7 @@ pub async fn unixfs_fetch(
     let fut = async {
         let stream = ipfs
             .unixfs()
-            .cat(IpfsPath::from(cid), None, &[], local)
+            .cat(IpfsPath::from(cid), None, &[], local, None)
             .await
             .map_err(anyhow::Error::from)?;
 
