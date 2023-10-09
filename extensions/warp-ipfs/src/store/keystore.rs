@@ -64,11 +64,10 @@ impl Keystore {
     pub fn get_latest(&self, did: &DID, recipient: &DID) -> Result<Vec<u8>, Error> {
         self.recipient_key
             .get(recipient)
-            .map(|list| {
+            .and_then(|list| {
                 list.last()
                     .and_then(|entry| super::ecdh_decrypt(did, None, entry).ok())
             })
-            .and_then(|entry| entry)
             .ok_or(Error::PublicKeyInvalid)
     }
 
