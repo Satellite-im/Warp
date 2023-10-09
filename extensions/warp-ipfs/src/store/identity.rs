@@ -267,13 +267,7 @@ impl IdentityStore {
             discovery.clone(),
         );
 
-        let phonebook = PhoneBook::new(
-            ipfs.clone(),
-            discovery.clone(),
-            tx.clone(),
-            config.store_setting.emit_online_event,
-            pb_tx,
-        );
+        let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
         let signal = Default::default();
         let wait_on_response = config.store_setting.friend_request_response_duration;
