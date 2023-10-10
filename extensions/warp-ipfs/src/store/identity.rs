@@ -2262,16 +2262,18 @@ impl IdentityStore {
                     error,
                     ..
                 })) => {
-                    match error {
+                    let err = match error {
                         Some(e) => {
                             log::error!("Error uploading picture with {written} bytes written with error: {e}");
-                            return Poll::Ready(Err(Error::from(e)));
-                        }
+                            e.into()
+                        },
                         None => {
                             log::error!("Error uploading picture with {written} bytes written");
-                            return Poll::Ready(Err(Error::OtherWithContext("Error uploading photo".into())));
+                            Error::OtherWithContext("Error uploading photo".into())
                         }
-                    }
+                    };
+
+                    return Poll::Ready(Err(err));
                 }
                 Poll::Ready(None) => return Poll::Ready(Err(Error::ReceiverChannelUnavailable)),
                 Poll::Pending => return Poll::Pending,
@@ -2345,12 +2347,17 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.profile_banner {
-            if let Ok(data) = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
+            let data = match unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
             {
-                let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                if !picture.is_empty() {
-                    return Ok(picture);
+                Ok(data) => data,
+                Err(_) => {
+                    return Err(Error::InvalidIdentityPicture);
                 }
+            };
+
+            let picture: String = String::from_utf8_lossy(&data).to_string();
+            if !picture.is_empty() {
+                return Ok(picture);
             }
         }
 
