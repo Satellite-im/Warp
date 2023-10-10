@@ -32,7 +32,7 @@ use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::debug;
+use tracing::{debug, trace};
 use tracing::log::{error, info, warn};
 use utils::ExtensionType;
 use uuid::Uuid;
@@ -686,6 +686,9 @@ impl MultiPass for WarpIpfs {
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
+
+                trace!("image size = {}", len);
+
                 let cid = store
                     .store_photo(
                         futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
@@ -696,8 +699,11 @@ impl MultiPass for WarpIpfs {
                     )
                     .await?;
 
+                debug!("Image cid: {cid}");
+
                 if let Some(picture_cid) = identity.profile_picture {
                     if picture_cid == cid {
+                        debug!("Picture is already on document. Not updating identity");
                         return Ok(());
                     }
 
@@ -733,6 +739,8 @@ impl MultiPass for WarpIpfs {
                     });
                 }
 
+                trace!("image size = {}", len);
+
                 let stream = async_stream::stream! {
                     let mut reader = file.compat();
                     let mut buffer = vec![0u8; 512];
@@ -756,8 +764,11 @@ impl MultiPass for WarpIpfs {
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
 
+                debug!("Image cid: {cid}");
+
                 if let Some(picture_cid) = identity.profile_picture {
                     if picture_cid == cid {
+                        debug!("Picture is already on document. Not updating identity");
                         return Ok(());
                     }
 
@@ -789,6 +800,8 @@ impl MultiPass for WarpIpfs {
                     });
                 }
 
+                trace!("image size = {}", len);
+
                 let cid = store
                     .store_photo(
                         futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
@@ -799,8 +812,11 @@ impl MultiPass for WarpIpfs {
                     )
                     .await?;
 
+                debug!("Image cid: {cid}");
+
                 if let Some(banner_cid) = identity.profile_banner {
                     if banner_cid == cid {
+                        debug!("Banner is already on document. Not updating identity");
                         return Ok(());
                     }
 
@@ -836,6 +852,8 @@ impl MultiPass for WarpIpfs {
                     });
                 }
 
+                trace!("image size = {}", len);
+
                 let stream = async_stream::stream! {
                     let mut reader = file.compat();
                     let mut buffer = vec![0u8; 512];
@@ -859,8 +877,11 @@ impl MultiPass for WarpIpfs {
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
 
+                debug!("Image cid: {cid}");
+
                 if let Some(banner_cid) = identity.profile_banner {
                     if banner_cid == cid {
+                        debug!("Banner is already on document. Not updating identity");
                         return Ok(());
                     }
 

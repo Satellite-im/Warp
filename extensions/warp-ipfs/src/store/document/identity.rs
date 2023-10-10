@@ -1,4 +1,4 @@
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
@@ -180,47 +180,31 @@ pub async fn unixfs_fetch(
     local: bool,
     limit: Option<usize>,
 ) -> Result<Vec<u8>, Error> {
-    let fut = async {
-        let stream = ipfs
-            .unixfs()
-            .cat(IpfsPath::from(cid), None, &[], local, None)
-            .await
-            .map_err(anyhow::Error::from)?;
+    let timeout = timeout.or(Some(std::time::Duration::from_secs(15)));
 
-        futures::pin_mut!(stream);
+    let mut stream = ipfs
+        .unixfs()
+        .cat(IpfsPath::from(cid), None, &[], local, timeout)
+        .await
+        .map_err(anyhow::Error::from)?
+        .boxed();
 
-        let mut data = vec![];
+    let mut data = vec![];
 
-        while let Some(stream) = stream.next().await {
-            if let Some(limit) = limit {
-                if data.len() >= limit {
-                    return Err(Error::InvalidLength {
-                        context: "data".into(),
-                        current: data.len(),
-                        minimum: None,
-                        maximum: Some(limit),
-                    });
-                }
-            }
-            match stream {
-                Ok(bytes) => {
-                    data.extend(bytes);
-                }
-                Err(e) => return Err(Error::from(anyhow::anyhow!("{e}"))),
-            }
-        }
-        Ok(data)
-    };
+    while let Some(stream) = stream.try_next().await.map_err(anyhow::Error::from)? {
+        data.extend(stream);
+    }
 
-    match local {
-        true => fut.await,
-        false => {
-            let timeout = timeout.unwrap_or(std::time::Duration::from_secs(15));
-            match tokio::time::timeout(timeout, fut).await {
-                Ok(Ok(data)) => serde_json::from_slice(&data).map_err(Error::from),
-                Ok(Err(e)) => Err(e),
-                Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-            }
+    if let Some(limit) = limit {
+        if data.len() > limit {
+            return Err(Error::InvalidLength {
+                context: "data".into(),
+                current: data.len(),
+                minimum: None,
+                maximum: Some(limit),
+            });
         }
     }
+
+    Ok(data)
 }

@@ -18,6 +18,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
+    task::Poll,
     time::{Duration, Instant},
 };
 
@@ -1912,11 +1913,18 @@ impl IdentityStore {
 
         let identity = identity.sign(&kp)?;
 
+        log::debug!("Updateing document");
         let mut root_document = self.get_root_document().await?;
         let ident_cid = identity.to_cid(&self.ipfs).await?;
         root_document.identity = ident_cid;
 
-        self.set_root_document(root_document).await
+        self.set_root_document(root_document)
+            .await
+            .map(|_| log::debug!("Document updated"))
+            .map_err(|e| {
+                log::error!("Updating document failed: {e}");
+                e
+            })
     }
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
@@ -2224,48 +2232,52 @@ impl IdentityStore {
 
         let mut stream = ipfs.add_unixfs(stream).await?;
 
-        let mut ipfs_path = None;
-
-        while let Some(status) = stream.next().await {
-            match status {
-                ipfs::unixfs::UnixfsStatus::ProgressStatus { written, .. } => {
+        let cid = futures::future::poll_fn(|cx| loop {
+            match stream.poll_next_unpin(cx) {
+                Poll::Ready(Some(ipfs::unixfs::UnixfsStatus::ProgressStatus {
+                    written, ..
+                })) => {
                     if let Some(limit) = limit {
-                        if written >= limit {
-                            return Err(Error::InvalidLength {
+                        if written > limit {
+                            return Poll::Ready(Err(Error::InvalidLength {
                                 context: "photo".into(),
                                 current: written,
                                 minimum: Some(1),
                                 maximum: Some(limit),
-                            });
+                            }));
                         }
                     }
                     log::trace!("{written} bytes written");
                 }
-                ipfs::unixfs::UnixfsStatus::CompletedStatus { path, written, .. } => {
-                    log::debug!("Image is written with {written} bytes");
-                    ipfs_path = Some(path);
+                Poll::Ready(Some(ipfs::unixfs::UnixfsStatus::CompletedStatus {
+                    path,
+                    written,
+                    ..
+                })) => {
+                    log::debug!("Image is written with {written} bytes - stored at {path}");
+                    return Poll::Ready(path.root().cid().copied().ok_or(Error::Other));
                 }
-                ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
+                Poll::Ready(Some(ipfs::unixfs::UnixfsStatus::FailedStatus {
+                    written,
+                    error,
+                    ..
+                })) => {
                     match error {
                         Some(e) => {
                             log::error!("Error uploading picture with {written} bytes written with error: {e}");
-                            return Err(Error::from(e));
+                            return Poll::Ready(Err(Error::from(e)));
                         }
                         None => {
                             log::error!("Error uploading picture with {written} bytes written");
-                            return Err(Error::OtherWithContext("Error uploading photo".into()));
+                            return Poll::Ready(Err(Error::OtherWithContext("Error uploading photo".into())));
                         }
                     }
                 }
+                Poll::Ready(None) => return Poll::Ready(Err(Error::ReceiverChannelUnavailable)),
+                Poll::Pending => return Poll::Pending,
             }
-        }
-
-        let cid = ipfs_path
-            .ok_or(Error::Other)?
-            .root()
-            .cid()
-            .copied()
-            .ok_or(Error::Other)?;
+        })
+        .await?;
 
         if !ipfs.is_pinned(&cid).await? {
             ipfs.insert_pin(&cid, true).await?;
@@ -2292,12 +2304,17 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.profile_picture {
-            if let Ok(data) = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
+            let data = match unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
             {
-                let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                if !picture.is_empty() {
-                    return Ok(picture);
+                Ok(data) => data,
+                Err(_) => {
+                    return Err(Error::InvalidIdentityPicture);
                 }
+            };
+
+            let picture: String = String::from_utf8_lossy(&data).to_string();
+            if !picture.is_empty() {
+                return Ok(picture);
             }
         }
 
