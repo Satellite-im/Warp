@@ -28,13 +28,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::document::ExtractedRootDocument;
 use store::files::FileStore;
-use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::debug;
 use tracing::log::{error, info, warn};
+use tracing::{debug, trace};
 use utils::ExtensionType;
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
@@ -78,7 +77,6 @@ pub struct WarpIpfs {
     identity_guard: Arc<tokio::sync::Mutex<()>>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
-    friend_store: Arc<RwLock<Option<FriendsStore>>>,
     identity_store: Arc<RwLock<Option<IdentityStore>>>,
     message_store: Arc<RwLock<Option<MessageStore>>>,
     file_store: Arc<RwLock<Option<FileStore>>>,
@@ -148,7 +146,6 @@ impl WarpIpfs {
             config,
             tesseract,
             ipfs: Default::default(),
-            friend_store: Default::default(),
             identity_store: Default::default(),
             message_store: Default::default(),
             file_store: Default::default(),
@@ -179,9 +176,7 @@ impl WarpIpfs {
     async fn initialize_store(&self, init: bool) -> anyhow::Result<()> {
         let tesseract = self.tesseract.clone();
 
-        if init && self.identity_store.read().is_some() && self.friend_store.read().is_some()
-            || self.initialized.load(Ordering::SeqCst)
-        {
+        if init && self.identity_store.read().is_some() || self.initialized.load(Ordering::SeqCst) {
             warn!("Identity is already loaded");
             anyhow::bail!(Error::IdentityExist)
         }
@@ -484,43 +479,21 @@ impl WarpIpfs {
             relays.clone(),
         );
 
+        info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
-            config.store_setting.auto_push,
-            self.multipass_tx.clone(),
-            config.store_setting.default_profile_picture.clone(),
-            (
-                discovery.clone(),
-                relays,
-                config.store_setting.fetch_over_bitswap,
-                config.store_setting.share_platform,
-                config.store_setting.update_events,
-                config.store_setting.disable_images,
-                Some(id_sh_tx),
-                Some(id_sh_p_rx),
-            ),
-        )
-        .await?;
-        info!("Identity store initialized");
-
-        let friend_store = FriendsStore::new(
-            ipfs.clone(),
-            identity_store.clone(),
-            discovery.clone(),
-            config.clone(),
-            tesseract.clone(),
             self.multipass_tx.clone(),
             pb_tx,
+            &config,
+            discovery.clone(),
+            (Some(id_sh_tx), Some(id_sh_p_rx)),
         )
         .await?;
-        info!("friends store initialized");
-
-        identity_store.set_friend_store(friend_store.clone()).await;
+        info!("Identity initialized");
 
         *self.identity_store.write() = Some(identity_store.clone());
-        *self.friend_store.write() = Some(friend_store.clone());
 
         *self.ipfs.write() = Some(ipfs.clone());
 
@@ -533,7 +506,7 @@ impl WarpIpfs {
             ipfs.clone(),
             config.path.map(|path| path.join("messages")),
             identity_store,
-            friend_store,
+            // friend_store,
             discovery,
             Some(Box::new(self.clone()) as Box<dyn Constellation>),
             false,
@@ -541,9 +514,7 @@ impl WarpIpfs {
             self.raygun_tx.clone(),
             (
                 config.store_setting.check_spam,
-                config.store_setting.disable_sender_event_emit,
                 config.store_setting.with_friends,
-                config.store_setting.conversation_load_task,
             ),
         )
         .await
@@ -554,14 +525,6 @@ impl WarpIpfs {
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
         Ok(())
-    }
-
-    pub(crate) async fn friend_store(&self) -> Result<FriendsStore, Error> {
-        self.identity_store(true).await?;
-        self.friend_store
-            .read()
-            .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
     pub(crate) async fn identity_store(&self, created: bool) -> Result<IdentityStore, Error> {
@@ -617,8 +580,8 @@ impl WarpIpfs {
     }
 
     pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
-        let friends = self.friend_store().await?;
-        friends.is_blocked_by(pubkey).await
+        let identity = self.identity_store(true).await?;
+        identity.is_blocked_by(pubkey).await
     }
 }
 
@@ -752,6 +715,9 @@ impl MultiPass for WarpIpfs {
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
+
+                trace!("image size = {}", len);
+
                 let cid = store
                     .store_photo(
                         futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
@@ -762,8 +728,11 @@ impl MultiPass for WarpIpfs {
                     )
                     .await?;
 
+                debug!("Image cid: {cid}");
+
                 if let Some(picture_cid) = identity.profile_picture {
                     if picture_cid == cid {
+                        debug!("Picture is already on document. Not updating identity");
                         return Ok(());
                     }
 
@@ -799,6 +768,8 @@ impl MultiPass for WarpIpfs {
                     });
                 }
 
+                trace!("image size = {}", len);
+
                 let stream = async_stream::stream! {
                     let mut reader = file.compat();
                     let mut buffer = vec![0u8; 512];
@@ -822,8 +793,11 @@ impl MultiPass for WarpIpfs {
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
 
+                debug!("Image cid: {cid}");
+
                 if let Some(picture_cid) = identity.profile_picture {
                     if picture_cid == cid {
+                        debug!("Picture is already on document. Not updating identity");
                         return Ok(());
                     }
 
@@ -855,6 +829,8 @@ impl MultiPass for WarpIpfs {
                     });
                 }
 
+                trace!("image size = {}", len);
+
                 let cid = store
                     .store_photo(
                         futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
@@ -865,8 +841,11 @@ impl MultiPass for WarpIpfs {
                     )
                     .await?;
 
+                debug!("Image cid: {cid}");
+
                 if let Some(banner_cid) = identity.profile_banner {
                     if banner_cid == cid {
+                        debug!("Banner is already on document. Not updating identity");
                         return Ok(());
                     }
 
@@ -902,6 +881,8 @@ impl MultiPass for WarpIpfs {
                     });
                 }
 
+                trace!("image size = {}", len);
+
                 let stream = async_stream::stream! {
                     let mut reader = file.compat();
                     let mut buffer = vec![0u8; 512];
@@ -925,8 +906,11 @@ impl MultiPass for WarpIpfs {
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
 
+                debug!("Image cid: {cid}");
+
                 if let Some(banner_cid) = identity.profile_banner {
                     if banner_cid == cid {
+                        debug!("Banner is already on document. Not updating identity");
                         return Ok(());
                     }
 
@@ -974,8 +958,6 @@ impl MultiPass for WarpIpfs {
             }
         }
 
-        info!("Update identity store");
-        store.update_identity().await?;
         store.push_to_all().await;
 
         Ok(())
@@ -1100,7 +1082,7 @@ impl MultiPassImportExport for WarpIpfs {
         let mut store = self.identity_store(true).await?;
         let kp = store.get_keypair_did()?;
         let ipfs = self.ipfs()?;
-        let document = store.get_root_document().await?;
+        let document = store.root_document().get().await?;
 
         let exported = document.export(&ipfs).await?;
 
@@ -1127,77 +1109,77 @@ impl MultiPassImportExport for WarpIpfs {
 #[async_trait::async_trait]
 impl Friends for WarpIpfs {
     async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.send_request(pubkey).await
     }
 
     async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.accept_request(pubkey).await
     }
 
     async fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.reject_request(pubkey).await
     }
 
     async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.close_request(pubkey).await
     }
 
     async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.list_incoming_request().await
     }
 
     async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.list_outgoing_request().await
     }
 
     async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.received_friend_request_from(did).await
     }
 
     async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.sent_friend_request_to(did).await
     }
 
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.remove_friend(pubkey, true).await
     }
 
     async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.block(pubkey).await
     }
 
     async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.is_blocked(did).await
     }
 
     async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store().await?;
+        let mut store = self.identity_store(true).await?;
         store.unblock(pubkey).await
     }
 
     async fn block_list(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.block_list().await.map(Vec::from_iter)
     }
 
     async fn list_friends(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.friends_list().await.map(Vec::from_iter)
     }
 
     async fn has_friend(&self, pubkey: &DID) -> Result<bool, Error> {
-        let store = self.friend_store().await?;
+        let store = self.identity_store(true).await?;
         store.is_friend(pubkey).await
     }
 }
