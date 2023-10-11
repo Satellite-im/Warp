@@ -78,8 +78,6 @@ pub struct IdentityStore {
 
     phonebook: PhoneBook,
 
-    wait_on_response: Option<Duration>,
-
     signal: Arc<RwLock<HashMap<DID, oneshot::Sender<Result<(), Error>>>>>,
 
     discovery: Discovery,
@@ -313,7 +311,6 @@ impl IdentityStore {
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
         let signal = Default::default();
-        let wait_on_response = config.store_setting.friend_request_response_duration;
 
         let store = Self {
             ipfs,
@@ -330,7 +327,6 @@ impl IdentityStore {
             queue,
             phonebook,
             signal,
-            wait_on_response,
         };
 
         if let Ok(ident) = store.own_identity().await {
@@ -2526,7 +2522,11 @@ impl IdentityStore {
 
         let mut queued = false;
 
-        let wait = self.wait_on_response.is_some();
+        let wait = self
+            .config
+            .store_setting
+            .friend_request_response_duration
+            .is_some();
 
         let mut rx = (matches!(payload.event, Event::Request) && wait).then_some({
             let (tx, rx) = oneshot::channel();
@@ -2556,7 +2556,7 @@ impl IdentityStore {
 
         if !queued && matches!(payload.event, Event::Request) {
             if let Some(rx) = std::mem::take(&mut rx) {
-                if let Some(timeout) = self.wait_on_response {
+                if let Some(timeout) = self.config.store_setting.friend_request_response_duration {
                     let start = Instant::now();
                     if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
                         let end = start.elapsed();
