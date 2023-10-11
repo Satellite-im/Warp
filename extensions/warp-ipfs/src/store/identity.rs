@@ -55,15 +55,9 @@ use super::{
 pub struct IdentityStore {
     ipfs: Ipfs,
 
-    path: Option<PathBuf>,
-
-    root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
-
     root_document: RootDocumentMap,
 
     identity_cache: IdentityCache,
-
-    identity: Arc<tokio::sync::RwLock<Option<Identity>>>,
 
     online_status: Arc<tokio::sync::RwLock<Option<IdentityStatus>>>,
 
@@ -246,11 +240,9 @@ impl IdentityStore {
             }
         }
         let config = config.clone();
-        let identity = Arc::new(Default::default());
 
         let identity_cache = IdentityCache::new(&ipfs, path.clone()).await;
 
-        let root_cid = Arc::new(Default::default());
         let online_status = Arc::default();
 
         let event = tx.clone();
@@ -273,16 +265,12 @@ impl IdentityStore {
 
         let store = Self {
             ipfs,
-            path,
-            root_cid,
             root_document,
             identity_cache,
-            identity,
             online_status,
             discovery,
             config,
             tesseract,
-
             event,
             did_key,
             queue,
@@ -293,7 +281,6 @@ impl IdentityStore {
 
         if let Ok(ident) = store.own_identity().await {
             log::info!("Identity loaded with {}", ident.did_key());
-            *store.identity.write().await = Some(ident);
         }
 
         let did = store.get_keypair_did()?;
@@ -916,7 +903,7 @@ impl IdentityStore {
                 // Validate after making sure the identity did matches the payload
                 identity.verify()?;
 
-                if let Some(own_id) = self.identity.read().await.clone() {
+                if let Ok(own_id) = self.own_identity().await {
                     anyhow::ensure!(
                         own_id.did_key() != identity.did,
                         "Cannot accept own identity"
@@ -1238,13 +1225,10 @@ impl IdentityStore {
 
         let identity = extracted.identity.clone();
 
-        let root_document = RootDocument::import(&self.ipfs, extracted).await?;
+        let document = RootDocument::import(&self.ipfs, extracted).await?;
 
-        let root_cid = root_document.to_cid(&self.ipfs).await?;
+        self.root_document.set(document).await?;
 
-        self.ipfs.insert_pin(&root_cid, true).await?;
-
-        self.save_cid(root_cid).await?;
         self.update_identity().await?;
 
         log::info!("Loading friends list into phonebook");
@@ -1296,27 +1280,21 @@ impl IdentityStore {
 
         let ident_cid = identity.to_cid(&self.ipfs).await?;
 
-        let mut root_document = RootDocument {
+        let root_document = RootDocument {
             identity: ident_cid,
             ..Default::default()
         };
 
-        root_document.sign(&did_kp)?;
-
-        let root_cid = root_document.to_cid(&self.ipfs).await?;
-
-        // Pin the dag
-        self.ipfs.insert_pin(&root_cid, true).await?;
+        self.root_document.set(root_document).await?;
 
         let identity = identity.resolve()?;
 
-        self.save_cid(root_cid).await?;
         self.update_identity().await?;
         Ok(identity)
     }
 
     pub async fn local_id_created(&self) -> bool {
-        self.identity.read().await.is_some()
+        self.own_identity().await.is_ok()
     }
 
     pub(crate) fn root_document(&self) -> &RootDocumentMap {
@@ -1326,14 +1304,10 @@ impl IdentityStore {
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
     pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
         let own_did = self
-            .identity
-            .read()
+            .own_identity()
             .await
-            .clone()
             .map(|identity| identity.did_key())
-            .ok_or_else(|| {
-                Error::OtherWithContext("Identity store may not be initialized".into())
-            })?;
+            .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
         let mut preidentity = vec![];
 
@@ -1476,14 +1450,10 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
         let own_did = self
-            .identity
-            .read()
+            .own_identity()
             .await
-            .clone()
             .map(|identity| identity.did_key())
-            .ok_or_else(|| {
-                Error::OtherWithContext("Identity store may not be initialized".into())
-            })?;
+            .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
         if own_did.eq(did) {
             return self
@@ -1538,14 +1508,10 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn identity_platform(&self, did: &DID) -> Result<Platform, Error> {
         let own_did = self
-            .identity
-            .read()
+            .own_identity()
             .await
-            .clone()
             .map(|identity| identity.did_key())
-            .ok_or_else(|| {
-                Error::OtherWithContext("Identity store may not be initialized".into())
-            })?;
+            .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
         if own_did.eq(did) {
             return Ok(self.own_platform());
@@ -1620,15 +1586,6 @@ impl IdentityStore {
 
         *self.online_status.write().await = root_document.status;
         Ok(identity)
-    }
-
-    pub async fn save_cid(&self, cid: Cid) -> Result<(), Error> {
-        *self.root_cid.write().await = Some(cid);
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            tokio::fs::write(path.join(".id"), cid).await?;
-        }
-        Ok(())
     }
 
     #[tracing::instrument(skip(self, stream))]
@@ -1812,22 +1769,9 @@ impl IdentityStore {
         Ok(())
     }
 
-    pub async fn load_cid(&self) -> Result<(), Error> {
-        if let Some(path) = self.path.as_ref() {
-            if let Ok(cid_str) = tokio::fs::read(path.join(".id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            {
-                *self.root_cid.write().await = cid_str.parse().ok()
-            }
-        }
-        Ok(())
-    }
-
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
         self.validate_identity(&ident)?;
-        *self.identity.write().await = Some(ident);
         Ok(())
     }
 
