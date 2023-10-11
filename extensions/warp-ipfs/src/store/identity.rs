@@ -43,6 +43,7 @@ use warp::{
 use super::{
     connected_to_peer, did_keypair,
     document::{
+        cache::IdentityCache,
         identity::{unixfs_fetch, IdentityDocument},
         utils::GetLocalDag,
         ExtractedRootDocument, RootDocument, ToCid,
@@ -61,7 +62,7 @@ pub struct IdentityStore {
 
     root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
 
-    cache_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
+    identity_cache: IdentityCache,
 
     identity: Arc<tokio::sync::RwLock<Option<Identity>>>,
 
@@ -252,8 +253,9 @@ impl IdentityStore {
         }
         let config = config.clone();
         let identity = Arc::new(Default::default());
+        let identity_cache = IdentityCache::new(&ipfs, path.clone()).await;
+
         let root_cid = Arc::new(Default::default());
-        let cache_cid = Arc::new(Default::default());
         let online_status = Arc::default();
         let root_task = Arc::default();
         let task_send = Arc::default();
@@ -277,7 +279,7 @@ impl IdentityStore {
             ipfs,
             path,
             root_cid,
-            cache_cid,
+            identity_cache,
             identity,
             online_status,
             discovery,
@@ -1336,42 +1338,17 @@ impl IdentityStore {
                     }
                 }
 
-                let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
-                    Ok(cid) => match self
-                        .get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid))
-                        .await
-                    {
-                        Ok(doc) => (Some(cid), doc),
-                        _ => (Some(cid), Default::default()),
-                    },
-                    _ => (None, Default::default()),
-                };
+                let previous_identity = self.identity_cache.get(&identity.did).await.ok();
 
-                let document = cache_documents
-                    .iter()
-                    .find(|document| {
-                        document.did == identity.did && document.short_id == identity.short_id
-                    })
-                    .cloned();
+                self.identity_cache.insert(&identity).await?;
 
-                match document {
+                match previous_identity {
                     Some(document) => {
                         if document.different(&identity) {
                             log::info!("Updating local cache of {}", identity.did);
+
                             let document_did = identity.did.clone();
-                            cache_documents.replace(identity.clone());
 
-                            let new_cid = cache_documents.to_cid(&self.ipfs).await?;
-
-                            self.ipfs.insert_pin(&new_cid, false).await?;
-                            self.save_cache_cid(new_cid).await?;
-                            if let Some(old_cid) = old_cid {
-                                if self.ipfs.is_pinned(&old_cid).await? {
-                                    self.ipfs.remove_pin(&old_cid, false).await?;
-                                }
-                                // Do we want to remove the old block?
-                                self.ipfs.remove_block(old_cid).await?;
-                            }
                             let mut emit = false;
 
                             if matches!(
@@ -1509,21 +1486,9 @@ impl IdentityStore {
                         }
                     }
                     None => {
-                        log::info!("Caching {} identity document", identity.did);
+                        log::info!("{} identity document cached", identity.did);
+
                         let document_did = identity.did.clone();
-                        cache_documents.insert(identity.clone());
-
-                        let new_cid = cache_documents.to_cid(&self.ipfs).await?;
-
-                        self.ipfs.insert_pin(&new_cid, false).await?;
-                        self.save_cache_cid(new_cid).await?;
-                        if let Some(old_cid) = old_cid {
-                            if self.ipfs.is_pinned(&old_cid).await? {
-                                self.ipfs.remove_pin(&old_cid, false).await?;
-                            }
-                            // Do we want to remove the old block?
-                            self.ipfs.remove_block(old_cid).await?;
-                        }
 
                         if matches!(
                             self.config.store_setting.update_events,
@@ -1620,11 +1585,9 @@ impl IdentityStore {
             IdentityEvent::Receive {
                 option: ResponseOption::Image { cid, data },
             } => {
-                let cache_documents = self.cache().await;
-                if let Some(cache) = cache_documents
-                    .iter()
-                    .find(|document| document.did == in_did)
-                {
+                let cache_documents = self.identity_cache.get(&in_did).await.ok();
+
+                if let Some(cache) = cache_documents {
                     if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
                         tokio::spawn({
                             let cid = cid;
@@ -1677,17 +1640,6 @@ impl IdentityStore {
 
     pub fn discovery_type(&self) -> &DiscoveryConfig {
         self.discovery.discovery_config()
-    }
-
-    pub(crate) async fn cache(&self) -> HashSet<IdentityDocument> {
-        let cid = self.cache_cid.read().await;
-        match *cid {
-            Some(cid) => self
-                .get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid))
-                .await
-                .unwrap_or_default(),
-            None => Default::default(),
-        }
     }
 
     #[tracing::instrument(skip(self, extracted))]
@@ -1807,8 +1759,9 @@ impl IdentityStore {
                     self.discovery.insert(pubkey).await?;
                 }
 
-                self.cache()
-                    .await
+                self.identity_cache
+                    .list()
+                    .await?
                     .iter()
                     .filter(|ident| ident.did == *pubkey)
                     .cloned()
@@ -1816,7 +1769,7 @@ impl IdentityStore {
             }
             LookupBy::DidKeys(list) => {
                 let mut items = HashSet::new();
-                let cache = self.cache().await;
+                let cache = self.identity_cache.list().await?;
 
                 for pubkey in list {
                     if !pubkey.eq(&own_did) && !self.discovery.contains(pubkey).await {
@@ -1845,7 +1798,7 @@ impl IdentityStore {
                 Vec::from_iter(items)
             }
             LookupBy::Username(username) if username.contains('#') => {
-                let cache = self.cache().await;
+                let cache = self.identity_cache.list().await?;
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
@@ -1880,16 +1833,18 @@ impl IdentityStore {
             }
             LookupBy::Username(username) => {
                 let username = username.to_lowercase();
-                self.cache()
-                    .await
+                self.identity_cache
+                    .list()
+                    .await?
                     .iter()
                     .filter(|ident| ident.username.to_lowercase().contains(&username))
                     .cloned()
                     .collect::<Vec<_>>()
             }
             LookupBy::ShortId(id) => self
-                .cache()
-                .await
+                .identity_cache
+                .list()
+                .await?
                 .iter()
                 .filter(|ident| String::from_utf8_lossy(&ident.short_id).eq(id))
                 .cloned()
@@ -1969,10 +1924,10 @@ impl IdentityStore {
             return Ok(status);
         }
 
-        self.cache()
+        self.identity_cache
+            .get(did)
             .await
-            .iter()
-            .find(|cache| cache.did.eq(did))
+            .ok()
             .and_then(|cache| cache.status)
             .or(Some(status))
             .ok_or(Error::IdentityDoesntExist)
@@ -2010,10 +1965,10 @@ impl IdentityStore {
             return Ok(Platform::Unknown);
         }
 
-        self.cache()
+        self.identity_cache
+            .get(did)
             .await
-            .iter()
-            .find(|cache| cache.did.eq(did))
+            .ok()
             .and_then(|cache| cache.platform)
             .ok_or(Error::IdentityDoesntExist)
     }
@@ -2210,16 +2165,6 @@ impl IdentityStore {
         Ok(())
     }
 
-    pub async fn save_cache_cid(&self, cid: Cid) -> Result<(), Error> {
-        log::trace!("Updating cache");
-        *self.cache_cid.write().await = Some(cid);
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            tokio::fs::write(path.join(".cache_id"), cid).await?;
-        }
-        Ok(())
-    }
-
     #[tracing::instrument(skip(self, stream))]
     pub async fn store_photo(
         &mut self,
@@ -2294,13 +2239,7 @@ impl IdentityStore {
 
         let document = match self.own_identity_document().await {
             Ok(document) if document.did.eq(did) => document,
-            Err(_) | Ok(_) => self
-                .cache()
-                .await
-                .iter()
-                .find(|ident| ident.did == *did)
-                .cloned()
-                .ok_or(Error::IdentityDoesntExist)?,
+            Err(_) | Ok(_) => self.identity_cache.get(did).await?,
         };
 
         if let Some(cid) = document.profile_picture {
@@ -2335,13 +2274,7 @@ impl IdentityStore {
 
         let document = match self.own_identity_document().await {
             Ok(document) if document.did.eq(did) => document,
-            Err(_) | Ok(_) => self
-                .cache()
-                .await
-                .iter()
-                .find(|ident| ident.did == *did)
-                .cloned()
-                .ok_or(Error::IdentityDoesntExist)?,
+            Err(_) | Ok(_) => self.identity_cache.get(did).await?,
         };
 
         if let Some(cid) = document.profile_banner {
@@ -2421,20 +2354,8 @@ impl IdentityStore {
             {
                 *self.root_cid.write().await = cid_str.parse().ok()
             }
-
-            if let Ok(cid_str) = tokio::fs::read(path.join(".cache_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            {
-                *self.cache_cid.write().await = cid_str.parse().ok();
-            }
         }
         Ok(())
-    }
-
-    pub async fn get_cache_cid(&self) -> Result<Cid, Error> {
-        (self.cache_cid.read().await)
-            .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
