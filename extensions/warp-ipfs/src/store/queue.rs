@@ -21,7 +21,7 @@ use warp::{
 
 use crate::store::{ecdh_encrypt, PeerIdExt, PeerTopic};
 
-use super::{connected_to_peer, discovery::Discovery, friends::RequestResponsePayload};
+use super::{connected_to_peer, discovery::Discovery, identity::RequestResponsePayload};
 
 pub struct Queue {
     path: Option<PathBuf>,
