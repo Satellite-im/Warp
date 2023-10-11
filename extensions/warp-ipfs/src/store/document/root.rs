@@ -393,7 +393,7 @@ impl RootDocumentTask {
             None => return Ok(vec![]),
         };
         let path = IpfsPath::from(cid).sub_path("request")?;
-        let list: Vec<Request> = path.get_local_dag(&self.ipfs).await?;
+        let list: Vec<Request> = path.get_local_dag(&self.ipfs).await.unwrap_or_default();
         Ok(list)
     }
 
@@ -453,7 +453,7 @@ impl RootDocumentTask {
             None => return Ok(vec![]),
         };
         let path = IpfsPath::from(cid).sub_path("friends")?;
-        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await?;
+        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await.unwrap_or_default();
         Ok(list)
     }
 
@@ -513,7 +513,7 @@ impl RootDocumentTask {
             None => return Ok(vec![]),
         };
         let path = IpfsPath::from(cid).sub_path("blocks")?;
-        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await?;
+        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await.unwrap_or_default();
         Ok(list)
     }
 
@@ -571,7 +571,7 @@ impl RootDocumentTask {
             None => return Ok(vec![]),
         };
         let path = IpfsPath::from(cid).sub_path("block_by")?;
-        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await?;
+        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await.unwrap_or_default();
         Ok(list)
     }
 
