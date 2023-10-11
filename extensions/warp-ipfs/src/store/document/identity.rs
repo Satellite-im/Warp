@@ -153,12 +153,12 @@ impl IdentityDocument {
         }
 
         if let Some(status) = &payload.status_message {
-            if status.len() > 256 {
+            if status.len() > 512 {
                 return Err(Error::InvalidLength {
                     context: "identity status message".into(),
                     current: status.len(),
                     minimum: None,
-                    maximum: Some(256),
+                    maximum: Some(512),
                 });
             }
         }
