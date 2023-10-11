@@ -1553,7 +1553,7 @@ impl IdentityStore {
                                     }
                                     if let Some(banner) = banner {
                                         tokio::spawn({
-                                            let tx = self.event.clone();
+                                            let store = self.clone();
                                             let ipfs = self.ipfs.clone();
 
                                             let did = in_did.clone();
@@ -1566,10 +1566,9 @@ impl IdentityStore {
 
                                                 while let Some(_d) = stream.try_next().await? {}
 
-                                                let _ =
-                                                    tx.send(MultiPassEventKind::IdentityUpdate {
-                                                        did,
-                                                    });
+                                                store.emit_event(
+                                                    MultiPassEventKind::IdentityUpdate { did },
+                                                );
 
                                                 Ok::<_, anyhow::Error>(())
                                             }
@@ -1585,31 +1584,28 @@ impl IdentityStore {
             IdentityEvent::Receive {
                 option: ResponseOption::Image { cid, data },
             } => {
-                let cache_documents = self.identity_cache.get(&in_did).await.ok();
+                let cache = self.identity_cache.get(&in_did).await?;
 
-                if let Some(cache) = cache_documents {
-                    if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
-                        tokio::spawn({
-                            let cid = cid;
-                            let mut store = self.clone();
-                            async move {
-                                let added_cid = store
-                                    .store_photo(
-                                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
-                                            .boxed(),
-                                        Some(2 * 1024 * 1024),
-                                    )
-                                    .await?;
+                if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
+                    tokio::spawn({
+                        let cid = cid;
+                        let mut store = self.clone();
+                        async move {
+                            let added_cid = store
+                                .store_photo(
+                                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
+                                        .boxed(),
+                                    Some(2 * 1024 * 1024),
+                                )
+                                .await?;
 
-                                debug_assert_eq!(added_cid, cid);
-                                let tx = store.event.clone();
-                                let _ = tx.send(MultiPassEventKind::IdentityUpdate {
-                                    did: in_did.clone(),
-                                });
-                                Ok::<_, Error>(())
-                            }
-                        });
-                    }
+                            debug_assert_eq!(added_cid, cid);
+                            store.emit_event(MultiPassEventKind::IdentityUpdate {
+                                did: in_did.clone(),
+                            });
+                            Ok::<_, Error>(())
+                        }
+                    });
                 }
             }
         };
