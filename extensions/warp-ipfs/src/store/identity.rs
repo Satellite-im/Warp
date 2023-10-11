@@ -1229,8 +1229,6 @@ impl IdentityStore {
 
         self.root_document.set(document).await?;
 
-        self.update_identity().await?;
-
         log::info!("Loading friends list into phonebook");
         if let Ok(friends) = self.friends_list().await {
             let phonebook = self.phonebook();
@@ -1289,7 +1287,6 @@ impl IdentityStore {
 
         let identity = identity.resolve()?;
 
-        self.update_identity().await?;
         Ok(identity)
     }
 
@@ -1439,9 +1436,9 @@ impl IdentityStore {
         self.root_document
             .set(root_document)
             .await
-            .map(|_| log::debug!("Document updated"))
+            .map(|_| log::debug!("Root document updated"))
             .map_err(|e| {
-                log::error!("Updating document failed: {e}");
+                log::error!("Updating root document failed: {e}");
                 e
             })
     }
@@ -1766,12 +1763,6 @@ impl IdentityStore {
             ipfs.remove_block(cid).await?;
         }
 
-        Ok(())
-    }
-
-    pub async fn update_identity(&self) -> Result<(), Error> {
-        let ident = self.own_identity().await?;
-        self.validate_identity(&ident)?;
         Ok(())
     }
 

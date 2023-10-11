@@ -929,8 +929,6 @@ impl MultiPass for WarpIpfs {
             }
         }
 
-        info!("Update identity store");
-        store.update_identity().await?;
         store.push_to_all().await;
 
         Ok(())
