@@ -17,7 +17,7 @@ use super::{identity::IdentityDocument, utils::GetLocalDag, ToCid};
 enum IdentityCacheCommand {
     Insert {
         document: IdentityDocument,
-        response: OneshotSender<Result<(), Error>>,
+        response: OneshotSender<Result<Option<IdentityDocument>, Error>>,
     },
     Get {
         did: DID,
@@ -47,7 +47,16 @@ impl Drop for IdentityCache {
 }
 
 impl IdentityCache {
-    pub fn new(ipfs: &Ipfs, path: Option<PathBuf>, list: Option<Cid>) -> Self {
+    pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
+        let list = match path.as_ref() {
+            Some(path) => tokio::fs::read(path.join(".cache_id"))
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                .ok()
+                .and_then(|cid_str| cid_str.parse().ok()),
+            None => None,
+        };
+
         let (tx, rx) = futures::channel::mpsc::channel(1);
 
         let mut task = IdentityCacheTask {
@@ -67,7 +76,10 @@ impl IdentityCache {
         }
     }
 
-    pub async fn insert(&self, document: &IdentityDocument) -> Result<(), Error> {
+    pub async fn insert(
+        &self,
+        document: &IdentityDocument,
+    ) -> Result<Option<IdentityDocument>, Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
         let _ = self
@@ -147,14 +159,17 @@ impl IdentityCacheTask {
                         None => HashSet::new(),
                     };
 
-                    let old_document = list.iter().find(|old_doc| {
-                        document.did == old_doc.did && document.short_id == old_doc.short_id
-                    });
+                    let old_document = list
+                        .iter()
+                        .find(|old_doc| {
+                            document.did == old_doc.did && document.short_id == old_doc.short_id
+                        })
+                        .cloned();
 
                     match old_document {
                         Some(old_document) => {
                             if !old_document.different(&document) {
-                                let _ = response.send(Ok(()));
+                                let _ = response.send(Err(Error::IdentityExist));
                                 continue;
                             }
 
@@ -195,6 +210,8 @@ impl IdentityCacheTask {
                             }
 
                             self.list = Some(cid);
+
+                            let _ = response.send(Ok(Some(old_document.clone())));
                         }
                         None => {
                             list.insert(document);
@@ -221,6 +238,8 @@ impl IdentityCacheTask {
                             }
 
                             self.list = Some(cid);
+
+                            let _ = response.send(Ok(None));
                         }
                     }
                 }
@@ -295,6 +314,8 @@ impl IdentityCacheTask {
                     }
 
                     self.list = Some(cid);
+
+                    let _ = response.send(Ok(()));
                 }
                 IdentityCacheCommand::List { response } => {
                     let list: HashSet<IdentityDocument> = match self.list {
