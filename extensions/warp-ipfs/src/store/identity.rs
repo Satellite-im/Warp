@@ -1576,9 +1576,7 @@ impl IdentityStore {
                                                     .await?
                                                     .boxed();
 
-                                                while let Some(_d) = stream.next().await {
-                                                    let _d = _d.map_err(anyhow::Error::from)?;
-                                                }
+                                                while let Some(_d) = stream.try_next().await? {}
 
                                                 store.emit_event(
                                                     MultiPassEventKind::IdentityUpdate { did },
@@ -1600,9 +1598,9 @@ impl IdentityStore {
                                                     .cat(banner, None, &[], false, None)
                                                     .await?
                                                     .boxed();
-                                                while let Some(_d) = stream.next().await {
-                                                    let _d = _d.map_err(anyhow::Error::from)?;
-                                                }
+
+                                                while let Some(_d) = stream.try_next().await? {}
+
                                                 let _ =
                                                     tx.send(MultiPassEventKind::IdentityUpdate {
                                                         did,
@@ -2314,7 +2312,7 @@ impl IdentityStore {
                 }
             };
 
-            let picture: String = String::from_utf8_lossy(&data).to_string();
+            let picture: String = serde_json::from_slice(&data)?;
             if !picture.is_empty() {
                 return Ok(picture);
             }
@@ -2355,7 +2353,7 @@ impl IdentityStore {
                 }
             };
 
-            let picture: String = String::from_utf8_lossy(&data).to_string();
+            let picture: String = serde_json::from_slice(&data)?;
             if !picture.is_empty() {
                 return Ok(picture);
             }
@@ -2566,13 +2564,12 @@ impl IdentityStore {
         let internal_request = list
             .iter()
             .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
-            .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
         if self.is_friend(pubkey).await? {
             warn!("Already friends. Removing request");
 
-            self.root_document_remove_request(&internal_request).await?;
+            self.root_document_remove_request(internal_request).await?;
 
             return Ok(());
         }
@@ -2584,7 +2581,7 @@ impl IdentityStore {
 
         self.add_friend(pubkey).await?;
 
-        self.root_document_remove_request(&internal_request).await?;
+        self.root_document_remove_request(internal_request).await?;
 
         self.broadcast_request((pubkey, &payload), false, true)
             .await
@@ -2608,7 +2605,6 @@ impl IdentityStore {
         let internal_request = list
             .iter()
             .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
-            .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
         let payload = RequestResponsePayload {
@@ -2616,7 +2612,7 @@ impl IdentityStore {
             event: Event::Reject,
         };
 
-        self.root_document_remove_request(&internal_request).await?;
+        self.root_document_remove_request(internal_request).await?;
 
         self.broadcast_request((pubkey, &payload), false, true)
             .await
@@ -2631,7 +2627,6 @@ impl IdentityStore {
         let internal_request = list
             .iter()
             .find(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
-            .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
         let payload = RequestResponsePayload {
@@ -2639,7 +2634,7 @@ impl IdentityStore {
             event: Event::Retract,
         };
 
-        self.root_document_remove_request(&internal_request).await?;
+        self.root_document_remove_request(internal_request).await?;
 
         if let Some(entry) = self.queue.get(pubkey).await {
             if entry.event == Event::Request {
@@ -2969,33 +2964,15 @@ impl IdentityStore {
                 });
             }
             Event::Block => {
-                tokio::spawn({
-                    let store = self.clone();
-                    let recipient = recipient.clone();
-                    async move {
-                        let _ = store.push(&recipient).await.ok();
-                        let _ = store
-                            .request(&recipient, RequestOption::Identity)
-                            .await
-                            .ok();
-                    }
-                });
+                let _ = self.push(recipient).await;
+                let _ = self.request(recipient, RequestOption::Identity).await;
                 self.emit_event(MultiPassEventKind::Blocked {
                     did: recipient.clone(),
                 });
             }
             Event::Unblock => {
-                tokio::spawn({
-                    let store = self.clone();
-                    let recipient = recipient.clone();
-                    async move {
-                        let _ = store.push(&recipient).await.ok();
-                        let _ = store
-                            .request(&recipient, RequestOption::Identity)
-                            .await
-                            .ok();
-                    }
-                });
+                let _ = self.push(recipient).await;
+                let _ = self.request(recipient, RequestOption::Identity).await;
 
                 self.emit_event(MultiPassEventKind::Unblocked {
                     did: recipient.clone(),
