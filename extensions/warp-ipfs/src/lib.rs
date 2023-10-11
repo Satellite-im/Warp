@@ -32,8 +32,8 @@ use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{debug, trace};
 use tracing::log::{error, info, warn};
+use tracing::{debug, trace};
 use utils::ExtensionType;
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
@@ -1029,7 +1029,7 @@ impl MultiPassImportExport for WarpIpfs {
         let store = self.identity_store(true).await?;
         let kp = store.get_keypair_did()?;
         let ipfs = self.ipfs()?;
-        let document = store.get_root_document().await?;
+        let document = store.root_document().get().await?;
 
         let exported = document.export(&ipfs).await?;
 

@@ -70,6 +70,7 @@ pub enum RootDocumentCommand {
     },
 }
 
+#[derive(Debug, Clone)]
 pub struct RootDocumentMap {
     tx: futures::channel::mpsc::Sender<RootDocumentCommand>,
     task: Arc<tokio::task::JoinHandle<()>>,
@@ -114,7 +115,7 @@ impl RootDocumentMap {
         }
     }
 
-    pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
+    pub async fn get(&self) -> Result<RootDocument, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -124,7 +125,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
+    pub async fn set(&mut self, document: RootDocument) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -137,7 +138,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_add_friend(&self, did: &DID) -> Result<(), Error> {
+    pub async fn add_friend(&self, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -150,7 +151,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_remove_friend(&self, did: &DID) -> Result<(), Error> {
+    pub async fn remove_friend(&self, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -163,7 +164,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_add_block(&self, did: &DID) -> Result<(), Error> {
+    pub async fn add_block(&self, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -176,7 +177,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_remove_block(&self, did: &DID) -> Result<(), Error> {
+    pub async fn remove_block(&self, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -189,7 +190,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_add_block_by(&self, did: &DID) -> Result<(), Error> {
+    pub async fn add_block_by(&self, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -202,7 +203,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_remove_block_by(&self, did: &DID) -> Result<(), Error> {
+    pub async fn remove_block_by(&self, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -215,7 +216,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_add_request(&self, request: &Request) -> Result<(), Error> {
+    pub async fn add_request(&self, request: &Request) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -228,7 +229,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_remove_request(&self, request: &Request) -> Result<(), Error> {
+    pub async fn remove_request(&self, request: &Request) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -241,7 +242,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_get_friends(&self) -> Result<Vec<DID>, Error> {
+    pub async fn get_friends(&self) -> Result<Vec<DID>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -251,7 +252,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_get_requests(&self) -> Result<Vec<Request>, Error> {
+    pub async fn get_requests(&self) -> Result<Vec<Request>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -261,7 +262,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_get_blocks(&self) -> Result<Vec<DID>, Error> {
+    pub async fn get_blocks(&self) -> Result<Vec<DID>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -271,7 +272,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn root_document_get_block_by(&self) -> Result<Vec<DID>, Error> {
+    pub async fn get_block_by(&self) -> Result<Vec<DID>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
