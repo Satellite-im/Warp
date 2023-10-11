@@ -1,5 +1,6 @@
 pub mod identity;
 pub mod utils;
+pub mod cache;
 
 use futures::TryFutureExt;
 use ipfs::{Ipfs, IpfsPath};
