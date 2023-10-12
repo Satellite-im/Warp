@@ -137,6 +137,11 @@ impl RootDocument {
         let mut root_document = self.clone();
         //In case there is a signature already exist
         root_document.signature = None;
+        if root_document.created.is_none() {
+            root_document.created = Some(Utc::now());
+        }
+        root_document.modified = Some(Utc::now());
+
         let bytes = serde_json::to_vec(&root_document)?;
         let signature = did.sign(&bytes);
         self.signature = Some(bs58::encode(signature).into_string());
