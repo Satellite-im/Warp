@@ -1257,14 +1257,16 @@ impl IdentityStore {
         let fingerprint = public_key.fingerprint();
         let bytes = fingerprint.as_bytes();
 
+        let time = Utc::now();
+
         let identity = IdentityDocument {
             username,
             short_id: bytes[bytes.len() - SHORT_ID_SIZE..]
                 .try_into()
                 .map_err(anyhow::Error::from)?,
             did: public_key.into(),
-            created: Utc::now(),
-            modified: Utc::now(),
+            created: Some(time),
+            modified: Some(time),
             status_message: None,
             profile_banner: None,
             profile_picture: None,
