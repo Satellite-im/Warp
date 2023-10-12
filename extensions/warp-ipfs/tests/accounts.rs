@@ -270,6 +270,44 @@ mod test {
     }
 
     #[tokio::test]
+    async fn identity_profile_picture() -> anyhow::Result<()> {
+        let (mut account, did, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::identity_profile_picture".into()),
+        )
+        .await?;
+
+        account
+            .update_identity(IdentityUpdate::Picture("picture".into()))
+            .await?;
+
+        let image = account.identity_picture(&did).await?;
+
+        assert_eq!(image, "picture");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn identity_profile_banner() -> anyhow::Result<()> {
+        let (mut account, did, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::identity_profile_banner".into()),
+        )
+        .await?;
+
+        account
+            .update_identity(IdentityUpdate::Banner("banner".into()))
+            .await?;
+
+        let image = account.identity_banner(&did).await?;
+
+        assert_eq!(image, "banner");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn get_identity_platform() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (

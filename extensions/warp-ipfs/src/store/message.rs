@@ -11,12 +11,10 @@ use futures::channel::mpsc::{unbounded, Sender, UnboundedSender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::{FuturesUnordered, SelectAll};
 use futures::{SinkExt, Stream, StreamExt};
-use rust_ipfs::libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
-use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
+use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 
 use libipld::Cid;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_stream::wrappers::ReadDirStream;
@@ -44,10 +42,9 @@ use crate::store::{
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::discovery::Discovery;
 use super::document::utils::{GetLocalDag, ToCid};
-use super::friends::FriendsStore;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
-use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, DidExt, MessagingEvents};
+use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, MessagingEvents};
 
 const PERMIT_AMOUNT: usize = 1;
 
@@ -83,7 +80,7 @@ pub struct MessageStore {
     identity: IdentityStore,
 
     // friend store
-    friends: FriendsStore,
+    // friends: FriendsStore,
 
     // discovery
     discovery: Discovery,
@@ -109,8 +106,6 @@ pub struct MessageStore {
     spam_filter: Arc<Option<SpamFilter>>,
 
     with_friends: Arc<AtomicBool>,
-
-    disable_sender_event_emit: Arc<AtomicBool>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -119,18 +114,13 @@ impl MessageStore {
         ipfs: Ipfs,
         path: Option<PathBuf>,
         identity: IdentityStore,
-        friends: FriendsStore,
+        // friends: FriendsStore,
         discovery: Discovery,
         filesystem: Option<Box<dyn Constellation>>,
         _: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, disable_sender_event_emit, with_friends, conversation_load_task): (
-            bool,
-            bool,
-            bool,
-            bool,
-        ),
+        (check_spam, with_friends): (bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
 
@@ -146,7 +136,6 @@ impl MessageStore {
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());
-        let disable_sender_event_emit = Arc::new(AtomicBool::new(disable_sender_event_emit));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
         let stream_sender = Arc::new(Default::default());
         let conversation_lock = Arc::new(Default::default());
@@ -168,21 +157,20 @@ impl MessageStore {
             conversation_sender,
             conversation_task_tx,
             identity,
-            friends,
+            // friends,
             discovery,
             filesystem,
             queue,
             did,
             event,
             spam_filter,
-            disable_sender_event_emit,
             with_friends,
             conversation_keystore_cid,
             stream_conversation_task,
         };
 
         info!("Loading existing conversations task");
-        if let Err(_e) = store.load_conversations(conversation_load_task).await {}
+        if let Err(_e) = store.load_conversations().await {}
 
         tokio::spawn({
             let mut store = store.clone();
@@ -926,32 +914,6 @@ impl MessageStore {
                 spam_check(&mut message, self.spam_filter.clone())?;
                 let conversation_id = message.conversation_id();
 
-                if message.message_type() == MessageType::Attachment
-                    && direction == MessageDirection::In
-                {
-                    if let Some(fs) = self.filesystem.clone() {
-                        let dir = fs.root_directory();
-                        for file in message.attachments() {
-                            let original = file.name();
-                            let mut inc = 0;
-                            loop {
-                                if dir.has_item(&original) {
-                                    if inc >= 20 {
-                                        break;
-                                    }
-                                    inc += 1;
-                                    file.set_name(&format!("{original}-{inc}"));
-                                    continue;
-                                }
-                                break;
-                            }
-                            if let Err(e) = dir.add_file(file) {
-                                error!("Error adding file to constellation: {e}");
-                            }
-                        }
-                    }
-                }
-
                 let message_id = message.id();
 
                 let message_document =
@@ -1442,7 +1404,7 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                if let Ok(true) = self.friends.is_blocked(&recipient).await {
+                if let Ok(true) = self.identity.is_blocked(&recipient).await {
                     //TODO: Signal back to close conversation
                     warn!("{recipient} is blocked");
                     return Ok(());
@@ -1809,11 +1771,11 @@ impl MessageStore {
 
 impl MessageStore {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
-        if self.with_friends.load(Ordering::SeqCst) && !self.friends.is_friend(did_key).await? {
+        if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did_key).await? {
             return Err(Error::FriendDoesntExist);
         }
 
-        if let Ok(true) = self.friends.is_blocked(did_key).await {
+        if let Ok(true) = self.identity.is_blocked(did_key).await {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -1900,12 +1862,10 @@ impl MessageStore {
             }
         }
 
-        if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
-            if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            }) {
-                error!("Error broadcasting event: {e}");
-            }
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
         }
 
         if let Some(path) = self.path.as_ref() {
@@ -1946,12 +1906,12 @@ impl MessageStore {
         let mut removal = vec![];
 
         for did in recipients.iter() {
-            if self.with_friends.load(Ordering::SeqCst) && !self.friends.is_friend(did).await? {
+            if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did).await? {
                 info!("{did} is not on the friends list.. removing from list");
                 removal.push(did.clone());
             }
 
-            if let Ok(true) = self.friends.is_blocked(did).await {
+            if let Ok(true) = self.identity.is_blocked(did).await {
                 info!("{did} is blocked.. removing from list");
                 removal.push(did.clone());
             }
@@ -2049,12 +2009,10 @@ impl MessageStore {
             }
         }
 
-        if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
-            if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            }) {
-                error!("Error broadcasting event: {e}");
-            }
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
         }
 
         tokio::spawn({
@@ -2246,7 +2204,7 @@ impl MessageStore {
             .map_err(Error::from)
     }
 
-    pub async fn load_conversations(&self, background: bool) -> Result<(), Error> {
+    pub async fn load_conversations(&self) -> Result<(), Error> {
         let Some(path) = self.path.as_ref() else {
             return Ok(());
         };
@@ -2318,9 +2276,7 @@ impl MessageStore {
                             }
                         };
 
-                        if background {
-                            tokio::spawn(task);
-                        } else if let Err(e) = task.await {
+                        if let Err(e) = task.await {
                             error!("Error loading conversation: {e}");
                         }
                     }
@@ -2764,7 +2720,7 @@ impl MessageStore {
             return Err(Error::PublicKeyInvalid);
         }
 
-        if self.friends.is_blocked(did_key).await? {
+        if self.identity.is_blocked(did_key).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -3506,111 +3462,61 @@ impl MessageStore {
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let root = constellation.root_directory();
-        if !root.has_item(&attachment.name()) {
-            root.add_file(attachment.clone())?;
-        }
+        let _root = constellation.root_directory();
+
+        let reference = attachment
+            .reference()
+            .and_then(|reference| IpfsPath::from_str(&reference).ok())
+            .ok_or(Error::FileNotFound)?;
 
         let ipfs = self.ipfs.clone();
-        let constellation = constellation.clone();
-        let own_did = self.did.clone();
-
+        let _constellation = constellation.clone();
         let progress_stream = async_stream::stream! {
-                yield Progression::CurrentProgress {
-                    name: attachment.name(),
-                    current: 0,
-                    total: Some(attachment.size()),
-                };
+            yield Progression::CurrentProgress {
+                name: attachment.name(),
+                current: 0,
+                total: Some(attachment.size()),
+            };
 
-                let did = message.sender();
-                if !did.eq(&own_did) {
-                    if let Ok(peer_id) = did.to_peer_id() {
-                        //This is done to insure we can successfully exchange blocks
-                        let opt = DialOpts::peer_id(peer_id).condition(PeerCondition::NotDialing).build();
-                        if let Err(e) = ipfs.connect(opt).await {
-                            warn!("Issue performing a connection to peer: {e}");
-                        }
-                    }
-                }
-
-                let mut file = match tokio::fs::File::create(&path).await {
-                    Ok(file) => file,
-                    Err(e) => {
-                        error!("Error creating file: {e}");
-                        yield Progression::ProgressFailed {
-                                    name: attachment.name(),
-                                    last_size: None,
-                                    error: Some(e.to_string()),
-                        };
-                        return;
-                    }
-                };
-
-                let stream = match constellation.get_stream(&attachment.name()).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Error creating stream: {e}");
-                        yield Progression::ProgressFailed {
-                                    name: attachment.name(),
-                                    last_size: None,
-                                    error: Some(e.to_string()),
-                        };
-                        return;
-                    }
-                };
-
-                let mut written = 0;
-                let mut failed = false;
-                for await res in stream  {
-                    match res {
-                        Ok(bytes) => match file.write_all(&bytes).await {
-                            Ok(_) => {
-                                written += bytes.len();
-                                yield Progression::CurrentProgress {
-                                    name: attachment.name(),
-                                    current: written,
-                                    total: Some(attachment.size()),
-                                };
-                            }
-                            Err(e) => {
-                                error!("Error writing to disk: {e}");
-                                yield Progression::ProgressFailed {
-                                    name: attachment.name(),
-                                    last_size: Some(written),
-                                    error: Some(e.to_string()),
-                                };
-                                failed = true;
-                                break;
-                            }
-                        },
-                        Err(e) => {
-                            error!("Error reading from stream: {e}");
-                            yield Progression::ProgressFailed {
-                                    name: attachment.name(),
-                                    last_size: Some(written),
-                                    error: Some(e.to_string()),
-                            };
-                            failed = true;
-                            break;
-                        }
-                    }
-                }
-
-                if failed {
-                    if let Err(e) = tokio::fs::remove_file(&path).await {
-                        error!("Error removing file: {e}");
-                    }
-                }
-
-                if !failed {
-                    if let Err(e) = file.flush().await {
-                        error!("Error flushing stream: {e}");
-                    }
-                    yield Progression::ProgressComplete {
+            let stream = match ipfs.get_unixfs(reference, &path).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    yield Progression::ProgressFailed {
                         name: attachment.name(),
-                        total: Some(written),
+                        last_size: None,
+                        error: Some(e.to_string()),
                     };
+                    return;
+                },
+            };
+
+            for await event in stream {
+                match event {
+                    rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
+                        yield Progression::CurrentProgress {
+                            name: attachment.name(),
+                            current: written,
+                            total: total_size
+                        };
+                    },
+                    rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
+                        yield Progression::ProgressComplete {
+                            name: attachment.name(),
+                            total: total_size,
+                        };
+                    },
+                    rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
+                        if let Err(e) = tokio::fs::remove_file(&path).await {
+                            error!("Error removing file: {e}");
+                        }
+                        yield Progression::ProgressFailed {
+                            name: attachment.name(),
+                            last_size: Some(written),
+                            error: error.map(|e| e.to_string()),
+                        };
+                    },
                 }
+            }
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))

@@ -1,7 +1,10 @@
+pub mod cache;
 pub mod identity;
+pub mod root;
 pub mod utils;
 
 use chrono::{DateTime, Utc};
+use futures::TryFutureExt;
 use ipfs::{Ipfs, IpfsPath};
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -20,7 +23,7 @@ use crate::store::get_keypair_did;
 
 use self::{identity::IdentityDocument, utils::GetLocalDag};
 
-use super::friends::Request;
+use super::identity::Request;
 
 #[async_trait::async_trait]
 pub(crate) trait ToCid: Sized {
@@ -79,7 +82,7 @@ pub struct ExtractedRootDocument {
     pub friends: Vec<DID>,
     pub block_list: Vec<DID>,
     pub block_by_list: Vec<DID>,
-    pub request: Vec<super::friends::Request>,
+    pub request: Vec<super::identity::Request>,
     pub signature: Option<Vec<u8>>,
 }
 
@@ -142,14 +145,20 @@ impl RootDocument {
 
     #[tracing::instrument(skip(self, ipfs))]
     pub async fn verify(&self, ipfs: &Ipfs) -> Result<(), Error> {
-        let (identity, _, _, _, _, _, _) = self.resolve(ipfs).await?;
+        let identity: IdentityDocument = self
+            .identity
+            .get_local_dag(ipfs)
+            .await
+            .map_err(|_| Error::IdentityInvalid)?;
+
         let mut root_document = self.clone();
         let signature =
             std::mem::take(&mut root_document.signature).ok_or(Error::InvalidSignature)?;
         let bytes = serde_json::to_vec(&root_document)?;
         let sig = bs58::decode(&signature).into_vec()?;
+
         identity
-            .did_key()
+            .did
             .verify(&bytes, &sig)
             .map_err(|_| Error::InvalidSignature)?;
         Ok(())
@@ -172,38 +181,33 @@ impl RootDocument {
         ),
         Error,
     > {
-        let identity = match ipfs
-            .dag()
-            .get(IpfsPath::from(self.identity), &[], true)
+        let document: IdentityDocument = self
+            .identity
+            .get_local_dag(ipfs)
             .await
-        {
-            Ok(ipld) => from_ipld::<IdentityDocument>(ipld)
-                .map_err(anyhow::Error::from)
-                .map_err(Error::from)?
-                .resolve()?,
-            Err(_) => return Err(Error::IdentityInvalid),
-        };
+            .map_err(|_| Error::IdentityInvalid)?;
 
-        let mut friends = Default::default();
-        let mut block_list = Default::default();
-        let mut block_by_list = Default::default();
-        let mut request = Default::default();
+        let identity = document.resolve()?;
 
-        if let Some(document) = &self.friends {
-            friends = document.get_local_dag(ipfs).await.unwrap_or_default();
-        }
+        let friends = futures::future::ready(self.friends.ok_or(Error::Other))
+            .and_then(|document| async move { document.get_local_dag(ipfs).await })
+            .await
+            .unwrap_or_default();
 
-        if let Some(document) = &self.blocks {
-            block_list = document.get_local_dag(ipfs).await.unwrap_or_default();
-        }
+        let block_list = futures::future::ready(self.blocks.ok_or(Error::Other))
+            .and_then(|document| async move { document.get_local_dag(ipfs).await })
+            .await
+            .unwrap_or_default();
 
-        if let Some(document) = &self.block_by {
-            block_by_list = document.get_local_dag(ipfs).await.unwrap_or_default();
-        }
+        let block_by_list = futures::future::ready(self.block_by.ok_or(Error::Other))
+            .and_then(|document| async move { document.get_local_dag(ipfs).await })
+            .await
+            .unwrap_or_default();
 
-        if let Some(document) = &self.request {
-            request = document.get_local_dag(ipfs).await.unwrap_or_default();
-        }
+        let request = futures::future::ready(self.request.ok_or(Error::Other))
+            .and_then(|document| async move { document.get_local_dag(ipfs).await })
+            .await
+            .unwrap_or_default();
 
         Ok((
             identity,
