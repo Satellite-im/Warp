@@ -6,6 +6,8 @@ use crate::{
     config::{self, Discovery as DiscoveryConfig, DiscoveryType, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
 };
+use chrono::Utc;
+
 use futures::{
     channel::oneshot::{self, Canceled},
     stream::BoxStream,
@@ -16,6 +18,7 @@ use ipfs::{
     p2p::MultiaddrExt,
     Ipfs, IpfsPath, Keypair,
 };
+
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -1309,12 +1312,16 @@ impl IdentityStore {
         let fingerprint = public_key.fingerprint();
         let bytes = fingerprint.as_bytes();
 
+        let time = Utc::now();
+
         let identity = IdentityDocument {
             username,
             short_id: bytes[bytes.len() - SHORT_ID_SIZE..]
                 .try_into()
                 .map_err(anyhow::Error::from)?,
             did: public_key.into(),
+            created: Some(time),
+            modified: Some(time),
             status_message: None,
             profile_banner: None,
             profile_picture: None,

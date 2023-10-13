@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use futures::{StreamExt, TryStreamExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
@@ -16,6 +17,12 @@ pub struct IdentityDocument {
     pub short_id: [u8; SHORT_ID_SIZE],
 
     pub did: DID,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<DateTime<Utc>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<DateTime<Utc>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
@@ -42,11 +49,16 @@ impl From<Identity> for IdentityDocument {
         let did = identity.did_key();
         let short_id = *identity.short_id();
         let status_message = identity.status_message();
+        let created = Some(identity.created());
+        let modified = Some(identity.modified());
+
         IdentityDocument {
             username,
             short_id,
             did,
             status_message,
+            created,
+            modified,
             profile_picture: None,
             profile_banner: None,
             platform: None,
@@ -62,6 +74,8 @@ impl From<shuttle::identity::document::IdentityDocument> for IdentityDocument {
             username: document.username,
             did: document.did,
             short_id: document.short_id,
+            created: document.created,
+            modified: document.modified,
             status_message: document.status_message,
             profile_picture: document.profile_picture,
             profile_banner: document.profile_banner,
@@ -78,6 +92,8 @@ impl From<IdentityDocument> for shuttle::identity::document::IdentityDocument {
             username: document.username,
             did: document.did,
             short_id: document.short_id,
+            created: document.created,
+            modified: document.modified,
             status_message: document.status_message,
             profile_picture: document.profile_picture,
             profile_banner: document.profile_banner,
@@ -90,11 +106,19 @@ impl From<IdentityDocument> for shuttle::identity::document::IdentityDocument {
 
 impl From<IdentityDocument> for Identity {
     fn from(document: IdentityDocument) -> Self {
+        Self::from(&document)
+    }
+}
+
+impl From<&IdentityDocument> for Identity {
+    fn from(document: &IdentityDocument) -> Self {
         let mut identity = Identity::default();
-        identity.set_did_key(document.did);
+        identity.set_did_key(document.did.clone());
         identity.set_short_id(document.short_id);
-        identity.set_status_message(document.status_message);
+        identity.set_status_message(document.status_message.clone());
         identity.set_username(&document.username);
+        identity.set_created(document.created.unwrap_or(Utc::now()));
+        identity.set_modified(document.modified.unwrap_or(Utc::now()));
         identity
     }
 }
@@ -136,16 +160,15 @@ impl IdentityDocument {
 impl IdentityDocument {
     pub fn resolve(&self) -> Result<Identity, Error> {
         self.verify()?;
-        let mut identity = Identity::default();
-        identity.set_username(&self.username);
-        identity.set_did_key(self.did.clone());
-        identity.set_short_id(self.short_id);
-        identity.set_status_message(self.status_message.clone());
-        Ok(identity)
+        Ok(self.into())
     }
 
     pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
         self.signature = None;
+        if self.created.is_none() {
+            self.created = Some(Utc::now());
+        }
+        self.modified = Some(Utc::now());
         let bytes = serde_json::to_vec(&self)?;
         let signature = bs58::encode(did.sign(&bytes)).into_string();
         self.signature = Some(signature);
@@ -185,12 +208,12 @@ impl IdentityDocument {
         }
 
         if let Some(status) = &payload.status_message {
-            if status.len() > 256 {
+            if status.len() > 512 {
                 return Err(Error::InvalidLength {
                     context: "identity status message".into(),
                     current: status.len(),
                     minimum: None,
-                    maximum: Some(256),
+                    maximum: Some(512),
                 });
             }
         }

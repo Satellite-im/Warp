@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 use crate::{crypto::DID, error::Error};
+use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
@@ -171,6 +172,12 @@ pub struct Identity {
     /// Public key for the identity
     did_key: DID,
 
+    /// Timestamp when the identity was created
+    created: DateTime<Utc>,
+
+    /// Timestamp when the identity was last modified or updated
+    modified: DateTime<Utc>,
+
     /// Status message
     status_message: Option<String>,
 }
@@ -191,6 +198,14 @@ impl Identity {
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
+
+    pub fn set_created(&mut self, time: DateTime<Utc>) {
+        self.created = time;
+    }
+
+    pub fn set_modified(&mut self, time: DateTime<Utc>) {
+        self.modified = time;
+    }
 }
 
 impl Identity {
@@ -208,6 +223,14 @@ impl Identity {
 
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
+    }
+
+    pub fn created(&self) -> DateTime<Utc> {
+        self.created
+    }
+
+    pub fn modified(&self) -> DateTime<Utc> {
+        self.modified
     }
 }
 

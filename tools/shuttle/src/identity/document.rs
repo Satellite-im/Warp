@@ -1,16 +1,23 @@
+use chrono::{DateTime, Utc};
 use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use warp::crypto::did_key::CoreSign;
 use warp::crypto::DID;
 use warp::multipass::identity::{IdentityStatus, Platform, SHORT_ID_SIZE};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Eq)]
 pub struct IdentityDocument {
     pub username: String,
 
     pub short_id: [u8; SHORT_ID_SIZE],
 
     pub did: DID,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<DateTime<Utc>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<DateTime<Utc>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
