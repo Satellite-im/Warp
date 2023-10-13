@@ -750,15 +750,20 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             let mut table = Table::new();
-                            table.set_header(vec!["Username", "Public Key", "Status Message", "Banner", "Picture", "Platform", "Status"]);
+                            table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status"]);
                             for identity in idents {
                                 let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
                                 let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
                                 let profile_picture = account.identity_picture(&identity.did_key()).await.unwrap_or_default();
                                 let profile_banner = account.identity_banner(&identity.did_key()).await.unwrap_or_default();
+                                let created = identity.created();
+                                let modified = identity.modified();
+
                                 table.add_row(vec![
                                     identity.username(),
                                     identity.did_key().to_string(),
+                                    created.to_string(),
+                                    modified.to_string(),
                                     identity.status_message().unwrap_or_default(),
                                     (!profile_banner.is_empty()).to_string(),
                                     (!profile_picture.is_empty()).to_string(),

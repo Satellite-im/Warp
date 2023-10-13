@@ -1,8 +1,9 @@
-pub mod identity;
-pub mod utils;
 pub mod cache;
+pub mod identity;
 pub mod root;
+pub mod utils;
 
+use chrono::{DateTime, Utc};
 use futures::TryFutureExt;
 use ipfs::{Ipfs, IpfsPath};
 use libipld::{
@@ -76,6 +77,8 @@ where
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ExtractedRootDocument {
     pub identity: Identity,
+    pub created: DateTime<Utc>,
+    pub modified: DateTime<Utc>,
     pub friends: Vec<DID>,
     pub block_list: Vec<DID>,
     pub block_by_list: Vec<DID>,
@@ -101,6 +104,13 @@ impl ExtractedRootDocument {
 pub struct RootDocument {
     /// Own Identity
     pub identity: Cid,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<DateTime<Utc>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<DateTime<Utc>>,
+
     /// array of friends (DID)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub friends: Option<Cid>,
@@ -127,6 +137,11 @@ impl RootDocument {
         let mut root_document = self.clone();
         //In case there is a signature already exist
         root_document.signature = None;
+        if root_document.created.is_none() {
+            root_document.created = Some(Utc::now());
+        }
+        root_document.modified = Some(Utc::now());
+
         let bytes = serde_json::to_vec(&root_document)?;
         let signature = did.sign(&bytes);
         self.signature = Some(bs58::encode(signature).into_string());
@@ -159,7 +174,18 @@ impl RootDocument {
     pub async fn resolve(
         &self,
         ipfs: &Ipfs,
-    ) -> Result<(Identity, Vec<DID>, Vec<DID>, Vec<DID>, Vec<Request>), Error> {
+    ) -> Result<
+        (
+            Identity,
+            Option<DateTime<Utc>>,
+            Option<DateTime<Utc>>,
+            Vec<DID>,
+            Vec<DID>,
+            Vec<DID>,
+            Vec<Request>,
+        ),
+        Error,
+    > {
         let document: IdentityDocument = self
             .identity
             .get_local_dag(ipfs)
@@ -188,7 +214,15 @@ impl RootDocument {
             .await
             .unwrap_or_default();
 
-        Ok((identity, friends, block_list, block_by_list, request))
+        Ok((
+            identity,
+            self.created,
+            self.modified,
+            friends,
+            block_list,
+            block_by_list,
+            request,
+        ))
     }
 
     pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
@@ -222,6 +256,8 @@ impl RootDocument {
 
         let mut root_document = RootDocument {
             identity,
+            created: Some(data.created),
+            modified: Some(data.modified),
             friends,
             blocks,
             block_by,
@@ -235,10 +271,13 @@ impl RootDocument {
     }
 
     pub async fn export(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {
-        let (identity, friends, block_list, block_by_list, request) = self.resolve(ipfs).await?;
+        let (identity, created, modified, friends, block_list, block_by_list, request) =
+            self.resolve(ipfs).await?;
 
         let mut exported = ExtractedRootDocument {
             identity,
+            created: created.unwrap_or_default(),
+            modified: modified.unwrap_or_default(),
             friends,
             block_list,
             block_by_list,
