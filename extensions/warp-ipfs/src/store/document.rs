@@ -133,19 +133,18 @@ pub struct RootDocument {
 
 impl RootDocument {
     #[tracing::instrument(skip(self, did))]
-    pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        let mut root_document = self.clone();
+    pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
         //In case there is a signature already exist
-        root_document.signature = None;
-        if root_document.created.is_none() {
-            root_document.created = Some(Utc::now());
+        self.signature = None;
+        if self.created.is_none() {
+            self.created = Some(Utc::now());
         }
-        root_document.modified = Some(Utc::now());
+        self.modified = Some(Utc::now());
 
-        let bytes = serde_json::to_vec(&root_document)?;
+        let bytes = serde_json::to_vec(&self)?;
         let signature = did.sign(&bytes);
         self.signature = Some(bs58::encode(signature).into_string());
-        Ok(())
+        Ok(self)
     }
 
     #[tracing::instrument(skip(self, ipfs))]
@@ -254,7 +253,7 @@ impl RootDocument {
             .then_some(data.request.to_cid(ipfs).await.ok())
             .flatten();
 
-        let mut root_document = RootDocument {
+        let root_document = RootDocument {
             identity,
             created: Some(data.created),
             modified: Some(data.modified),
@@ -265,7 +264,7 @@ impl RootDocument {
             status: None,
             signature: None,
         };
-        root_document.sign(&did_kp)?;
+        let root_document = root_document.sign(&did_kp)?;
 
         Ok(root_document)
     }

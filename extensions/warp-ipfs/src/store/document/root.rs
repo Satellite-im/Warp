@@ -354,10 +354,10 @@ impl RootDocumentTask {
         Ok(document)
     }
 
-    async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
+    async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
         let old_cid = self.cid;
 
-        document.sign(&self.keypair)?;
+        let document = document.sign(&self.keypair)?;
 
         //Precautionary check
         document.verify(&self.ipfs).await?;
