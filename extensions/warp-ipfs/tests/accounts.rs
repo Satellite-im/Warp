@@ -4,6 +4,7 @@ mod test {
     use std::time::Duration;
 
     use crate::common::{create_account, create_accounts};
+    use warp::constellation::file::FileType;
     use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
     use warp::tesseract::Tesseract;
     use warp_ipfs::WarpIpfsBuilder;
@@ -284,7 +285,8 @@ mod test {
 
         let image = account.identity_picture(&did).await?;
 
-        assert_eq!(image, "picture");
+        assert_eq!(image.data(), b"picture");
+        assert!(image.image_type().eq(&FileType::Generic));
         Ok(())
     }
 
@@ -303,7 +305,8 @@ mod test {
 
         let image = account.identity_banner(&did).await?;
 
-        assert_eq!(image, "banner");
+        assert_eq!(image.data(), b"banner");
+        assert!(image.image_type().eq(&FileType::Generic));
         Ok(())
     }
 

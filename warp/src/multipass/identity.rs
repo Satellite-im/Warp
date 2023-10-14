@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::crypto::DID;
+use crate::{constellation::file::FileType, crypto::DID};
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,32 @@ impl IdentityProfile {
     /// Supplied passphrase, if applicable.
     pub fn passphrase(&self) -> Option<&str> {
         self.passphrase.as_ref().map(|phrase| phrase.as_str())
+    }
+}
+
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IdentityImage {
+    data: Vec<u8>,
+    image_type: FileType,
+}
+
+impl IdentityImage {
+    pub fn set_data(&mut self, data: Vec<u8>) {
+        self.data = data
+    }
+
+    pub fn set_image_type(&mut self, image_type: FileType) {
+        self.image_type = image_type
+    }
+}
+
+impl IdentityImage {
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn image_type(&self) -> &FileType {
+        &self.image_type
     }
 }
 
@@ -283,10 +309,10 @@ impl From<&[DID]> for Identifier {
 #[derive(Debug, Clone, FFIFree)]
 pub enum IdentityUpdate {
     Username(String),
-    Picture(String),
+    Picture(Vec<u8>),
     PicturePath(std::path::PathBuf),
     ClearPicture,
-    Banner(String),
+    Banner(Vec<u8>),
     BannerPath(std::path::PathBuf),
     ClearBanner,
     StatusMessage(Option<String>),
@@ -409,33 +435,33 @@ pub mod ffi {
         Box::into_raw(Box::new(IdentityUpdate::Username(name)))
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_update_set_graphics_picture(
-        name: *const c_char,
-    ) -> *mut IdentityUpdate {
-        if name.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn multipass_identity_update_set_graphics_picture(
+    //     name: *const c_char,
+    // ) -> *mut IdentityUpdate {
+    //     if name.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+    //     let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Picture(name)))
-    }
+    //     Box::into_raw(Box::new(IdentityUpdate::Picture(name)))
+    // }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_update_set_graphics_banner(
-        name: *const c_char,
-    ) -> *mut IdentityUpdate {
-        if name.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn multipass_identity_update_set_graphics_banner(
+    //     name: *const c_char,
+    // ) -> *mut IdentityUpdate {
+    //     if name.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+    //     let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Banner(name)))
-    }
+    //     Box::into_raw(Box::new(IdentityUpdate::Banner(name)))
+    // }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

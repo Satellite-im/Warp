@@ -2,6 +2,7 @@ pub mod cache;
 pub mod identity;
 pub mod root;
 pub mod utils;
+pub mod image;
 
 use chrono::{DateTime, Utc};
 use futures::TryFutureExt;

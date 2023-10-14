@@ -674,7 +674,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::Picture(picture.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Picture(picture.as_bytes().to_vec())).await {
                                 writeln!(stdout, "Error updating picture: {e}")?;
                                 continue;
                             }
@@ -690,7 +690,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::Banner(banner.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Banner(banner.as_bytes().to_vec())).await {
                                 writeln!(stdout, "Error updating banner: {e}")?;
                                 continue;
                             }
@@ -765,8 +765,8 @@ async fn main() -> anyhow::Result<()> {
                                     created.to_string(),
                                     modified.to_string(),
                                     identity.status_message().unwrap_or_default(),
-                                    (!profile_banner.is_empty()).to_string(),
-                                    (!profile_picture.is_empty()).to_string(),
+                                    (!profile_banner.data().is_empty()).to_string(),
+                                    (!profile_picture.data().is_empty()).to_string(),
                                     platform.to_string(),
                                     format!("{status:?}"),
                                 ]);
