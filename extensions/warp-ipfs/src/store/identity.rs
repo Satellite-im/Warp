@@ -8,7 +8,7 @@ use crate::{
 };
 use chrono::Utc;
 
-use futures::{channel::oneshot, stream::BoxStream, StreamExt, TryStreamExt};
+use futures::{channel::oneshot, StreamExt, TryStreamExt};
 use ipfs::{Ipfs, IpfsPath, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
@@ -16,7 +16,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    task::Poll,
     time::{Duration, Instant},
 };
 
