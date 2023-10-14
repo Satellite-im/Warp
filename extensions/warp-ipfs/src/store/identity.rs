@@ -44,8 +44,8 @@ use warp::{
 use super::{
     connected_to_peer, did_keypair,
     document::{
-        cache::IdentityCache, identity::IdentityDocument, image::get_image, root::RootDocumentMap,
-        utils::GetLocalDag, ExtractedRootDocument, RootDocument, ToCid,
+        cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
+        root::RootDocumentMap, utils::GetLocalDag, ExtractedRootDocument, RootDocument, ToCid,
     },
     ecdh_decrypt, ecdh_encrypt, libp2p_pub_to_did,
     phonebook::PhoneBook,
@@ -793,7 +793,8 @@ impl IdentityStore {
         }
 
         let image =
-            super::document::image::get_image(&self.ipfs, cid, true, Some(2 * 1024 * 1024)).await?;
+            super::document::image_dag::get_image(&self.ipfs, cid, true, Some(2 * 1024 * 1024))
+                .await?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Image {
@@ -844,7 +845,8 @@ impl IdentityStore {
         }
 
         let image =
-            super::document::image::get_image(&self.ipfs, cid, true, Some(2 * 1024 * 1024)).await?;
+            super::document::image_dag::get_image(&self.ipfs, cid, true, Some(2 * 1024 * 1024))
+                .await?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Image {
@@ -1125,7 +1127,7 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                let _ = super::document::image::get_image(
+                                                let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     picture,
                                                     false,
@@ -1148,7 +1150,7 @@ impl IdentityStore {
 
                                             let did = in_did.clone();
                                             async move {
-                                                let _ = super::document::image::get_image(
+                                                let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     banner,
                                                     false,
@@ -1181,7 +1183,7 @@ impl IdentityStore {
                         let cid = cid;
                         let store = self.clone();
                         async move {
-                            let added_cid = super::document::image::store_photo(
+                            let added_cid = super::document::image_dag::store_photo(
                                 &store.ipfs,
                                 futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
                                 ty,

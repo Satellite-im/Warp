@@ -707,7 +707,7 @@ impl MultiPass for WarpIpfs {
                 .await
                 .map_err(anyhow::Error::from)??;
 
-                let cid = store::document::image::store_photo(
+                let cid = store::document::image_dag::store_photo(
                     &self.ipfs()?,
                     futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
                     format.into(),
@@ -782,7 +782,7 @@ impl MultiPass for WarpIpfs {
                     }
                 };
 
-                let cid = store::document::image::store_photo(
+                let cid = store::document::image_dag::store_photo(
                     &self.ipfs()?,
                     stream.boxed(),
                     extension.into(),
@@ -846,7 +846,7 @@ impl MultiPass for WarpIpfs {
                 .await
                 .map_err(anyhow::Error::from)??;
 
-                let cid = store::document::image::store_photo(
+                let cid = store::document::image_dag::store_photo(
                     &self.ipfs()?,
                     futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
                     format.into(),
@@ -921,7 +921,7 @@ impl MultiPass for WarpIpfs {
                     }
                 };
 
-                let cid = store::document::image::store_photo(
+                let cid = store::document::image_dag::store_photo(
                     &self.ipfs()?,
                     stream.boxed(),
                     extension.into(),
