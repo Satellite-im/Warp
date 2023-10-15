@@ -4,7 +4,7 @@
 use crate::{
     behaviour::phonebook::PhoneBookCommand,
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic},
+    store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
 };
 use chrono::Utc;
 
@@ -995,14 +995,19 @@ impl IdentityStore {
                                         let store = self.clone();
                                         let did = in_did.clone();
                                         async move {
+                                            let peer_id = vec![did.to_peer_id()?];
                                             let _ = super::document::image_dag::get_image(
                                                 &ipfs,
                                                 identity_profile_picture,
-                                                &[],
+                                                &peer_id,
                                                 false,
                                                 Some(2 * 1024 * 1024),
                                             )
-                                            .await?;
+                                            .await
+                                            .map_err(|e| {
+                                                log::error!("Error fetching image from {did}: {e}");
+                                                e
+                                            })?;
 
                                             if emit {
                                                 store.emit_event(
@@ -1044,14 +1049,20 @@ impl IdentityStore {
                                         let did = in_did.clone();
                                         let store = self.clone();
                                         async move {
+                                            let peer_id = vec![did.to_peer_id()?];
+
                                             let _ = super::document::image_dag::get_image(
                                                 &ipfs,
                                                 identity_profile_banner,
-                                                &[],
+                                                &peer_id,
                                                 false,
                                                 Some(2 * 1024 * 1024),
                                             )
-                                            .await?;
+                                            .await
+                                            .map_err(|e| {
+                                                log::error!("Error fetching image from {did}: {e}");
+                                                e
+                                            })?;
 
                                             if emit {
                                                 store.emit_event(
@@ -1123,14 +1134,21 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
+                                                let peer_id = vec![did.to_peer_id()?];
                                                 let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     picture,
-                                                    &[],
+                                                    &peer_id,
                                                     false,
                                                     Some(2 * 1024 * 1024),
                                                 )
-                                                .await?;
+                                                .await
+                                                .map_err(|e| {
+                                                    log::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 store.emit_event(
                                                     MultiPassEventKind::IdentityUpdate { did },
@@ -1147,14 +1165,21 @@ impl IdentityStore {
 
                                             let did = in_did.clone();
                                             async move {
+                                                let peer_id = vec![did.to_peer_id()?];
                                                 let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     banner,
-                                                    &[],
+                                                    &peer_id,
                                                     false,
                                                     Some(2 * 1024 * 1024),
                                                 )
-                                                .await?;
+                                                .await
+                                                .map_err(|e| {
+                                                    log::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 store.emit_event(
                                                     MultiPassEventKind::IdentityUpdate { did },
