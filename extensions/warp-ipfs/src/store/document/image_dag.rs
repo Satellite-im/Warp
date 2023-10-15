@@ -112,6 +112,8 @@ pub async fn get_image(
 
     let image = unixfs_fetch(ipfs, dag.link, None, local, limit).await?;
 
+    println!("Finished {cid}");
+
     let mut id_img = IdentityImage::default();
 
     id_img.set_data(image);
