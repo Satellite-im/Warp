@@ -792,9 +792,14 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let image =
-            super::document::image_dag::get_image(&self.ipfs, cid, true, Some(2 * 1024 * 1024))
-                .await?;
+        let image = super::document::image_dag::get_image(
+            &self.ipfs,
+            cid,
+            &[],
+            true,
+            Some(2 * 1024 * 1024),
+        )
+        .await?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Image {
@@ -844,9 +849,14 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let image =
-            super::document::image_dag::get_image(&self.ipfs, cid, true, Some(2 * 1024 * 1024))
-                .await?;
+        let image = super::document::image_dag::get_image(
+            &self.ipfs,
+            cid,
+            &[],
+            true,
+            Some(2 * 1024 * 1024),
+        )
+        .await?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Image {
@@ -988,6 +998,7 @@ impl IdentityStore {
                                             let _ = super::document::image_dag::get_image(
                                                 &ipfs,
                                                 identity_profile_picture,
+                                                &[],
                                                 false,
                                                 Some(2 * 1024 * 1024),
                                             )
@@ -1036,6 +1047,7 @@ impl IdentityStore {
                                             let _ = super::document::image_dag::get_image(
                                                 &ipfs,
                                                 identity_profile_banner,
+                                                &[],
                                                 false,
                                                 Some(2 * 1024 * 1024),
                                             )
@@ -1114,6 +1126,7 @@ impl IdentityStore {
                                                 let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     picture,
+                                                    &[],
                                                     false,
                                                     Some(2 * 1024 * 1024),
                                                 )
@@ -1137,6 +1150,7 @@ impl IdentityStore {
                                                 let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     banner,
+                                                    &[],
                                                     false,
                                                     Some(2 * 1024 * 1024),
                                                 )
@@ -1599,7 +1613,7 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.profile_picture {
-            let data = match get_image(&self.ipfs, cid, true, Some(2 * 1024 * 1024)).await {
+            let data = match get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024)).await {
                 Ok(data) => data,
                 Err(_) => {
                     return Err(Error::InvalidIdentityPicture);
@@ -1634,7 +1648,7 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.profile_banner {
-            let data = match get_image(&self.ipfs, cid, true, Some(2 * 1024 * 1024)).await {
+            let data = match get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024)).await {
                 Ok(data) => data,
                 Err(_) => {
                     return Err(Error::InvalidIdentityPicture);

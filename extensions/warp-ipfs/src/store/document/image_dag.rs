@@ -1,6 +1,6 @@
 use futures::{stream::BoxStream, StreamExt};
 use libipld::{serde::to_ipld, Cid};
-use rust_ipfs::Ipfs;
+use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
 use std::task::Poll;
 use tracing::log;
@@ -102,6 +102,7 @@ pub async fn store_photo(
 pub async fn get_image(
     ipfs: &Ipfs,
     cid: Cid,
+    peers: &[PeerId],
     local: bool,
     limit: Option<usize>,
 ) -> Result<IdentityImage, Error> {
@@ -110,7 +111,7 @@ pub async fn get_image(
         false => cid.get_dag(&ipfs, None).await?,
     };
 
-    let image = unixfs_fetch(ipfs, dag.link, None, local, limit).await?;
+    let image = unixfs_fetch(ipfs, dag.link, None, peers, local, limit).await?;
 
     let mut id_img = IdentityImage::default();
 
