@@ -194,15 +194,34 @@ impl MessageStore {
                 loop {
                     tokio::select! {
                         Some(message) = stream.next() => {
-                            if let Ok(payload) = Payload::from_bytes(&message.data) {
-                                if let Ok(data) = ecdh_decrypt(&store.did, Some(&payload.sender()), payload.data()) {
-                                    if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
-                                        if let Err(e) = store.process_conversation(payload, events).await {
-                                            error!("Error processing conversation: {e}");
-                                        }
-                                    }
+                            let payload = match Payload::from_bytes(&message.data) {
+                                Ok(payload) => payload,
+                                Err(e) => {
+                                    tracing::log::warn!("Failed to parse payload data: {e}");
+                                    continue;
                                 }
-                            }
+                            };
+
+                            let data = match ecdh_decrypt(&store.did, Some(&payload.sender()), payload.data()) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    tracing::log::warn!("Failed to decrypt message from {}: {e}", payload.sender());
+                                    continue;
+                                }
+                            };
+                            
+                            let events = match serde_json::from_slice::<ConversationEvents>(&data) {
+                                Ok(ev) => ev,
+                                Err(e) => {
+                                    tracing::log::warn!("Failed to parse message: {e}");
+                                    continue;
+                                }
+                            };
+                                        
+                            if let Err(e) = store.process_conversation(payload, events).await {
+                                error!("Error processing conversation: {e}");
+                            }     
+                            
                         }
                         _ = interval.tick() => {
                             if let Err(e) = store.process_queue().await {
