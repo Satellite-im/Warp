@@ -111,6 +111,19 @@ pub async fn get_image(
         false => cid.get_dag(&ipfs, None).await?,
     };
 
+    match limit {
+        Some(size) if dag.size > size as _ => {
+            return Err(Error::InvalidLength {
+                context: "image".into(),
+                current: dag.size as _,
+                minimum: None,
+                maximum: limit,
+            });
+        }
+        Some(_) => {}
+        None => {}
+    }
+
     let image = unixfs_fetch(ipfs, dag.link, None, peers, local, limit).await?;
 
     let mut id_img = IdentityImage::default();
