@@ -1009,6 +1009,8 @@ impl IdentityStore {
                                                 e
                                             })?;
 
+                                            log::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
+
                                             if emit {
                                                 store.emit_event(
                                                     MultiPassEventKind::IdentityUpdate { did },
@@ -1063,6 +1065,8 @@ impl IdentityStore {
                                                 log::error!("Error fetching image from {did}: {e}");
                                                 e
                                             })?;
+
+                                            log::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
                                             if emit {
                                                 store.emit_event(
@@ -1150,6 +1154,8 @@ impl IdentityStore {
                                                     e
                                                 })?;
 
+                                                log::trace!("Image pointed to {picture} for {did} downloaded");
+
                                                 store.emit_event(
                                                     MultiPassEventKind::IdentityUpdate { did },
                                                 );
@@ -1180,6 +1186,8 @@ impl IdentityStore {
                                                     );
                                                     e
                                                 })?;
+
+                                                log::trace!("Image pointed to {banner} for {did} downloaded");
 
                                                 store.emit_event(
                                                     MultiPassEventKind::IdentityUpdate { did },
