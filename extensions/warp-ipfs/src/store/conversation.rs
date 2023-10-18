@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{
-    stream::{self, BoxStream, FuturesOrdered},
+    stream::{self, BoxStream},
     StreamExt, TryFutureExt,
 };
 use libipld::{Cid, Ipld};
@@ -301,23 +301,8 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         list: BTreeSet<MessageDocument>,
     ) -> Result<(), Error> {
-        // let old_cid = self.messages;
         let cid = list.to_cid(ipfs).await?;
-        if !ipfs.is_pinned(&cid).await? {
-            ipfs.insert_pin(&cid, false).await?;
-        }
-
-        // if let Some(old_cid) = old_cid {
-        //     if old_cid != cid {
-        //         if ipfs.is_pinned(&old_cid).await? {
-        //             ipfs.remove_pin(&old_cid, false).await?;
-        //         }
-        //         ipfs.remove_block(old_cid).await?;
-        //     }
-        // }
-
         self.messages = Some(cid);
-
         Ok(())
     }
 
@@ -538,27 +523,11 @@ impl ConversationDocument {
             ipfs.remove_pin(&cid, false).await?;
         }
 
-        let mut ids = vec![];
-
         for document in messages {
             if ipfs.is_pinned(&document.message).await? {
                 ipfs.remove_pin(&document.message, false).await?;
             }
-            ids.push(document.message);
         }
-
-        ipfs.remove_block(cid).await?;
-
-        //TODO: Replace with gc within ipfs (when completed) in the future
-        //      so we dont need to manually delete the blocks
-        FuturesOrdered::from_iter(ids.iter().map(|cid| {
-            let ipfs = ipfs.clone();
-            async move { (ipfs, *cid) }
-        }))
-        .for_each_concurrent(None, |(ipfs, cid)| async move {
-            let _ = ipfs.remove_block(cid).await.ok();
-        })
-        .await;
         Ok(())
     }
 }
