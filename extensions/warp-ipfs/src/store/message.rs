@@ -61,14 +61,11 @@ pub struct MessageStore {
     // conversation cid
     conversation_keystore_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
     conversation_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationSender>>>,
+
     // identity store
-    // Note: Not used for now;
     identity: IdentityStore,
 
     conversations: Conversations,
-
-    // friend store
-    // friends: FriendsStore,
 
     // discovery
     discovery: Discovery,
@@ -160,6 +157,8 @@ impl MessageStore {
             .pubsub_subscribe(store.did.messaging())
             .await?
             .boxed();
+
+        let _ = store.load_conversations().await;
 
         tokio::spawn({
             let mut store = store.clone();
@@ -1992,70 +1991,45 @@ impl MessageStore {
         while let Some(entry) = entry_stream.next().await {
             let entry = entry?;
             let entry_path = entry.path();
-            if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
-                let Some(filename) = entry_path
-                    .file_name()
-                    .map(|file| file.to_string_lossy().to_string())
-                else {
-                    continue;
-                };
-
-                //TODO: Maybe check file extension instead
-                let slices = filename.split('.').collect::<Vec<&str>>();
-
-                let keystore = slices
-                    .last()
-                    .map(|s| s.ends_with("keystore"))
-                    .unwrap_or_default();
-
-                let Some(file_id) = slices.first() else {
-                    continue;
-                };
-
-                let Ok(id) = Uuid::from_str(file_id) else {
-                    continue;
-                };
-
-                let Ok(cid_str) = tokio::fs::read(entry_path)
-                    .await
-                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                else {
-                    continue;
-                };
-                if let Ok(cid) = cid_str.parse::<Cid>() {
-                    if keystore {
-                        self.conversation_keystore_cid.write().await.insert(id, cid);
-                    } else {
-                        // let task = {
-                        //     let store = self.clone();
-                        //     async move {
-                        //         let conversation: ConversationDocument =
-                        //             self.conversations.get(id).await?;
-                        //         conversation.verify()?;
-
-                        //         let recipients = conversation.recipients();
-
-                        //         for recipient in recipients {
-                        //             if !store.discovery.contains(&recipient).await {
-                        //                 let _ = store.discovery.insert(recipient).await.ok();
-                        //             }
-                        //         }
-
-                        //         let stream =
-                        //             store.ipfs.pubsub_subscribe(conversation.topic()).await?;
-
-                        //         store.start_task(conversation.id(), stream).await;
-
-                        //         Ok::<_, Error>(())
-                        //     }
-                        // };
-
-                        // if let Err(e) = task.await {
-                        //     error!("Error loading conversation: {e}");
-                        // }
-                    }
-                }
+            if entry_path.ends_with(".messaging_queue") {
+                continue;
             }
+
+            if !entry_path.is_file() {
+                continue;
+            }
+
+            match entry_path.extension().map(OsStr::to_str).flatten() {
+                Some("keystore") => {}
+                _ => continue,
+            };
+
+            let Some(filename) = entry_path.file_name().and_then(OsStr::to_str) else {
+                continue;
+            };
+
+            let slices = filename.split('.').collect::<Vec<_>>();
+
+            let Some(file_id) = slices.first() else {
+                continue;
+            };
+
+            let Ok(id) = Uuid::from_str(file_id) else {
+                continue;
+            };
+
+            let Ok(cid_str) = tokio::fs::read(entry_path)
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            else {
+                continue;
+            };
+
+            let Ok(cid) = cid_str.parse::<Cid>() else {
+                continue;
+            };
+
+            self.conversation_keystore_cid.write().await.insert(id, cid);
         }
 
         Ok(())
