@@ -1,8 +1,8 @@
 pub mod cache;
+pub mod conversation;
 pub mod identity;
 pub mod root;
 pub mod utils;
-pub mod conversation;
 
 use chrono::{DateTime, Utc};
 use futures::TryFutureExt;
@@ -124,6 +124,12 @@ pub struct RootDocument {
     /// array of request (Request)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<Cid>,
+    /// map of conversations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversations: Option<Cid>,
+    /// map of keystore for group chat conversations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversations_keystore: Option<Cid>,
     /// Online/Away/Busy/Offline status
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
@@ -258,6 +264,8 @@ impl RootDocument {
             identity,
             created: Some(data.created),
             modified: Some(data.modified),
+            conversations: None,
+            conversations_keystore: None,
             friends,
             blocks,
             block_by,
