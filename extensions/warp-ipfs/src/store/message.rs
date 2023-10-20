@@ -120,7 +120,9 @@ impl MessageStore {
         let conversation_sender = Arc::default();
         let stream_conversation_task = Arc::default();
 
-        let conversations = Conversations::new(&ipfs, path.clone(), did.clone()).await;
+        let root = identity.root_document().clone();
+
+        let conversations = Conversations::new(&ipfs, path.clone(), did.clone(), root).await;
 
         let store = Self {
             path,

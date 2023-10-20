@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use futures::{
     channel::{mpsc::Receiver, oneshot},
@@ -6,9 +6,10 @@ use futures::{
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
+use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
 
-use crate::store::{identity::Request, VecExt};
+use crate::store::{identity::Request, keystore::Keystore, VecExt};
 
 use super::{
     utils::{GetLocalDag, ToCid},
@@ -67,6 +68,17 @@ pub enum RootDocumentCommand {
     },
     GetBlockByList {
         response: oneshot::Sender<Result<Vec<DID>, Error>>,
+    },
+    SetKeystore {
+        document: BTreeMap<String, Cid>,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    GetKeystoreMap {
+        response: oneshot::Sender<Result<BTreeMap<String, Cid>, Error>>,
+    },
+    GetKeystore {
+        id: Uuid,
+        response: oneshot::Sender<Result<Keystore, Error>>,
     },
 }
 
@@ -281,6 +293,42 @@ impl RootDocumentMap {
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
+
+    pub async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::GetKeystoreMap { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::GetKeystore { id, response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn set_conversation_keystore_map(
+        &self,
+        document: BTreeMap<String, Cid>,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::SetKeystore {
+                document,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
 }
 
 struct RootDocumentTask {
@@ -336,6 +384,15 @@ impl RootDocumentTask {
                 }
                 RootDocumentCommand::GetBlockByList { response } => {
                     let _ = response.send(self.blockby_list().await);
+                }
+                RootDocumentCommand::SetKeystore { document, response } => {
+                    let _ = response.send(self.set_conversation_keystore(document).await);
+                }
+                RootDocumentCommand::GetKeystore { id, response } => {
+                    let _ = response.send(self.get_conversation_keystore(id).await);
+                }
+                RootDocumentCommand::GetKeystoreMap { response } => {
+                    let _ = response.send(self.get_conversation_keystore_map().await);
                 }
             }
         }
@@ -621,5 +678,34 @@ impl RootDocumentTask {
             }
         }
         Ok(())
+    }
+
+    async fn set_conversation_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
+        let mut document = self.get_root_document().await?;
+        document.conversations_keystore = Some(map.to_cid(&self.ipfs).await?);
+        self.set_root_document(document).await
+    }
+
+    async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
+        let document = self.get_root_document().await?;
+
+        let cid = match document.conversations_keystore {
+            Some(cid) => cid,
+            None => return Ok(BTreeMap::new()),
+        };
+
+        cid.get_local_dag(&self.ipfs).await
+    }
+
+    async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+        let document = self.get_root_document().await?;
+
+        let cid = match document.conversations_keystore {
+            Some(cid) => cid,
+            None => return Ok(Keystore::new(id)),
+        };
+
+        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
+        path.get_local_dag(&self.ipfs).await
     }
 }

@@ -13,10 +13,7 @@ use libipld::{
 };
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{
-    collections::{BTreeSet, HashMap},
-    time::Duration,
-};
+use std::{collections::BTreeMap, str::FromStr, time::Duration};
 use uuid::Uuid;
 use warp::{
     crypto::{did_key::CoreSign, DID},
@@ -28,7 +25,7 @@ use crate::store::get_keypair_did;
 
 use self::{identity::IdentityDocument, utils::GetLocalDag};
 
-use super::{identity::Request, keystore::KeyEntry};
+use super::{identity::Request, keystore::Keystore};
 
 #[async_trait::async_trait]
 pub(crate) trait ToCid: Sized {
@@ -88,7 +85,7 @@ pub struct ExtractedRootDocument {
     pub block_list: Vec<DID>,
     pub block_by_list: Vec<DID>,
     pub request: Vec<super::identity::Request>,
-    pub conversation_keystore: HashMap<Uuid, HashMap<DID, BTreeSet<KeyEntry>>>,
+    pub conversation_keystore: BTreeMap<Uuid, Keystore>,
     pub signature: Option<Vec<u8>>,
 }
 
@@ -194,7 +191,7 @@ impl RootDocument {
             Vec<DID>,
             Vec<DID>,
             Vec<Request>,
-            HashMap<Uuid, HashMap<DID, BTreeSet<KeyEntry>>>,
+            BTreeMap<Uuid, Keystore>,
         ),
         Error,
     > {
@@ -228,7 +225,19 @@ impl RootDocument {
 
         let conversation_keystore =
             futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
-                .and_then(|document| async move { document.get_local_dag(ipfs).await })
+                .and_then(|document| async move {
+                    let map: BTreeMap<String, Cid> = document.get_local_dag(ipfs).await?;
+                    let mut resolved_map: BTreeMap<Uuid, Keystore> = BTreeMap::new();
+                    for (k, v) in map
+                        .iter()
+                        .filter_map(|(k, v)| Uuid::from_str(k).map(|k| (k, *v)).ok())
+                    {
+                        if let Ok(store) = v.get_local_dag(ipfs).await {
+                            resolved_map.insert(k, store);
+                        }
+                    }
+                    Ok(resolved_map)
+                })
                 .await
                 .unwrap_or_default();
 
@@ -259,6 +268,7 @@ impl RootDocument {
         let has_blocks = !data.block_list.is_empty();
         let has_block_by_list = !data.block_by_list.is_empty();
         let has_requests = !data.request.is_empty();
+        let has_keystore = !data.conversation_keystore.is_empty();
 
         let friends = has_friends
             .then_some(data.friends.to_cid(ipfs).await.ok())
@@ -273,12 +283,24 @@ impl RootDocument {
             .then_some(data.request.to_cid(ipfs).await.ok())
             .flatten();
 
+        let conversations_keystore = has_keystore
+            .then_some({
+                let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
+                for (k, v) in data.conversation_keystore {
+                    if let Ok(cid) = v.to_cid(ipfs).await {
+                        pointer_map.insert(k.to_string(), cid);
+                    }
+                }
+                pointer_map.to_cid(ipfs).await.ok()
+            })
+            .flatten();
+
         let root_document = RootDocument {
             identity,
             created: Some(data.created),
             modified: Some(data.modified),
             conversations: None,
-            conversations_keystore: None,
+            conversations_keystore,
             friends,
             blocks,
             block_by,

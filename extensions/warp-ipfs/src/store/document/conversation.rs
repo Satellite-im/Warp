@@ -21,7 +21,7 @@ use warp::{
 
 use crate::store::{conversation::ConversationDocument, keystore::Keystore};
 
-use super::{utils::GetLocalDag, ToCid};
+use super::{root::RootDocumentMap, utils::GetLocalDag, ToCid};
 
 #[allow(clippy::large_enum_variant)]
 enum ConversationCommand {
@@ -74,18 +74,14 @@ impl Drop for Conversations {
 }
 
 impl Conversations {
-    pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>, keypair: Arc<DID>) -> Self {
+    pub async fn new(
+        ipfs: &Ipfs,
+        path: Option<PathBuf>,
+        keypair: Arc<DID>,
+        root: RootDocumentMap,
+    ) -> Self {
         let cid = match path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".message_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .ok()
-                .and_then(|cid_str| cid_str.parse().ok()),
-            None => None,
-        };
-
-        let keystore_cid = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".keystore_id"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
                 .ok()
@@ -101,8 +97,8 @@ impl Conversations {
             keypair,
             path,
             cid,
-            keystore_cid,
             rx,
+            root,
         };
 
         let handle = tokio::spawn(async move {
@@ -209,10 +205,10 @@ impl Conversations {
 struct ConversationTask {
     ipfs: Ipfs,
     cid: Option<Cid>,
-    keystore_cid: Option<Cid>,
     path: Option<PathBuf>,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
+    root: RootDocumentMap,
     rx: mpsc::Receiver<ConversationCommand>,
 }
 
@@ -270,15 +266,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         }
 
-        let cid = match self.keystore_cid {
-            Some(cid) => cid,
-            None => return Err(Error::InvalidConversation),
-        };
-
-        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
-
-        let document: Keystore = path.get_local_dag(&self.ipfs).await?;
-        Ok(document)
+        self.root.get_conversation_keystore(id).await
     }
 
     async fn set_keystore(&mut self, id: Uuid, document: Keystore) -> Result<(), Error> {
@@ -286,10 +274,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         }
 
-        let mut map = match self.keystore_cid {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await?,
-            None => BTreeMap::new(),
-        };
+        let mut map = self.root.get_conversation_keystore_map().await?;
 
         let id = id.to_string();
         let cid = document.to_cid(&self.ipfs).await?;
@@ -314,8 +299,7 @@ impl ConversationTask {
 
         self.set_map(conversation_map).await?;
 
-        if let Some(cid) = self.keystore_cid {
-            let mut ks_map: BTreeMap<String, Cid> = cid.get_local_dag(&self.ipfs).await?;
+        if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
             if ks_map.remove(&id.to_string()).is_some() {
                 if let Err(e) = self.set_keystore_map(ks_map).await {
                     warn!("Failed to remove keystore for {id}: {e}");
@@ -362,28 +346,7 @@ impl ConversationTask {
     }
 
     async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let cid = map.to_cid(&self.ipfs).await?;
-
-        let old_map_cid = self.keystore_cid.replace(cid);
-
-        self.ipfs.insert_pin(&cid, true).await?;
-
-        if let Some(old_cid) = old_map_cid {
-            if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                self.ipfs.remove_pin(&old_cid, true).await?;
-            }
-        }
-
-        self.keystore_cid = Some(cid);
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".keystore_cid"), cid).await {
-                tracing::log::error!("Error writing to '.keystore_cid': {e}.")
-            }
-        }
-
-        Ok(())
+        self.root.set_conversation_keystore_map(map).await
     }
 
     async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
