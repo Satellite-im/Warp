@@ -13,7 +13,11 @@ use libipld::{
 };
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::time::Duration;
+use std::{
+    collections::{BTreeSet, HashMap},
+    time::Duration,
+};
+use uuid::Uuid;
 use warp::{
     crypto::{did_key::CoreSign, DID},
     error::Error,
@@ -24,7 +28,7 @@ use crate::store::get_keypair_did;
 
 use self::{identity::IdentityDocument, utils::GetLocalDag};
 
-use super::identity::Request;
+use super::{identity::Request, keystore::KeyEntry};
 
 #[async_trait::async_trait]
 pub(crate) trait ToCid: Sized {
@@ -84,6 +88,7 @@ pub struct ExtractedRootDocument {
     pub block_list: Vec<DID>,
     pub block_by_list: Vec<DID>,
     pub request: Vec<super::identity::Request>,
+    pub conversation_keystore: HashMap<Uuid, HashMap<DID, BTreeSet<KeyEntry>>>,
     pub signature: Option<Vec<u8>>,
 }
 
@@ -189,6 +194,7 @@ impl RootDocument {
             Vec<DID>,
             Vec<DID>,
             Vec<Request>,
+            HashMap<Uuid, HashMap<DID, BTreeSet<KeyEntry>>>,
         ),
         Error,
     > {
@@ -220,6 +226,12 @@ impl RootDocument {
             .await
             .unwrap_or_default();
 
+        let conversation_keystore =
+            futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
+                .and_then(|document| async move { document.get_local_dag(ipfs).await })
+                .await
+                .unwrap_or_default();
+
         Ok((
             identity,
             self.created,
@@ -228,6 +240,7 @@ impl RootDocument {
             block_list,
             block_by_list,
             request,
+            conversation_keystore,
         ))
     }
 
@@ -279,8 +292,16 @@ impl RootDocument {
     }
 
     pub async fn export(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {
-        let (identity, created, modified, friends, block_list, block_by_list, request) =
-            self.resolve(ipfs).await?;
+        let (
+            identity,
+            created,
+            modified,
+            friends,
+            block_list,
+            block_by_list,
+            request,
+            conversation_keystore,
+        ) = self.resolve(ipfs).await?;
 
         let mut exported = ExtractedRootDocument {
             identity,
@@ -290,6 +311,7 @@ impl RootDocument {
             block_list,
             block_by_list,
             request,
+            conversation_keystore,
             signature: None,
         };
 

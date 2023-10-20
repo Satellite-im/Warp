@@ -13,10 +13,8 @@ use futures::stream::SelectAll;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 
-use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
-use tokio_stream::wrappers::ReadDirStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
@@ -41,7 +39,6 @@ use crate::store::{
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::discovery::Discovery;
 use super::document::conversation::Conversations;
-use super::document::utils::{GetLocalDag, ToCid};
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
 use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, MessagingEvents};
@@ -59,7 +56,6 @@ pub struct MessageStore {
     path: Option<PathBuf>,
 
     // conversation cid
-    conversation_keystore_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
     conversation_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationSender>>>,
 
     // identity store
@@ -120,7 +116,6 @@ impl MessageStore {
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());
         let with_friends = Arc::new(AtomicBool::new(with_friends));
-        let conversation_keystore_cid = Arc::default();
         let stream_reqres_task = Arc::default();
         let conversation_sender = Arc::default();
         let stream_conversation_task = Arc::default();
@@ -143,7 +138,6 @@ impl MessageStore {
             event,
             spam_filter,
             with_friends,
-            conversation_keystore_cid,
             stream_conversation_task,
         };
 
@@ -389,7 +383,7 @@ impl MessageStore {
                                                     if let Err(e) = store
                                                         .set_conversation_keystore(
                                                             conversation_id,
-                                                            &keystore,
+                                                            keystore,
                                                         )
                                                         .await
                                                     {
@@ -548,7 +542,7 @@ impl MessageStore {
                                             if let Err(e) = store
                                                 .set_conversation_keystore(
                                                     conversation_id,
-                                                    &keystore,
+                                                    keystore,
                                                 )
                                                 .await
                                             {
@@ -1351,7 +1345,7 @@ impl MessageStore {
                     }
                 };
 
-                self.set_conversation_keystore(conversation_id, &keystore)
+                self.set_conversation_keystore(conversation_id, keystore)
                     .await?;
 
                 self.start_task(conversation_id, stream).await;
@@ -1486,12 +1480,6 @@ impl MessageStore {
                 if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
                     warn!("topic should have been unsubscribed after dropping conversation.");
                 }
-
-                // Delete a keystore, if any, assigned to the conversation.
-                let _ = self
-                    .remove_conversation_keystore(conversation_id)
-                    .await
-                    .ok();
 
                 if let Err(e) = self
                     .event
@@ -1745,7 +1733,8 @@ impl MessageStore {
 
         let mut keystore = Keystore::new(convo_id);
         keystore.insert(own_did, own_did, warp::crypto::generate::<64>())?;
-        self.set_conversation_keystore(convo_id, &keystore).await?;
+
+        self.set_conversation_keystore(convo_id, keystore).await?;
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
@@ -1937,8 +1926,6 @@ impl MessageStore {
             }
         });
 
-        let _ = self.remove_conversation_keystore(conversation_id).await;
-
         if let Err(e) = self
             .event
             .send(RayGunEventKind::ConversationDeleted { conversation_id })
@@ -1978,60 +1965,6 @@ impl MessageStore {
             }
         }
 
-        let Some(path) = self.path.as_ref() else {
-            return Ok(());
-        };
-
-        if !path.is_dir() {
-            return Err(Error::InvalidDirectory);
-        }
-
-        let mut entry_stream = ReadDirStream::new(tokio::fs::read_dir(path).await?);
-
-        while let Some(entry) = entry_stream.next().await {
-            let entry = entry?;
-            let entry_path = entry.path();
-            if entry_path.ends_with(".messaging_queue") {
-                continue;
-            }
-
-            if !entry_path.is_file() {
-                continue;
-            }
-
-            match entry_path.extension().map(OsStr::to_str).flatten() {
-                Some("keystore") => {}
-                _ => continue,
-            };
-
-            let Some(filename) = entry_path.file_name().and_then(OsStr::to_str) else {
-                continue;
-            };
-
-            let slices = filename.split('.').collect::<Vec<_>>();
-
-            let Some(file_id) = slices.first() else {
-                continue;
-            };
-
-            let Ok(id) = Uuid::from_str(file_id) else {
-                continue;
-            };
-
-            let Ok(cid_str) = tokio::fs::read(entry_path)
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            else {
-                continue;
-            };
-
-            let Ok(cid) = cid_str.parse::<Cid>() else {
-                continue;
-            };
-
-            self.conversation_keystore_cid.write().await.insert(id, cid);
-        }
-
         Ok(())
     }
 
@@ -2054,77 +1987,17 @@ impl MessageStore {
     }
 
     pub async fn conversation_keystore(&self, conversation_id: Uuid) -> Result<Keystore, Error> {
-        let guard = self.conversation_keystore_cid.read().await;
-
-        let cid = guard
-            .get(&conversation_id)
-            .ok_or(Error::InvalidConversation)?;
-
-        cid.get_local_dag(&self.ipfs).await
+        self.conversations.get_keystore(conversation_id).await
     }
 
     pub async fn set_conversation_keystore(
         &self,
         conversation_id: Uuid,
-        keystore: &Keystore,
+        keystore: Keystore,
     ) -> Result<(), Error> {
-        let cid = keystore.to_cid(&self.ipfs).await?;
-
-        if !self.ipfs.is_pinned(&cid).await? {
-            self.ipfs.insert_pin(&cid, false).await?;
-        }
-
-        let old_cid = self
-            .conversation_keystore_cid
-            .write()
+        self.conversations
+            .set_keystore(conversation_id, keystore)
             .await
-            .insert(conversation_id, cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.remove_pin(&old_cid, false).await?;
-                }
-                if let Err(_e) = self.ipfs.remove_block(old_cid).await {}
-            }
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            let keystore_cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(
-                path.join(format!("{}.keystore", conversation_id)),
-                keystore_cid,
-            )
-            .await
-            {
-                error!("Unable to save info to file: {e}");
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn remove_conversation_keystore(&self, conversation_id: Uuid) -> Result<(), Error> {
-        let mut writer = self.conversation_keystore_cid.write().await;
-        let cid = writer
-            .remove(&conversation_id)
-            .ok_or(Error::InvalidConversation)?;
-        drop(writer);
-
-        if self.ipfs.is_pinned(&cid).await? {
-            self.ipfs.remove_pin(&cid, false).await?;
-        }
-        if let Err(_e) = self.ipfs.remove_block(cid).await {}
-
-        if let Some(path) = self.path.as_ref() {
-            if let Err(e) =
-                tokio::fs::remove_file(path.join(format!("{}.keystore", conversation_id))).await
-            {
-                error!("Unable to remove keystore: {e}");
-            }
-        }
-
-        Ok(())
     }
 
     async fn send_single_conversation_event(

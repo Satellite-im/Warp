@@ -11,6 +11,7 @@ use futures::{
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
+use tracing::warn;
 use uuid::Uuid;
 use warp::{
     crypto::DID,
@@ -18,7 +19,7 @@ use warp::{
     raygun::{ConversationType, MessageEventKind},
 };
 
-use crate::store::conversation::ConversationDocument;
+use crate::store::{conversation::ConversationDocument, keystore::Keystore};
 
 use super::{utils::GetLocalDag, ToCid};
 
@@ -27,8 +28,17 @@ enum ConversationCommand {
         id: Uuid,
         response: oneshot::Sender<Result<ConversationDocument, Error>>,
     },
+    GetKeystore {
+        id: Uuid,
+        response: oneshot::Sender<Result<Keystore, Error>>,
+    },
     SetDocument {
         document: ConversationDocument,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    SetKeystore {
+        id: Uuid,
+        document: Keystore,
         response: oneshot::Sender<Result<(), Error>>,
     },
     Delete {
@@ -73,6 +83,15 @@ impl Conversations {
             None => None,
         };
 
+        let keystore_cid = match path.as_ref() {
+            Some(path) => tokio::fs::read(path.join(".keystore_id"))
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                .ok()
+                .and_then(|cid_str| cid_str.parse().ok()),
+            None => None,
+        };
+
         let (tx, rx) = futures::channel::mpsc::channel(1);
 
         let mut task = ConversationTask {
@@ -81,6 +100,7 @@ impl Conversations {
             keypair,
             path,
             cid,
+            keystore_cid,
             rx,
         };
 
@@ -104,6 +124,16 @@ impl Conversations {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::GetKeystore { id, response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn contains(&self, id: Uuid) -> Result<bool, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -120,6 +150,20 @@ impl Conversations {
             .tx
             .clone()
             .send(ConversationCommand::SetDocument {
+                document,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn set_keystore(&self, id: Uuid, document: Keystore) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::SetKeystore {
+                id,
                 document,
                 response: tx,
             })
@@ -164,6 +208,7 @@ impl Conversations {
 struct ConversationTask {
     ipfs: Ipfs,
     cid: Option<Cid>,
+    keystore_cid: Option<Cid>,
     path: Option<PathBuf>,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
@@ -192,6 +237,16 @@ impl ConversationTask {
                 ConversationCommand::Contains { id, response } => {
                     let _ = response.send(Ok(self.contains(id).await));
                 }
+                ConversationCommand::GetKeystore { id, response } => {
+                    let _ = response.send(self.get_keystore(id).await);
+                }
+                ConversationCommand::SetKeystore {
+                    id,
+                    document,
+                    response,
+                } => {
+                    let _ = response.send(self.set_keystore(id, document).await);
+                }
             }
         }
     }
@@ -209,6 +264,43 @@ impl ConversationTask {
         Ok(document)
     }
 
+    async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+        if !self.contains(id).await {
+            return Err(Error::InvalidConversation);
+        }
+
+        let cid = match self.keystore_cid {
+            Some(cid) => cid,
+            None => return Err(Error::InvalidConversation),
+        };
+
+        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
+
+        let document: Keystore = path.get_local_dag(&self.ipfs).await?;
+        Ok(document)
+    }
+
+    async fn set_keystore(&mut self, id: Uuid, document: Keystore) -> Result<(), Error> {
+        if !self.contains(id).await {
+            return Err(Error::InvalidConversation);
+        }
+
+        let mut map = match self.keystore_cid {
+            Some(cid) => {
+                let map = cid.get_local_dag(&self.ipfs).await?;
+                map
+            }
+            None => BTreeMap::new(),
+        };
+
+        let id = id.to_string();
+        let cid = document.to_cid(&self.ipfs).await?;
+
+        map.insert(id, cid);
+
+        self.set_keystore_map(map).await
+    }
+
     async fn delete(&mut self, id: Uuid) -> Result<ConversationDocument, Error> {
         let cid = match self.cid {
             Some(cid) => cid,
@@ -223,6 +315,15 @@ impl ConversationTask {
         };
 
         self.set_map(conversation_map).await?;
+
+        if let Some(cid) = self.keystore_cid {
+            let mut ks_map: BTreeMap<String, Cid> = cid.get_local_dag(&self.ipfs).await?;
+            if ks_map.remove(&id.to_string()).is_some() {
+                if let Err(e) = self.set_keystore_map(ks_map).await {
+                    warn!("Failed to remove keystore for {id}: {e}");
+                }
+            }
+        }
 
         let document: ConversationDocument = document_cid.get_local_dag(&self.ipfs).await?;
         Ok(document)
@@ -260,6 +361,31 @@ impl ConversationTask {
         };
 
         conversation_map.contains_key(&id.to_string())
+    }
+
+    async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
+        let cid = map.to_cid(&self.ipfs).await?;
+
+        let old_map_cid = self.keystore_cid.replace(cid);
+
+        self.ipfs.insert_pin(&cid, true).await?;
+
+        if let Some(old_cid) = old_map_cid {
+            if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                self.ipfs.remove_pin(&old_cid, true).await?;
+            }
+        }
+
+        self.keystore_cid = Some(cid);
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            if let Err(e) = tokio::fs::write(path.join(".keystore_cid"), cid).await {
+                tracing::log::error!("Error writing to '.keystore_cid': {e}.")
+            }
+        }
+
+        Ok(())
     }
 
     async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
