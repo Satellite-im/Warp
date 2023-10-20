@@ -750,7 +750,7 @@ impl MessageStore {
                 }
 
                 let lines_value_length: usize = message
-                    .value()
+                    .lines()
                     .iter()
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
@@ -775,7 +775,7 @@ impl MessageStore {
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
                         message
-                            .value()
+                            .lines()
                             .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
@@ -859,7 +859,7 @@ impl MessageStore {
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
                         message
-                            .value()
+                            .lines()
                             .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
@@ -886,7 +886,7 @@ impl MessageStore {
                 }
 
                 message.set_signature(Some(signature));
-                *message.value_mut() = lines;
+                *message.lines_mut() = lines;
                 message.set_modified(modified);
 
                 message_document
@@ -923,7 +923,7 @@ impl MessageStore {
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
                         message
-                            .value()
+                            .lines()
                             .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
@@ -2472,14 +2472,14 @@ impl MessageStore {
         let mut message = Message::default();
         message.set_conversation_id(conversation.id());
         message.set_sender(own_did.clone());
-        message.set_value(messages.clone());
+        message.set_lines(messages.clone());
 
         let construct = [
             message.id().into_bytes().to_vec(),
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
             message
-                .value()
+                .lines()
                 .iter()
                 .map(|s| s.as_bytes())
                 .collect::<Vec<_>>()
@@ -2604,7 +2604,7 @@ impl MessageStore {
         let mut message = Message::default();
         message.set_conversation_id(conversation.id());
         message.set_sender(own_did.clone());
-        message.set_value(messages);
+        message.set_lines(messages);
         message.set_replied(Some(message_id));
 
         let construct = [
@@ -2612,7 +2612,7 @@ impl MessageStore {
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
             message
-                .value()
+                .lines()
                 .iter()
                 .map(|s| s.as_bytes())
                 .collect::<Vec<_>>()
@@ -2951,14 +2951,14 @@ impl MessageStore {
                     message.set_conversation_id(conversation.id());
                     message.set_sender(own_did.clone());
                     message.set_attachment(attachments);
-                    message.set_value(messages.clone());
+                    message.set_lines(messages.clone());
                     message.set_replied(message_id);
                     let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         own_did.to_string().as_bytes().to_vec(),
                         message
-                            .value()
+                            .lines()
                             .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
@@ -3330,7 +3330,7 @@ impl Queue {
 
 pub fn spam_check(message: &mut Message, filter: Arc<Option<SpamFilter>>) -> anyhow::Result<()> {
     if let Some(filter) = filter.as_ref() {
-        if filter.process(&message.value().join(" "))? {
+        if filter.process(&message.lines().join(" "))? {
             message
                 .metadata_mut()
                 .insert("is_spam".to_owned(), "true".to_owned());
