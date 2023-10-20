@@ -1358,7 +1358,7 @@ impl MessageStore {
                 }
 
                 for recipient in list.iter().filter(|d| did.ne(d)) {
-                    if let Err(e) = self.request_key(conversation_id, &recipient).await {
+                    if let Err(e) = self.request_key(conversation_id, recipient).await {
                         tracing::log::warn!("Failed to send exchange request to {recipient}: {e}");
                     }
                 }
@@ -1800,7 +1800,7 @@ impl MessageStore {
         }
 
         for recipient in recipient.iter().filter(|d| own_did.ne(d)) {
-            if let Err(e) = self.request_key(conversation.id(), &recipient).await {
+            if let Err(e) = self.request_key(conversation.id(), recipient).await {
                 tracing::log::warn!("Failed to send exchange request to {recipient}: {e}");
             }
         }

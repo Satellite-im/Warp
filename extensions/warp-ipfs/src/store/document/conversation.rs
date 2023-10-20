@@ -23,6 +23,7 @@ use crate::store::{conversation::ConversationDocument, keystore::Keystore};
 
 use super::{utils::GetLocalDag, ToCid};
 
+#[allow(clippy::large_enum_variant)]
 enum ConversationCommand {
     GetDocument {
         id: Uuid,
@@ -286,10 +287,7 @@ impl ConversationTask {
         }
 
         let mut map = match self.keystore_cid {
-            Some(cid) => {
-                let map = cid.get_local_dag(&self.ipfs).await?;
-                map
-            }
+            Some(cid) => cid.get_local_dag(&self.ipfs).await?,
             None => BTreeMap::new(),
         };
 
@@ -425,10 +423,7 @@ impl ConversationTask {
         document.verify()?;
 
         let mut map = match self.cid {
-            Some(cid) => {
-                let map = cid.get_local_dag(&self.ipfs).await?;
-                map
-            }
+            Some(cid) => cid.get_local_dag(&self.ipfs).await?,
             None => BTreeMap::new(),
         };
 
