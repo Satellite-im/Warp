@@ -513,7 +513,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.date().to_string(),
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
-                                    &message.value().join("\n"),
+                                    &message.lines().join("\n"),
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
@@ -581,7 +581,7 @@ async fn main() -> anyhow::Result<()> {
                                             &message.date().to_string(),
                                             &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                             &username,
-                                            &message.value().join("\n"),
+                                            &message.lines().join("\n"),
                                             &format!("{}", message.pinned()),
                                             &emojis.join(" ")
                                         ]);
@@ -616,7 +616,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.date().to_string(),
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
-                                    &message.value().join("\n"),
+                                    &message.lines().join("\n"),
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
@@ -648,7 +648,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.date().to_string(),
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
-                                    &message.value().join("\n"),
+                                    &message.lines().join("\n"),
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
@@ -689,7 +689,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.date().to_string(),
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
-                                    &message.value().join("\n"),
+                                    &message.lines().join("\n"),
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
@@ -1080,7 +1080,7 @@ async fn message_event_handle(
                                         stdout,
                                         "[{}] @> [SPAM!] {}",
                                         username,
-                                        message.value().join("\n")
+                                        message.lines().join("\n")
                                     )?;
                                 }
                                 None => {
@@ -1088,19 +1088,19 @@ async fn message_event_handle(
                                         stdout,
                                         "[{}] @> {}",
                                         username,
-                                        message.value().join("\n")
+                                        message.lines().join("\n")
                                     )?;
                                 }
                             },
                             MessageType::Attachment => {
-                                if !message.value().is_empty() {
+                                if !message.lines().is_empty() {
                                     match message.metadata().get("is_spam") {
                                         Some(_) => {
                                             writeln!(
                                                 stdout,
                                                 "[{}] @> [SPAM!] {}",
                                                 username,
-                                                message.value().join("\n")
+                                                message.lines().join("\n")
                                             )?;
                                         }
                                         None => {
@@ -1108,7 +1108,7 @@ async fn message_event_handle(
                                                 stdout,
                                                 "[{}] @> {}",
                                                 username,
-                                                message.value().join("\n")
+                                                message.lines().join("\n")
                                             )?;
                                         }
                                     }

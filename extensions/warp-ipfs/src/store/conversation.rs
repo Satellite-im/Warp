@@ -382,7 +382,7 @@ impl ConversationDocument {
                     }
                     let should_yield = if let Some(keyword) = option.keyword() {
                          message
-                            .value()
+                            .lines()
                             .iter()
                             .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
                     } else {
@@ -567,7 +567,7 @@ pub struct MessageDocument {
 
 impl PartialOrd for MessageDocument {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.date.partial_cmp(&other.date)
+        Some(self.cmp(other))
     }
 }
 

@@ -1164,7 +1164,6 @@ impl IdentityStore {
 
                 if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
                     tokio::spawn({
-                        let cid = cid;
                         let mut store = self.clone();
                         async move {
                             let added_cid = store
