@@ -377,7 +377,7 @@ impl MessagePage {
 
 impl PartialOrd for MessagePage {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.id.partial_cmp(&other.id)
+        Some(self.cmp(other))
     }
 }
 
@@ -530,7 +530,7 @@ pub struct Message {
     replied: Option<Uuid>,
 
     /// Message context for `Message`
-    value: Vec<String>,
+    lines: Vec<String>,
 
     /// List of Attachment
     attachment: Vec<File>,
@@ -556,7 +556,7 @@ impl Default for Message {
             pinned: false,
             reactions: Vec::new(),
             replied: None,
-            value: Vec::new(),
+            lines: Vec::new(),
             attachment: Vec::new(),
             signature: Default::default(),
             metadata: HashMap::new(),
@@ -566,7 +566,7 @@ impl Default for Message {
 
 impl PartialOrd for Message {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.date.partial_cmp(&other.date)
+        Some(self.cmp(other))
     }
 }
 
@@ -616,8 +616,8 @@ impl Message {
         self.reactions.clone()
     }
 
-    pub fn value(&self) -> Vec<String> {
-        self.value.clone()
+    pub fn lines(&self) -> Vec<String> {
+        self.lines.clone()
     }
 
     pub fn attachments(&self) -> Vec<File> {
@@ -670,8 +670,8 @@ impl Message {
         self.reactions = reaction
     }
 
-    pub fn set_value(&mut self, val: Vec<String>) {
-        self.value = val
+    pub fn set_lines(&mut self, val: Vec<String>) {
+        self.lines = val
     }
 
     pub fn set_attachment(&mut self, attachments: Vec<File>) {
@@ -701,8 +701,8 @@ impl Message {
         &mut self.reactions
     }
 
-    pub fn value_mut(&mut self) -> &mut Vec<String> {
-        &mut self.value
+    pub fn lines_mut(&mut self) -> &mut Vec<String> {
+        &mut self.lines
     }
 
     pub fn metadata_mut(&mut self) -> &mut HashMap<String, String> {
@@ -1015,7 +1015,7 @@ pub mod ffi {
         EmbedState, FFIResult_FFIVec_Message, FFIVec_Reaction, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
     };
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    // use chrono::{DateTime, NaiveDateTime, Utc};
     use futures::StreamExt;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
@@ -1602,7 +1602,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        let lines = adapter.value();
+        let lines = adapter.lines();
 
         Box::into_raw(Box::new(lines.into()))
     }
@@ -1711,32 +1711,32 @@ pub mod ffi {
         Box::into_raw(Box::new(opt))
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn messageoptions_set_date_range(
-        option: *mut MessageOptions,
-        start: i64,
-        end: i64,
-    ) -> *mut MessageOptions {
-        if option.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn messageoptions_set_date_range(
+    //     option: *mut MessageOptions,
+    //     start: i64,
+    //     end: i64,
+    // ) -> *mut MessageOptions {
+    //     if option.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let opt = Box::from_raw(option);
+    //     let opt = Box::from_raw(option);
 
-        let start = match convert_timstamp(start) {
-            Some(s) => s,
-            None => return std::ptr::null_mut(),
-        };
-        let end = match convert_timstamp(end) {
-            Some(s) => s,
-            None => return std::ptr::null_mut(),
-        };
+    //     let start = match convert_timstamp(start) {
+    //         Some(s) => s,
+    //         None => return std::ptr::null_mut(),
+    //     };
+    //     let end = match convert_timstamp(end) {
+    //         Some(s) => s,
+    //         None => return std::ptr::null_mut(),
+    //     };
 
-        let opt = opt.set_date_range(start..end);
+    //     let opt = opt.set_date_range(start..end);
 
-        Box::into_raw(Box::new(opt))
-    }
+    //     Box::into_raw(Box::new(opt))
+    // }
 
     #[allow(clippy::missing_safety_doc)]
     unsafe fn pointer_to_vec(
@@ -1749,8 +1749,8 @@ pub mod ffi {
             .collect()
     }
 
-    fn convert_timstamp(timestamp: i64) -> Option<DateTime<Utc>> {
-        NaiveDateTime::from_timestamp_opt(timestamp, 0)
-            .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
-    }
+    // fn convert_timstamp(timestamp: i64) -> Option<DateTime<Utc>> {
+    //     NaiveDateTime::from_timestamp_opt(timestamp, 0)
+    //         .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+    // }
 }
