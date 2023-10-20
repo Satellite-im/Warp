@@ -1266,7 +1266,6 @@ impl RayGun for WarpIpfs {
         self.messaging_store()?
             .get_conversation(conversation_id)
             .await
-            .map(|convo| convo.into())
     }
 
     async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
