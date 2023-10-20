@@ -107,8 +107,8 @@ pub async fn get_image(
     limit: Option<usize>,
 ) -> Result<IdentityImage, Error> {
     let dag: ImageDag = match local {
-        true => cid.get_local_dag(&ipfs).await?,
-        false => cid.get_dag(&ipfs, None).await?,
+        true => cid.get_local_dag(ipfs).await?,
+        false => cid.get_dag(ipfs, None).await?,
     };
 
     match limit {
