@@ -1320,6 +1320,8 @@ impl MessageStore {
                     list.clone(),
                     Some(conversation_id),
                     ConversationType::Group,
+                    None,
+                    None,
                     Some(creator),
                     signature,
                 )?;
