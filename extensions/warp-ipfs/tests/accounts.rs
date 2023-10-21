@@ -309,7 +309,9 @@ mod test {
         let image = account.identity_picture(&did).await?;
 
         assert_eq!(image.data(), b"picture");
-        assert!(image.image_type().eq(&FileType::Generic));
+        assert!(image
+            .image_type()
+            .eq(&FileType::Mime("application/octet-stream".parse().unwrap())));
         Ok(())
     }
 
@@ -329,7 +331,9 @@ mod test {
         let image = account.identity_banner(&did).await?;
 
         assert_eq!(image.data(), b"banner");
-        assert!(image.image_type().eq(&FileType::Generic));
+        assert!(image
+            .image_type()
+            .eq(&FileType::Mime("application/octet-stream".parse().unwrap())));
         Ok(())
     }
 
