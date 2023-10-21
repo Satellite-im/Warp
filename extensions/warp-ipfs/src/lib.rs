@@ -60,7 +60,7 @@ use ipfs::{DhtMode, Ipfs, Keypair, PeerId, Protocol, UninitializedIpfs};
 use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
 use warp::multipass::identity::{
-    Identifier, Identity, IdentityProfile, IdentityUpdate, Relationship,
+    Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityImportOption, IdentityInformation, ImportLocation,
@@ -689,15 +689,31 @@ impl MultiPass for WarpIpfs {
 
                 trace!("image size = {}", len);
 
-                let cid = store
-                    .store_photo(
-                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
-                            &data,
-                        )?)))
-                        .boxed(),
-                        Some(2 * 1024 * 1024),
-                    )
-                    .await?;
+                let (data, format) = tokio::task::spawn_blocking(move || {
+                    let cursor = std::io::Cursor::new(data);
+
+                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                    let format = image
+                        .format()
+                        .and_then(|format| ExtensionType::try_from(format).ok())
+                        .unwrap_or(ExtensionType::Other);
+
+                    let inner = image.into_inner();
+
+                    let data = inner.into_inner();
+                    Ok::<_, Error>((data, format))
+                })
+                .await
+                .map_err(anyhow::Error::from)??;
+
+                let cid = store::document::image_dag::store_photo(
+                    &self.ipfs()?,
+                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                    format.into(),
+                    Some(2 * 1024 * 1024),
+                )
+                .await?;
 
                 debug!("Image cid: {cid}");
 
@@ -724,7 +740,7 @@ impl MultiPass for WarpIpfs {
                     )));
                 }
 
-                let file = tokio::fs::File::open(path).await?;
+                let file = tokio::fs::File::open(&path).await?;
 
                 let metadata = file.metadata().await?;
 
@@ -738,6 +754,12 @@ impl MultiPass for WarpIpfs {
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
+
+                let extension = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
 
                 trace!("image size = {}", len);
 
@@ -760,9 +782,13 @@ impl MultiPass for WarpIpfs {
                     }
                 };
 
-                let cid = store
-                    .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
-                    .await?;
+                let cid = store::document::image_dag::store_photo(
+                    &self.ipfs()?,
+                    stream.boxed(),
+                    extension.into(),
+                    Some(2 * 1024 * 1024),
+                )
+                .await?;
 
                 debug!("Image cid: {cid}");
 
@@ -802,15 +828,31 @@ impl MultiPass for WarpIpfs {
 
                 trace!("image size = {}", len);
 
-                let cid = store
-                    .store_photo(
-                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
-                            &data,
-                        )?)))
-                        .boxed(),
-                        Some(2 * 1024 * 1024),
-                    )
-                    .await?;
+                let (data, format) = tokio::task::spawn_blocking(move || {
+                    let cursor = std::io::Cursor::new(data);
+
+                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                    let format = image
+                        .format()
+                        .and_then(|format| ExtensionType::try_from(format).ok())
+                        .unwrap_or(ExtensionType::Other);
+
+                    let inner = image.into_inner();
+
+                    let data = inner.into_inner();
+                    Ok::<_, Error>((data, format))
+                })
+                .await
+                .map_err(anyhow::Error::from)??;
+
+                let cid = store::document::image_dag::store_photo(
+                    &self.ipfs()?,
+                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                    format.into(),
+                    Some(2 * 1024 * 1024),
+                )
+                .await?;
 
                 debug!("Image cid: {cid}");
 
@@ -837,7 +879,7 @@ impl MultiPass for WarpIpfs {
                     )));
                 }
 
-                let file = tokio::fs::File::open(path).await?;
+                let file = tokio::fs::File::open(&path).await?;
 
                 let metadata = file.metadata().await?;
 
@@ -851,6 +893,12 @@ impl MultiPass for WarpIpfs {
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
+
+                let extension = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
 
                 trace!("image size = {}", len);
 
@@ -873,9 +921,13 @@ impl MultiPass for WarpIpfs {
                     }
                 };
 
-                let cid = store
-                    .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
-                    .await?;
+                let cid = store::document::image_dag::store_photo(
+                    &self.ipfs()?,
+                    stream.boxed(),
+                    extension.into(),
+                    Some(2 * 1024 * 1024),
+                )
+                .await?;
 
                 debug!("Image cid: {cid}");
 
@@ -1147,12 +1199,12 @@ impl FriendsEvent for WarpIpfs {
 
 #[async_trait::async_trait]
 impl IdentityInformation for WarpIpfs {
-    async fn identity_picture(&self, did: &DID) -> Result<String, Error> {
+    async fn identity_picture(&self, did: &DID) -> Result<IdentityImage, Error> {
         let store = self.identity_store(true).await?;
         store.identity_picture(did).await
     }
 
-    async fn identity_banner(&self, did: &DID) -> Result<String, Error> {
+    async fn identity_banner(&self, did: &DID) -> Result<IdentityImage, Error> {
         let store = self.identity_store(true).await?;
         store.identity_banner(did).await
     }
