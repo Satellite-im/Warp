@@ -245,8 +245,7 @@ impl MessageStore {
                                             .conversations
                                             .get(conversation_id)
                                             .await
-                                            .map(|c| c.recipients())
-                                            .unwrap_or_default()
+                                            .map(|c| c.recipients())?
                                             .iter()
                                             .filter(|did| own_did.ne(did))
                                             .cloned()
@@ -673,26 +672,39 @@ impl MessageStore {
                                         .collect::<Vec<_>>()
                                         .first()
                                         .cloned() else {
+                                            tracing::log::warn!("participant is not in {}", conversation_id);
                                             continue;
                                         };
                                     ecdh_decrypt(own_did, Some(&recipient), data.data())
                                 }
                                 ConversationType::Group => {
-
-                                    let Ok(key) = store.conversation_keystore(conversation.id()).await.and_then(|keystore| keystore.get_latest(own_did, &data.sender())) else {
-                                        continue;
+                                    let key = match store.conversation_keystore(conversation.id()).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
+                                        Ok(key) => key,
+                                        Err(e) => {
+                                            tracing::log::warn!("Failed to obtain key for {}: {e}", data.sender());
+                                            continue;
+                                        }
                                     };
+
                                     Cipher::direct_decrypt(data.data(), &key)
                                 }
                             };
                             drop(conversation);
 
-                            let Ok(bytes) = bytes_results else {
-                                continue;
+                            let bytes = match bytes_results {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    tracing::log::warn!("Failed to decrypt payload from {} in {conversation_id}: {e}", data.sender());
+                                    continue;
+                                }
                             };
 
-                            let Ok(event) = serde_json::from_slice::<MessagingEvents>(&bytes) else {
-                                continue;
+                            let event = match serde_json::from_slice::<MessagingEvents>(&bytes) {
+                                Ok(e) => e,
+                                Err(e) => {
+                                    tracing::log::warn!("Failed to deserialize message from {} in {conversation_id}: {e}", data.sender());
+                                    continue;
+                                }
                             };
 
                             (MessageDirection::In, event, None)

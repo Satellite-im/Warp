@@ -230,8 +230,6 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        self.modified = Utc::now();
-
         if matches!(self.conversation_type, ConversationType::Group) {
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
@@ -318,6 +316,7 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         list: BTreeSet<MessageDocument>,
     ) -> Result<(), Error> {
+        self.modified = Utc::now();
         let cid = list.to_cid(ipfs).await?;
         self.messages = Some(cid);
         Ok(())
