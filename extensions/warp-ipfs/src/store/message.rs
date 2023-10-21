@@ -211,26 +211,32 @@ impl MessageStore {
 
     async fn start_event_task(&self, conversation_id: Uuid) {
         info!("Event Task started for {conversation_id}");
-        let did = self.did.clone();
-        let Ok(mut conversation) = self.conversations.get(conversation_id).await else {
-            return;
-        };
-        conversation.recipients.clear();
 
-        let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
-            return;
-        };
-
-        let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
-            return;
-        };
-
-        let conversation_type = conversation.conversation_type;
-
-        drop(conversation);
         let task = tokio::spawn({
             let store = self.clone();
             async move {
+                let did = store.did.clone();
+
+                let (topic, conversation_type) = store
+                    .conversations
+                    .get(conversation_id)
+                    .await
+                    .map(|conversation| {
+                        (conversation.event_topic(), conversation.conversation_type)
+                    })
+                    .expect("Conversation exist");
+
+                let stream = store
+                    .ipfs
+                    .pubsub_subscribe(topic)
+                    .await
+                    .expect("Topic isnt subscribed");
+
+                let tx = store
+                    .get_conversation_sender(conversation_id)
+                    .await
+                    .expect("Conversation exist");
+
                 futures::pin_mut!(stream);
 
                 while let Some(stream) = stream.next().await {
@@ -303,23 +309,25 @@ impl MessageStore {
 
     async fn start_reqres_task(&self, conversation_id: Uuid) {
         info!("RequestResponse Task started for {conversation_id}");
-        let did = self.did.clone();
-        let Ok(conversation) = self.conversations.get(conversation_id).await else {
-            return;
-        };
-
-        let Ok(stream) = self
-            .ipfs
-            .pubsub_subscribe(conversation.reqres_topic(&did))
-            .await
-        else {
-            return;
-        };
-        drop(conversation);
 
         let task = tokio::spawn({
             let store = self.clone();
             async move {
+                let did = store.did.clone();
+
+                let topic = store
+                    .conversations
+                    .get(conversation_id)
+                    .await
+                    .map(|conversation| conversation.reqres_topic(&did))
+                    .expect("Conversation exist");
+
+                let stream = store
+                    .ipfs
+                    .pubsub_subscribe(topic)
+                    .await
+                    .expect("Topic isnt subscribed");
+
                 futures::pin_mut!(stream);
 
                 while let Some(stream) = stream.next().await {
