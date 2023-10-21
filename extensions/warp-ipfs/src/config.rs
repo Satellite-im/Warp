@@ -6,7 +6,7 @@ use std::{
     str::FromStr,
     time::Duration,
 };
-use warp::multipass::identity::Identity;
+use warp::{multipass::identity::Identity, constellation::file::FileType};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -250,7 +250,7 @@ pub enum UpdateEvents {
 }
 
 pub type DefaultPfpFn =
-    std::sync::Arc<dyn Fn(&Identity) -> Result<Vec<u8>, std::io::Error> + Send + Sync + 'static>;
+    std::sync::Arc<dyn Fn(&Identity) -> Result<(Vec<u8>, FileType), std::io::Error> + Send + Sync + 'static>;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoreSetting {

@@ -1657,10 +1657,10 @@ impl IdentityStore {
 
         if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
             let identity = document.resolve()?;
-            let picture = cb(&identity)?;
+            let (picture, ty) = cb(&identity)?;
             let mut image = IdentityImage::default();
             image.set_data(picture);
-            image.set_image_type(FileType::Generic);
+            image.set_image_type(ty);
 
             return Ok(image);
         }
@@ -1688,16 +1688,6 @@ impl IdentityStore {
             };
 
             return Ok(data);
-        }
-
-        if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
-            let identity = document.resolve()?;
-            let picture = cb(&identity)?;
-            let mut image = IdentityImage::default();
-            image.set_data(picture);
-            image.set_image_type(FileType::Generic);
-
-            return Ok(image);
         }
 
         Err(Error::InvalidIdentityBanner)
