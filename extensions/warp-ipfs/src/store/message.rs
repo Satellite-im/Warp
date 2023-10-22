@@ -272,29 +272,56 @@ impl MessageStore {
                             }
                         };
 
-                        if let Ok(data) = bytes.await {
-                            if let Ok(MessagingEvents::Event {
-                                conversation_id,
-                                member,
-                                event,
-                                cancelled,
-                            }) = serde_json::from_slice::<MessagingEvents>(&data)
-                            {
-                                let ev = match cancelled {
-                                    true => MessageEventKind::EventCancelled {
-                                        conversation_id,
-                                        did_key: member,
-                                        event,
-                                    },
-                                    false => MessageEventKind::EventReceived {
-                                        conversation_id,
-                                        did_key: member,
-                                        event,
-                                    },
-                                };
-                                if let Err(e) = tx.send(ev) {
-                                    error!("Error broadcasting event: {e}");
-                                }
+                        let data = match bytes.await {
+                            Ok(data) => data,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to decrypt payload from {} in {}: {e}",
+                                    payload.sender(),
+                                    conversation_id
+                                );
+                                continue;
+                            }
+                        };
+
+                        let event = match serde_json::from_slice::<MessagingEvents>(&data) {
+                            Ok(event @ MessagingEvents::Event { .. }) => event,
+                            Ok(_) => {
+                                warn!("Unreachable event in {conversation_id}");
+                                continue;
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to deserialize payload from {} in {}: {e}",
+                                    payload.sender(),
+                                    conversation_id
+                                );
+                                continue;
+                            }
+                        };
+
+                        if let MessagingEvents::Event {
+                            conversation_id,
+                            member,
+                            event,
+                            cancelled,
+                        } = event
+                        {
+                            let ev = match cancelled {
+                                true => MessageEventKind::EventCancelled {
+                                    conversation_id,
+                                    did_key: member,
+                                    event,
+                                },
+                                false => MessageEventKind::EventReceived {
+                                    conversation_id,
+                                    did_key: member,
+                                    event,
+                                },
+                            };
+
+                            if let Err(e) = tx.send(ev) {
+                                error!("Error broadcasting event: {e}");
                             }
                         }
                     }
@@ -345,11 +372,11 @@ impl MessageStore {
                                         kind,
                                     } => match kind {
                                         ConversationRequestKind::Key => {
-                                            let Ok(conversation) =
-                                                store.conversations.get(conversation_id).await
-                                            else {
-                                                continue;
-                                            };
+                                            let conversation = store
+                                                .conversations
+                                                .get(conversation_id)
+                                                .await
+                                                .expect("Conversation exist");
 
                                             if !matches!(
                                                 conversation.conversation_type,
@@ -363,6 +390,7 @@ impl MessageStore {
                                                 .recipients()
                                                 .contains(&payload.sender())
                                             {
+                                                warn!("{} is not apart of conversation {conversation_id}", payload.sender());
                                                 continue;
                                             }
 
@@ -411,7 +439,7 @@ impl MessageStore {
                                                 match ecdh_encrypt(&did, Some(&sender), raw_key) {
                                                     Ok(key) => key,
                                                     Err(e) => {
-                                                        error!("Error: {e}");
+                                                        error!("Failed to encrypt response: {e}");
                                                         continue;
                                                     }
                                                 };
