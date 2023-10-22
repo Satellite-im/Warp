@@ -12,6 +12,7 @@ use warp::{crypto::DID, error::Error};
 use crate::store::{identity::Request, keystore::Keystore, VecExt};
 
 use super::{
+    identity::IdentityDocument,
     utils::{GetLocalDag, ToCid},
     RootDocument,
 };
@@ -24,6 +25,9 @@ pub enum RootDocumentCommand {
     Set {
         document: RootDocument,
         response: oneshot::Sender<Result<(), Error>>,
+    },
+    Identity {
+        response: oneshot::Sender<Result<IdentityDocument, Error>>,
     },
     AddFriend {
         did: DID,
@@ -146,6 +150,16 @@ impl RootDocumentMap {
                 document,
                 response: tx,
             })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn identity(&self) -> Result<IdentityDocument, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::Identity { response: tx })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -349,6 +363,9 @@ impl RootDocumentTask {
                 RootDocumentCommand::Set { document, response } => {
                     let _ = response.send(self.set_root_document(document).await);
                 }
+                RootDocumentCommand::Identity { response } => {
+                    let _ = response.send(self.identity().await);
+                }
                 RootDocumentCommand::AddFriend { did, response } => {
                     let _ = response.send(self.add_friend(did).await);
                 }
@@ -407,6 +424,15 @@ impl RootDocumentTask {
         };
 
         document.verify(&self.ipfs).await?;
+
+        Ok(document)
+    }
+
+    async fn identity(&self) -> Result<IdentityDocument, Error> {
+        let root = self.get_root_document().await?;
+        let path = IpfsPath::from(root.identity);
+        let document: IdentityDocument = path.get_local_dag(&self.ipfs).await?;
+        document.verify()?;
 
         Ok(document)
     }
