@@ -439,7 +439,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("/list-conversations") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["Name", "ID", "Recipients"]);
+                            table.set_header(vec!["Name", "ID", "Created", "Updated", "Recipients"]);
                             let list = chat.list_conversations().await?;
                             for convo in list.iter() {
                                 let mut recipients = vec![];
@@ -447,7 +447,9 @@ async fn main() -> anyhow::Result<()> {
                                     let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
-                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), recipients.join(",").to_string()]);
+                                let created = convo.created();
+                                let modified = convo.modified();
+                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), created.to_string(), modified.to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{table}")?;
                         },

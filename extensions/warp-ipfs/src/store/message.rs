@@ -211,26 +211,32 @@ impl MessageStore {
 
     async fn start_event_task(&self, conversation_id: Uuid) {
         info!("Event Task started for {conversation_id}");
-        let did = self.did.clone();
-        let Ok(mut conversation) = self.conversations.get(conversation_id).await else {
-            return;
-        };
-        conversation.recipients.clear();
 
-        let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
-            return;
-        };
-
-        let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
-            return;
-        };
-
-        let conversation_type = conversation.conversation_type;
-
-        drop(conversation);
         let task = tokio::spawn({
             let store = self.clone();
             async move {
+                let did = store.did.clone();
+
+                let (topic, conversation_type) = store
+                    .conversations
+                    .get(conversation_id)
+                    .await
+                    .map(|conversation| {
+                        (conversation.event_topic(), conversation.conversation_type)
+                    })
+                    .expect("Conversation exist");
+
+                let stream = store
+                    .ipfs
+                    .pubsub_subscribe(topic)
+                    .await
+                    .expect("Topic isnt subscribed");
+
+                let tx = store
+                    .get_conversation_sender(conversation_id)
+                    .await
+                    .expect("Conversation exist");
+
                 futures::pin_mut!(stream);
 
                 while let Some(stream) = stream.next().await {
@@ -245,8 +251,7 @@ impl MessageStore {
                                             .conversations
                                             .get(conversation_id)
                                             .await
-                                            .map(|c| c.recipients())
-                                            .unwrap_or_default()
+                                            .map(|c| c.recipients())?
                                             .iter()
                                             .filter(|did| own_did.ne(did))
                                             .cloned()
@@ -267,29 +272,56 @@ impl MessageStore {
                             }
                         };
 
-                        if let Ok(data) = bytes.await {
-                            if let Ok(MessagingEvents::Event {
-                                conversation_id,
-                                member,
-                                event,
-                                cancelled,
-                            }) = serde_json::from_slice::<MessagingEvents>(&data)
-                            {
-                                let ev = match cancelled {
-                                    true => MessageEventKind::EventCancelled {
-                                        conversation_id,
-                                        did_key: member,
-                                        event,
-                                    },
-                                    false => MessageEventKind::EventReceived {
-                                        conversation_id,
-                                        did_key: member,
-                                        event,
-                                    },
-                                };
-                                if let Err(e) = tx.send(ev) {
-                                    error!("Error broadcasting event: {e}");
-                                }
+                        let data = match bytes.await {
+                            Ok(data) => data,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to decrypt payload from {} in {}: {e}",
+                                    payload.sender(),
+                                    conversation_id
+                                );
+                                continue;
+                            }
+                        };
+
+                        let event = match serde_json::from_slice::<MessagingEvents>(&data) {
+                            Ok(event @ MessagingEvents::Event { .. }) => event,
+                            Ok(_) => {
+                                warn!("Unreachable event in {conversation_id}");
+                                continue;
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to deserialize payload from {} in {}: {e}",
+                                    payload.sender(),
+                                    conversation_id
+                                );
+                                continue;
+                            }
+                        };
+
+                        if let MessagingEvents::Event {
+                            conversation_id,
+                            member,
+                            event,
+                            cancelled,
+                        } = event
+                        {
+                            let ev = match cancelled {
+                                true => MessageEventKind::EventCancelled {
+                                    conversation_id,
+                                    did_key: member,
+                                    event,
+                                },
+                                false => MessageEventKind::EventReceived {
+                                    conversation_id,
+                                    did_key: member,
+                                    event,
+                                },
+                            };
+
+                            if let Err(e) = tx.send(ev) {
+                                error!("Error broadcasting event: {e}");
                             }
                         }
                     }
@@ -304,23 +336,25 @@ impl MessageStore {
 
     async fn start_reqres_task(&self, conversation_id: Uuid) {
         info!("RequestResponse Task started for {conversation_id}");
-        let did = self.did.clone();
-        let Ok(conversation) = self.conversations.get(conversation_id).await else {
-            return;
-        };
-
-        let Ok(stream) = self
-            .ipfs
-            .pubsub_subscribe(conversation.reqres_topic(&did))
-            .await
-        else {
-            return;
-        };
-        drop(conversation);
 
         let task = tokio::spawn({
             let store = self.clone();
             async move {
+                let did = store.did.clone();
+
+                let topic = store
+                    .conversations
+                    .get(conversation_id)
+                    .await
+                    .map(|conversation| conversation.reqres_topic(&did))
+                    .expect("Conversation exist");
+
+                let stream = store
+                    .ipfs
+                    .pubsub_subscribe(topic)
+                    .await
+                    .expect("Topic isnt subscribed");
+
                 futures::pin_mut!(stream);
 
                 while let Some(stream) = stream.next().await {
@@ -338,11 +372,11 @@ impl MessageStore {
                                         kind,
                                     } => match kind {
                                         ConversationRequestKind::Key => {
-                                            let Ok(conversation) =
-                                                store.conversations.get(conversation_id).await
-                                            else {
-                                                continue;
-                                            };
+                                            let conversation = store
+                                                .conversations
+                                                .get(conversation_id)
+                                                .await
+                                                .expect("Conversation exist");
 
                                             if !matches!(
                                                 conversation.conversation_type,
@@ -356,6 +390,7 @@ impl MessageStore {
                                                 .recipients()
                                                 .contains(&payload.sender())
                                             {
+                                                warn!("{} is not apart of conversation {conversation_id}", payload.sender());
                                                 continue;
                                             }
 
@@ -404,7 +439,7 @@ impl MessageStore {
                                                 match ecdh_encrypt(&did, Some(&sender), raw_key) {
                                                     Ok(key) => key,
                                                     Err(e) => {
-                                                        error!("Error: {e}");
+                                                        error!("Failed to encrypt response: {e}");
                                                         continue;
                                                     }
                                                 };
@@ -641,27 +676,17 @@ impl MessageStore {
                 loop {
                     let (direction, event, ret) = tokio::select! {
                         biased;
-                        event = rx.next() => {
-                            let Some((event, ret)) = event else {
-                                continue;
-                            };
-
+                        Some((event, ret)) = rx.next() => {
                             (MessageDirection::Out, event, ret)
                         }
-                        event = stream.next() => {
-                            let Some(event) = event else {
-                                continue;
-                            };
-
+                        Some(event) = stream.next() => {
                             let Ok(data) = Payload::from_bytes(&event.data) else {
                                 continue;
                             };
 
                             let own_did = &*did;
 
-                            let Ok(conversation) = store.conversations.get(conversation_id).await else {
-                                    continue;
-                            };
+                            let conversation = store.conversations.get(conversation_id).await.expect("Conversation exist");
 
                             let bytes_results = match conversation.conversation_type {
                                 ConversationType::Direct => {
@@ -673,26 +698,39 @@ impl MessageStore {
                                         .collect::<Vec<_>>()
                                         .first()
                                         .cloned() else {
+                                            tracing::log::warn!("participant is not in {}", conversation_id);
                                             continue;
                                         };
                                     ecdh_decrypt(own_did, Some(&recipient), data.data())
                                 }
                                 ConversationType::Group => {
-
-                                    let Ok(key) = store.conversation_keystore(conversation.id()).await.and_then(|keystore| keystore.get_latest(own_did, &data.sender())) else {
-                                        continue;
+                                    let key = match store.conversation_keystore(conversation.id()).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
+                                        Ok(key) => key,
+                                        Err(e) => {
+                                            tracing::log::warn!("Failed to obtain key for {}: {e}", data.sender());
+                                            continue;
+                                        }
                                     };
+
                                     Cipher::direct_decrypt(data.data(), &key)
                                 }
                             };
                             drop(conversation);
 
-                            let Ok(bytes) = bytes_results else {
-                                continue;
+                            let bytes = match bytes_results {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    tracing::log::warn!("Failed to decrypt payload from {} in {conversation_id}: {e}", data.sender());
+                                    continue;
+                                }
                             };
 
-                            let Ok(event) = serde_json::from_slice::<MessagingEvents>(&bytes) else {
-                                continue;
+                            let event = match serde_json::from_slice::<MessagingEvents>(&bytes) {
+                                Ok(e) => e,
+                                Err(e) => {
+                                    tracing::log::warn!("Failed to deserialize message from {} in {conversation_id}: {e}", data.sender());
+                                    continue;
+                                }
                             };
 
                             (MessageDirection::In, event, None)
@@ -1320,6 +1358,8 @@ impl MessageStore {
                     list.clone(),
                     Some(conversation_id),
                     ConversationType::Group,
+                    None,
+                    None,
                     Some(creator),
                     signature,
                 )?;
