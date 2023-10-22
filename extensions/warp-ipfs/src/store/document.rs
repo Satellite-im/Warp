@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod conversation;
 pub mod identity;
+pub mod image_dag;
 pub mod root;
 pub mod utils;
 

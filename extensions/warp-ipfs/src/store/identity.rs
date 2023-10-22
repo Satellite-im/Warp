@@ -10,8 +10,7 @@ use chrono::Utc;
 
 use futures::{
     channel::oneshot::{self, Canceled},
-    stream::BoxStream,
-    SinkExt, StreamExt, TryStreamExt,
+    SinkExt, StreamExt,
 };
 use ipfs::{
     libp2p::request_response::{RequestId, ResponseChannel},
@@ -25,7 +24,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    task::Poll,
     time::{Duration, Instant},
 };
 
@@ -35,7 +33,11 @@ use tracing::{
     warn,
 };
 
-use warp::{crypto::zeroize::Zeroizing, multipass::identity::Platform};
+use warp::{
+    constellation::file::FileType,
+    crypto::zeroize::Zeroizing,
+    multipass::identity::{IdentityImage, Platform},
+};
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -50,11 +52,8 @@ use warp::{
 use super::{
     connected_to_peer, did_keypair,
     document::{
-        cache::IdentityCache,
-        identity::{unixfs_fetch, IdentityDocument},
-        root::RootDocumentMap,
-        utils::GetLocalDag,
-        ExtractedRootDocument, RootDocument, ToCid,
+        cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
+        root::RootDocumentMap, utils::GetLocalDag, ExtractedRootDocument, RootDocument, ToCid,
     },
     ecdh_decrypt, ecdh_encrypt, libp2p_pub_to_did,
     phonebook::PhoneBook,
@@ -238,7 +237,11 @@ pub enum ResponseOption {
     /// Identity request
     Identity { identity: IdentityDocument },
     /// Pictures
-    Image { cid: Cid, data: Vec<u8> },
+    Image {
+        cid: Cid,
+        ty: FileType,
+        data: Vec<u8>,
+    },
 }
 
 impl std::fmt::Debug for ResponseOption {
@@ -258,6 +261,7 @@ impl std::fmt::Debug for ResponseOption {
 
 impl IdentityStore {
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ipfs: Ipfs,
         path: Option<PathBuf>,
@@ -843,10 +847,21 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let data = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await?;
+        let image = super::document::image_dag::get_image(
+            &self.ipfs,
+            cid,
+            &[],
+            true,
+            Some(2 * 1024 * 1024),
+        )
+        .await?;
 
         let event = IdentityEvent::Receive {
-            option: ResponseOption::Image { cid, data },
+            option: ResponseOption::Image {
+                cid,
+                ty: image.image_type().clone(),
+                data: image.data().to_vec(),
+            },
         };
 
         let payload_bytes = serde_json::to_vec(&event)?;
@@ -889,10 +904,21 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let data = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await?;
+        let image = super::document::image_dag::get_image(
+            &self.ipfs,
+            cid,
+            &[],
+            true,
+            Some(2 * 1024 * 1024),
+        )
+        .await?;
 
         let event = IdentityEvent::Receive {
-            option: ResponseOption::Image { cid, data },
+            option: ResponseOption::Image {
+                cid,
+                ty: image.image_type().clone(),
+                data: image.data().to_vec(),
+            },
         };
 
         let payload_bytes = serde_json::to_vec(&event)?;
@@ -1025,20 +1051,20 @@ impl IdentityStore {
                                         let did = in_did.clone();
                                         async move {
                                             let peer_id = vec![did.to_peer_id()?];
+                                            let _ = super::document::image_dag::get_image(
+                                                &ipfs,
+                                                identity_profile_picture,
+                                                &peer_id,
+                                                false,
+                                                Some(2 * 1024 * 1024),
+                                            )
+                                            .await
+                                            .map_err(|e| {
+                                                log::error!("Error fetching image from {did}: {e}");
+                                                e
+                                            })?;
 
-                                            let mut stream = ipfs
-                                                .unixfs()
-                                                .cat(
-                                                    identity_profile_picture,
-                                                    None,
-                                                    &peer_id,
-                                                    false,
-                                                    None,
-                                                )
-                                                .await?
-                                                .boxed();
-
-                                            while let Some(_d) = stream.try_next().await? {}
+                                            log::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
 
                                             if emit {
                                                 store.emit_event(
@@ -1082,19 +1108,20 @@ impl IdentityStore {
                                         async move {
                                             let peer_id = vec![did.to_peer_id()?];
 
-                                            let mut stream = ipfs
-                                                .unixfs()
-                                                .cat(
-                                                    identity_profile_banner,
-                                                    None,
-                                                    &peer_id,
-                                                    false,
-                                                    None,
-                                                )
-                                                .await?
-                                                .boxed();
+                                            let _ = super::document::image_dag::get_image(
+                                                &ipfs,
+                                                identity_profile_banner,
+                                                &peer_id,
+                                                false,
+                                                Some(2 * 1024 * 1024),
+                                            )
+                                            .await
+                                            .map_err(|e| {
+                                                log::error!("Error fetching image from {did}: {e}");
+                                                e
+                                            })?;
 
-                                            while let Some(_d) = stream.try_next().await? {}
+                                            log::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
                                             if emit {
                                                 store.emit_event(
@@ -1166,13 +1193,23 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                let mut stream = ipfs
-                                                    .unixfs()
-                                                    .cat(picture, None, &[], false, None)
-                                                    .await?
-                                                    .boxed();
+                                                let peer_id = vec![did.to_peer_id()?];
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    picture,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(2 * 1024 * 1024),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    log::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
-                                                while let Some(_d) = stream.try_next().await? {}
+                                                log::trace!("Image pointed to {picture} for {did} downloaded");
 
                                                 store.emit_event(
                                                     MultiPassEventKind::IdentityUpdate { did },
@@ -1189,13 +1226,23 @@ impl IdentityStore {
 
                                             let did = in_did.clone();
                                             async move {
-                                                let mut stream = ipfs
-                                                    .unixfs()
-                                                    .cat(banner, None, &[], false, None)
-                                                    .await?
-                                                    .boxed();
+                                                let peer_id = vec![did.to_peer_id()?];
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    banner,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(2 * 1024 * 1024),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    log::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
-                                                while let Some(_d) = stream.try_next().await? {}
+                                                log::trace!("Image pointed to {banner} for {did} downloaded");
 
                                                 store.emit_event(
                                                     MultiPassEventKind::IdentityUpdate { did },
@@ -1213,21 +1260,21 @@ impl IdentityStore {
             }
             //Used when receiving an image (eg banner, pfp) from a peer
             IdentityEvent::Receive {
-                option: ResponseOption::Image { cid, data },
+                option: ResponseOption::Image { cid, ty, data },
             } => {
                 let cache = self.identity_cache.get(&in_did).await?;
 
                 if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
                     tokio::spawn({
-                        let mut store = self.clone();
+                        let store = self.clone();
                         async move {
-                            let added_cid = store
-                                .store_photo(
-                                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
-                                        .boxed(),
-                                    Some(2 * 1024 * 1024),
-                                )
-                                .await?;
+                            let added_cid = super::document::image_dag::store_photo(
+                                &store.ipfs,
+                                futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                                ty,
+                                Some(2 * 1024 * 1024),
+                            )
+                            .await?;
 
                             debug_assert_eq!(added_cid, cid);
                             store.emit_event(MultiPassEventKind::IdentityUpdate {
@@ -1885,74 +1932,8 @@ impl IdentityStore {
         Ok(identity)
     }
 
-    #[tracing::instrument(skip(self, stream))]
-    pub async fn store_photo(
-        &mut self,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
-        limit: Option<usize>,
-    ) -> Result<Cid, Error> {
-        let ipfs = self.ipfs.clone();
-
-        let mut stream = ipfs.add_unixfs(stream).await?;
-
-        let cid = futures::future::poll_fn(|cx| loop {
-            match stream.poll_next_unpin(cx) {
-                Poll::Ready(Some(ipfs::unixfs::UnixfsStatus::ProgressStatus {
-                    written, ..
-                })) => {
-                    if let Some(limit) = limit {
-                        if written > limit {
-                            return Poll::Ready(Err(Error::InvalidLength {
-                                context: "photo".into(),
-                                current: written,
-                                minimum: Some(1),
-                                maximum: Some(limit),
-                            }));
-                        }
-                    }
-                    log::trace!("{written} bytes written");
-                }
-                Poll::Ready(Some(ipfs::unixfs::UnixfsStatus::CompletedStatus {
-                    path,
-                    written,
-                    ..
-                })) => {
-                    log::debug!("Image is written with {written} bytes - stored at {path}");
-                    return Poll::Ready(path.root().cid().copied().ok_or(Error::Other));
-                }
-                Poll::Ready(Some(ipfs::unixfs::UnixfsStatus::FailedStatus {
-                    written,
-                    error,
-                    ..
-                })) => {
-                    let err = match error {
-                        Some(e) => {
-                            log::error!("Error uploading picture with {written} bytes written with error: {e}");
-                            e.into()
-                        },
-                        None => {
-                            log::error!("Error uploading picture with {written} bytes written");
-                            Error::OtherWithContext("Error uploading photo".into())
-                        }
-                    };
-
-                    return Poll::Ready(Err(err));
-                }
-                Poll::Ready(None) => return Poll::Ready(Err(Error::ReceiverChannelUnavailable)),
-                Poll::Pending => return Poll::Pending,
-            }
-        })
-        .await?;
-
-        if !ipfs.is_pinned(&cid).await? {
-            ipfs.insert_pin(&cid, true).await?;
-        }
-
-        Ok(cid)
-    }
-
     #[tracing::instrument(skip(self))]
-    pub async fn identity_picture(&self, did: &DID) -> Result<String, Error> {
+    pub async fn identity_picture(&self, did: &DID) -> Result<IdentityImage, Error> {
         if self.config.store_setting.disable_images {
             return Err(Error::InvalidIdentityPicture);
         }
@@ -1963,31 +1944,31 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.profile_picture {
-            let data = match unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
-            {
+            let data = match get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024)).await {
                 Ok(data) => data,
                 Err(_) => {
                     return Err(Error::InvalidIdentityPicture);
                 }
             };
 
-            let picture: String = serde_json::from_slice(&data)?;
-            if !picture.is_empty() {
-                return Ok(picture);
-            }
+            return Ok(data);
         }
 
         if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
             let identity = document.resolve()?;
-            let picture = cb(&identity)?;
-            return Ok(String::from_utf8_lossy(&picture).to_string());
+            let (picture, ty) = cb(&identity)?;
+            let mut image = IdentityImage::default();
+            image.set_data(picture);
+            image.set_image_type(ty);
+
+            return Ok(image);
         }
 
         Err(Error::InvalidIdentityPicture)
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn identity_banner(&self, did: &DID) -> Result<String, Error> {
+    pub async fn identity_banner(&self, did: &DID) -> Result<IdentityImage, Error> {
         if self.config.store_setting.disable_images {
             return Err(Error::InvalidIdentityBanner);
         }
@@ -1998,24 +1979,14 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.profile_banner {
-            let data = match unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
-            {
+            let data = match get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024)).await {
                 Ok(data) => data,
                 Err(_) => {
                     return Err(Error::InvalidIdentityPicture);
                 }
             };
 
-            let picture: String = serde_json::from_slice(&data)?;
-            if !picture.is_empty() {
-                return Ok(picture);
-            }
-        }
-
-        if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
-            let identity = document.resolve()?;
-            let picture = cb(&identity)?;
-            return Ok(String::from_utf8_lossy(&picture).to_string());
+            return Ok(data);
         }
 
         Err(Error::InvalidIdentityBanner)

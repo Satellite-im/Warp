@@ -17,7 +17,7 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{Identifier, IdentityUpdate};
 
-use self::identity::{IdentityProfile, IdentityStatus, Platform, Relationship};
+use self::identity::{IdentityImage, IdentityProfile, IdentityStatus, Platform, Relationship};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
@@ -219,12 +219,12 @@ pub trait FriendsEvent: Sync + Send {
 #[async_trait::async_trait]
 pub trait IdentityInformation: Send + Sync {
     /// Profile picture belonging to the `Identity`
-    async fn identity_picture(&self, _: &DID) -> Result<String, Error> {
+    async fn identity_picture(&self, _: &DID) -> Result<IdentityImage, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Profile banner belonging to the `Identity`
-    async fn identity_banner(&self, _: &DID) -> Result<String, Error> {
+    async fn identity_banner(&self, _: &DID) -> Result<IdentityImage, Error> {
         Err(Error::Unimplemented)
     }
 
