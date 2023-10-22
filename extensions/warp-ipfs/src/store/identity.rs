@@ -2119,6 +2119,23 @@ impl IdentityStore {
     pub async fn is_friend(&self, pubkey: &DID) -> Result<bool, Error> {
         self.friends_list().await.map(|list| list.contains(pubkey))
     }
+
+    #[tracing::instrument(skip(self))]
+    pub fn subscribe(&self) -> futures::stream::BoxStream<'static, MultiPassEventKind> {
+        let mut rx = self.event.subscribe();
+
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        stream.boxed()
+    }
 }
 
 impl IdentityStore {

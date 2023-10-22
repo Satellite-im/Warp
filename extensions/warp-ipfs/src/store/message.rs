@@ -22,6 +22,7 @@ use warp::crypto::{generate, DID};
 use warp::error::Error;
 use warp::logging::tracing::log::{debug, error, info, trace};
 use warp::logging::tracing::warn;
+use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState, Location,
     Message, MessageEvent, MessageEventKind, MessageOptions, MessageStatus, MessageStream,
@@ -163,6 +164,8 @@ impl MessageStore {
 
                 let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
 
+                let mut identity_stream = store.identity.subscribe();
+
                 loop {
                     tokio::select! {
                         Some(message) = stream.next() => {
@@ -195,6 +198,11 @@ impl MessageStore {
                             }
 
                         }
+                        Some(id_event) = identity_stream.next() => {
+                            if let Err(e) = store.process_identity_events(id_event).await {
+                                warn!("Failed to process event: {e}");
+                            }
+                        }
                         _ = interval.tick() => {
                             if let Err(e) = store.process_queue().await {
                                 error!("Error processing queue: {e}");
@@ -207,6 +215,81 @@ impl MessageStore {
 
         tokio::task::yield_now().await;
         Ok(store)
+    }
+
+    async fn process_identity_events(&mut self, event: MultiPassEventKind) -> Result<(), Error> {
+        match event {
+            MultiPassEventKind::FriendAdded { did } => {
+                if !self.with_friends.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+
+                match self.create_conversation(&did).await {
+                    Ok(_) | Err(Error::ConversationExist { .. }) => return Ok(()),
+                    Err(e) => return Err(e),
+                }
+            }
+
+            MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did } => {
+                let list = self.conversations.list().await?;
+
+                for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
+                    let id = conversation.id();
+                    match conversation.conversation_type {
+                        ConversationType::Direct => {
+                            if let Err(e) = self.delete_conversation(id, true).await {
+                                warn!("Failed to delete conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                        ConversationType::Group => {
+                            if conversation.creator != Some((*self.did).clone()) {
+                                continue;
+                            }
+
+                            if let Err(e) = self.remove_recipient(id, &did, true).await {
+                                warn!("Failed to remove {did} from conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            MultiPassEventKind::FriendRemoved { did } => {
+                if !self.with_friends.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+
+                let list = self.conversations.list().await?;
+
+                for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
+                    let id = conversation.id();
+                    match conversation.conversation_type {
+                        ConversationType::Direct => {
+                            if let Err(e) = self.delete_conversation(id, true).await {
+                                warn!("Failed to delete conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                        ConversationType::Group => {
+                            if conversation.creator != Some((*self.did).clone()) {
+                                continue;
+                            }
+
+                            if let Err(e) = self.remove_recipient(id, &did, true).await {
+                                warn!("Failed to remove {did} from conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            MultiPassEventKind::IdentityOnline { .. } => {
+                //TODO: Check queue and process any entry once peer is subscribed to the respective topics.
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn start_event_task(&self, conversation_id: Uuid) {
