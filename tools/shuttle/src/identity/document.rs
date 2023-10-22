@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use warp::crypto::did_key::CoreSign;
-use warp::crypto::DID;
+use warp::crypto::{DID, Fingerprint};
+use warp::error::Error;
 use warp::multipass::identity::{IdentityStatus, Platform, SHORT_ID_SIZE};
 
 #[derive(Debug, Clone, Deserialize, Serialize, Eq)]
@@ -73,17 +74,55 @@ impl IdentityDocument {
 }
 
 impl IdentityDocument {
-    pub fn verify(&self) -> Result<(), warp::error::Error> {
+    pub fn verify(&self) -> Result<(), Error> {
         let mut payload = self.clone();
 
-        //TODO: Validate username, short id, and status message
+        if payload.username.is_empty() {
+            return Err(Error::IdentityInvalid); //TODO: Invalid username
+        }
 
-        let signature =
-            std::mem::take(&mut payload.signature).ok_or(warp::error::Error::InvalidSignature)?;
+        if !(4..=64).contains(&payload.username.len()) {
+            return Err(Error::InvalidLength {
+                context: "username".into(),
+                current: payload.username.len(),
+                minimum: Some(4),
+                maximum: Some(64),
+            });
+        }
+
+        if payload.short_id.is_empty() {
+            return Err(Error::IdentityInvalid); //TODO: Invalid short id
+        }
+
+        let fingerprint = payload.did.fingerprint();
+
+        let bytes = fingerprint.as_bytes();
+
+        let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
+            .try_into()
+            .map_err(anyhow::Error::from)?;
+
+        if payload.short_id != short_id {
+            return Err(Error::IdentityInvalid); //TODO: Invalid short id
+        }
+
+        if let Some(status) = &payload.status_message {
+            if status.len() > 512 {
+                return Err(Error::InvalidLength {
+                    context: "identity status message".into(),
+                    current: status.len(),
+                    minimum: None,
+                    maximum: Some(512),
+                });
+            }
+        }
+
+        let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
         let signature_bytes = bs58::decode(signature).into_vec()?;
         let bytes = serde_json::to_vec(&payload)?;
         self.did
             .verify(&bytes, &signature_bytes)
-            .map_err(|_| warp::error::Error::InvalidSignature)
+            .map_err(|_| Error::InvalidSignature)?;
+        Ok(())
     }
 }
