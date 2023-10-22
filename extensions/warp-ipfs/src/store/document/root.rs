@@ -9,12 +9,12 @@ use rust_ipfs::{Ipfs, IpfsPath};
 use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
 
-use crate::store::{identity::Request, keystore::Keystore, VecExt};
+use crate::store::{ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
 
 use super::{
     identity::IdentityDocument,
     utils::{GetLocalDag, ToCid},
-    RootDocument,
+    ExtractedRootDocument, RootDocument,
 };
 
 #[allow(clippy::large_enum_variant)]
@@ -83,6 +83,12 @@ pub enum RootDocumentCommand {
     GetKeystore {
         id: Uuid,
         response: oneshot::Sender<Result<Keystore, Error>>,
+    },
+    Export {
+        response: oneshot::Sender<Result<ExtractedRootDocument, Error>>,
+    },
+    ExportEncrypted {
+        response: oneshot::Sender<Result<Vec<u8>, Error>>,
     },
 }
 
@@ -308,6 +314,26 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn export(&self) -> Result<ExtractedRootDocument, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::Export { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn export_bytes(&self) -> Result<Vec<u8>, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::ExportEncrypted { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -410,6 +436,12 @@ impl RootDocumentTask {
                 }
                 RootDocumentCommand::GetKeystoreMap { response } => {
                     let _ = response.send(self.get_conversation_keystore_map().await);
+                }
+                RootDocumentCommand::Export { response } => {
+                    let _ = response.send(self.export().await);
+                }
+                RootDocumentCommand::ExportEncrypted { response } => {
+                    let _ = response.send(self.export_bytes().await);
                 }
             }
         }
@@ -733,5 +765,17 @@ impl RootDocumentTask {
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
         path.get_local_dag(&self.ipfs).await
+    }
+
+    async fn export(&self) -> Result<ExtractedRootDocument, Error> {
+        let document = self.get_root_document().await?;
+        document.export(&self.ipfs).await
+    }
+
+    async fn export_bytes(&self) -> Result<Vec<u8>, Error> {
+        let export = self.export().await?;
+
+        let bytes = serde_json::to_vec(&export)?;
+        ecdh_encrypt(&self.keypair, None, bytes)
     }
 }
