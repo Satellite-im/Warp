@@ -648,27 +648,17 @@ impl MessageStore {
                 loop {
                     let (direction, event, ret) = tokio::select! {
                         biased;
-                        event = rx.next() => {
-                            let Some((event, ret)) = event else {
-                                continue;
-                            };
-
+                        Some((event, ret)) = rx.next() => {
                             (MessageDirection::Out, event, ret)
                         }
-                        event = stream.next() => {
-                            let Some(event) = event else {
-                                continue;
-                            };
-
+                        Some(event) = stream.next() => {
                             let Ok(data) = Payload::from_bytes(&event.data) else {
                                 continue;
                             };
 
                             let own_did = &*did;
 
-                            let Ok(conversation) = store.conversations.get(conversation_id).await else {
-                                    continue;
-                            };
+                            let conversation = store.conversations.get(conversation_id).await.expect("Conversation exist");
 
                             let bytes_results = match conversation.conversation_type {
                                 ConversationType::Direct => {
