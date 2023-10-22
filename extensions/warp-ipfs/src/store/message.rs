@@ -34,7 +34,8 @@ use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;
 use crate::store::{
     connected_to_peer, ecdh_decrypt, ecdh_encrypt, get_keypair_did, sign_serde,
-    ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, PeerTopic,
+    ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, DidExt,
+    PeerTopic,
 };
 
 use super::conversation::{ConversationDocument, MessageDocument};
@@ -42,7 +43,7 @@ use super::discovery::Discovery;
 use super::document::conversation::Conversations;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
-use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, MessagingEvents};
+use super::{verify_serde_sig, ConversationEvents, MessagingEvents};
 
 type ConversationSender =
     UnboundedSender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
@@ -549,8 +550,8 @@ impl MessageStore {
                                                         .ipfs
                                                         .pubsub_peers(Some(topic.clone()))
                                                         .await?;
-                                                    let peer_id = did_to_libp2p_pub(&sender)
-                                                        .map(|pk| pk.to_peer_id())?;
+
+                                                    let peer_id = sender.to_peer_id()?;
 
                                                     let bytes = payload.to_bytes()?;
 
@@ -711,7 +712,7 @@ impl MessageStore {
         let topic = conversation.reqres_topic(did);
 
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-        let peer_id = did_to_libp2p_pub(did).map(|pk| pk.to_peer_id())?;
+        let peer_id = did.to_peer_id()?;
 
         if !peers.contains(&peer_id)
             || (peers.contains(&peer_id)
@@ -798,7 +799,6 @@ impl MessageStore {
                                     Cipher::direct_decrypt(data.data(), &key)
                                 }
                             };
-                            drop(conversation);
 
                             let bytes = match bytes_results {
                                 Ok(b) => b,
@@ -1745,7 +1745,7 @@ impl MessageStore {
 
         self.start_task(convo_id, stream).await;
 
-        let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
+        let peer_id = did_key.to_peer_id()?;
 
         let event = ConversationEvents::NewConversation {
             recipient: own_did.clone(),
@@ -1870,8 +1870,7 @@ impl MessageStore {
             .iter()
             .filter(|did| own_did.ne(did))
             .map(|did| (did.clone(), did))
-            .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
-            .map(|(did, pk)| (did, pk.to_peer_id()))
+            .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
 
         let conversation = self.conversations.get(convo_id).await?;
@@ -1980,8 +1979,8 @@ impl MessageStore {
                     .iter()
                     .filter(|did| own_did.ne(did))
                     .map(|did| (did.clone(), did))
-                    .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
-                    .map(|(did, pk)| (did, pk.to_peer_id()))
+                    .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
+                    .map(|(did, pk)| (did, pk))
                     .collect::<Vec<_>>();
 
                 let event = serde_json::to_vec(&ConversationEvents::DeleteConversation {
@@ -2140,7 +2139,7 @@ impl MessageStore {
 
         let payload = Payload::new(own_did, &bytes, &signature);
 
-        let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
+        let peer_id = did_key.to_peer_id()?;
         let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
 
         let mut time = true;
@@ -3327,7 +3326,7 @@ impl MessageStore {
             .iter()
             .filter(|did| own_did.ne(did))
         {
-            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
+            let peer_id = recipient.to_peer_id()?;
 
             // We want to confirm that there is atleast one peer subscribed before attempting to send a message
             match peers.contains(&peer_id) {
