@@ -19,3 +19,11 @@ impl PeerIdExt for PeerId {
         Ok(public_key)
     }
 }
+
+pub enum ShuttleNodeQuorum {
+    Primary,
+    Seconary,
+    Select(PeerId),
+    All,
+}
+

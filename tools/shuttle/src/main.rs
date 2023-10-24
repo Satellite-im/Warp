@@ -137,18 +137,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (id_event_tx, mut id_event_rx) = futures::channel::mpsc::channel(1);
 
     let mut uninitialized = UninitializedIpfs::empty()
-        .set_custom_behaviour(Behaviour {
+        .with_identify(Some(IdentifyConfiguration {
+            agent_version: format!("shuttle/{}", env!("CARGO_PKG_VERSION")),
+            ..Default::default()
+        }))
+        .with_autonat()
+        .with_bitswap(None)
+        .with_ping(None)
+        .with_pubsub(None)
+        .with_custom_behaviour(Behaviour {
             identity: identity::Behaviour::new(&keypair, id_event_tx, None),
             dummy: ext_behaviour::Behaviour,
         })
-        .disable_kad()
-        .disable_delay()
-        .set_identify_configuration(IdentifyConfiguration {
-            agent_version: format!("shuttle/{}", env!("CARGO_PKG_VERSION")),
-            ..Default::default()
-        })
-        .enable_relay(true)
-        .enable_relay_server(Some(RelayConfig {
+        .with_relay(true)
+        .with_relay_server(Some(RelayConfig {
             max_circuits: 512,
             max_circuits_per_peer: 8,
             max_circuit_duration: Duration::from_secs(2 * 60),
@@ -179,7 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             ],
         }))
-        .enable_rendezvous_server()
+        .with_rendezvous_server()
         .fd_limit(FDLimit::Max)
         .set_keypair(keypair)
         .set_idle_connection_timeout(120)

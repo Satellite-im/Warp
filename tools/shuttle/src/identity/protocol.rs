@@ -8,6 +8,13 @@ pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/identity/0.0.
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum Message {
+    Request(Request),
+    Response(Response),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Request {
     Register(Register),
     Synchronized(Synchronized),

@@ -15,8 +15,8 @@ use rust_ipfs::{
         core::Endpoint,
         request_response::{RequestId, ResponseChannel},
         swarm::{
-            ConnectionDenied, ConnectionId, FromSwarm, PollParameters, THandler, THandlerInEvent,
-            THandlerOutEvent, ToSwarm,
+            ConnectionDenied, ConnectionId, ExternalAddresses, FromSwarm, PollParameters, THandler,
+            THandlerInEvent, THandlerOutEvent, ToSwarm,
         },
     },
     Keypair, Multiaddr, NetworkBehaviour, PeerId,
@@ -58,6 +58,8 @@ pub struct Behaviour {
     process_command: Option<futures::channel::mpsc::Receiver<IdentityCommand>>,
 
     queue_event: HashMap<RequestId, (Option<ResponseChannel<Response>>, Either<Request, Response>)>,
+
+    external_addresses: ExternalAddresses,
 }
 
 #[derive(Debug)]
@@ -129,6 +131,7 @@ impl Behaviour {
             waiting_on_request: Default::default(),
             waiting_on_response: Default::default(),
             queue_event: Default::default(),
+            external_addresses: ExternalAddresses::default(),
         }
     }
 
@@ -426,6 +429,7 @@ impl NetworkBehaviour for Behaviour {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+        self.external_addresses.on_swarm_event(&event);
         self.inner.on_swarm_event(event)
     }
 
