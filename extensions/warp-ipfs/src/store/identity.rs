@@ -362,11 +362,30 @@ impl IdentityStore {
                                 },
                                 None => continue,
                             };
-                            if let Some(in_did) = entry {
-                                if let Err(e) = store.process_message(in_did, &message.data).await {
-                                    error!("Error: {e}");
+
+                            let Some(in_did) = entry else {
+                                continue;
+                            };
+
+                            log::info!("Received event from {in_did}");
+
+                            let event = match ecdh_decrypt(&store.did_key, Some(&in_did), &message.data).and_then(|bytes| {
+                                serde_json::from_slice::<IdentityEvent>(&bytes).map_err(Error::from)
+                            }) {
+                                Ok(e) => e,
+                                Err(e) => {
+                                    error!("Failed to decrypt payload from {in_did}: {e}");
+                                    continue;
                                 }
+                            };
+
+                            log::debug!("Event: {event:?}");
+
+
+                            if let Err(e) = store.process_message(in_did, event).await {
+                                error!("Error: {e}");
                             }
+
 
                         }
                         Some(event) = friend_stream.next() => {
@@ -662,19 +681,23 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let event = IdentityEvent::Request { option };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
@@ -694,7 +717,13 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let mut identity = self.own_identity_document().await?;
 
@@ -747,13 +776,11 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
@@ -773,7 +800,13 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push_profile_picture(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let identity = self.own_identity_document().await?;
 
@@ -805,13 +838,11 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
@@ -831,7 +862,13 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let identity = self.own_identity_document().await?;
 
@@ -862,13 +899,11 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
@@ -886,17 +921,9 @@ impl IdentityStore {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, message))]
+    #[tracing::instrument(skip(self))]
     #[allow(clippy::if_same_then_else)]
-    async fn process_message(&mut self, in_did: DID, message: &[u8]) -> anyhow::Result<()> {
-        let pk_did = self.get_keypair_did()?;
-
-        let bytes = ecdh_decrypt(&pk_did, Some(&in_did), message)?;
-
-        log::info!("Received event from {in_did}");
-        let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
-
-        log::debug!("Event: {event:?}");
+    async fn process_message(&mut self, in_did: DID, event: IdentityEvent) -> anyhow::Result<()> {
         match event {
             IdentityEvent::Request { option } => match option {
                 RequestOption::Identity => self.push(&in_did).await?,
