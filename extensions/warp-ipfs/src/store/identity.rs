@@ -382,8 +382,33 @@ impl IdentityStore {
                                 continue;
                             };
 
-                            if let Err(e) = store.check_request_message(&did, &event.data).await {
-                                error!("Error: {e}");
+                            let mut signal = store.signal.write().await.remove(&did);
+
+                            log::trace!("received payload size: {} bytes", event.data.len());
+
+                            log::info!("Received event from {did}");
+
+                            let data = match ecdh_decrypt(&store.did_key, Some(&did), &event.data).and_then(|bytes| {
+                                serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
+                            }) {
+                                Ok(pl) => pl,
+                                Err(e) => {
+                                    if let Some(tx) = signal {
+                                        let _ = tx.send(Err(e));
+                                    }
+                                    continue;
+                                }
+                            };
+
+                            log::debug!("Event from {did}: {:?}", data.event);
+
+                            let result = store.check_request_message(&did, data, &mut signal).await.map_err(|e| {
+                                error!("Error processing message: {e}");
+                                e
+                            });
+
+                            if let Some(tx) = signal {
+                                let _ = tx.send(result);
                             }
                         }
                         // Used as the initial request/push
@@ -414,18 +439,13 @@ impl IdentityStore {
     }
 
     //TODO: Implement Errors
-    #[tracing::instrument(skip(self, data))]
-    async fn check_request_message(&mut self, did: &DID, data: &[u8]) -> anyhow::Result<()> {
-        let pk_did = &*self.did_key;
-
-        let bytes = ecdh_decrypt(pk_did, Some(did), data)?;
-
-        log::trace!("received payload size: {} bytes", bytes.len());
-
-        let data = serde_json::from_slice::<RequestResponsePayload>(&bytes)?;
-
-        log::info!("Received event from {did}");
-
+    #[tracing::instrument(skip(self, data, signal))]
+    async fn check_request_message(
+        &mut self,
+        did: &DID,
+        data: RequestResponsePayload,
+        signal: &mut Option<oneshot::Sender<Result<(), Error>>>,
+    ) -> Result<(), Error> {
         if self
             .list_incoming_request()
             .await
@@ -437,11 +457,6 @@ impl IdentityStore {
             return Ok(());
         }
 
-        //TODO: Send error if dropped early due to error when processing request
-        let mut signal = self.signal.write().await.remove(&data.sender);
-
-        log::debug!("Event {:?}", data.event);
-
         // Before we validate the request, we should check to see if the key is blocked
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
@@ -451,10 +466,9 @@ impl IdentityStore {
                 event: Event::Block,
             };
 
-            self.broadcast_request((&data.sender, &payload), false, true)
-                .await?;
-
-            return Ok(());
+            return self
+                .broadcast_request((&data.sender, &payload), false, true)
+                .await;
         }
 
         match data.event {
@@ -467,16 +481,16 @@ impl IdentityStore {
                     .find(|req| data.sender.eq(req.did()))
                     .cloned()
                 else {
-                    anyhow::bail!(
+                    return Err(Error::from(anyhow::anyhow!(
                         "Unable to locate pending request. Already been accepted or rejected?"
-                    )
+                    )));
                 };
 
                 // Maybe just try the function instead and have it be a hard error?
                 if self.root_document.remove_request(&item).await.is_err() {
-                    anyhow::bail!(
+                    return Err(Error::from(anyhow::anyhow!(
                         "Unable to locate pending request. Already been accepted or rejected?"
-                    )
+                    )));
                 }
 
                 self.add_friend(item.did()).await?;
@@ -489,10 +503,9 @@ impl IdentityStore {
                         event: Event::Accept,
                     };
 
-                    self.broadcast_request((&data.sender, &payload), false, false)
-                        .await?;
-
-                    return Ok(());
+                    return self
+                        .broadcast_request((&data.sender, &payload), false, false)
+                        .await;
                 }
 
                 let list = self.list_all_raw_request().await?;
@@ -513,28 +526,13 @@ impl IdentityStore {
                         .add_request(&Request::In(data.sender.clone()))
                         .await?;
 
-                    tokio::spawn({
-                        let store = self.clone();
-                        let from = data.sender.clone();
-                        async move {
-                            let _ = tokio::time::timeout(Duration::from_secs(10), async {
-                                loop {
-                                    if let Ok(list) =
-                                        store.lookup(LookupBy::DidKey(from.clone())).await
-                                    {
-                                        if !list.is_empty() {
-                                            break;
-                                        }
-                                    }
-                                    tokio::time::sleep(Duration::from_secs(1)).await;
-                                }
-                            })
-                            .await
-                            .ok();
+                    let from = data.sender.clone();
 
-                            store.emit_event(MultiPassEventKind::FriendRequestReceived { from });
-                        }
-                    });
+                    if self.identity_cache.get(&from).await.is_err() {
+                        self.request(&from, RequestOption::Identity).await?;
+                    }
+
+                    self.emit_event(MultiPassEventKind::FriendRequestReceived { from });
                 }
                 let payload = RequestResponsePayload {
                     sender: (*self.did_key).clone(),
@@ -611,7 +609,7 @@ impl IdentityStore {
                     self.emit_event(MultiPassEventKind::BlockedBy { did: data.sender });
                 }
 
-                if let Some(tx) = std::mem::take(&mut signal) {
+                if let Some(tx) = signal.take() {
                     log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Err(Error::BlockedByUser));
                 }
@@ -633,16 +631,12 @@ impl IdentityStore {
                 }
             }
             Event::Response => {
-                if let Some(tx) = std::mem::take(&mut signal) {
+                if let Some(tx) = signal.take() {
                     log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Ok(()));
                 }
             }
         };
-        if let Some(tx) = std::mem::take(&mut signal) {
-            log::debug!("Signaling broadcast of response...");
-            let _ = tx.send(Ok(()));
-        }
 
         Ok(())
     }
