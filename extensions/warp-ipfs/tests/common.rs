@@ -11,6 +11,8 @@ use warp_ipfs::{
     WarpIpfsBuilder,
 };
 
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
 pub async fn node_info(nodes: Vec<Ipfs>) -> Vec<(Ipfs, PeerId, Vec<Multiaddr>)> {
     stream::iter(nodes)
         .filter_map(|node| async move {
@@ -78,6 +80,11 @@ pub async fn create_account(
 pub async fn create_accounts(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
 ) -> anyhow::Result<Vec<(Box<dyn MultiPass>, DID, Identity)>> {
+    tracing_subscriber::registry()
+        .with(fmt::layer().pretty())
+        .with(EnvFilter::from_default_env())
+        .init();
+
     let mut accounts = vec![];
     let mut nodes = vec![];
     for (username, passphrase, context) in infos {
