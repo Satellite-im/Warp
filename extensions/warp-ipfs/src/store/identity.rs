@@ -55,7 +55,7 @@ use super::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
         root::RootDocumentMap, utils::GetLocalDag, ExtractedRootDocument, RootDocument, ToCid,
     },
-    ecdh_decrypt, ecdh_encrypt, libp2p_pub_to_did,
+    ecdh_decrypt, ecdh_encrypt,
     phonebook::PhoneBook,
     queue::Queue,
 };
@@ -1841,9 +1841,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
-        let mut root_document = self.root_document.get().await?;
-        root_document.status = Some(status);
-        self.root_document.set(root_document).await?;
+        self.root_document.set_status_indicator(status).await?;
         *self.online_status.write().await = Some(status);
         self.push_to_all().await;
         Ok(())
@@ -1905,31 +1903,15 @@ impl IdentityStore {
     }
 
     pub async fn own_identity_document(&self) -> Result<IdentityDocument, Error> {
-        let root_document = self.root_document.get().await?;
-        let path = IpfsPath::from(root_document.identity);
-        let identity: IdentityDocument = path.get_local_dag(&self.ipfs).await?;
+        let identity = self.root_document.identity().await?;
         identity.verify()?;
         Ok(identity)
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
-        let root_document = self.root_document.get().await?;
-
-        let path = IpfsPath::from(root_document.identity);
-        let identity = self
-            .get_local_dag::<IdentityDocument>(path)
-            .await?
-            .resolve()?;
-
-        let public_key = identity.did_key();
-        let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
-        if public_key != kp_public_key {
-            //Note if we reach this point, the identity would need to be reconstructed
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        *self.online_status.write().await = root_document.status;
-        Ok(identity)
+        let identity = self.own_identity_document().await?;
+        *self.online_status.write().await = identity.status;
+        Ok(identity.into())
     }
 
     #[tracing::instrument(skip(self))]

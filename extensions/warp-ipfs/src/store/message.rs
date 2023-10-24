@@ -1642,9 +1642,9 @@ impl MessageStore {
         }
 
         //Temporary limit
-        if self.list_conversations().await.unwrap_or_default().len() >= 32 {
-            return Err(Error::ConversationLimitReached);
-        }
+        // if self.list_conversations().await.unwrap_or_default().len() >= 256 {
+        //     return Err(Error::ConversationLimitReached);
+        // }
 
         if !self.discovery.contains(did_key).await {
             self.discovery.insert(did_key).await?;
@@ -1753,9 +1753,9 @@ impl MessageStore {
         }
 
         //Temporary limit
-        if self.list_conversations().await.unwrap_or_default().len() >= 32 {
-            return Err(Error::ConversationLimitReached);
-        }
+        // if self.list_conversations().await.unwrap_or_default().len() >= 256 {
+        //     return Err(Error::ConversationLimitReached);
+        // }
 
         for recipient in &recipients {
             if !self.discovery.contains(recipient).await {

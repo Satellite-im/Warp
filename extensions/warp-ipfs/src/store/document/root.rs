@@ -7,7 +7,7 @@ use futures::{
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use uuid::Uuid;
-use warp::{crypto::DID, error::Error};
+use warp::{crypto::DID, error::Error, multipass::identity::IdentityStatus};
 
 use crate::store::{ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
 
@@ -28,6 +28,10 @@ pub enum RootDocumentCommand {
     },
     Identity {
         response: oneshot::Sender<Result<IdentityDocument, Error>>,
+    },
+    SetIdentityStatus {
+        status: IdentityStatus,
+        response: oneshot::Sender<Result<(), Error>>,
     },
     AddFriend {
         did: DID,
@@ -166,6 +170,19 @@ impl RootDocumentMap {
             .tx
             .clone()
             .send(RootDocumentCommand::Identity { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn set_status_indicator(&self, status: IdentityStatus) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::SetIdentityStatus {
+                status,
+                response: tx,
+            })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -443,6 +460,9 @@ impl RootDocumentTask {
                 RootDocumentCommand::ExportEncrypted { response } => {
                     let _ = response.send(self.export_bytes().await);
                 }
+                RootDocumentCommand::SetIdentityStatus { status, response } => {
+                    let _ = response.send(self.set_identity_status(status).await);
+                }
             }
         }
     }
@@ -500,6 +520,18 @@ impl RootDocumentTask {
 
         self.cid = Some(root_cid);
         Ok(())
+    }
+
+    async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
+        let mut root = self.get_root_document().await?;
+        let mut identity = self.identity().await?;
+        root.status = Some(status);
+        identity.status = Some(status);
+
+        let identity = identity.sign(&self.keypair)?;
+        root.identity = identity.to_cid(&self.ipfs).await?;
+
+        self.set_root_document(root).await
     }
 
     async fn request_list(&self) -> Result<Vec<Request>, Error> {
