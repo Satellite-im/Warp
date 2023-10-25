@@ -252,7 +252,7 @@ impl Cipher {
                             }
                         };
                     }
-                    Ok(read_count) if read_count == 0 => break,
+                    Ok(0) => break,
                     Ok(read_count) => {
                         match stream.decrypt_last(&buffer[..read_count]).map_err(|_| Error::DecryptionStreamError) {
                             Ok(data) => {
@@ -350,7 +350,7 @@ impl Cipher {
                             }
                         };
                     }
-                    Ok(read_count) if read_count == 0 => break,
+                    Ok(0) => break,
                     Ok(read_count) => {
                         match stream.decrypt_last(&buffer[..read_count]).map_err(|_| Error::DecryptionStreamError) {
                             Ok(data) => {
@@ -460,7 +460,7 @@ impl Cipher {
 
                     writer.write_all(&plaintext)?
                 }
-                Ok(read_count) if read_count == 0 => break,
+                Ok(0) => break,
                 Ok(read_count) => {
                     let plaintext = stream
                         .decrypt_last(&buffer[..read_count])
