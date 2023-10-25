@@ -80,10 +80,10 @@ pub async fn create_account(
 pub async fn create_accounts(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
 ) -> anyhow::Result<Vec<(Box<dyn MultiPass>, DID, Identity)>> {
-    tracing_subscriber::registry()
+    let _ = tracing_subscriber::registry()
         .with(fmt::layer().pretty())
         .with(EnvFilter::from_default_env())
-        .init();
+        .try_init();
 
     let mut accounts = vec![];
     let mut nodes = vec![];
@@ -139,10 +139,10 @@ pub async fn create_account_and_chat(
 pub async fn create_accounts_and_chat(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
 ) -> anyhow::Result<Vec<(Box<dyn MultiPass>, Box<dyn RayGun>, DID, Identity)>> {
-    tracing_subscriber::registry()
+    let _ = tracing_subscriber::registry()
         .with(fmt::layer().pretty())
         .with(EnvFilter::from_default_env())
-        .init();
+        .try_init();
 
     let mut accounts = vec![];
     let mut nodes = vec![];
