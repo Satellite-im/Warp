@@ -1493,7 +1493,7 @@ impl IdentityStore {
 
         let identity = identity.sign(&kp)?;
 
-        log::debug!("Updateing document");
+        log::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
         let ident_cid = identity.to_cid(&self.ipfs).await?;
         root_document.identity = ident_cid;
