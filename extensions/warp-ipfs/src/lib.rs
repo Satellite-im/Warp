@@ -268,7 +268,6 @@ impl WarpIpfs {
 
         let behaviour = behaviour::Behaviour {
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
-            rz_discovery: None.into(),
         };
 
         info!("Starting ipfs");
