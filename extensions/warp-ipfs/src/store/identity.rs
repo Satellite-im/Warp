@@ -2,7 +2,6 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    behaviour::phonebook::PhoneBookCommand,
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
 };
@@ -234,7 +233,7 @@ impl IdentityStore {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         tx: broadcast::Sender<MultiPassEventKind>,
-        pb_tx: futures::channel::mpsc::Sender<PhoneBookCommand>,
+        phonebook: PhoneBook,
         config: &config::Config,
         discovery: Discovery,
     ) -> Result<Self, Error> {
@@ -261,8 +260,6 @@ impl IdentityStore {
             config.path.clone(),
             discovery.clone(),
         );
-
-        let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
         let signal = Default::default();
 
@@ -380,7 +377,6 @@ impl IdentityStore {
                             };
 
                             log::debug!("Event: {event:?}");
-
 
                             if let Err(e) = store.process_message(in_did, event).await {
                                 error!("Error: {e}");

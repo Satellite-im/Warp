@@ -69,6 +69,7 @@ use warp::multipass::{
 
 use crate::config::Bootstrap;
 use crate::store::discovery::Discovery;
+use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, ecdh_encrypt};
 
 #[derive(Clone)]
@@ -454,13 +455,15 @@ impl WarpIpfs {
             relays.clone(),
         );
 
+        let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
+
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
             self.multipass_tx.clone(),
-            pb_tx,
+            phonebook,
             &config,
             discovery.clone(),
         )
