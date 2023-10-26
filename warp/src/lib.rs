@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 #![allow(clippy::result_large_err)]
 pub mod sync {
     pub use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
