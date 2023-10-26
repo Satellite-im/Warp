@@ -40,8 +40,7 @@ impl Framer {
         let loudness_calculator = loudness::Calculator::new(frame_size);
         let mut buf: Vec<f32> = Vec::new();
         buf.reserve(frame_size);
-        let mut opus_out: Vec<u8> = Vec::new();
-        opus_out.resize(frame_size * 4, 0);
+        let opus_out: Vec<u8> = vec![0; frame_size * 4];
         let mut encoder = opus::Encoder::new(
             webrtc_codec.sample_rate(),
             opus::Channels::Mono,
