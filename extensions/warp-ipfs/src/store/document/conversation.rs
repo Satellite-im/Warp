@@ -89,7 +89,7 @@ impl Conversations {
             None => None,
         };
 
-        let (tx, rx) = futures::channel::mpsc::channel(1);
+        let (tx, rx) = futures::channel::mpsc::channel(0);
 
         let mut task = ConversationTask {
             ipfs: ipfs.clone(),

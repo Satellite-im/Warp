@@ -466,6 +466,6 @@ pub mod ffi {
             false => CStr::from_ptr(name).to_string_lossy().to_string(),
         };
         let file = Box::new(File::new(name.as_str()));
-        Box::into_raw(file) as *mut File
+        Box::into_raw(file)
     }
 }
