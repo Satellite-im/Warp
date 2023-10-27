@@ -169,8 +169,7 @@ impl IdentityCacheTask {
                     match old_document {
                         Some(old_document) => {
                             if !old_document.different(&document) {
-                                tracing::error!("Identity in cache havent changed");
-                                let _ = response.send(Err(Error::IdentityExist));
+                                let _ = response.send(Ok(None));
                                 continue;
                             }
 
