@@ -107,17 +107,20 @@ impl IdentityDocument {
             return false;
         }
 
-        if self.username != other.username
+        if other.verify().is_err() {
+            tracing::warn!(
+                "identity for {} is not valid, corrupted or been tampered with.",
+                self.did
+            );
+            return false;
+        }
+
+        self.username != other.username
             || self.status_message != other.status_message
             || self.status != other.status
             || self.profile_banner != other.profile_banner
             || self.profile_picture != other.profile_picture
             || self.platform != other.platform
-        {
-            return other.verify().is_ok();
-        }
-
-        false
     }
 }
 
