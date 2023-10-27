@@ -149,24 +149,6 @@ pub enum RequestType {
 }
 
 #[allow(clippy::large_enum_variant)]
-pub enum RootDocumentEvents {
-    Get(oneshot::Sender<Result<RootDocument, Error>>),
-    Set(RootDocument, oneshot::Sender<Result<(), Error>>),
-    AddFriend(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
-    GetFriendList(oneshot::Sender<Result<Vec<DID>, Error>>),
-    AddRequest(Request, oneshot::Sender<Result<(), Error>>),
-    RemoveRequest(Request, oneshot::Sender<Result<(), Error>>),
-    GetRequestList(oneshot::Sender<Result<Vec<Request>, Error>>),
-    AddBlock(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveBlock(DID, oneshot::Sender<Result<(), Error>>),
-    GetBlockList(oneshot::Sender<Result<Vec<DID>, Error>>),
-    AddBlockBy(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveBlockBy(DID, oneshot::Sender<Result<(), Error>>),
-    GetBlockByList(oneshot::Sender<Result<Vec<DID>, Error>>),
-}
-
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum LookupBy {
     DidKey(DID),
