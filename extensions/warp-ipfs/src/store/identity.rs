@@ -378,8 +378,8 @@ impl IdentityStore {
 
                             log::debug!("Event: {event:?}");
 
-                            if let Err(e) = store.process_message(in_did, event).await {
-                                error!("Error: {e}");
+                            if let Err(e) = store.process_message(&in_did, event).await {
+                                error!("Failed to process identity message from {in_did}: {e}");
                             }
 
 
@@ -919,16 +919,16 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     #[allow(clippy::if_same_then_else)]
-    async fn process_message(&mut self, in_did: DID, event: IdentityEvent) -> anyhow::Result<()> {
+    async fn process_message(&mut self, in_did: &DID, event: IdentityEvent) -> anyhow::Result<()> {
         match event {
             IdentityEvent::Request { option } => match option {
-                RequestOption::Identity => self.push(&in_did).await?,
+                RequestOption::Identity => self.push(in_did).await?,
                 RequestOption::Image { banner, picture } => {
                     if let Some(cid) = banner {
-                        self.push_profile_banner(&in_did, cid).await?;
+                        self.push_profile_banner(in_did, cid).await?;
                     }
                     if let Some(cid) = picture {
-                        self.push_profile_picture(&in_did, cid).await?;
+                        self.push_profile_picture(in_did, cid).await?;
                     }
                 }
             },
@@ -939,7 +939,7 @@ impl IdentityStore {
                 // let _pk = did_to_libp2p_pub(&raw_object.did)?;
 
                 //TODO: Remove upon offline implementation
-                anyhow::ensure!(identity.did == in_did, "Payload doesnt match identity");
+                anyhow::ensure!(identity.did.eq(in_did), "Payload doesnt match identity");
 
                 // Validate after making sure the identity did matches the payload
                 identity.verify()?;
@@ -991,7 +991,7 @@ impl IdentityStore {
                                 if !self.config.store_setting.fetch_over_bitswap {
                                     if let Err(e) = self
                                         .request(
-                                            &in_did,
+                                            in_did,
                                             RequestOption::Image {
                                                 banner: None,
                                                 picture: identity.profile_picture,
@@ -1047,7 +1047,7 @@ impl IdentityStore {
                                 if !self.config.store_setting.fetch_over_bitswap {
                                     if let Err(e) = self
                                         .request(
-                                            &in_did,
+                                            in_did,
                                             RequestOption::Image {
                                                 banner: identity.profile_banner,
                                                 picture: None,
@@ -1146,7 +1146,7 @@ impl IdentityStore {
 
                             if banner.is_some() || picture.is_some() {
                                 if !self.config.store_setting.fetch_over_bitswap {
-                                    self.request(&in_did, RequestOption::Image { banner, picture })
+                                    self.request(in_did, RequestOption::Image { banner, picture })
                                         .await?;
                                 } else {
                                     if let Some(picture) = picture {
@@ -1224,11 +1224,12 @@ impl IdentityStore {
             IdentityEvent::Receive {
                 option: ResponseOption::Image { cid, ty, data },
             } => {
-                let cache = self.identity_cache.get(&in_did).await?;
+                let cache = self.identity_cache.get(in_did).await?;
 
                 if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
                     tokio::spawn({
                         let store = self.clone();
+                        let did = in_did.clone();
                         async move {
                             let added_cid = super::document::image_dag::store_photo(
                                 &store.ipfs,
@@ -1239,9 +1240,7 @@ impl IdentityStore {
                             .await?;
 
                             debug_assert_eq!(added_cid, cid);
-                            store.emit_event(MultiPassEventKind::IdentityUpdate {
-                                did: in_did.clone(),
-                            });
+                            store.emit_event(MultiPassEventKind::IdentityUpdate { did });
                             Ok::<_, Error>(())
                         }
                     });

@@ -741,7 +741,7 @@ impl MessageStore {
                         .message_event(conversation_id, &event, direction, Default::default())
                         .await
                     {
-                        error!("Error processing message: {e}");
+                        error!("Failure while processing message in {conversation_id}: {e}");
                         if let Some(ret) = ret {
                             let _ = ret.send(Err(e)).ok();
                         }
