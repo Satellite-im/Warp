@@ -1154,15 +1154,9 @@ impl MessageStore {
                 document.signature = Some(signature);
                 self.conversations.set(document).await?;
 
-                tokio::spawn({
-                    let store = self.clone();
-                    let recipient = recipient.clone();
-                    async move {
-                        if let Err(e) = store.request_key(conversation_id, &recipient).await {
-                            error!("Error requesting key: {e}");
-                        }
-                    }
-                });
+                if let Err(e) = self.request_key(conversation_id, &recipient).await {
+                    error!("Error requesting key: {e}");
+                }
 
                 if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
                     conversation_id,
