@@ -57,7 +57,7 @@ impl IdentityCache {
             None => None,
         };
 
-        let (tx, rx) = futures::channel::mpsc::channel(1);
+        let (tx, rx) = futures::channel::mpsc::channel(0);
 
         let mut task = IdentityCacheTask {
             ipfs: ipfs.clone(),
@@ -169,7 +169,7 @@ impl IdentityCacheTask {
                     match old_document {
                         Some(old_document) => {
                             if !old_document.different(&document) {
-                                let _ = response.send(Err(Error::IdentityExist));
+                                let _ = response.send(Ok(None));
                                 continue;
                             }
 

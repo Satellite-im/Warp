@@ -2,7 +2,6 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    behaviour::phonebook::PhoneBookCommand,
     config::{self, Discovery as DiscoveryConfig, DiscoveryType, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
 };
@@ -181,24 +180,6 @@ pub enum RequestType {
 }
 
 #[allow(clippy::large_enum_variant)]
-pub enum RootDocumentEvents {
-    Get(oneshot::Sender<Result<RootDocument, Error>>),
-    Set(RootDocument, oneshot::Sender<Result<(), Error>>),
-    AddFriend(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
-    GetFriendList(oneshot::Sender<Result<Vec<DID>, Error>>),
-    AddRequest(Request, oneshot::Sender<Result<(), Error>>),
-    RemoveRequest(Request, oneshot::Sender<Result<(), Error>>),
-    GetRequestList(oneshot::Sender<Result<Vec<Request>, Error>>),
-    AddBlock(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveBlock(DID, oneshot::Sender<Result<(), Error>>),
-    GetBlockList(oneshot::Sender<Result<Vec<DID>, Error>>),
-    AddBlockBy(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveBlockBy(DID, oneshot::Sender<Result<(), Error>>),
-    GetBlockByList(oneshot::Sender<Result<Vec<DID>, Error>>),
-}
-
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum LookupBy {
     DidKey(DID),
@@ -267,7 +248,7 @@ impl IdentityStore {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         tx: broadcast::Sender<MultiPassEventKind>,
-        pb_tx: futures::channel::mpsc::Sender<PhoneBookCommand>,
+        phonebook: PhoneBook,
         config: &config::Config,
         discovery: Discovery,
         (identity_command, _process_identity_event): (
@@ -314,8 +295,6 @@ impl IdentityStore {
             config.path.clone(),
             discovery.clone(),
         );
-
-        let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
         let signal = Default::default();
 
@@ -417,11 +396,29 @@ impl IdentityStore {
                                 },
                                 None => continue,
                             };
-                            if let Some(in_did) = entry {
-                                if let Err(e) = store.process_message(in_did, &message.data).await {
-                                    error!("Error: {e}");
+
+                            let Some(in_did) = entry else {
+                                continue;
+                            };
+
+                            log::info!("Received event from {in_did}");
+
+                            let event = match ecdh_decrypt(&store.did_key, Some(&in_did), &message.data).and_then(|bytes| {
+                                serde_json::from_slice::<IdentityEvent>(&bytes).map_err(Error::from)
+                            }) {
+                                Ok(e) => e,
+                                Err(e) => {
+                                    error!("Failed to decrypt payload from {in_did}: {e}");
+                                    continue;
                                 }
+                            };
+
+                            log::debug!("Event: {event:?}");
+
+                            if let Err(e) = store.process_message(&in_did, event).await {
+                                error!("Failed to process identity message from {in_did}: {e}");
                             }
+
 
                         }
                         Some(event) = friend_stream.next() => {
@@ -437,8 +434,33 @@ impl IdentityStore {
                                 continue;
                             };
 
-                            if let Err(e) = store.check_request_message(&did, &event.data).await {
-                                error!("Error: {e}");
+                            let mut signal = store.signal.write().await.remove(&did);
+
+                            log::trace!("received payload size: {} bytes", event.data.len());
+
+                            log::info!("Received event from {did}");
+
+                            let data = match ecdh_decrypt(&store.did_key, Some(&did), &event.data).and_then(|bytes| {
+                                serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
+                            }) {
+                                Ok(pl) => pl,
+                                Err(e) => {
+                                    if let Some(tx) = signal {
+                                        let _ = tx.send(Err(e));
+                                    }
+                                    continue;
+                                }
+                            };
+
+                            log::debug!("Event from {did}: {:?}", data.event);
+
+                            let result = store.check_request_message(&did, data, &mut signal).await.map_err(|e| {
+                                error!("Error processing message: {e}");
+                                e
+                            });
+
+                            if let Some(tx) = signal {
+                                let _ = tx.send(result);
                             }
                         }
                         // Used as the initial request/push
@@ -469,18 +491,13 @@ impl IdentityStore {
     }
 
     //TODO: Implement Errors
-    #[tracing::instrument(skip(self, data))]
-    async fn check_request_message(&mut self, did: &DID, data: &[u8]) -> anyhow::Result<()> {
-        let pk_did = &*self.did_key;
-
-        let bytes = ecdh_decrypt(pk_did, Some(did), data)?;
-
-        log::trace!("received payload size: {} bytes", bytes.len());
-
-        let data = serde_json::from_slice::<RequestResponsePayload>(&bytes)?;
-
-        log::info!("Received event from {did}");
-
+    #[tracing::instrument(skip(self, data, signal))]
+    async fn check_request_message(
+        &mut self,
+        did: &DID,
+        data: RequestResponsePayload,
+        signal: &mut Option<oneshot::Sender<Result<(), Error>>>,
+    ) -> Result<(), Error> {
         if self
             .list_incoming_request()
             .await
@@ -492,11 +509,6 @@ impl IdentityStore {
             return Ok(());
         }
 
-        //TODO: Send error if dropped early due to error when processing request
-        let mut signal = self.signal.write().await.remove(&data.sender);
-
-        log::debug!("Event {:?}", data.event);
-
         // Before we validate the request, we should check to see if the key is blocked
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
@@ -506,10 +518,9 @@ impl IdentityStore {
                 event: Event::Block,
             };
 
-            self.broadcast_request((&data.sender, &payload), false, true)
-                .await?;
-
-            return Ok(());
+            return self
+                .broadcast_request((&data.sender, &payload), false, true)
+                .await;
         }
 
         match data.event {
@@ -522,16 +533,16 @@ impl IdentityStore {
                     .find(|req| data.sender.eq(req.did()))
                     .cloned()
                 else {
-                    anyhow::bail!(
+                    return Err(Error::from(anyhow::anyhow!(
                         "Unable to locate pending request. Already been accepted or rejected?"
-                    )
+                    )));
                 };
 
                 // Maybe just try the function instead and have it be a hard error?
                 if self.root_document.remove_request(&item).await.is_err() {
-                    anyhow::bail!(
+                    return Err(Error::from(anyhow::anyhow!(
                         "Unable to locate pending request. Already been accepted or rejected?"
-                    )
+                    )));
                 }
 
                 self.add_friend(item.did()).await?;
@@ -544,10 +555,9 @@ impl IdentityStore {
                         event: Event::Accept,
                     };
 
-                    self.broadcast_request((&data.sender, &payload), false, false)
-                        .await?;
-
-                    return Ok(());
+                    return self
+                        .broadcast_request((&data.sender, &payload), false, false)
+                        .await;
                 }
 
                 let list = self.list_all_raw_request().await?;
@@ -568,28 +578,13 @@ impl IdentityStore {
                         .add_request(&Request::In(data.sender.clone()))
                         .await?;
 
-                    tokio::spawn({
-                        let store = self.clone();
-                        let from = data.sender.clone();
-                        async move {
-                            let _ = tokio::time::timeout(Duration::from_secs(10), async {
-                                loop {
-                                    if let Ok(list) =
-                                        store.lookup(LookupBy::DidKey(from.clone())).await
-                                    {
-                                        if !list.is_empty() {
-                                            break;
-                                        }
-                                    }
-                                    tokio::time::sleep(Duration::from_secs(1)).await;
-                                }
-                            })
-                            .await
-                            .ok();
+                    let from = data.sender.clone();
 
-                            store.emit_event(MultiPassEventKind::FriendRequestReceived { from });
-                        }
-                    });
+                    if self.identity_cache.get(&from).await.is_err() {
+                        self.request(&from, RequestOption::Identity).await?;
+                    }
+
+                    self.emit_event(MultiPassEventKind::FriendRequestReceived { from });
                 }
                 let payload = RequestResponsePayload {
                     sender: (*self.did_key).clone(),
@@ -666,7 +661,7 @@ impl IdentityStore {
                     self.emit_event(MultiPassEventKind::BlockedBy { did: data.sender });
                 }
 
-                if let Some(tx) = std::mem::take(&mut signal) {
+                if let Some(tx) = signal.take() {
                     log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Err(Error::BlockedByUser));
                 }
@@ -688,16 +683,12 @@ impl IdentityStore {
                 }
             }
             Event::Response => {
-                if let Some(tx) = std::mem::take(&mut signal) {
+                if let Some(tx) = signal.take() {
                     log::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Ok(()));
                 }
             }
         };
-        if let Some(tx) = std::mem::take(&mut signal) {
-            log::debug!("Signaling broadcast of response...");
-            let _ = tx.send(Ok(()));
-        }
 
         Ok(())
     }
@@ -723,19 +714,23 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let event = IdentityEvent::Request { option };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
@@ -755,7 +750,13 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let mut identity = self.own_identity_document().await?;
 
@@ -808,13 +809,11 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
@@ -834,7 +833,13 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push_profile_picture(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let identity = self.own_identity_document().await?;
 
@@ -866,13 +871,11 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
@@ -892,7 +895,13 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let identity = self.own_identity_document().await?;
 
@@ -923,13 +932,11 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
         log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
@@ -947,26 +954,18 @@ impl IdentityStore {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, message))]
+    #[tracing::instrument(skip(self))]
     #[allow(clippy::if_same_then_else)]
-    async fn process_message(&mut self, in_did: DID, message: &[u8]) -> anyhow::Result<()> {
-        let pk_did = self.get_keypair_did()?;
-
-        let bytes = ecdh_decrypt(&pk_did, Some(&in_did), message)?;
-
-        log::info!("Received event from {in_did}");
-        let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
-
-        log::debug!("Event: {event:?}");
+    async fn process_message(&mut self, in_did: &DID, event: IdentityEvent) -> anyhow::Result<()> {
         match event {
             IdentityEvent::Request { option } => match option {
-                RequestOption::Identity => self.push(&in_did).await?,
+                RequestOption::Identity => self.push(in_did).await?,
                 RequestOption::Image { banner, picture } => {
                     if let Some(cid) = banner {
-                        self.push_profile_banner(&in_did, cid).await?;
+                        self.push_profile_banner(in_did, cid).await?;
                     }
                     if let Some(cid) = picture {
-                        self.push_profile_picture(&in_did, cid).await?;
+                        self.push_profile_picture(in_did, cid).await?;
                     }
                 }
             },
@@ -977,7 +976,7 @@ impl IdentityStore {
                 // let _pk = did_to_libp2p_pub(&raw_object.did)?;
 
                 //TODO: Remove upon offline implementation
-                anyhow::ensure!(identity.did == in_did, "Payload doesnt match identity");
+                anyhow::ensure!(identity.did.eq(in_did), "Payload doesnt match identity");
 
                 // Validate after making sure the identity did matches the payload
                 identity.verify()?;
@@ -1029,7 +1028,7 @@ impl IdentityStore {
                                 if !self.config.store_setting.fetch_over_bitswap {
                                     if let Err(e) = self
                                         .request(
-                                            &in_did,
+                                            in_did,
                                             RequestOption::Image {
                                                 banner: None,
                                                 picture: identity.profile_picture,
@@ -1085,7 +1084,7 @@ impl IdentityStore {
                                 if !self.config.store_setting.fetch_over_bitswap {
                                     if let Err(e) = self
                                         .request(
-                                            &in_did,
+                                            in_did,
                                             RequestOption::Image {
                                                 banner: identity.profile_banner,
                                                 picture: None,
@@ -1184,7 +1183,7 @@ impl IdentityStore {
 
                             if banner.is_some() || picture.is_some() {
                                 if !self.config.store_setting.fetch_over_bitswap {
-                                    self.request(&in_did, RequestOption::Image { banner, picture })
+                                    self.request(in_did, RequestOption::Image { banner, picture })
                                         .await?;
                                 } else {
                                     if let Some(picture) = picture {
@@ -1262,11 +1261,12 @@ impl IdentityStore {
             IdentityEvent::Receive {
                 option: ResponseOption::Image { cid, ty, data },
             } => {
-                let cache = self.identity_cache.get(&in_did).await?;
+                let cache = self.identity_cache.get(in_did).await?;
 
                 if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
                     tokio::spawn({
                         let store = self.clone();
+                        let did = in_did.clone();
                         async move {
                             let added_cid = super::document::image_dag::store_photo(
                                 &store.ipfs,
@@ -1277,9 +1277,7 @@ impl IdentityStore {
                             .await?;
 
                             debug_assert_eq!(added_cid, cid);
-                            store.emit_event(MultiPassEventKind::IdentityUpdate {
-                                did: in_did.clone(),
-                            });
+                            store.emit_event(MultiPassEventKind::IdentityUpdate { did });
                             Ok::<_, Error>(())
                         }
                     });
@@ -1772,7 +1770,7 @@ impl IdentityStore {
 
         let identity = identity.sign(&kp)?;
 
-        log::debug!("Updateing document");
+        log::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
         let ident_cid = identity.to_cid(&self.ipfs).await?;
         root_document.identity = ident_cid;

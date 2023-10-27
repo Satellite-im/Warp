@@ -69,6 +69,7 @@ use warp::multipass::{
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
+use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, ecdh_encrypt};
 
 #[derive(Clone)]
@@ -274,7 +275,6 @@ impl WarpIpfs {
                 Some(id_sh_rx),
             ),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
-            rz_discovery: None.into(),
         };
 
         info!("Starting ipfs");
@@ -482,13 +482,15 @@ impl WarpIpfs {
             relays.clone(),
         );
 
+        let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
+
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
             self.multipass_tx.clone(),
-            pb_tx,
+            phonebook,
             &config,
             discovery.clone(),
             (Some(id_sh_tx), Some(id_sh_p_rx)),
