@@ -765,7 +765,7 @@ impl MessageStore {
         events: &MessagingEvents,
         direction: MessageDirection,
         opt: EventOpt,
-    ) -> Result<bool, Error> {
+    ) -> Result<(), Error> {
         let tx = self.get_conversation_sender(conversation_id).await?;
 
         let mut document = self.conversations.get(conversation_id).await?;
@@ -1003,7 +1003,7 @@ impl MessageStore {
                 let event = match state {
                     PinState::Pin => {
                         if message.pinned() {
-                            return Ok(false);
+                            return Ok(());
                         }
                         *message.pinned_mut() = true;
                         MessageEventKind::MessagePinned {
@@ -1013,7 +1013,7 @@ impl MessageStore {
                     }
                     PinState::Unpin => {
                         if !message.pinned() {
-                            return Ok(false);
+                            return Ok(());
                         }
                         *message.pinned_mut() = false;
                         MessageEventKind::MessageUnpinned {
@@ -1210,7 +1210,7 @@ impl MessageStore {
                 }
                 if let Some(current_name) = document.name() {
                     if current_name.eq(&name) {
-                        return Ok(false);
+                        return Ok(());
                     }
                 }
 
@@ -1228,7 +1228,7 @@ impl MessageStore {
             }
             _ => {}
         }
-        Ok(false)
+        Ok(())
     }
 
     async fn end_task(&self, conversation_id: Uuid) {
