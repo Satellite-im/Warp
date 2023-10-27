@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use warp::crypto::did_key::CoreSign;
-use warp::crypto::{DID, Fingerprint};
+use warp::crypto::{Fingerprint, DID};
 use warp::error::Error;
 use warp::multipass::identity::{IdentityStatus, Platform, SHORT_ID_SIZE};
 
@@ -59,17 +59,16 @@ impl IdentityDocument {
             return false;
         }
 
-        if self.username != other.username
+        if other.verify().is_err() {
+            return false;
+        }
+
+        self.username != other.username
             || self.status_message != other.status_message
             || self.status != other.status
             || self.profile_banner != other.profile_banner
             || self.profile_picture != other.profile_picture
             || self.platform != other.platform
-        {
-            return other.verify().is_ok();
-        }
-
-        false
     }
 }
 
