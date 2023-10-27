@@ -7,13 +7,14 @@ use futures::{
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use uuid::Uuid;
-use warp::{crypto::DID, error::Error};
+use warp::{crypto::DID, error::Error, multipass::identity::IdentityStatus};
 
-use crate::store::{identity::Request, keystore::Keystore, VecExt};
+use crate::store::{ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
 
 use super::{
+    identity::IdentityDocument,
     utils::{GetLocalDag, ToCid},
-    RootDocument,
+    ExtractedRootDocument, RootDocument,
 };
 
 #[allow(clippy::large_enum_variant)]
@@ -23,6 +24,13 @@ pub enum RootDocumentCommand {
     },
     Set {
         document: RootDocument,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    Identity {
+        response: oneshot::Sender<Result<IdentityDocument, Error>>,
+    },
+    SetIdentityStatus {
+        status: IdentityStatus,
         response: oneshot::Sender<Result<(), Error>>,
     },
     AddFriend {
@@ -79,6 +87,12 @@ pub enum RootDocumentCommand {
     GetKeystore {
         id: Uuid,
         response: oneshot::Sender<Result<Keystore, Error>>,
+    },
+    Export {
+        response: oneshot::Sender<Result<ExtractedRootDocument, Error>>,
+    },
+    ExportEncrypted {
+        response: oneshot::Sender<Result<Vec<u8>, Error>>,
     },
 }
 
@@ -144,6 +158,29 @@ impl RootDocumentMap {
             .clone()
             .send(RootDocumentCommand::Set {
                 document,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn identity(&self) -> Result<IdentityDocument, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::Identity { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn set_status_indicator(&self, status: IdentityStatus) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::SetIdentityStatus {
+                status,
                 response: tx,
             })
             .await;
@@ -294,6 +331,26 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn export(&self) -> Result<ExtractedRootDocument, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::Export { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn export_bytes(&self) -> Result<Vec<u8>, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::ExportEncrypted { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -349,6 +406,9 @@ impl RootDocumentTask {
                 RootDocumentCommand::Set { document, response } => {
                     let _ = response.send(self.set_root_document(document).await);
                 }
+                RootDocumentCommand::Identity { response } => {
+                    let _ = response.send(self.identity().await);
+                }
                 RootDocumentCommand::AddFriend { did, response } => {
                     let _ = response.send(self.add_friend(did).await);
                 }
@@ -394,6 +454,15 @@ impl RootDocumentTask {
                 RootDocumentCommand::GetKeystoreMap { response } => {
                     let _ = response.send(self.get_conversation_keystore_map().await);
                 }
+                RootDocumentCommand::Export { response } => {
+                    let _ = response.send(self.export().await);
+                }
+                RootDocumentCommand::ExportEncrypted { response } => {
+                    let _ = response.send(self.export_bytes().await);
+                }
+                RootDocumentCommand::SetIdentityStatus { status, response } => {
+                    let _ = response.send(self.set_identity_status(status).await);
+                }
             }
         }
     }
@@ -407,6 +476,15 @@ impl RootDocumentTask {
         };
 
         document.verify(&self.ipfs).await?;
+
+        Ok(document)
+    }
+
+    async fn identity(&self) -> Result<IdentityDocument, Error> {
+        let root = self.get_root_document().await?;
+        let path = IpfsPath::from(root.identity);
+        let document: IdentityDocument = path.get_local_dag(&self.ipfs).await?;
+        document.verify()?;
 
         Ok(document)
     }
@@ -442,6 +520,18 @@ impl RootDocumentTask {
 
         self.cid = Some(root_cid);
         Ok(())
+    }
+
+    async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
+        let mut root = self.get_root_document().await?;
+        let mut identity = self.identity().await?;
+        root.status = Some(status);
+        identity.status = Some(status);
+
+        let identity = identity.sign(&self.keypair)?;
+        root.identity = identity.to_cid(&self.ipfs).await?;
+
+        self.set_root_document(root).await
     }
 
     async fn request_list(&self) -> Result<Vec<Request>, Error> {
@@ -707,5 +797,17 @@ impl RootDocumentTask {
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
         path.get_local_dag(&self.ipfs).await
+    }
+
+    async fn export(&self) -> Result<ExtractedRootDocument, Error> {
+        let document = self.get_root_document().await?;
+        document.export(&self.ipfs).await
+    }
+
+    async fn export_bytes(&self) -> Result<Vec<u8>, Error> {
+        let export = self.export().await?;
+
+        let bytes = serde_json::to_vec(&export)?;
+        ecdh_encrypt(&self.keypair, None, bytes)
     }
 }

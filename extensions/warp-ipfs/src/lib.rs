@@ -272,18 +272,7 @@ impl WarpIpfs {
 
         info!("Starting ipfs");
         let mut uninitialized = UninitializedIpfs::empty()
-            .set_listening_addrs(config.listen_on.clone())
-            .set_custom_behaviour(behaviour)
-            .set_keypair(keypair)
-            .enable_rendezvous_client()
-            .set_transport_configuration(TransportConfig {
-                yamux_update_mode: UpdateMode::Read,
-                ..Default::default()
-            })
-            .listen_as_external_addr()
-            .enable_relay(true)
-            .set_swarm_configuration(swarm_configuration)
-            .set_identify_configuration({
+            .with_identify(Some({
                 let mut idconfig = IdentifyConfiguration {
                     protocol_version: "/satellite/warp/0.1".into(),
                     ..Default::default()
@@ -292,21 +281,35 @@ impl WarpIpfs {
                     idconfig.agent_version = agent.clone();
                 }
                 idconfig
-            })
-            .set_kad_configuration(
-                KadConfig {
+            }))
+            .with_autonat()
+            .with_bitswap(None)
+            .with_kademlia(
+                Some(either::Either::Left(KadConfig {
                     query_timeout: std::time::Duration::from_secs(60),
                     publication_interval: Some(Duration::from_secs(30 * 60)),
                     provider_record_ttl: Some(Duration::from_secs(60 * 60)),
                     insert_method: KadInserts::Manual,
                     ..Default::default()
-                },
+                })),
                 Default::default(),
             )
-            .set_pubsub_configuration(PubsubConfig {
+            .with_ping(None)
+            .with_pubsub(Some(PubsubConfig {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
-            });
+            }))
+            .with_relay(true)
+            .set_listening_addrs(config.listen_on.clone())
+            .with_custom_behaviour(behaviour)
+            .set_keypair(keypair)
+            .with_rendezvous_client()
+            .set_transport_configuration(TransportConfig {
+                yamux_update_mode: UpdateMode::Read,
+                ..Default::default()
+            })
+            .listen_as_external_addr()
+            .set_swarm_configuration(swarm_configuration);
 
         if let Some(path) = self.config.path.as_ref() {
             info!("Instance will be persistent");
@@ -324,7 +327,7 @@ impl WarpIpfs {
         }
 
         if config.ipfs_setting.memory_transport {
-            uninitialized = uninitialized.set_custom_transport(Box::new(
+            uninitialized = uninitialized.with_custom_transport(Box::new(
                 |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
                     let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
@@ -350,11 +353,11 @@ impl WarpIpfs {
         }
 
         if config.ipfs_setting.portmapping {
-            uninitialized = uninitialized.enable_upnp();
+            uninitialized = uninitialized.with_upnp();
         }
 
         if config.ipfs_setting.mdns.enable {
-            uninitialized = uninitialized.enable_mdns();
+            uninitialized = uninitialized.with_mdns();
         }
 
         let ipfs = uninitialized.start().await?;
