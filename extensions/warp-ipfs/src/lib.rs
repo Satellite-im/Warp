@@ -1244,19 +1244,8 @@ impl Friends for WarpIpfs {
 #[async_trait::async_trait]
 impl FriendsEvent for WarpIpfs {
     async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
-        let mut rx = self.multipass_tx.subscribe();
-
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-
-        Ok(MultiPassEventStream(Box::pin(stream)))
+        let store = self.identity_store(true).await?;
+        Ok(MultiPassEventStream(store.subscribe()))
     }
 }
 
