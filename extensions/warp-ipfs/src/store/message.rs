@@ -22,6 +22,7 @@ use warp::crypto::{generate, DID};
 use warp::error::Error;
 use warp::logging::tracing::log::{debug, error, info, trace};
 use warp::logging::tracing::warn;
+use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState, Location,
     Message, MessageEvent, MessageEventKind, MessageOptions, MessageStatus, MessageStream,
@@ -33,7 +34,8 @@ use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;
 use crate::store::{
     connected_to_peer, ecdh_decrypt, ecdh_encrypt, get_keypair_did, sign_serde,
-    ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, PeerTopic,
+    ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, DidExt,
+    PeerTopic,
 };
 
 use super::conversation::{ConversationDocument, MessageDocument};
@@ -41,7 +43,7 @@ use super::discovery::Discovery;
 use super::document::conversation::Conversations;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
-use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, MessagingEvents};
+use super::{verify_serde_sig, ConversationEvents, MessagingEvents};
 
 type ConversationSender =
     UnboundedSender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
@@ -163,6 +165,8 @@ impl MessageStore {
 
                 let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
 
+                let mut identity_stream = store.identity.subscribe();
+
                 loop {
                     tokio::select! {
                         Some(message) = stream.next() => {
@@ -195,6 +199,11 @@ impl MessageStore {
                             }
 
                         }
+                        Some(id_event) = identity_stream.next() => {
+                            if let Err(e) = store.process_identity_events(id_event).await {
+                                warn!("Failed to process event: {e}");
+                            }
+                        }
                         _ = interval.tick() => {
                             if let Err(e) = store.process_queue().await {
                                 error!("Error processing queue: {e}");
@@ -207,6 +216,81 @@ impl MessageStore {
 
         tokio::task::yield_now().await;
         Ok(store)
+    }
+
+    async fn process_identity_events(&mut self, event: MultiPassEventKind) -> Result<(), Error> {
+        match event {
+            MultiPassEventKind::FriendAdded { did } => {
+                if !self.with_friends.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+
+                match self.create_conversation(&did).await {
+                    Ok(_) | Err(Error::ConversationExist { .. }) => return Ok(()),
+                    Err(e) => return Err(e),
+                }
+            }
+
+            MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did } => {
+                let list = self.conversations.list().await?;
+
+                for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
+                    let id = conversation.id();
+                    match conversation.conversation_type {
+                        ConversationType::Direct => {
+                            if let Err(e) = self.delete_conversation(id, true).await {
+                                warn!("Failed to delete conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                        ConversationType::Group => {
+                            if conversation.creator != Some((*self.did).clone()) {
+                                continue;
+                            }
+
+                            if let Err(e) = self.remove_recipient(id, &did, true).await {
+                                warn!("Failed to remove {did} from conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            MultiPassEventKind::FriendRemoved { did } => {
+                if !self.with_friends.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+
+                let list = self.conversations.list().await?;
+
+                for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
+                    let id = conversation.id();
+                    match conversation.conversation_type {
+                        ConversationType::Direct => {
+                            if let Err(e) = self.delete_conversation(id, true).await {
+                                warn!("Failed to delete conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                        ConversationType::Group => {
+                            if conversation.creator != Some((*self.did).clone()) {
+                                continue;
+                            }
+
+                            if let Err(e) = self.remove_recipient(id, &did, true).await {
+                                warn!("Failed to remove {did} from conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            MultiPassEventKind::IdentityOnline { .. } => {
+                //TODO: Check queue and process any entry once peer is subscribed to the respective topics.
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn start_event_task(&self, conversation_id: Uuid) {
@@ -466,8 +550,8 @@ impl MessageStore {
                                                         .ipfs
                                                         .pubsub_peers(Some(topic.clone()))
                                                         .await?;
-                                                    let peer_id = did_to_libp2p_pub(&sender)
-                                                        .map(|pk| pk.to_peer_id())?;
+
+                                                    let peer_id = sender.to_peer_id()?;
 
                                                     let bytes = payload.to_bytes()?;
 
@@ -628,7 +712,7 @@ impl MessageStore {
         let topic = conversation.reqres_topic(did);
 
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-        let peer_id = did_to_libp2p_pub(did).map(|pk| pk.to_peer_id())?;
+        let peer_id = did.to_peer_id()?;
 
         if !peers.contains(&peer_id)
             || (peers.contains(&peer_id)
@@ -715,7 +799,6 @@ impl MessageStore {
                                     Cipher::direct_decrypt(data.data(), &key)
                                 }
                             };
-                            drop(conversation);
 
                             let bytes = match bytes_results {
                                 Ok(b) => b,
@@ -1656,7 +1739,7 @@ impl MessageStore {
 
         self.start_task(convo_id, stream).await;
 
-        let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
+        let peer_id = did_key.to_peer_id()?;
 
         let event = ConversationEvents::NewConversation {
             recipient: own_did.clone(),
@@ -1781,8 +1864,7 @@ impl MessageStore {
             .iter()
             .filter(|did| own_did.ne(did))
             .map(|did| (did.clone(), did))
-            .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
-            .map(|(did, pk)| (did, pk.to_peer_id()))
+            .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
 
         let conversation = self.conversations.get(convo_id).await?;
@@ -1891,8 +1973,8 @@ impl MessageStore {
                     .iter()
                     .filter(|did| own_did.ne(did))
                     .map(|did| (did.clone(), did))
-                    .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
-                    .map(|(did, pk)| (did, pk.to_peer_id()))
+                    .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
+                    .map(|(did, pk)| (did, pk))
                     .collect::<Vec<_>>();
 
                 let event = serde_json::to_vec(&ConversationEvents::DeleteConversation {
@@ -2051,7 +2133,7 @@ impl MessageStore {
 
         let payload = Payload::new(own_did, &bytes, &signature);
 
-        let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
+        let peer_id = did_key.to_peer_id()?;
         let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
 
         let mut time = true;
@@ -3238,7 +3320,7 @@ impl MessageStore {
             .iter()
             .filter(|did| own_did.ne(did))
         {
-            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
+            let peer_id = recipient.to_peer_id()?;
 
             // We want to confirm that there is atleast one peer subscribed before attempting to send a message
             match peers.contains(&peer_id) {
