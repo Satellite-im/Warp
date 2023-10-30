@@ -115,21 +115,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::fs::create_dir_all(path).await?;
     }
 
-    let keypair = match opts.keyfile {
+    let keypair = match opts
+        .keyfile
+        .map(|kp| path.as_ref().map(|p| p.join(kp.clone())).unwrap_or(kp))
+    {
         Some(kp) => match kp.is_file() {
             true => {
+                tracing::info!("Reading keypair from {}", kp.display());
                 let kp_str = tokio::fs::read_to_string(&kp).await?;
                 decode_kp(&kp_str)?
             }
             false => {
+                tracing::info!("Generating keypair");
                 let k = Keypair::generate_ed25519();
                 let encoded_kp = encode_kp(&k)?;
                 let kp = path.as_ref().map(|p| p.join(kp.clone())).unwrap_or(kp);
+                tracing::info!("Saving keypair to {}", kp.display());
                 tokio::fs::write(kp, &encoded_kp).await?;
                 k
             }
         },
-        None => Keypair::generate_ed25519(),
+        None => {
+            tracing::info!("Generating keypair");
+            Keypair::generate_ed25519()
+        }
     };
 
     let local_peer_id = keypair.public().to_peer_id();
