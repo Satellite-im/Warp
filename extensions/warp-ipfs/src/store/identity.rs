@@ -578,6 +578,8 @@ impl IdentityStore {
                         .add_request(&Request::In(data.sender.clone()))
                         .await?;
 
+                    _ = self.export_identity_document().await;
+
                     let from = data.sender.clone();
 
                     if self.identity_cache.get(&from).await.is_err() {
@@ -606,6 +608,8 @@ impl IdentityStore {
 
                 self.root_document.remove_request(&internal_request).await?;
 
+                _ = self.export_identity_document().await;
+
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
                     did: data.sender,
                 });
@@ -626,6 +630,8 @@ impl IdentityStore {
                     .ok_or(Error::FriendRequestDoesntExist)?;
 
                 self.root_document.remove_request(&internal_request).await?;
+
+                _ = self.export_identity_document().await;
 
                 self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
                     did: data.sender,
@@ -653,6 +659,7 @@ impl IdentityStore {
 
                 let completed = self.root_document.add_block_by(&data.sender).await.is_ok();
                 if completed {
+                    _ = self.export_identity_document().await;
                     let sender = data.sender.clone();
 
                     let _ = self.push(&sender).await.ok();
@@ -674,6 +681,8 @@ impl IdentityStore {
                     .is_ok();
 
                 if completed {
+                    _ = self.export_identity_document().await;
+
                     let sender = data.sender.clone();
 
                     let _ = self.push(&sender).await.ok();
@@ -1478,53 +1487,7 @@ impl IdentityStore {
 
     pub async fn export_identity_document(&mut self) -> Result<(), Error> {
         let document = self.own_identity_document().await?;
-
-        if let Some(sender) = self.identity_command.as_mut() {
-            if let DiscoveryConfig::Namespace {
-                discovery_type: DiscoveryType::RzPoint { addresses },
-                ..
-            } = self.discovery.discovery_config()
-            {
-                for addr in addresses {
-                    let Some(peer_id) = addr.peer_id() else {
-                        continue;
-                    };
-
-                    let (tx, rx) = futures::channel::oneshot::channel();
-                    let _ = sender
-                        .send(shuttle::identity::IdentityCommand::Synchronized {
-                            peer_id,
-                            identity: document.clone().into(),
-                            package: None,
-                            response: tx,
-                        })
-                        .await;
-
-                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
-                        Ok(Ok(Ok(_))) => {
-                            break;
-                        }
-                        Ok(Ok(Err(e))) => {
-                            log::error!("Error exporting to {peer_id}: {e}");
-                            break;
-                        }
-                        Ok(Err(Canceled)) => {
-                            log::error!("Channel been unexpectedly closed for {peer_id}");
-                            continue;
-                        }
-                        Err(_) => {
-                            log::error!("Request timeout for {peer_id}");
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn export_identity_remote(&mut self, package: Vec<u8>) -> Result<(), Error> {
-        let document = self.own_identity_document().await?;
+        let package = self.root_document.export_bytes().await?;
 
         if let Some(sender) = self.identity_command.as_mut() {
             if let DiscoveryConfig::Namespace {
@@ -1728,11 +1691,15 @@ impl IdentityStore {
                         match tokio::time::timeout(Duration::from_secs(20), rx).await {
                             Ok(Ok(Ok(list))) => {
                                 for ident in &list {
+                                    let ident = ident.clone().into();
+                                    _ = self.identity_cache.insert(&ident).await;
+
                                     if self.discovery.contains(&ident.did).await {
                                         continue;
                                     }
                                     let _ = self.discovery.insert(&ident.did).await;
                                 }
+
                                 idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
                                 break;
                             }
@@ -1840,6 +1807,7 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
         self.root_document.set_status_indicator(status).await?;
+        _ = self.export_identity_document().await;
         *self.online_status.write().await = Some(status);
         self.push_to_all().await;
         Ok(())
@@ -2144,6 +2112,8 @@ impl IdentityStore {
 
             self.root_document.remove_request(internal_request).await?;
 
+            _ = self.export_identity_document().await;
+
             return Ok(());
         }
 
@@ -2152,9 +2122,8 @@ impl IdentityStore {
             sender: local_public_key,
         };
 
-        self.add_friend(pubkey).await?;
-
         self.root_document.remove_request(internal_request).await?;
+        self.add_friend(pubkey).await?;
 
         self.broadcast_request((pubkey, &payload), false, true)
             .await
@@ -2187,6 +2156,8 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
+        _ = self.export_identity_document().await;
+
         self.broadcast_request((pubkey, &payload), false, true)
             .await
     }
@@ -2208,6 +2179,8 @@ impl IdentityStore {
         };
 
         self.root_document.remove_request(internal_request).await?;
+
+        _ = self.export_identity_document().await;
 
         if let Some(entry) = self.queue.get(pubkey).await {
             if entry.event == Event::Request {
@@ -2259,6 +2232,8 @@ impl IdentityStore {
 
         self.root_document.add_block(pubkey).await?;
 
+        _ = self.export_identity_document().await;
+
         // Remove anything from queue related to the key
         self.queue.remove(pubkey).await;
 
@@ -2304,6 +2279,8 @@ impl IdentityStore {
 
         self.root_document.remove_block(pubkey).await?;
 
+        _ = self.export_identity_document().await;
+
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
 
@@ -2345,6 +2322,8 @@ impl IdentityStore {
 
         self.root_document.add_friend(pubkey).await?;
 
+        _ = self.export_identity_document().await;
+
         let phonebook = self.phonebook();
         if let Err(_e) = phonebook.add_friend(pubkey).await {
             error!("Error: {_e}");
@@ -2368,6 +2347,7 @@ impl IdentityStore {
         }
 
         self.root_document.remove_friend(pubkey).await?;
+        _ = self.export_identity_document().await;
 
         let phonebook = self.phonebook();
 
@@ -2479,6 +2459,7 @@ impl IdentityStore {
             let list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
                 self.root_document.add_request(&outgoing_request).await?;
+                _ = self.export_identity_document().await;
             }
         }
 

@@ -152,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_relay(true)
         .with_relay_server(Some(RelayConfig {
             max_circuits: 512,
-            max_circuits_per_peer: 8,
+            max_circuits_per_peer: 64,
             max_circuit_duration: Duration::from_secs(2 * 60),
             max_circuit_bytes: 8 * 1024 * 1024,
 
@@ -167,16 +167,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             ],
 
-            max_reservations_per_peer: 16,
-            max_reservations: 128,
+            max_reservations_per_peer: 64,
+            max_reservations: 1024,
             reservation_duration: Duration::from_secs(60 * 60),
             reservation_rate_limiters: vec![
                 RateLimit::PerIp {
-                    limit: 60.try_into().expect("Greater than 0"),
+                    limit: 256.try_into().expect("Greater than 0"),
                     interval: Duration::from_secs(60),
                 },
                 RateLimit::PerPeer {
-                    limit: 60.try_into().expect("Greater than 0"),
+                    limit: 256.try_into().expect("Greater than 0"),
                     interval: Duration::from_secs(60),
                 },
             ],

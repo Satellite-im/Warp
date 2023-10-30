@@ -69,8 +69,8 @@ use warp::multipass::{
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
+use crate::store::ecdh_decrypt;
 use crate::store::phonebook::PhoneBook;
-use crate::store::{ecdh_decrypt, ecdh_encrypt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
@@ -1137,26 +1137,19 @@ impl MultiPassImportExport for WarpIpfs {
 
     async fn export_identity<'a>(&mut self, location: ImportLocation<'a>) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
-        let kp = store.get_keypair_did()?;
-        let ipfs = self.ipfs()?;
-        let document = store.root_document().get().await?;
-
-        let exported = document.export(&ipfs).await?;
-
-        let bytes = serde_json::to_vec(&exported)?;
-        let encrypted_bundle = ecdh_encrypt(&kp, None, bytes)?;
 
         match location {
             ImportLocation::Local { path } => {
-                tokio::fs::write(path, encrypted_bundle).await?;
+                let bundle = store.root_document().export_bytes().await?;
+                tokio::fs::write(path, bundle).await?;
                 Ok(())
             }
             ImportLocation::Memory { buffer } => {
-                *buffer = encrypted_bundle;
+                *buffer = store.root_document().export_bytes().await?;
                 Ok(())
             }
             ImportLocation::Remote => {
-                store.export_identity_remote(encrypted_bundle).await?;
+                store.export_identity_document().await?;
                 Ok(())
             }
         }
