@@ -18,6 +18,8 @@ use mime_types::*;
 use uuid::Uuid;
 mod audio_config;
 pub use audio_config::*;
+mod call_config;
+pub use call_config::*;
 
 use crate::{
     crypto::DID,
@@ -83,6 +85,8 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     async fn disable_camera(&mut self) -> Result<(), Error>;
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error>;
     async fn stop_recording(&mut self) -> Result<(), Error>;
+
+    async fn get_call_config(&self) -> Result<Option<CallConfig>, Error>;
 
     fn enable_automute(&mut self) -> Result<(), Error>;
     fn disable_automute(&mut self) -> Result<(), Error>;
