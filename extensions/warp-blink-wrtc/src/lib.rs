@@ -629,7 +629,27 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                         }
                         webrtc_controller.write().await.hang_up(&sender).await;
                         if let Err(e) = ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
-                            log::error!("failed to send ParticipantLeft Event: {e}");
+                            log::error!("failed to send ParticipantLeft event: {e}");
+                        }
+                    },
+                    CallSignal::Muted => {
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantMuted { peer_id: sender }) {
+                            log::error!("failed to send ParticipantMuted event: {e}");
+                        }
+                    },
+                    CallSignal::Unmuted => {
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantUnmuted { peer_id: sender }) {
+                            log::error!("failed to send ParticipantUnmuted event: {e}");
+                        }
+                    }
+                    CallSignal::Deafened => {
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantDeafened { peer_id: sender }) {
+                            log::error!("failed to send ParticipantDeafened event: {e}");
+                        }
+                    },
+                    CallSignal::Undeafened => {
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantUndeafened { peer_id: sender }) {
+                            log::error!("failed to send ParticipantUndeafened event: {e}");
                         }
                     },
                 }
@@ -1134,6 +1154,12 @@ impl Blink for BlinkImpl {
         host_media::unmute_self()
             .await
             .map_err(|e| warp::error::Error::OtherWithContext(e.to_string()))
+    }
+    async fn silence_call(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+    async fn unsilence_call(&mut self) -> Result<(), Error> {
+        todo!()
     }
     async fn enable_camera(&mut self) -> Result<(), Error> {
         Err(Error::Unimplemented)

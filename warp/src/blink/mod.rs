@@ -77,6 +77,8 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
 
     async fn mute_self(&mut self) -> Result<(), Error>;
     async fn unmute_self(&mut self) -> Result<(), Error>;
+    async fn silence_call(&mut self) -> Result<(), Error>;
+    async fn unsilence_call(&mut self) -> Result<(), Error>;
     async fn enable_camera(&mut self) -> Result<(), Error>;
     async fn disable_camera(&mut self) -> Result<(), Error>;
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error>;
@@ -127,6 +129,14 @@ pub enum BlinkEventKind {
     ParticipantSpeaking { peer_id: DID },
     #[display(fmt = "SelfSpeaking")]
     SelfSpeaking,
+    #[display(fmt = "ParticipantMuted")]
+    ParticipantMuted { peer_id: DID },
+    #[display(fmt = "ParticipantUnmuted")]
+    ParticipantUnmuted { peer_id: DID },
+    #[display(fmt = "ParticipantDeafened")]
+    ParticipantDeafened { peer_id: DID },
+    #[display(fmt = "ParticipantUndeafened")]
+    ParticipantUndeafened { peer_id: DID },
     /// audio packets were dropped for the peer
     #[display(fmt = "AudioDegradation")]
     AudioDegradation { peer_id: DID },
