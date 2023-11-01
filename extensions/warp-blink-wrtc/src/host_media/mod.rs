@@ -266,9 +266,6 @@ pub async fn deafen() -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
     unsafe {
         DATA.deafened = true;
-    }
-
-    unsafe {
         for (_id, track) in DATA.audio_sink_tracks.iter() {
             track
                 .pause()
@@ -283,9 +280,6 @@ pub async fn undeafen() -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
     unsafe {
         DATA.deafened = false;
-    }
-
-    unsafe {
         for (_id, track) in DATA.audio_sink_tracks.iter() {
             track
                 .play()
