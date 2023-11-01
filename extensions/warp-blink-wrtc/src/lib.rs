@@ -1132,9 +1132,7 @@ impl Blink for BlinkImpl {
         if self.active_call.read().await.is_none() {
             return Err(Error::CallNotInProgress);
         }
-        host_media::mute_self()
-            .await
-            .map_err(|e| warp::error::Error::OtherWithContext(e.to_string()))?;
+        host_media::mute_self().await?;
 
         let lock = self.ipfs.read().await;
         let ipfs = match lock.as_ref() {
@@ -1162,9 +1160,7 @@ impl Blink for BlinkImpl {
         if self.active_call.read().await.is_none() {
             return Err(Error::CallNotInProgress);
         }
-        host_media::unmute_self()
-            .await
-            .map_err(|e| warp::error::Error::OtherWithContext(e.to_string()))?;
+        host_media::unmute_self().await?;
 
         let lock = self.ipfs.read().await;
         let ipfs = match lock.as_ref() {
