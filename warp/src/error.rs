@@ -222,6 +222,10 @@ pub enum Error {
     // indicates a problem enumerating audio I/O devices
     #[error("AudioHostError: {_0}")]
     AudioHostError(String),
+    #[error("CallNotInProgress")]
+    CallNotInProgress,
+    #[error("BlinkNotInitialized")]
+    BlinkNotInitialized,
 
     //Misc
     #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]

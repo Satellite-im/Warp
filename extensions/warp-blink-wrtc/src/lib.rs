@@ -47,7 +47,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{AudioDeviceConfig, Blink, BlinkEventKind, BlinkEventStream, CallInfo},
+    blink::{AudioDeviceConfig, Blink, BlinkEventKind, BlinkEventStream, CallConfig, CallInfo},
     crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     module::Module,
@@ -93,6 +93,7 @@ struct ActiveCall {
     call: CallInfo,
     connected_participants: HashMap<DID, PeerState>,
     call_state: CallState,
+    call_config: CallConfig,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -119,6 +120,7 @@ impl From<CallInfo> for ActiveCall {
             call: value,
             connected_participants: HashMap::new(),
             call_state: CallState::Uninitialized,
+            call_config: CallConfig::default(),
         }
     }
 }
@@ -629,7 +631,27 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                         }
                         webrtc_controller.write().await.hang_up(&sender).await;
                         if let Err(e) = ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
-                            log::error!("failed to send ParticipantLeft Event: {e}");
+                            log::error!("failed to send ParticipantLeft event: {e}");
+                        }
+                    },
+                    CallSignal::Muted => {
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantMuted { peer_id: sender }) {
+                            log::error!("failed to send ParticipantMuted event: {e}");
+                        }
+                    },
+                    CallSignal::Unmuted => {
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantUnmuted { peer_id: sender }) {
+                            log::error!("failed to send ParticipantUnmuted event: {e}");
+                        }
+                    }
+                    CallSignal::Deafened => {
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantDeafened { peer_id: sender }) {
+                            log::error!("failed to send ParticipantDeafened event: {e}");
+                        }
+                    },
+                    CallSignal::Undeafened => {
+                        if let Err(e) = ch.send(BlinkEventKind::ParticipantUndeafened { peer_id: sender }) {
+                            log::error!("failed to send ParticipantUndeafened event: {e}");
                         }
                     },
                 }
@@ -880,9 +902,7 @@ impl Blink for BlinkImpl {
         mut participants: Vec<DID>,
     ) -> Result<Uuid, Error> {
         if self.ipfs.read().await.is_none() {
-            return Err(Error::OtherWithContext(
-                "no ipfs - received signal before blink is initialized".into(),
-            ));
+            return Err(Error::BlinkNotInitialized);
         }
         if let Some(ac) = self.active_call.read().await.as_ref() {
             if ac.call_state != CallState::Closed {
@@ -896,9 +916,7 @@ impl Blink for BlinkImpl {
             let own_id = match lock.as_ref() {
                 Some(r) => r,
                 None => {
-                    return Err(Error::OtherWithContext(
-                        "no own_id - received signal before blink is initialized".into(),
-                    ));
+                    return Err(Error::BlinkNotInitialized);
                 }
             };
 
@@ -914,18 +932,14 @@ impl Blink for BlinkImpl {
         let own_id = match lock.as_ref() {
             Some(r) => r,
             None => {
-                return Err(Error::OtherWithContext(
-                    "no own_id - received signal before blink is initialized".into(),
-                ));
+                return Err(Error::BlinkNotInitialized);
             }
         };
         let lock = self.ipfs.read().await;
         let ipfs = match lock.as_ref() {
             Some(r) => r,
             None => {
-                return Err(Error::OtherWithContext(
-                    "no ipfs - received signal before blink is initialized".into(),
-                ));
+                return Err(Error::BlinkNotInitialized);
             }
         };
         for dest in participants {
@@ -946,9 +960,7 @@ impl Blink for BlinkImpl {
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         if self.ipfs.read().await.is_none() {
-            return Err(Error::OtherWithContext(
-                "received signal before blink is initialized".into(),
-            ));
+            return Err(Error::BlinkNotInitialized);
         }
         if let Some(ac) = self.active_call.read().await.as_ref() {
             if ac.call_state != CallState::Closed {
@@ -975,9 +987,7 @@ impl Blink for BlinkImpl {
             Some(r) => r,
             None => {
                 // should never happen
-                return Err(Error::OtherWithContext(
-                    "received signal before blink is initialized".into(),
-                ));
+                return Err(Error::BlinkNotInitialized);
             }
         };
         if let Err(e) = send_signal_aes(ipfs, &call.group_key(), signal, topic).await {
@@ -991,9 +1001,7 @@ impl Blink for BlinkImpl {
         let ipfs = match lock.as_ref() {
             Some(r) => r,
             None => {
-                return Err(Error::OtherWithContext(
-                    "received signal before blink is initialized".into(),
-                ));
+                return Err(Error::BlinkNotInitialized);
             }
         };
         if let Some(pc) = self.pending_calls.write().await.remove(&call_id) {
@@ -1015,9 +1023,7 @@ impl Blink for BlinkImpl {
         let own_id = match lock.as_ref() {
             Some(r) => r,
             None => {
-                return Err(Error::OtherWithContext(
-                    "received signal before blink is initialized".into(),
-                ));
+                return Err(Error::BlinkNotInitialized);
             }
         };
 
@@ -1025,9 +1031,7 @@ impl Blink for BlinkImpl {
         let ipfs = match lock.as_ref() {
             Some(r) => r,
             None => {
-                return Err(Error::OtherWithContext(
-                    "received signal before blink is initialized".into(),
-                ));
+                return Err(Error::BlinkNotInitialized);
             }
         };
         if let Some(ac) = self.active_call.write().await.as_mut() {
@@ -1050,7 +1054,6 @@ impl Blink for BlinkImpl {
             };
 
             let call_id = ac.call.call_id();
-
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Leave { call_id };
             if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
@@ -1126,15 +1129,125 @@ impl Blink for BlinkImpl {
     // ------ Media controls ------
 
     async fn mute_self(&mut self) -> Result<(), Error> {
-        host_media::mute_self()
-            .await
-            .map_err(|e| warp::error::Error::OtherWithContext(e.to_string()))
+        if self.active_call.read().await.is_none() {
+            return Err(Error::CallNotInProgress);
+        }
+        host_media::mute_self().await?;
+
+        let lock = self.ipfs.read().await;
+        let ipfs = match lock.as_ref() {
+            Some(r) => r,
+            None => {
+                return Err(Error::BlinkNotInitialized);
+            }
+        };
+
+        if let Some(ac) = self.active_call.write().await.as_mut() {
+            ac.call_config.self_muted = true;
+            let call_id = ac.call.call_id();
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Muted;
+            if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
+            } else {
+                log::debug!("sent signal to mute self");
+            }
+        }
+
+        Ok(())
     }
     async fn unmute_self(&mut self) -> Result<(), Error> {
-        host_media::unmute_self()
-            .await
-            .map_err(|e| warp::error::Error::OtherWithContext(e.to_string()))
+        if self.active_call.read().await.is_none() {
+            return Err(Error::CallNotInProgress);
+        }
+        host_media::unmute_self().await?;
+
+        let lock = self.ipfs.read().await;
+        let ipfs = match lock.as_ref() {
+            Some(r) => r,
+            None => {
+                return Err(Error::BlinkNotInitialized);
+            }
+        };
+
+        if let Some(ac) = self.active_call.write().await.as_mut() {
+            ac.call_config.self_muted = false;
+            let call_id = ac.call.call_id();
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Unmuted;
+            if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
+            } else {
+                log::debug!("sent signal to unmute self");
+            }
+        }
+
+        Ok(())
     }
+    async fn silence_call(&mut self) -> Result<(), Error> {
+        if self.active_call.read().await.is_none() {
+            return Err(Error::CallNotInProgress);
+        }
+        host_media::deafen().await?;
+        let lock = self.ipfs.read().await;
+        let ipfs = match lock.as_ref() {
+            Some(r) => r,
+            None => {
+                return Err(Error::BlinkNotInitialized);
+            }
+        };
+
+        if let Some(ac) = self.active_call.write().await.as_mut() {
+            ac.call_config.self_deafened = true;
+            let call_id = ac.call.call_id();
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Deafened;
+            if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
+            } else {
+                log::debug!("sent signal to deafen self");
+            }
+        }
+
+        Ok(())
+    }
+    async fn unsilence_call(&mut self) -> Result<(), Error> {
+        if self.active_call.read().await.is_none() {
+            return Err(Error::CallNotInProgress);
+        }
+        host_media::undeafen().await?;
+        let lock = self.ipfs.read().await;
+        let ipfs = match lock.as_ref() {
+            Some(r) => r,
+            None => {
+                return Err(Error::BlinkNotInitialized);
+            }
+        };
+
+        if let Some(ac) = self.active_call.write().await.as_mut() {
+            ac.call_config.self_deafened = false;
+            let call_id = ac.call.call_id();
+            let topic = ipfs_routes::call_signal_route(&call_id);
+            let signal = CallSignal::Undeafened;
+            if let Err(e) = send_signal_aes(ipfs, &ac.call.group_key(), signal, topic).await {
+                log::error!("failed to send signal: {e}");
+            } else {
+                log::debug!("sent signal to undeafen self");
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn get_call_config(&self) -> Result<Option<CallConfig>, Error> {
+        Ok(self
+            .active_call
+            .read()
+            .await
+            .as_ref()
+            .map(|x| x.call_config.clone()))
+    }
+
     async fn enable_camera(&mut self) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
@@ -1143,7 +1256,7 @@ impl Blink for BlinkImpl {
     }
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error> {
         match self.active_call.read().await.as_ref() {
-            None => return Err(Error::OtherWithContext("no call to record".into())),
+            None => return Err(Error::CallNotInProgress),
             Some(ActiveCall { call, .. }) => {
                 host_media::init_recording(Mp4LoggerConfig {
                     call_id: call.call_id(),
@@ -1159,7 +1272,7 @@ impl Blink for BlinkImpl {
     }
     async fn stop_recording(&mut self) -> Result<(), Error> {
         match self.active_call.read().await.as_ref() {
-            None => return Err(Error::OtherWithContext("no call to pause".into())),
+            None => return Err(Error::CallNotInProgress),
             Some(_) => {
                 host_media::pause_recording().await?;
             }

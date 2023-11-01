@@ -59,6 +59,10 @@ enum Repl {
     MuteSelf,
     /// unmute self
     UnmuteSelf,
+    /// silence the call
+    Deafen,
+    /// unsilence the call
+    Undeafen,
     /// enable automute (enabled by default)
     EnableAutomute,
     /// disable automute
@@ -157,6 +161,8 @@ async fn handle_command(
         Repl::UnmuteSelf => {
             blink.unmute_self().await?;
         }
+        Repl::Deafen => blink.silence_call().await?,
+        Repl::Undeafen => blink.unsilence_call().await?,
         Repl::EnableAutomute => {
             blink.enable_automute()?;
         }
