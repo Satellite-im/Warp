@@ -1,9 +1,9 @@
-use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use warp::blink::{BlinkEventKind, MimeType};
 use warp::crypto::DID;
+use warp::error::Error;
 use webrtc::track::{
     track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote,
 };
@@ -97,20 +97,20 @@ pub trait SourceTrack {
         track: Arc<TrackLocalStaticRTP>,
         webrtc_codec: AudioCodec,
         source_config: AudioHardwareConfig,
-    ) -> Result<Self>
+    ) -> Result<Self, Error>
     where
         Self: Sized;
 
-    fn play(&self) -> Result<()>;
-    fn pause(&self) -> Result<()>;
+    fn play(&self) -> Result<(), Error>;
+    fn pause(&self) -> Result<(), Error>;
     // should not require RTP renegotiation
     fn change_input_device(
         &mut self,
         input_device: &cpal::Device,
         source_config: AudioHardwareConfig,
-    ) -> Result<()>;
-    fn init_mp4_logger(&mut self) -> Result<()>;
-    fn remove_mp4_logger(&mut self) -> Result<()>;
+    ) -> Result<(), Error>;
+    fn init_mp4_logger(&mut self) -> Result<(), Error>;
+    fn remove_mp4_logger(&mut self) -> Result<(), Error>;
 }
 
 // stores the TrackRemote at least
@@ -122,19 +122,19 @@ pub trait SinkTrack {
         track: Arc<TrackRemote>,
         webrtc_codec: AudioCodec,
         sink_config: AudioHardwareConfig,
-    ) -> Result<Self>
+    ) -> Result<Self, Error>
     where
         Self: Sized;
-    fn play(&self) -> Result<()>;
-    fn pause(&self) -> Result<()>;
+    fn play(&self) -> Result<(), Error>;
+    fn pause(&self) -> Result<(), Error>;
     fn change_output_device(
         &mut self,
         output_device: &cpal::Device,
         sink_config: AudioHardwareConfig,
-    ) -> anyhow::Result<()>;
-    fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<()>;
-    fn init_mp4_logger(&mut self) -> Result<()>;
-    fn remove_mp4_logger(&mut self) -> Result<()>;
+    ) -> Result<(), Error>;
+    fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<(), Error>;
+    fn init_mp4_logger(&mut self) -> Result<(), Error>;
+    fn remove_mp4_logger(&mut self) -> Result<(), Error>;
 }
 
 /// Uses the MIME type from codec to determine which implementation of SourceTrack to create
@@ -145,7 +145,7 @@ pub fn create_source_track(
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: AudioCodec,
     source_config: AudioHardwareConfig,
-) -> Result<Box<dyn SourceTrack>> {
+) -> Result<Box<dyn SourceTrack>, Error> {
     match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSource::init(
             own_id,
@@ -155,9 +155,7 @@ pub fn create_source_track(
             webrtc_codec,
             source_config,
         )?)),
-        _ => {
-            bail!("unhandled mime type: {}", &webrtc_codec.mime_type());
-        }
+        _ => Err(Error::InvalidMimeType(webrtc_codec.mime_type())),
     }
 }
 
@@ -169,7 +167,7 @@ pub fn create_sink_track(
     track: Arc<TrackRemote>,
     webrtc_codec: AudioCodec,
     sink_config: AudioHardwareConfig,
-) -> Result<Box<dyn SinkTrack>> {
+) -> Result<Box<dyn SinkTrack>, Error> {
     match MimeType::try_from(webrtc_codec.mime_type().as_str())? {
         MimeType::OPUS => Ok(Box::new(OpusSink::init(
             peer_id,
@@ -179,70 +177,75 @@ pub fn create_sink_track(
             webrtc_codec,
             sink_config,
         )?)),
-        _ => {
-            bail!("unhandled mime type: {}", &webrtc_codec.mime_type());
-        }
+        _ => Err(Error::InvalidMimeType(webrtc_codec.mime_type())),
     }
 }
 
-pub fn get_input_device(
-    host_id: cpal::HostId,
-    device_name: String,
-) -> anyhow::Result<cpal::Device> {
+pub fn get_input_device(host_id: cpal::HostId, device_name: String) -> Result<cpal::Device, Error> {
     let host = match cpal::available_hosts().iter().find(|h| **h == host_id) {
         Some(h) => match cpal::platform::host_from_id(*h) {
             Ok(h) => h,
             Err(e) => {
-                bail!("failed to get host from id: {e}");
+                return Err(Error::OtherWithContext(format!(
+                    "failed to get host from id: {e}"
+                )));
             }
         },
         None => {
-            bail!("failed to find host");
+            return Err(Error::OtherWithContext("failed to find host".into()));
         }
     };
 
-    let device = host.input_devices()?.find(|d| {
-        if let Ok(n) = d.name() {
-            n == device_name
-        } else {
-            false
-        }
-    });
+    let device = host
+        .input_devices()
+        .map_err(|x| Error::OtherWithContext(x.to_string()))?
+        .find(|d| {
+            if let Ok(n) = d.name() {
+                n == device_name
+            } else {
+                false
+            }
+        });
 
     if let Some(d) = device {
         Ok(d)
     } else {
-        bail!("could not find device")
+        Err(Error::AudioDeviceNotFound)
     }
 }
 
 pub fn get_output_device(
     host_id: cpal::HostId,
     device_name: String,
-) -> anyhow::Result<cpal::Device> {
+) -> Result<cpal::Device, Error> {
     let host = match cpal::available_hosts().iter().find(|h| **h == host_id) {
         Some(h) => match cpal::platform::host_from_id(*h) {
             Ok(h) => h,
             Err(e) => {
-                bail!("failed to get host from id: {e}");
+                return Err(Error::OtherWithContext(format!(
+                    "failed to get host from id: {e}"
+                )));
             }
         },
         None => {
-            bail!("failed to find host");
+            return Err(Error::OtherWithContext("failed to find host".into()));
         }
     };
 
-    let device = host.output_devices()?.find(|d| {
-        if let Ok(n) = d.name() {
-            n == device_name
-        } else {
-            false
-        }
-    });
+    let device = host
+        .output_devices()
+        .map_err(|x| Error::OtherWithContext(x.to_string()))?
+        .find(|d| {
+            if let Ok(n) = d.name() {
+                n == device_name
+            } else {
+                false
+            }
+        });
 
     if let Some(d) = device {
         Ok(d)
     } else {
-        bail!("could not find device")
+        Err(Error::AudioDeviceNotFound)
     }
 }

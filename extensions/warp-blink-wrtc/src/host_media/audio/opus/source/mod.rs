@@ -1,4 +1,3 @@
-use anyhow::Result;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     SampleRate,
@@ -8,7 +7,7 @@ use ringbuf::HeapRb;
 
 use std::{ops::Mul, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
-use warp::{blink::BlinkEventKind, crypto::DID};
+use warp::{blink::BlinkEventKind, crypto::DID, error::Error};
 
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
@@ -54,7 +53,7 @@ impl SourceTrack for OpusSource {
         track: Arc<TrackLocalStaticRTP>,
         webrtc_codec: AudioCodec,
         source_config: AudioHardwareConfig,
-    ) -> Result<Self>
+    ) -> Result<Self, Error>
     where
         Self: Sized,
     {
@@ -83,13 +82,17 @@ impl SourceTrack for OpusSource {
         })
     }
 
-    fn play(&self) -> Result<()> {
-        self.stream.play()?;
+    fn play(&self) -> Result<(), Error> {
+        self.stream
+            .play()
+            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         *self.muted.write() = false;
         Ok(())
     }
-    fn pause(&self) -> Result<()> {
-        self.stream.pause()?;
+    fn pause(&self) -> Result<(), Error> {
+        self.stream
+            .pause()
+            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         *self.muted.write() = true;
         Ok(())
     }
@@ -98,8 +101,10 @@ impl SourceTrack for OpusSource {
         &mut self,
         input_device: &cpal::Device,
         source_config: AudioHardwareConfig,
-    ) -> Result<()> {
-        self.stream.pause()?;
+    ) -> Result<(), Error> {
+        self.stream
+            .pause()
+            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         self.packetizer_handle.abort();
         let (stream, handle) = create_source_track(
             input_device,
@@ -113,18 +118,20 @@ impl SourceTrack for OpusSource {
         self.stream = stream;
         self.packetizer_handle = handle;
         if !*self.muted.read() {
-            self.stream.play()?;
+            self.stream
+                .play()
+                .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         }
         Ok(())
     }
 
-    fn init_mp4_logger(&mut self) -> Result<()> {
+    fn init_mp4_logger(&mut self) -> Result<(), Error> {
         let mp4_logger = mp4_logger::get_audio_logger(&self.own_id)?;
         self.mp4_logger.write().replace(mp4_logger);
         Ok(())
     }
 
-    fn remove_mp4_logger(&mut self) -> Result<()> {
+    fn remove_mp4_logger(&mut self) -> Result<(), Error> {
         self.mp4_logger.write().take();
         Ok(())
     }
@@ -138,7 +145,7 @@ fn create_source_track(
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
     muted: Arc<warp::sync::RwLock<bool>>,
-) -> Result<(cpal::Stream, JoinHandle<()>)> {
+) -> Result<(cpal::Stream, JoinHandle<()>), Error> {
     let config = cpal::StreamConfig {
         channels: source_config.channels(),
         sample_rate: SampleRate(source_config.sample_rate()),

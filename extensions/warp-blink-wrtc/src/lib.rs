@@ -277,17 +277,17 @@ impl BlinkImpl {
         Ok(Box::new(blink_impl))
     }
 
-    async fn init_call(&mut self, call: CallInfo) -> anyhow::Result<()> {
+    async fn init_call(&mut self, call: CallInfo) -> Result<(), Error> {
         //rtp_logger::init(call.call_id(), std::path::PathBuf::from("")).await?;
         let lock = self.ipfs.read().await;
         let ipfs = match lock.as_ref() {
             Some(r) => r,
-            None => bail!("blink not initialized"),
+            None => return Err(Error::BlinkNotInitialized),
         };
         let lock = self.own_id.read().await;
         let own_id = match lock.as_ref() {
             Some(r) => r,
-            None => bail!("blink not initialized"),
+            None => return Err(Error::BlinkNotInitialized),
         };
 
         self.active_call.write().await.replace(call.clone().into());
@@ -306,14 +306,23 @@ impl BlinkImpl {
             .await
             .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
             .await?;
-        host_media::create_audio_source_track(
+        if let Err(e) = host_media::create_audio_source_track(
             own_id.clone(),
             self.ui_event_ch.clone(),
             track,
             webrtc_codec,
             audio_source_config.clone(),
         )
-        .await?;
+        .await
+        {
+            let _ = self
+                .webrtc_controller
+                .write()
+                .await
+                .remove_media_source(host_media::AUDIO_SOURCE_ID.into())
+                .await;
+            return Err(e);
+        }
 
         // next, create event streams and pass them to a task
         let call_signaling_stream = ipfs

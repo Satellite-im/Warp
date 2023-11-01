@@ -2,14 +2,14 @@
 //! To circumvent this, the collection of SinkTracks and the host's SourceTrack are static variables. Mutating static variables
 //! is `unsafe`. However, it should not be dangerous due to the RwLock.
 //!
-use std::{collections::HashMap, sync::Arc};
-
 use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
+use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
@@ -86,13 +86,11 @@ pub async fn create_audio_source_track(
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: AudioCodec,
     source_config: AudioHardwareConfig,
-) -> anyhow::Result<()> {
+) -> Result<(), Error> {
     let _lock = LOCK.write().await;
     let input_device = match unsafe { DATA.audio_input_device.as_ref() } {
         Some(d) => d,
-        None => {
-            bail!("no audio input device selected");
-        }
+        None => return Err(Error::MicrophoneMissing),
     };
 
     let muted = unsafe { DATA.muted };
@@ -104,13 +102,10 @@ pub async fn create_audio_source_track(
         track,
         webrtc_codec,
         source_config,
-    )
-    .map_err(|e| anyhow::anyhow!("{e}: failed to create source track"))?;
+    )?;
 
     if !muted {
-        source_track
-            .play()
-            .map_err(|e| anyhow::anyhow!("{e}: failed to play source track"))?;
+        source_track.play()?;
     }
 
     unsafe {
