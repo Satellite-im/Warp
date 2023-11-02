@@ -148,6 +148,8 @@ pub enum BlinkEventKind {
     AudioOutputDeviceNoLongerAvailable,
     #[display(fmt = "AudioInputDeviceNoLongerAvailable")]
     AudioInputDeviceNoLongerAvailable,
+    #[display(fmt = "AudioStreamError")]
+    AudioStreamError,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

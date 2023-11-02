@@ -1,6 +1,6 @@
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
-    SampleRate,
+    BuildStreamError, SampleRate,
 };
 use rand::Rng;
 use ringbuf::HeapRb;
@@ -196,18 +196,24 @@ fn create_source_track(
             input_data_fn,
             move |err| {
                 log::error!("an error occurred on stream: {}", err);
-                if matches!(err, cpal::StreamError::DeviceNotAvailable) {
-                    let _ = event_ch2.send(BlinkEventKind::AudioInputDeviceNoLongerAvailable);
-                }
+                let evt = match err {
+                    cpal::StreamError::DeviceNotAvailable => {
+                        BlinkEventKind::AudioInputDeviceNoLongerAvailable
+                    }
+                    _ => BlinkEventKind::AudioStreamError,
+                };
+                let _ = event_ch2.send(evt);
             },
             None,
         )
-        .map_err(|e| {
-            anyhow::anyhow!(
+        .map_err(|e| match e {
+            BuildStreamError::StreamConfigNotSupported => Error::InvalidAudioConfig,
+            BuildStreamError::DeviceNotAvailable => Error::AudioDeviceNotFound,
+            e => Error::OtherWithContext(format!(
                 "failed to build input stream: {e}, {}, {}",
                 file!(),
                 line!()
-            )
+            )),
         })?;
 
     let join_handle = tokio::spawn(async move {

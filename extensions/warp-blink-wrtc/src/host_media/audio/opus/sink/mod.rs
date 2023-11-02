@@ -1,6 +1,6 @@
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
-    SampleRate,
+    BuildStreamError, SampleRate,
 };
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
@@ -132,13 +132,25 @@ impl OpusSink {
                 output_data_fn,
                 move |err| {
                     log::error!("an error occurred on stream: {}", err);
-                    if matches!(err, cpal::StreamError::DeviceNotAvailable) {
-                        let _ = event_ch3.send(BlinkEventKind::AudioOutputDeviceNoLongerAvailable);
-                    }
+                    let evt = match err {
+                        cpal::StreamError::DeviceNotAvailable => {
+                            BlinkEventKind::AudioOutputDeviceNoLongerAvailable
+                        }
+                        _ => BlinkEventKind::AudioStreamError,
+                    };
+                    let _ = event_ch3.send(evt);
                 },
                 None,
             )
-            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
+            .map_err(|e| match e {
+                BuildStreamError::StreamConfigNotSupported => Error::InvalidAudioConfig,
+                BuildStreamError::DeviceNotAvailable => Error::AudioDeviceNotFound,
+                e => Error::OtherWithContext(format!(
+                    "failed to build output stream: {e}, {}, {}",
+                    file!(),
+                    line!()
+                )),
+            })?;
 
         Ok(Self {
             peer_id,
