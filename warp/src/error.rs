@@ -215,17 +215,25 @@ pub enum Error {
     InvalidDataType,
 
     //Blink Errors
-    #[error("Invalid MIME type: {mime_type}")]
-    InvalidMimeType { mime_type: String },
-    #[error("Device not found")]
+    #[error("Audio device not found")]
     AudioDeviceNotFound,
+    #[error("AudioDeviceDisconnected")]
+    AudioDeviceDisconnected,
     // indicates a problem enumerating audio I/O devices
     #[error("AudioHostError: {_0}")]
     AudioHostError(String),
-    #[error("CallNotInProgress")]
-    CallNotInProgress,
     #[error("BlinkNotInitialized")]
     BlinkNotInitialized,
+    #[error("CallNotInProgress")]
+    CallNotInProgress,
+    #[error("Invalid MIME type: {_0}")]
+    InvalidMimeType(String),
+    #[error("InvalidAudioConfig")]
+    InvalidAudioConfig,
+    #[error("MicrophoneMissing")]
+    MicrophoneMissing,
+    #[error("SpeakerMissing")]
+    SpeakerMissing,
 
     //Misc
     #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]
