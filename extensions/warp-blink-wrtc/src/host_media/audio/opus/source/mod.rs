@@ -83,16 +83,18 @@ impl SourceTrack for OpusSource {
     }
 
     fn play(&self) -> Result<(), Error> {
-        self.stream
-            .play()
-            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
+        self.stream.play().map_err(|err| match err {
+            cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+            _ => Error::OtherWithContext(err.to_string()),
+        })?;
         *self.muted.write() = false;
         Ok(())
     }
     fn pause(&self) -> Result<(), Error> {
-        self.stream
-            .pause()
-            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
+        self.stream.pause().map_err(|err| match err {
+            cpal::PauseStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+            _ => Error::OtherWithContext(err.to_string()),
+        })?;
         *self.muted.write() = true;
         Ok(())
     }
@@ -118,9 +120,10 @@ impl SourceTrack for OpusSource {
         self.stream = stream;
         self.packetizer_handle = handle;
         if !*self.muted.read() {
-            self.stream
-                .play()
-                .map_err(|x| Error::OtherWithContext(x.to_string()))?;
+            self.stream.play().map_err(|err| match err {
+                cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+                _ => Error::OtherWithContext(err.to_string()),
+            })?;
         }
         Ok(())
     }

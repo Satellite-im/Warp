@@ -188,17 +188,18 @@ impl SinkTrack for OpusSink {
 
     fn play(&self) -> Result<(), Error> {
         *self.muted.write() = false;
-        self.stream
-            .play()
-            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
-        Ok(())
+        self.stream.play().map_err(|err| match err {
+            cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+            _ => Error::OtherWithContext(err.to_string()),
+        })
     }
+
     fn pause(&self) -> Result<(), Error> {
         *self.muted.write() = true;
-        self.stream
-            .pause()
-            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
-        Ok(())
+        self.stream.pause().map_err(|err| match err {
+            cpal::PauseStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+            _ => Error::OtherWithContext(err.to_string()),
+        })
     }
     fn change_output_device(
         &mut self,
@@ -219,9 +220,10 @@ impl SinkTrack for OpusSink {
         )?;
         *self = new_sink;
         if !*self.muted.read() {
-            self.stream
-                .play()
-                .map_err(|x| Error::OtherWithContext(x.to_string()))?;
+            self.stream.play().map_err(|err| match err {
+                cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+                _ => Error::OtherWithContext(err.to_string()),
+            })?;
         }
 
         Ok(())

@@ -215,8 +215,10 @@ pub enum Error {
     InvalidDataType,
 
     //Blink Errors
-    #[error("Device not found")]
+    #[error("Audio device not found")]
     AudioDeviceNotFound,
+    #[error("AudioDeviceDisconnected")]
+    AudioDeviceDisconnected,
     // indicates a problem enumerating audio I/O devices
     #[error("AudioHostError: {_0}")]
     AudioHostError(String),
