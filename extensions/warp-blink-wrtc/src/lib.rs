@@ -849,6 +849,9 @@ async fn handle_webrtc(params: WebRtcHandlerParams, mut webrtc_event_stream: Web
                                     log::error!("failed to send signal: {e}");
                                 }
                             }
+                            EmittedEvents::DataChannelCreated { peer, data_channel } => {},
+                            EmittedEvents::DataChannelOpened { peer } => {}
+                            EmittedEvents::DataChannelClosed { peer } => {}
                         }
                     }
                     None => todo!()

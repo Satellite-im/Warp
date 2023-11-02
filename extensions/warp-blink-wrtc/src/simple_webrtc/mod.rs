@@ -27,6 +27,7 @@ use warp::crypto::DID;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
+use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -474,6 +475,53 @@ impl Controller {
                 Box::pin(async {})
             },
         ));
+
+        let tx = self.event_ch.clone();
+        let dest = peer_id.clone();
+        peer.connection
+            .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
+                let tx2 = tx.clone();
+                let dest2 = dest.clone();
+                d.on_close(Box::new(move || {
+                    if let Err(e) = tx2.send(EmittedEvents::DataChannelClosed {
+                        peer: dest2.clone(),
+                    }) {
+                        log::error!(
+                            "failed to send data channel closed event for peer {}: {}",
+                            &dest2,
+                            e
+                        );
+                    }
+                    Box::pin(async {})
+                }));
+
+                let tx2 = tx.clone();
+                let dest2 = dest.clone();
+                d.on_open(Box::new(move || {
+                    if let Err(e) = tx2.send(EmittedEvents::DataChannelOpened {
+                        peer: dest2.clone(),
+                    }) {
+                        log::error!(
+                            "failed to send data channel opened event for peer {}: {}",
+                            &dest2,
+                            e
+                        );
+                    }
+                    Box::pin(async {})
+                }));
+
+                if let Err(e) = tx.send(EmittedEvents::DataChannelCreated {
+                    peer: dest.clone(),
+                    data_channel: d,
+                }) {
+                    log::error!(
+                        "failed to send data channel opened event for peer {}: {}",
+                        &dest,
+                        e
+                    );
+                }
+                Box::pin(async {})
+            }));
 
         // attach all media sources to the peer
         for (source_id, track) in &self.media_sources {
