@@ -1,19 +1,12 @@
+use futures::StreamExt;
+use rust_ipfs::SubscriptionStream;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-
-use futures::StreamExt;
-
-use rust_ipfs::SubscriptionStream;
-
 use tokio::sync::{broadcast::Sender, RwLock};
 use uuid::Uuid;
-use warp::{
-    blink::BlinkEventKind,
-    crypto::{did_key::Generate, DID},
-    error::Error,
-};
+use warp::{blink::BlinkEventKind, crypto::DID, error::Error};
 
 use crate::{
     signaling::InitiationSignal,

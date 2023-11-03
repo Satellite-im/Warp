@@ -1,6 +1,3 @@
-use crate::host_media;
-use crate::simple_webrtc;
-
 mod call_initiation;
 use call_initiation::run as handle_call_initiation;
 
@@ -11,23 +8,11 @@ mod webrtc_handler;
 use webrtc_handler::run as handle_webrtc;
 use webrtc_handler::WebRtcHandlerParams;
 
-use async_trait::async_trait;
-use host_media::{
-    audio::{
-        automute::{AutoMuteCmd, AUDIO_CMD_CH},
-        AudioCodec, AudioHardwareConfig,
-    },
-    mp4_logger::Mp4LoggerConfig,
-};
-use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
-use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
-
 use anyhow::{bail, Context};
+use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
-use futures::StreamExt;
-
 use rust_ipfs::{Ipfs, Keypair};
-
+use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
     sync::{
         broadcast::{self},
@@ -44,11 +29,19 @@ use warp::{
     multipass::MultiPass,
     Extension, SingleHandle,
 };
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
 use crate::{
-    host_media::audio::AudioSampleRate,
+    host_media::{
+        self,
+        audio::{
+            automute::{AutoMuteCmd, AUDIO_CMD_CH},
+            AudioCodec, AudioHardwareConfig, AudioSampleRate,
+        },
+        mp4_logger::Mp4LoggerConfig,
+    },
     signaling::{ipfs_routes, CallSignal, InitiationSignal},
-    simple_webrtc::events::WebRtcEventStream,
+    simple_webrtc::{self, events::WebRtcEventStream},
     store::{send_signal_aes, send_signal_ecdh},
 };
 
