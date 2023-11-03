@@ -511,6 +511,10 @@ impl Blink for BlinkImpl {
                             }
                         };
 
+                        if dest == *own_id {
+                            continue;
+                        }
+
                         let topic = ipfs_routes::call_initiation_route(&dest);
                         let signal = InitiationSignal::Offer {
                             call_info: call_info.clone(),
@@ -518,7 +522,7 @@ impl Blink for BlinkImpl {
 
                         if let Err(e) = send_signal_ecdh(&ipfs, own_id, &dest, signal, topic).await
                         {
-                            log::error!("failed to send signal: {e}");
+                            log::error!("failed to send offer signal: {e}");
                             new_participants.push(dest);
                             continue;
                         }
@@ -536,7 +540,9 @@ impl Blink for BlinkImpl {
                 _ = handle_signals => {
                     log::debug!("all signals sent successfully");
                 },
-                _ = notify.notified() => {}
+                _ = notify.notified() => {
+                    log::debug!("call retry task successfully cancelled");
+                }
             }
         });
 
