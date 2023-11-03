@@ -279,16 +279,10 @@ impl BlinkImpl {
 
     async fn init_call(&mut self, call: CallInfo) -> Result<(), Error> {
         //rtp_logger::init(call.call_id(), std::path::PathBuf::from("")).await?;
-        let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => return Err(Error::BlinkNotInitialized),
-        };
         let lock = self.own_id.read().await;
-        let own_id = match lock.as_ref() {
-            Some(r) => r,
-            None => return Err(Error::BlinkNotInitialized),
-        };
+        let own_id = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
+        let lock = self.ipfs.read().await;
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
 
         self.active_call.write().await.replace(call.clone().into());
         let audio_source_config = self.audio_source_config.read().await;
@@ -922,12 +916,7 @@ impl Blink for BlinkImpl {
         // need to drop the lock before calling self.init() so that self doesn't have 2 mutable borrows.
         {
             let lock = self.own_id.read().await;
-            let own_id = match lock.as_ref() {
-                Some(r) => r,
-                None => {
-                    return Err(Error::BlinkNotInitialized);
-                }
-            };
+            let own_id = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
 
             if !participants.contains(own_id) {
                 participants.push(DID::from_str(&own_id.fingerprint())?);
@@ -938,19 +927,10 @@ impl Blink for BlinkImpl {
         self.init_call(call_info.clone()).await?;
 
         let lock = self.own_id.read().await;
-        let own_id = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
+        let own_id = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
         let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
+
         for dest in participants {
             if dest == *own_id {
                 continue;
@@ -992,27 +972,15 @@ impl Blink for BlinkImpl {
         let signal = CallSignal::Join { call_id };
 
         let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                // should never happen
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
-        if let Err(e) = send_signal_aes(ipfs, &call.group_key(), signal, topic).await {
-            log::error!("failed to send signal: {e}");
-        }
-        Ok(())
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
+        send_signal_aes(ipfs, &call.group_key(), signal, topic)
+            .await
+            .map_err(|e| Error::FailedToSendSignal(e.to_string()))
     }
     /// use the Leave signal as a courtesy, to let the group know not to expect you to join.
     async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
         if let Some(pc) = self.pending_calls.write().await.remove(&call_id) {
             let topic = ipfs_routes::call_signal_route(&call_id);
             let signal = CallSignal::Leave { call_id };
@@ -1029,20 +997,9 @@ impl Blink for BlinkImpl {
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
         let lock = self.own_id.read().await;
-        let own_id = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
-
+        let own_id = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
         let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
         if let Some(ac) = self.active_call.write().await.as_mut() {
             match ac.call_state.clone() {
                 CallState::Started => {
@@ -1144,12 +1101,7 @@ impl Blink for BlinkImpl {
         host_media::mute_self().await?;
 
         let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
 
         if let Some(ac) = self.active_call.write().await.as_mut() {
             ac.call_config.self_muted = true;
@@ -1172,12 +1124,7 @@ impl Blink for BlinkImpl {
         host_media::unmute_self().await?;
 
         let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
 
         if let Some(ac) = self.active_call.write().await.as_mut() {
             ac.call_config.self_muted = false;
@@ -1199,12 +1146,7 @@ impl Blink for BlinkImpl {
         }
         host_media::deafen().await?;
         let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
 
         if let Some(ac) = self.active_call.write().await.as_mut() {
             ac.call_config.self_deafened = true;
@@ -1226,12 +1168,7 @@ impl Blink for BlinkImpl {
         }
         host_media::undeafen().await?;
         let lock = self.ipfs.read().await;
-        let ipfs = match lock.as_ref() {
-            Some(r) => r,
-            None => {
-                return Err(Error::BlinkNotInitialized);
-            }
-        };
+        let ipfs = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
 
         if let Some(ac) = self.active_call.write().await.as_mut() {
             ac.call_config.self_deafened = false;
