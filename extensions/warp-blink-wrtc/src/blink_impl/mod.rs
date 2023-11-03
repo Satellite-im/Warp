@@ -21,7 +21,7 @@ use host_media::{
 };
 use std::{
     any::Any,
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -32,11 +32,11 @@ use anyhow::{bail, Context};
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 
-use rust_ipfs::{Ipfs, Keypair, SubscriptionStream};
+use rust_ipfs::{Ipfs, Keypair};
 
 use tokio::{
     sync::{
-        broadcast::{self, Sender},
+        broadcast::{self},
         RwLock,
     },
     task::JoinHandle,
@@ -53,11 +53,10 @@ use warp::{
 
 use crate::{
     host_media::audio::AudioSampleRate,
-    signaling::{ipfs_routes, CallSignal, InitiationSignal, PeerSignal},
-    simple_webrtc::events::{EmittedEvents, WebRtcEventStream},
+    signaling::{ipfs_routes, CallSignal, InitiationSignal},
+    simple_webrtc::events::{WebRtcEventStream},
     store::{
-        decode_gossipsub_msg_aes, decode_gossipsub_msg_ecdh, send_signal_aes, send_signal_ecdh,
-        PeerIdExt,
+        send_signal_aes, send_signal_ecdh,
     },
 };
 

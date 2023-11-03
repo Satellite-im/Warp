@@ -10,24 +10,20 @@ use tokio::{
         broadcast::{self, Sender},
         RwLock,
     },
-    task::JoinHandle,
 };
-use uuid::Uuid;
+
 use warp::{
-    blink::{AudioDeviceConfig, Blink, BlinkEventKind, BlinkEventStream, CallConfig, CallInfo},
-    crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
+    blink::{BlinkEventKind},
+    crypto::{DID},
     error::Error,
-    module::Module,
-    multipass::MultiPass,
-    Extension, SingleHandle,
 };
 
 use crate::{
-    host_media::audio::{AudioHardwareConfig, AudioSampleRate},
-    signaling::{ipfs_routes, CallSignal, InitiationSignal, PeerSignal},
+    host_media::audio::{AudioHardwareConfig},
+    signaling::{ipfs_routes, CallSignal, PeerSignal},
     simple_webrtc::events::{EmittedEvents, WebRtcEventStream},
     store::{
-        decode_gossipsub_msg_aes, decode_gossipsub_msg_ecdh, send_signal_aes, send_signal_ecdh,
+        decode_gossipsub_msg_aes, decode_gossipsub_msg_ecdh, send_signal_ecdh,
         PeerIdExt,
     },
 };
