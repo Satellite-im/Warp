@@ -226,6 +226,8 @@ pub enum Error {
     BlinkNotInitialized,
     #[error("CallNotInProgress")]
     CallNotInProgress,
+    #[error("FailedToSendSignal: {_0}")]
+    FailedToSendSignal(String),
     #[error("Invalid MIME type: {_0}")]
     InvalidMimeType(String),
     #[error("InvalidAudioConfig")]
