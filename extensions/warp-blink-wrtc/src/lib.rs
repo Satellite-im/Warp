@@ -494,7 +494,7 @@ async fn handle_call_initiation(
         };
 
         let signal: InitiationSignal = {
-            let lock: tokio::sync::RwLockReadGuard<'_, Option<DID>> = own_id.read().await;
+            let lock = own_id.read().await;
             let own_id = match lock.as_ref().ok_or(Error::BlinkNotInitialized) {
                 Ok(r) => r,
                 Err(e) => {
