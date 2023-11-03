@@ -19,13 +19,7 @@ use host_media::{
     },
     mp4_logger::Mp4LoggerConfig,
 };
-use std::{
-    any::Any,
-    collections::{HashMap},
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{any::Any, collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
 use anyhow::{bail, Context};
@@ -54,10 +48,8 @@ use warp::{
 use crate::{
     host_media::audio::AudioSampleRate,
     signaling::{ipfs_routes, CallSignal, InitiationSignal},
-    simple_webrtc::events::{WebRtcEventStream},
-    store::{
-        send_signal_aes, send_signal_ecdh,
-    },
+    simple_webrtc::events::WebRtcEventStream,
+    store::{send_signal_aes, send_signal_ecdh},
 };
 
 // implements Blink

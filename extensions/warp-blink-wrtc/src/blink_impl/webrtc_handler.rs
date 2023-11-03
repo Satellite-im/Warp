@@ -5,27 +5,18 @@ use crate::simple_webrtc;
 use futures::StreamExt;
 use rust_ipfs::{Ipfs, SubscriptionStream};
 use std::sync::Arc;
-use tokio::{
-    sync::{
-        broadcast::{self, Sender},
-        RwLock,
-    },
+use tokio::sync::{
+    broadcast::{self, Sender},
+    RwLock,
 };
 
-use warp::{
-    blink::{BlinkEventKind},
-    crypto::{DID},
-    error::Error,
-};
+use warp::{blink::BlinkEventKind, crypto::DID, error::Error};
 
 use crate::{
-    host_media::audio::{AudioHardwareConfig},
+    host_media::audio::AudioHardwareConfig,
     signaling::{ipfs_routes, CallSignal, PeerSignal},
     simple_webrtc::events::{EmittedEvents, WebRtcEventStream},
-    store::{
-        decode_gossipsub_msg_aes, decode_gossipsub_msg_ecdh, send_signal_ecdh,
-        PeerIdExt,
-    },
+    store::{decode_gossipsub_msg_aes, decode_gossipsub_msg_ecdh, send_signal_ecdh, PeerIdExt},
 };
 
 pub struct WebRtcHandlerParams {
