@@ -5,6 +5,7 @@ mod data;
 use data::*;
 
 mod webrtc_handler;
+use tokio::sync::Notify;
 use webrtc_handler::run as handle_webrtc;
 use webrtc_handler::WebRtcHandlerParams;
 
@@ -63,6 +64,8 @@ pub struct BlinkImpl {
     // handles 3 streams: one for webrtc events and two IPFS topics
     // pertains to the active_call, which is stored in STATIC_DATA
     webrtc_handler: Arc<warp::sync::RwLock<Option<JoinHandle<()>>>>,
+    // call initiation signals frequently fail. this will retry while the call is active
+    notify: Arc<Notify>,
 
     // prevents the UI from running multiple tests simultaneously
     audio_device_config: Arc<RwLock<host_media::audio::DeviceConfig>>,
@@ -138,6 +141,7 @@ impl BlinkImpl {
             pending_calls: Arc::new(RwLock::new(HashMap::new())),
             active_call: Arc::new(RwLock::new(None)),
             webrtc_controller: Arc::new(RwLock::new(simple_webrtc::Controller::new()?)),
+            notify: Arc::new(Notify::new()),
             own_id: Arc::new(RwLock::new(None)),
             ui_event_ch,
             audio_source_config: Arc::new(RwLock::new(source_config)),
@@ -414,6 +418,12 @@ impl BlinkImpl {
 
         Ok(())
     }
+
+    fn reinit_notify(&mut self) {
+        self.notify.notify_waiters();
+        let new_notify = Arc::new(Notify::new());
+        let _to_drop = std::mem::replace(&mut self.notify, new_notify);
+    }
 }
 
 impl Extension for BlinkImpl {
@@ -469,6 +479,7 @@ impl Blink for BlinkImpl {
         mut participants: Vec<DID>,
     ) -> Result<Uuid, Error> {
         self.ensure_call_not_in_progress().await?;
+        self.reinit_notify();
         let ipfs = self.get_ipfs().await?;
 
         // need to drop lock to self.own_id before calling self.init_call
@@ -483,27 +494,58 @@ impl Blink for BlinkImpl {
         let call_info = CallInfo::new(conversation_id, participants.clone());
         self.init_call(call_info.clone()).await?;
 
-        let lock = self.own_id.read().await;
-        let own_id = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
+        let call_id = call_info.call_id();
+        let notify = self.notify.clone();
+        let own_id = self.own_id.clone();
+        tokio::task::spawn(async move {
+            let handle_signals = async {
+                loop {
+                    let mut new_participants = vec![];
+                    while let Some(dest) = participants.pop() {
+                        let lock = own_id.read().await;
+                        let own_id = match lock.as_ref() {
+                            Some(r) => r,
+                            None => {
+                                new_participants.push(dest);
+                                continue;
+                            }
+                        };
 
-        for dest in participants {
-            if dest == *own_id {
-                continue;
-            }
-            let topic = ipfs_routes::call_initiation_route(&dest);
-            let signal = InitiationSignal::Offer {
-                call_info: call_info.clone(),
+                        let topic = ipfs_routes::call_initiation_route(&dest);
+                        let signal = InitiationSignal::Offer {
+                            call_info: call_info.clone(),
+                        };
+
+                        if let Err(e) = send_signal_ecdh(&ipfs, own_id, &dest, signal, topic).await
+                        {
+                            log::error!("failed to send signal: {e}");
+                            new_participants.push(dest);
+                            continue;
+                        }
+                    }
+                    participants = new_participants;
+                    if participants.is_empty() {
+                        break;
+                    } else {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                }
             };
 
-            if let Err(e) = send_signal_ecdh(&ipfs, own_id, &dest, signal, topic).await {
-                log::error!("failed to send signal: {e}");
+            tokio::select! {
+                _ = handle_signals => {
+                    log::debug!("all signals sent successfully");
+                },
+                _ = notify.notified() => {}
             }
-        }
-        Ok(call_info.call_id())
+        });
+
+        Ok(call_id)
     }
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
         self.ensure_call_not_in_progress().await?;
+        self.reinit_notify();
         let call = match self.pending_calls.write().await.remove(&call_id) {
             Some(r) => r.call,
             None => {
@@ -541,6 +583,7 @@ impl Blink for BlinkImpl {
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
+        self.reinit_notify();
         let lock = self.own_id.read().await;
         let own_id = lock.as_ref().ok_or(Error::BlinkNotInitialized)?;
         let ipfs = self.get_ipfs().await?;
