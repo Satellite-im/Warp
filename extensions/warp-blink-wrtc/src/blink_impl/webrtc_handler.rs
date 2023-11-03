@@ -85,6 +85,11 @@ pub async fn run(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEve
                                     continue;
                             }
                         }
+                        if let Some(state) = active_call.connected_participants.get(&sender) {
+                            if matches!(state, PeerState::Connected | PeerState::Initializing) {
+                                continue;
+                            }
+                        }
                         active_call.connected_participants.insert(sender.clone(), PeerState::Initializing);
                         // todo: properly hang up on error.
                         // emits CallInitiated Event, which returns the local sdp. will be sent to the peer with the dial signal
