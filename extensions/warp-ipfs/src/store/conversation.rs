@@ -22,12 +22,7 @@ use warp::{
 
 use crate::store::ecdh_encrypt;
 
-use super::{
-    document::utils::{GetIpldDag, GetLocalDag, ToCid},
-    ecdh_decrypt,
-    keystore::Keystore,
-    verify_serde_sig,
-};
+use super::{ecdh_decrypt, keystore::Keystore, verify_serde_sig};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
@@ -300,14 +295,29 @@ impl ConversationDocument {
 
     pub async fn get_message_list(&self, ipfs: &Ipfs) -> Result<BTreeSet<MessageDocument>, Error> {
         match self.messages {
-            Some(cid) => cid.get_local_dag(ipfs).await,
+            Some(cid) => ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from),
             None => Ok(BTreeSet::new()),
         }
     }
 
     pub async fn get_raw_message_list(&self, ipfs: &Ipfs) -> Result<Ipld, Error> {
         match self.messages {
-            Some(cid) => cid.get_ipld_dag(ipfs).await,
+            Some(cid) => ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .await
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from),
             None => Ok(Ipld::List(vec![])),
         }
     }
@@ -317,7 +327,7 @@ impl ConversationDocument {
         list: BTreeSet<MessageDocument>,
     ) -> Result<(), Error> {
         self.modified = Utc::now();
-        let cid = list.to_cid(ipfs).await?;
+        let cid = ipfs.dag().put().serialize(list)?.await?;
         self.messages = Some(cid);
         Ok(())
     }
@@ -531,7 +541,10 @@ impl ConversationDocument {
     pub async fn delete_all_message(&mut self, ipfs: Ipfs) -> Result<(), Error> {
         let cid = std::mem::take(&mut self.messages);
         let (cid, messages): (Cid, BTreeSet<MessageDocument>) = match cid {
-            Some(cid) => (cid, cid.get_local_dag(&ipfs).await?),
+            Some(cid) => (
+                cid,
+                ipfs.dag().get().path(cid).local().deserialized().await?,
+            ),
             None => return Ok(()),
         };
 
@@ -611,7 +624,7 @@ impl MessageDocument {
             None => ecdh_encrypt(&did, Some(&sender), &bytes)?,
         };
 
-        let message = data.to_cid(ipfs).await?;
+        let message = ipfs.dag().put().serialize(data)?.await?;
 
         let sender = DIDEd25519Reference::from_did(&sender);
 
@@ -664,7 +677,7 @@ impl MessageDocument {
             None => ecdh_encrypt(did, Some(&self.sender.to_did()), &bytes)?,
         };
 
-        let message_cid = data.to_cid(ipfs).await?;
+        let message_cid = ipfs.dag().put().serialize(data)?.await?;
 
         info!("Setting Message to document");
         self.message = message_cid;
@@ -678,7 +691,13 @@ impl MessageDocument {
         did: &DID,
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
-        let bytes: Vec<u8> = self.message.get_local_dag(ipfs).await?;
+        let bytes: Vec<u8> = ipfs
+            .dag()
+            .get()
+            .path(self.message)
+            .local()
+            .deserialized()
+            .await?;
 
         let sender = self.sender.to_did();
         let data = match keystore {

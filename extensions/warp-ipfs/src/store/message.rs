@@ -3145,17 +3145,7 @@ impl MessageStore {
                 total: Some(attachment.size()),
             };
 
-            let stream = match ipfs.get_unixfs(reference, &path).await {
-                Ok(stream) => stream,
-                Err(e) => {
-                    yield Progression::ProgressFailed {
-                        name: attachment.name(),
-                        last_size: None,
-                        error: Some(e.to_string()),
-                    };
-                    return;
-                },
-            };
+            let stream = ipfs.get_unixfs(reference, &path);
 
             for await event in stream {
                 match event {
