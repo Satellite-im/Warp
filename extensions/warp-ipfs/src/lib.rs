@@ -282,7 +282,6 @@ impl WarpIpfs {
                 }
                 idconfig
             }))
-            .with_autonat()
             .with_bitswap(None)
             .with_kademlia(
                 Some(either::Either::Left(KadConfig {

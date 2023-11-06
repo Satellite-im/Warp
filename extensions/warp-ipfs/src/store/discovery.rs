@@ -254,6 +254,12 @@ impl Discovery {
             return Ok(());
         }
 
+        let own_peer_id = self.ipfs.keypair()?.public().to_peer_id();
+
+        if peer_id == own_peer_id {
+            return Ok(());
+        }
+
         let entry = DiscoveryEntry::new(
             &self.ipfs,
             peer_id,

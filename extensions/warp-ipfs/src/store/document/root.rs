@@ -11,11 +11,7 @@ use warp::{crypto::DID, error::Error, multipass::identity::IdentityStatus};
 
 use crate::store::{ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
 
-use super::{
-    identity::IdentityDocument,
-    utils::{GetLocalDag, ToCid},
-    ExtractedRootDocument, RootDocument,
-};
+use super::{identity::IdentityDocument, ExtractedRootDocument, RootDocument};
 
 #[allow(clippy::large_enum_variant)]
 pub enum RootDocumentCommand {
@@ -471,7 +467,15 @@ impl RootDocumentTask {
 impl RootDocumentTask {
     async fn get_root_document(&self) -> Result<RootDocument, Error> {
         let document: RootDocument = match self.cid {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await?,
+            Some(cid) => {
+                self.ipfs
+                    .dag()
+                    .get()
+                    .path(cid)
+                    .local()
+                    .deserialized()
+                    .await?
+            }
             None => return Err(Error::Other),
         };
 
@@ -483,7 +487,8 @@ impl RootDocumentTask {
     async fn identity(&self) -> Result<IdentityDocument, Error> {
         let root = self.get_root_document().await?;
         let path = IpfsPath::from(root.identity);
-        let document: IdentityDocument = path.get_local_dag(&self.ipfs).await?;
+        let document: IdentityDocument =
+            self.ipfs.dag().get_dag(path).local().deserialized().await?;
         document.verify()?;
 
         Ok(document)
@@ -497,7 +502,8 @@ impl RootDocumentTask {
         //Precautionary check
         document.verify(&self.ipfs).await?;
 
-        let root_cid = document.to_cid(&self.ipfs).await?;
+        let root_cid = self.ipfs.dag().put().serialize(document)?.await?;
+
         if !self.ipfs.is_pinned(&root_cid).await? {
             self.ipfs.insert_pin(&root_cid, true).await?;
         }
@@ -507,7 +513,7 @@ impl RootDocumentTask {
                 if self.ipfs.is_pinned(&old_cid).await? {
                     self.ipfs.remove_pin(&old_cid, true).await?;
                 }
-                self.ipfs.remove_block(old_cid).await?;
+                self.ipfs.remove_block(old_cid, false).await?;
             }
         }
 
@@ -529,7 +535,7 @@ impl RootDocumentTask {
         identity.status = Some(status);
 
         let identity = identity.sign(&self.keypair)?;
-        root.identity = identity.to_cid(&self.ipfs).await?;
+        root.identity = self.ipfs.dag().put().serialize(identity)?.await?;
 
         self.set_root_document(root).await
     }
@@ -540,7 +546,15 @@ impl RootDocumentTask {
             None => return Ok(vec![]),
         };
         let path = IpfsPath::from(cid).sub_path("request")?;
-        let list: Vec<Request> = path.get_local_dag(&self.ipfs).await.unwrap_or_default();
+        let list: Vec<Request> = self
+            .ipfs
+            .dag()
+            .get()
+            .path(path)
+            .local()
+            .deserialized()
+            .await
+            .unwrap_or_default();
         Ok(list)
     }
 
@@ -548,7 +562,15 @@ impl RootDocumentTask {
         let mut document = self.get_root_document().await?;
         let old_document = document.request;
         let mut list: Vec<Request> = match document.request {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
+            Some(cid) => self
+                .ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
             None => vec![],
         };
 
@@ -556,13 +578,14 @@ impl RootDocumentTask {
             return Err(Error::FriendRequestExist);
         }
 
-        document.request = (!list.is_empty()).then_some(list.to_cid(&self.ipfs).await?);
+        document.request =
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
 
         self.set_root_document(document).await?;
 
         if let Some(cid) = old_document {
             if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid).await?;
+                self.ipfs.remove_block(cid, false).await?;
             }
         }
 
@@ -573,7 +596,15 @@ impl RootDocumentTask {
         let mut document = self.get_root_document().await?;
         let old_document = document.request;
         let mut list: Vec<Request> = match document.request {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
+            Some(cid) => self
+                .ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
             None => vec![],
         };
 
@@ -581,13 +612,14 @@ impl RootDocumentTask {
             return Err(Error::FriendRequestExist);
         }
 
-        document.request = (!list.is_empty()).then_some(list.to_cid(&self.ipfs).await?);
+        document.request =
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
 
         self.set_root_document(document).await?;
 
         if let Some(cid) = old_document {
             if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid).await?;
+                self.ipfs.remove_block(cid, false).await?;
             }
         }
 
@@ -600,7 +632,15 @@ impl RootDocumentTask {
             None => return Ok(vec![]),
         };
         let path = IpfsPath::from(cid).sub_path("friends")?;
-        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await.unwrap_or_default();
+        let list: Vec<DID> = self
+            .ipfs
+            .dag()
+            .get()
+            .path(path)
+            .local()
+            .deserialized()
+            .await
+            .unwrap_or_default();
         Ok(list)
     }
 
@@ -608,7 +648,15 @@ impl RootDocumentTask {
         let mut document = self.get_root_document().await?;
         let old_document = document.friends;
         let mut list: Vec<DID> = match document.friends {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
+            Some(cid) => self
+                .ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
             None => vec![],
         };
 
@@ -616,13 +664,14 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::FriendExist);
         }
 
-        document.friends = (!list.is_empty()).then_some(list.to_cid(&self.ipfs).await?);
+        document.friends =
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
 
         self.set_root_document(document).await?;
 
         if let Some(cid) = old_document {
             if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid).await?;
+                self.ipfs.remove_block(cid, false).await?;
             }
         }
 
@@ -633,7 +682,15 @@ impl RootDocumentTask {
         let mut document = self.get_root_document().await?;
         let old_document = document.friends;
         let mut list: Vec<DID> = match document.friends {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
+            Some(cid) => self
+                .ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
             None => vec![],
         };
 
@@ -641,13 +698,14 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::FriendDoesntExist);
         }
 
-        document.friends = (!list.is_empty()).then_some(list.to_cid(&self.ipfs).await?);
+        document.friends =
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
 
         self.set_root_document(document).await?;
 
         if let Some(cid) = old_document {
             if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid).await?;
+                self.ipfs.remove_block(cid, false).await?;
             }
         }
 
@@ -660,7 +718,15 @@ impl RootDocumentTask {
             None => return Ok(vec![]),
         };
         let path = IpfsPath::from(cid).sub_path("blocks")?;
-        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await.unwrap_or_default();
+        let list: Vec<DID> = self
+            .ipfs
+            .dag()
+            .get()
+            .path(path)
+            .local()
+            .deserialized()
+            .await
+            .unwrap_or_default();
         Ok(list)
     }
 
@@ -668,7 +734,15 @@ impl RootDocumentTask {
         let mut document = self.get_root_document().await?;
         let old_document = document.blocks;
         let mut list: Vec<DID> = match document.blocks {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
+            Some(cid) => self
+                .ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
             None => vec![],
         };
 
@@ -676,13 +750,14 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::PublicKeyIsBlocked);
         }
 
-        document.blocks = (!list.is_empty()).then_some(list.to_cid(&self.ipfs).await?);
+        document.blocks =
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
 
         self.set_root_document(document).await?;
 
         if let Some(cid) = old_document {
             if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid).await?;
+                self.ipfs.remove_block(cid, false).await?;
             }
         }
         Ok(())
@@ -692,7 +767,15 @@ impl RootDocumentTask {
         let mut document = self.get_root_document().await?;
         let old_document = document.blocks;
         let mut list: Vec<DID> = match document.blocks {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
+            Some(cid) => self
+                .ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
             None => vec![],
         };
 
@@ -700,13 +783,14 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
-        document.blocks = (!list.is_empty()).then_some(list.to_cid(&self.ipfs).await?);
+        document.blocks =
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
 
         self.set_root_document(document).await?;
 
         if let Some(cid) = old_document {
             if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid).await?;
+                self.ipfs.remove_block(cid, false).await?;
             }
         }
         Ok(())
@@ -718,7 +802,15 @@ impl RootDocumentTask {
             None => return Ok(vec![]),
         };
         let path = IpfsPath::from(cid).sub_path("block_by")?;
-        let list: Vec<DID> = path.get_local_dag(&self.ipfs).await.unwrap_or_default();
+        let list: Vec<DID> = self
+            .ipfs
+            .dag()
+            .get()
+            .path(path)
+            .local()
+            .deserialized()
+            .await
+            .unwrap_or_default();
         Ok(list)
     }
 
@@ -726,7 +818,15 @@ impl RootDocumentTask {
         let mut document = self.get_root_document().await?;
         let old_document = document.block_by;
         let mut list: Vec<DID> = match document.block_by {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
+            Some(cid) => self
+                .ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
             None => vec![],
         };
 
@@ -734,13 +834,14 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
-        document.block_by = (!list.is_empty()).then_some(list.to_cid(&self.ipfs).await?);
+        document.block_by =
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
 
         self.set_root_document(document).await?;
 
         if let Some(cid) = old_document {
             if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid).await?;
+                self.ipfs.remove_block(cid, false).await?;
             }
         }
         Ok(())
@@ -750,7 +851,15 @@ impl RootDocumentTask {
         let mut document = self.get_root_document().await?;
         let old_document = document.block_by;
         let mut list: Vec<DID> = match document.block_by {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
+            Some(cid) => self
+                .ipfs
+                .dag()
+                .get()
+                .path(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
             None => vec![],
         };
 
@@ -758,13 +867,14 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
-        document.block_by = (!list.is_empty()).then_some(list.to_cid(&self.ipfs).await?);
+        document.block_by =
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
 
         self.set_root_document(document).await?;
 
         if let Some(cid) = old_document {
             if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid).await?;
+                self.ipfs.remove_block(cid, false).await?;
             }
         }
         Ok(())
@@ -772,7 +882,7 @@ impl RootDocumentTask {
 
     async fn set_conversation_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        document.conversations_keystore = Some(map.to_cid(&self.ipfs).await?);
+        document.conversations_keystore = Some(self.ipfs.dag().put().serialize(map)?.await?);
         self.set_root_document(document).await
     }
 
@@ -784,7 +894,14 @@ impl RootDocumentTask {
             None => return Ok(BTreeMap::new()),
         };
 
-        cid.get_local_dag(&self.ipfs).await
+        self.ipfs
+            .dag()
+            .get()
+            .path(cid)
+            .local()
+            .deserialized()
+            .await
+            .map_err(Error::from)
     }
 
     async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
@@ -796,7 +913,14 @@ impl RootDocumentTask {
         };
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
-        path.get_local_dag(&self.ipfs).await
+        self.ipfs
+            .dag()
+            .get()
+            .path(path)
+            .local()
+            .deserialized()
+            .await
+            .map_err(Error::from)
     }
 
     async fn export(&self) -> Result<ExtractedRootDocument, Error> {

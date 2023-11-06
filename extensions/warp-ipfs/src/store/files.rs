@@ -124,8 +124,6 @@ impl FileStore {
             .ipfs
             .unixfs()
             .cat(IpfsPath::from(cid), None, &[], true, None)
-            .await
-            .map_err(anyhow::Error::from)?
             .boxed();
 
         let mut data = vec![];
@@ -154,17 +152,13 @@ impl FileStore {
 
         let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
 
-        let mut stream = self
-            .ipfs
-            .unixfs()
-            .add(
-                AddOpt::Stream(data_stream),
-                Some(AddOption {
-                    pin: true,
-                    ..Default::default()
-                }),
-            )
-            .await?;
+        let mut stream = self.ipfs.unixfs().add(
+            AddOpt::Stream(data_stream),
+            Some(AddOption {
+                pin: true,
+                ..Default::default()
+            }),
+        );
 
         let mut ipfs_path = None;
 
@@ -231,7 +225,7 @@ impl FileStore {
                 }
 
                 for cid in pinned_blocks {
-                    self.ipfs.remove_block(cid).await?;
+                    self.ipfs.remove_block(cid, false).await?;
                 }
             }
         }
@@ -343,17 +337,7 @@ impl FileStore {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = match ipfs.unixfs().add(path.clone(), Some(AddOption { pin: true, ..Default::default() })).await {
-                Ok(ste) => ste,
-                Err(e) => {
-                    yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: Some(e.to_string()),
-                    };
-                    return;
-                }
-            };
+            let mut stream = ipfs.unixfs().add(path.clone(), Some(AddOption { pin: true, ..Default::default() }));
 
             while let Some(status) = stream.next().await {
                 let name = name.clone();
@@ -468,9 +452,7 @@ impl FileStore {
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
 
-        let mut stream = ipfs
-            .get_unixfs(reference.parse::<IpfsPath>()?, path)
-            .await?;
+        let mut stream = ipfs.get_unixfs(reference.parse::<IpfsPath>()?, path);
 
         while let Some(status) = stream.next().await {
             if let UnixfsStatus::FailedStatus { error, .. } = status {
@@ -533,16 +515,13 @@ impl FileStore {
         let mut total_written = 0;
         let mut returned_path = None;
 
-        let mut stream = ipfs
-            .unixfs()
-            .add(
-                reader,
-                Some(AddOption {
-                    pin: true,
-                    ..Default::default()
-                }),
-            )
-            .await?;
+        let mut stream = ipfs.unixfs().add(
+            reader,
+            Some(AddOption {
+                pin: true,
+                ..Default::default()
+            }),
+        );
 
         while let Some(status) = stream.next().await {
             match status {
@@ -592,10 +571,7 @@ impl FileStore {
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs
-            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-            .await
-            .map_err(anyhow::Error::from)?;
+        let stream = ipfs.cat_unixfs(reference.parse::<IpfsPath>()?, None);
         pin_mut!(stream);
 
         let mut buffer = vec![];
@@ -654,17 +630,7 @@ impl FileStore {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = match ipfs.unixfs().add(stream, Some(AddOption { pin: true, ..Default::default() })).await {
-                Ok(ste) => ste,
-                Err(e) => {
-                    yield Progression::ProgressFailed {
-                        name,
-                        last_size: Some(last_written),
-                        error: Some(e.to_string()),
-                    };
-                    return;
-                }
-            };
+            let mut stream = ipfs.unixfs().add(stream, Some(AddOption { pin: true, ..Default::default() }));
 
             while let Some(status) = stream.next().await {
                 let n = name.clone();
@@ -777,9 +743,7 @@ impl FileStore {
 
         let stream = async_stream::stream! {
             let cat_stream = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-                .await
-                .map_err(anyhow::Error::from)?;
+                .cat_unixfs(reference.parse::<IpfsPath>()?, None);
 
             for await data in cat_stream {
                 match data {
@@ -850,7 +814,7 @@ impl FileStore {
         }
 
         for cid in pinned_blocks {
-            ipfs.remove_block(cid).await?;
+            ipfs.remove_block(cid, false).await?;
         }
 
         directory.remove_item(&item.name())?;
@@ -920,10 +884,7 @@ impl FileStore {
 
         let reference = file.reference().ok_or(Error::FileNotFound)?;
 
-        let stream = ipfs
-            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-            .await
-            .map_err(anyhow::Error::from)?;
+        let stream = ipfs.cat_unixfs(reference.parse::<IpfsPath>()?, None);
 
         pin_mut!(stream);
 
