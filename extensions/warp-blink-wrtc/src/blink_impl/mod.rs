@@ -8,6 +8,8 @@ mod webrtc_handler;
 use webrtc_handler::run as handle_webrtc;
 use webrtc_handler::WebRtcHandlerParams;
 
+mod gossipsub_sender;
+
 use anyhow::{bail, Context};
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};

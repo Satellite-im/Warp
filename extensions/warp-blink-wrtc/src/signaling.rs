@@ -43,18 +43,6 @@ pub enum InitiationSignal {
     /// invite a peer to join a call
     #[display(fmt = "Offer")]
     Offer { call_info: CallInfo },
-    /// used to dismiss an incoming call dialog
-    /// is needed when someone offers a call and
-    /// everyone who joined the call leaves. if this
-    /// happens and someone hasn't rejected the call,
-    /// they may have a call dialog displayed. they need
-    /// to track how many people joined and left the call to
-    /// know when to dismiss the dialog.
-    #[display(fmt = "Join")]
-    Join { call_id: Uuid },
-    /// used to dismiss an incoming call dialog
-    #[display(fmt = "Leave")]
-    Leave { call_id: Uuid },
 }
 
 pub mod ipfs_routes {
