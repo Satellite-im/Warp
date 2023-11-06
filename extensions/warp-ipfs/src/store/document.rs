@@ -3,18 +3,14 @@ pub mod conversation;
 pub mod identity;
 pub mod image_dag;
 pub mod root;
-pub mod utils;
 
 use chrono::{DateTime, Utc};
 use futures::TryFutureExt;
-use ipfs::{Ipfs, IpfsPath};
-use libipld::{
-    serde::{from_ipld, to_ipld},
-    Cid,
-};
+use ipfs::Ipfs;
+use libipld::Cid;
 use rust_ipfs as ipfs;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::BTreeMap, str::FromStr, time::Duration};
+use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, str::FromStr};
 use uuid::Uuid;
 use warp::{
     crypto::{did_key::CoreSign, DID},
@@ -24,58 +20,9 @@ use warp::{
 
 use crate::store::get_keypair_did;
 
-use self::{identity::IdentityDocument, utils::GetLocalDag};
+use self::identity::IdentityDocument;
 
 use super::{identity::Request, keystore::Keystore};
-
-#[async_trait::async_trait]
-pub(crate) trait ToCid: Sized {
-    async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error>;
-}
-
-#[async_trait::async_trait]
-pub(crate) trait GetDag<D>: Sized {
-    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error>;
-}
-
-#[async_trait::async_trait]
-impl<D: DeserializeOwned> GetDag<D> for Cid {
-    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error> {
-        IpfsPath::from(*self).get_dag(ipfs, timeout).await
-    }
-}
-
-#[async_trait::async_trait]
-impl<D: DeserializeOwned> GetDag<D> for &Cid {
-    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error> {
-        IpfsPath::from(**self).get_dag(ipfs, timeout).await
-    }
-}
-
-#[async_trait::async_trait]
-impl<D: DeserializeOwned> GetDag<D> for IpfsPath {
-    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error> {
-        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
-        match tokio::time::timeout(timeout, ipfs.get_dag(self.clone())).await {
-            Ok(Ok(ipld)) => from_ipld(ipld)
-                .map_err(anyhow::Error::from)
-                .map_err(Error::from),
-            Ok(Err(e)) => Err(Error::Any(e)),
-            Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl<T> ToCid for T
-where
-    T: Serialize + Clone + Send + Sync,
-{
-    async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error> {
-        let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
-        ipfs.put_dag(ipld).await.map_err(Error::from)
-    }
-}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ExtractedRootDocument {
@@ -159,9 +106,12 @@ impl RootDocument {
 
     #[tracing::instrument(skip(self, ipfs))]
     pub async fn verify(&self, ipfs: &Ipfs) -> Result<(), Error> {
-        let identity: IdentityDocument = self
-            .identity
-            .get_local_dag(ipfs)
+        let identity: IdentityDocument = ipfs
+            .dag()
+            .get()
+            .path(self.identity)
+            .local()
+            .deserialized()
             .await
             .map_err(|_| Error::IdentityInvalid)?;
 
@@ -196,44 +146,85 @@ impl RootDocument {
         ),
         Error,
     > {
-        let document: IdentityDocument = self
-            .identity
-            .get_local_dag(ipfs)
+        let document: IdentityDocument = ipfs
+            .dag()
+            .get()
+            .path(self.identity)
+            .local()
+            .deserialized()
             .await
             .map_err(|_| Error::IdentityInvalid)?;
 
         let identity = document.resolve()?;
 
         let friends = futures::future::ready(self.friends.ok_or(Error::Other))
-            .and_then(|document| async move { document.get_local_dag(ipfs).await })
+            .and_then(|document| async move {
+                ipfs.dag()
+                    .get()
+                    .path(document)
+                    .local()
+                    .deserialized()
+                    .await
+                    .map_err(Error::from)
+            })
             .await
             .unwrap_or_default();
 
         let block_list = futures::future::ready(self.blocks.ok_or(Error::Other))
-            .and_then(|document| async move { document.get_local_dag(ipfs).await })
+            .and_then(|document| async move {
+                ipfs.dag()
+                    .get()
+                    .path(document)
+                    .local()
+                    .deserialized()
+                    .await
+                    .map_err(Error::from)
+            })
             .await
             .unwrap_or_default();
 
         let block_by_list = futures::future::ready(self.block_by.ok_or(Error::Other))
-            .and_then(|document| async move { document.get_local_dag(ipfs).await })
+            .and_then(|document| async move {
+                ipfs.dag()
+                    .get()
+                    .path(document)
+                    .local()
+                    .deserialized()
+                    .await
+                    .map_err(Error::from)
+            })
             .await
             .unwrap_or_default();
 
         let request = futures::future::ready(self.request.ok_or(Error::Other))
-            .and_then(|document| async move { document.get_local_dag(ipfs).await })
+            .and_then(|document| async move {
+                ipfs.dag()
+                    .get()
+                    .path(document)
+                    .local()
+                    .deserialized()
+                    .await
+                    .map_err(Error::from)
+            })
             .await
             .unwrap_or_default();
 
         let conversation_keystore =
             futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
                 .and_then(|document| async move {
-                    let map: BTreeMap<String, Cid> = document.get_local_dag(ipfs).await?;
+                    let map: BTreeMap<String, Cid> = ipfs
+                        .dag()
+                        .get()
+                        .path(document)
+                        .local()
+                        .deserialized()
+                        .await?;
                     let mut resolved_map: BTreeMap<Uuid, Keystore> = BTreeMap::new();
                     for (k, v) in map
                         .iter()
                         .filter_map(|(k, v)| Uuid::from_str(k).map(|k| (k, *v)).ok())
                     {
-                        if let Ok(store) = v.get_local_dag(ipfs).await {
+                        if let Ok(store) = ipfs.dag().get().path(v).local().deserialized().await {
                             resolved_map.insert(k, store);
                         }
                     }
@@ -264,7 +255,7 @@ impl RootDocument {
 
         let document = document.sign(&did_kp)?;
 
-        let identity = document.to_cid(ipfs).await?;
+        let identity = ipfs.dag().put().serialize(document)?.await?;
         let has_friends = !data.friends.is_empty();
         let has_blocks = !data.block_list.is_empty();
         let has_block_by_list = !data.block_by_list.is_empty();
@@ -272,27 +263,29 @@ impl RootDocument {
         let has_keystore = !data.conversation_keystore.is_empty();
 
         let friends = has_friends
-            .then_some(data.friends.to_cid(ipfs).await.ok())
+            .then_some(ipfs.dag().put().serialize(data.friends)?.await.ok())
             .flatten();
+
         let blocks = has_blocks
-            .then_some(data.block_list.to_cid(ipfs).await.ok())
+            .then_some(ipfs.dag().put().serialize(data.block_list)?.await.ok())
             .flatten();
         let block_by = has_block_by_list
-            .then_some(data.block_by_list.to_cid(ipfs).await.ok())
+            .then_some(ipfs.dag().put().serialize(data.block_by_list)?.await.ok())
             .flatten();
         let request = has_requests
-            .then_some(data.request.to_cid(ipfs).await.ok())
+            .then_some(ipfs.dag().put().serialize(data.request)?.await.ok())
             .flatten();
 
         let conversations_keystore = has_keystore
             .then_some({
                 let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
                 for (k, v) in data.conversation_keystore {
-                    if let Ok(cid) = v.to_cid(ipfs).await {
+                    if let Ok(cid) = ipfs.dag().put().serialize(v)?.await {
                         pointer_map.insert(k.to_string(), cid);
                     }
                 }
-                pointer_map.to_cid(ipfs).await.ok()
+
+                ipfs.dag().put().serialize(pointer_map)?.await.ok()
             })
             .flatten();
 

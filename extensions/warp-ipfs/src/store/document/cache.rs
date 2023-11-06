@@ -8,10 +8,10 @@ use futures::{
     SinkExt, StreamExt,
 };
 use libipld::Cid;
-use rust_ipfs::Ipfs;
+use rust_ipfs::{Ipfs, IpfsPath};
 use warp::{crypto::DID, error::Error};
 
-use super::{identity::IdentityDocument, utils::GetLocalDag, ToCid};
+use super::identity::IdentityDocument;
 
 #[allow(clippy::large_enum_variant)]
 enum IdentityCacheCommand {
@@ -149,183 +149,183 @@ impl IdentityCacheTask {
         while let Some(command) = self.rx.next().await {
             match command {
                 IdentityCacheCommand::Insert { document, response } => {
-                    if let Err(e) = document.verify() {
-                        let _ = response.send(Err(e));
-                        continue;
-                    }
-
-                    let mut list: HashSet<IdentityDocument> = match self.list {
-                        Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
-                        None => HashSet::new(),
-                    };
-
-                    let old_document = list
-                        .iter()
-                        .find(|old_doc| {
-                            document.did == old_doc.did && document.short_id == old_doc.short_id
-                        })
-                        .cloned();
-
-                    match old_document {
-                        Some(old_document) => {
-                            if !old_document.different(&document) {
-                                let _ = response.send(Ok(None));
-                                continue;
-                            }
-
-                            list.replace(document);
-
-                            let cid = match list.to_cid(&self.ipfs).await {
-                                Ok(cid) => cid,
-                                Err(e) => {
-                                    let _ = response.send(Err(e));
-                                    continue;
-                                }
-                            };
-
-                            let old_cid = self.list.take();
-
-                            let remove_pin_and_block = async {
-                                if let Some(old_cid) = old_cid {
-                                    if self.ipfs.is_pinned(&old_cid).await? {
-                                        self.ipfs.remove_pin(&old_cid, false).await?;
-                                    }
-                                    // Do we want to remove the old block?
-                                    self.ipfs.remove_block(old_cid).await?;
-                                }
-                                Ok::<_, Error>(())
-                            };
-
-                            if let Err(e) = remove_pin_and_block.await {
-                                let _ = response.send(Err(e));
-                                continue;
-                            }
-
-                            if let Some(path) = self.path.as_ref() {
-                                let cid = cid.to_string();
-                                if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await
-                                {
-                                    tracing::log::error!("Error writing cid to file: {e}");
-                                }
-                            }
-
-                            self.list = Some(cid);
-
-                            let _ = response.send(Ok(Some(old_document.clone())));
-                        }
-                        None => {
-                            list.insert(document);
-
-                            let cid = match list.to_cid(&self.ipfs).await {
-                                Ok(cid) => cid,
-                                Err(e) => {
-                                    let _ = response.send(Err(e));
-                                    continue;
-                                }
-                            };
-
-                            if let Err(e) = self.ipfs.insert_pin(&cid, false).await {
-                                let _ = response.send(Err(e.into()));
-                                continue;
-                            }
-
-                            if let Some(path) = self.path.as_ref() {
-                                let cid = cid.to_string();
-                                if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await
-                                {
-                                    tracing::log::error!("Error writing cid to file: {e}");
-                                }
-                            }
-
-                            self.list = Some(cid);
-
-                            let _ = response.send(Ok(None));
-                        }
-                    }
+                    _ = response.send(self.insert(document).await)
                 }
                 IdentityCacheCommand::Get { did, response } => {
-                    let list: HashSet<IdentityDocument> = match self.list {
-                        Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
-                        None => HashSet::new(),
-                    };
-
-                    let document = list
-                        .iter()
-                        .find(|document| document.did == did)
-                        .cloned()
-                        .ok_or(Error::IdentityDoesntExist);
-
-                    let _ = response.send(document);
+                    let _ = response.send(self.get(did).await);
                 }
                 IdentityCacheCommand::Remove { did, response } => {
-                    let mut list: HashSet<IdentityDocument> = match self.list {
-                        Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
-                        None => {
-                            let _ = response.send(Err(Error::IdentityDoesntExist));
-                            continue;
-                        }
-                    };
-
-                    let old_document = list.iter().find(|document| document.did == did).cloned();
-
-                    if old_document.is_none() {
-                        let _ = response.send(Err(Error::IdentityDoesntExist));
-                        continue;
-                    }
-
-                    let document = old_document.expect("Exist");
-
-                    if !list.remove(&document) {
-                        let _ = response.send(Err(Error::IdentityDoesntExist));
-                        continue;
-                    }
-
-                    let cid = match list.to_cid(&self.ipfs).await {
-                        Ok(cid) => cid,
-                        Err(e) => {
-                            let _ = response.send(Err(e));
-                            continue;
-                        }
-                    };
-
-                    let old_cid = self.list.take();
-
-                    let remove_pin_and_block = async {
-                        if let Some(old_cid) = old_cid {
-                            if self.ipfs.is_pinned(&old_cid).await? {
-                                self.ipfs.remove_pin(&old_cid, false).await?;
-                            }
-                            // Do we want to remove the old block?
-                            self.ipfs.remove_block(old_cid).await?;
-                        }
-                        Ok::<_, Error>(())
-                    };
-
-                    if let Err(e) = remove_pin_and_block.await {
-                        let _ = response.send(Err(e));
-                        continue;
-                    }
-
-                    if let Some(path) = self.path.as_ref() {
-                        let cid = cid.to_string();
-                        if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
-                            tracing::log::error!("Error writing cid to file: {e}");
-                        }
-                    }
-
-                    self.list = Some(cid);
-
-                    let _ = response.send(Ok(()));
+                    let _ = response.send(self.remove(did).await);
                 }
                 IdentityCacheCommand::List { response } => {
-                    let list: HashSet<IdentityDocument> = match self.list {
-                        Some(cid) => cid.get_local_dag(&self.ipfs).await.unwrap_or_default(),
-                        None => HashSet::new(),
-                    };
-
-                    let _ = response.send(Ok(Vec::from_iter(list)));
+                    let _ = response.send(self.list().await);
                 }
             }
         }
+    }
+
+    async fn insert(
+        &mut self,
+        document: IdentityDocument,
+    ) -> Result<Option<IdentityDocument>, Error> {
+        document.verify()?;
+
+        let mut list: HashSet<IdentityDocument> = match self.list {
+            Some(cid) => self
+                .ipfs
+                .get_dag(IpfsPath::from(cid))
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => HashSet::new(),
+        };
+
+        let old_document = list
+            .iter()
+            .find(|old_doc| document.did == old_doc.did && document.short_id == old_doc.short_id)
+            .cloned();
+
+        match old_document {
+            Some(old_document) => {
+                if !old_document.different(&document) {
+                    return Ok(None);
+                }
+
+                list.replace(document);
+
+                let cid = self.ipfs.dag().put().serialize(list)?.await?;
+
+                let old_cid = self.list.take();
+
+                let remove_pin_and_block = async {
+                    if let Some(old_cid) = old_cid {
+                        if self.ipfs.is_pinned(&old_cid).await? {
+                            self.ipfs.remove_pin(&old_cid, false).await?;
+                        }
+                        // Do we want to remove the old block?
+                        self.ipfs.remove_block(old_cid, false).await?;
+                    }
+                    Ok::<_, Error>(())
+                };
+
+                remove_pin_and_block.await?;
+
+                if let Some(path) = self.path.as_ref() {
+                    let cid = cid.to_string();
+                    if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
+                        tracing::log::error!("Error writing cid to file: {e}");
+                    }
+                }
+
+                self.list = Some(cid);
+
+                Ok(Some(old_document.clone()))
+            }
+            None => {
+                list.insert(document);
+
+                let cid = self.ipfs.dag().put().serialize(list)?.await?;
+
+                self.ipfs.insert_pin(&cid, false).await?;
+
+                if let Some(path) = self.path.as_ref() {
+                    let cid = cid.to_string();
+                    if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
+                        tracing::log::error!("Error writing cid to file: {e}");
+                    }
+                }
+
+                self.list = Some(cid);
+
+                Ok(None)
+            }
+        }
+    }
+
+    async fn get(&self, did: DID) -> Result<IdentityDocument, Error> {
+        let list: HashSet<IdentityDocument> = match self.list {
+            Some(cid) => self
+                .ipfs
+                .get_dag(IpfsPath::from(cid))
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => HashSet::new(),
+        };
+
+        let document = list
+            .iter()
+            .find(|document| document.did == did)
+            .cloned()
+            .ok_or(Error::IdentityDoesntExist)?;
+
+        Ok(document)
+    }
+
+    async fn remove(&mut self, did: DID) -> Result<(), Error> {
+        let mut list: HashSet<IdentityDocument> = match self.list {
+            Some(cid) => self
+                .ipfs
+                .get_dag(IpfsPath::from(cid))
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => {
+                return Err(Error::IdentityDoesntExist);
+            }
+        };
+
+        let old_document = list.iter().find(|document| document.did == did).cloned();
+
+        if old_document.is_none() {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let document = old_document.expect("Exist");
+
+        if !list.remove(&document) {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
+
+        let old_cid = self.list.take();
+
+        if let Some(old_cid) = old_cid {
+            if self.ipfs.is_pinned(&old_cid).await? {
+                self.ipfs.remove_pin(&old_cid, false).await?;
+            }
+            // Do we want to remove the old block?
+            self.ipfs.remove_block(old_cid, false).await?;
+        }
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
+                tracing::log::error!("Error writing cid to file: {e}");
+            }
+        }
+
+        self.list = Some(cid);
+
+        Ok(())
+    }
+
+    async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
+        let list: HashSet<IdentityDocument> = match self.list {
+            Some(cid) => self
+                .ipfs
+                .get_dag(IpfsPath::from(cid))
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => HashSet::new(),
+        };
+
+        Ok(Vec::from_iter(list))
     }
 }

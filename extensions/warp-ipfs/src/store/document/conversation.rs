@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    future::IntoFuture,
     path::PathBuf,
     sync::Arc,
 };
@@ -7,7 +8,7 @@ use std::{
 use futures::{
     channel::{mpsc, oneshot},
     stream::FuturesUnordered,
-    FutureExt, SinkExt, StreamExt,
+    SinkExt, StreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
@@ -21,7 +22,7 @@ use warp::{
 
 use crate::store::{conversation::ConversationDocument, keystore::Keystore};
 
-use super::{root::RootDocumentMap, utils::GetLocalDag, ToCid};
+use super::root::RootDocumentMap;
 
 #[allow(clippy::large_enum_variant)]
 enum ConversationCommand {
@@ -256,7 +257,7 @@ impl ConversationTask {
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
 
-        let document: ConversationDocument = path.get_local_dag(&self.ipfs).await?;
+        let document: ConversationDocument = self.ipfs.get_dag(path).local().deserialized().await?;
         document.verify()?;
         Ok(document)
     }
@@ -277,7 +278,7 @@ impl ConversationTask {
         let mut map = self.root.get_conversation_keystore_map().await?;
 
         let id = id.to_string();
-        let cid = document.to_cid(&self.ipfs).await?;
+        let cid = self.ipfs.dag().put().serialize(document)?.await?;
 
         map.insert(id, cid);
 
@@ -290,7 +291,12 @@ impl ConversationTask {
             None => return Err(Error::InvalidConversation),
         };
 
-        let mut conversation_map: BTreeMap<String, Cid> = cid.get_local_dag(&self.ipfs).await?;
+        let mut conversation_map: BTreeMap<String, Cid> = self
+            .ipfs
+            .get_dag(IpfsPath::from(cid))
+            .local()
+            .deserialized()
+            .await?;
 
         let document_cid = match conversation_map.remove(&id.to_string()) {
             Some(cid) => cid,
@@ -307,7 +313,12 @@ impl ConversationTask {
             }
         }
 
-        let document: ConversationDocument = document_cid.get_local_dag(&self.ipfs).await?;
+        let document: ConversationDocument = self
+            .ipfs
+            .get_dag(IpfsPath::from(document_cid))
+            .local()
+            .deserialized()
+            .await?;
         Ok(document)
     }
 
@@ -317,13 +328,20 @@ impl ConversationTask {
             None => return Ok(Vec::new()),
         };
 
-        let conversation_map: BTreeMap<String, Cid> = cid.get_local_dag(&self.ipfs).await?;
+        let conversation_map: BTreeMap<String, Cid> = self
+            .ipfs
+            .get_dag(IpfsPath::from(cid))
+            .local()
+            .deserialized()
+            .await?;
 
-        let list = FuturesUnordered::from_iter(
-            conversation_map
-                .values()
-                .map(|cid| (*cid).get_local_dag(&self.ipfs).boxed()),
-        )
+        let list = FuturesUnordered::from_iter(conversation_map.values().map(|cid| {
+            self.ipfs
+                .get_dag(IpfsPath::from(*cid))
+                .local()
+                .deserialized()
+                .into_future()
+        }))
         .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
         .collect::<Vec<_>>()
         .await;
@@ -337,7 +355,13 @@ impl ConversationTask {
             None => return false,
         };
 
-        let conversation_map: BTreeMap<String, Cid> = match cid.get_local_dag(&self.ipfs).await {
+        let conversation_map: BTreeMap<String, Cid> = match self
+            .ipfs
+            .get_dag(IpfsPath::from(cid))
+            .local()
+            .deserialized()
+            .await
+        {
             Ok(document) => document,
             Err(_) => return false,
         };
@@ -350,7 +374,7 @@ impl ConversationTask {
     }
 
     async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let cid = map.to_cid(&self.ipfs).await?;
+        let cid = self.ipfs.dag().put().serialize(map)?.await?;
 
         let old_map_cid = self.cid.replace(cid);
 
@@ -386,12 +410,18 @@ impl ConversationTask {
         document.verify()?;
 
         let mut map = match self.cid {
-            Some(cid) => cid.get_local_dag(&self.ipfs).await?,
+            Some(cid) => {
+                self.ipfs
+                    .get_dag(IpfsPath::from(cid))
+                    .local()
+                    .deserialized()
+                    .await?
+            }
             None => BTreeMap::new(),
         };
 
         let id = document.id().to_string();
-        let cid = document.to_cid(&self.ipfs).await?;
+        let cid = self.ipfs.dag().put().serialize(document)?.await?;
 
         map.insert(id, cid);
 
