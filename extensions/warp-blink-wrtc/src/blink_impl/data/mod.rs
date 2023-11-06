@@ -8,15 +8,19 @@ use warp::{
 pub struct ActiveCall {
     pub call: CallInfo,
     pub connected_participants: HashMap<DID, PeerState>,
+    // participants who refused the call or hung up
+    pub left_call: HashSet<DID>,
     pub call_state: CallState,
     pub call_config: CallConfig,
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum PeerState {
+    // one of the webrtc transport layers got disconnected.
     Disconnected,
     Initializing,
     Connected,
+    // the the webrtc controller hung up.
     Closed,
 }
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -35,6 +39,7 @@ impl From<CallInfo> for ActiveCall {
         Self {
             call: value,
             connected_participants: HashMap::new(),
+            left_call: HashSet::new(),
             call_state: CallState::Uninitialized,
             call_config: CallConfig::default(),
         }

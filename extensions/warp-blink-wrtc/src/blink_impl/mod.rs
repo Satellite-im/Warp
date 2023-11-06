@@ -501,6 +501,7 @@ impl Blink for BlinkImpl {
         let call_info = CallInfo::new(conversation_id, participants.clone());
         self.init_call(call_info.clone()).await?;
 
+        let active_call = self.active_call.clone();
         let call_id = call_info.call_id();
         let notify = self.notify.clone();
         let own_id = self.own_id.clone();
@@ -522,6 +523,15 @@ impl Blink for BlinkImpl {
                         };
                         let mut new_participants = vec![];
                         while let Some(dest) = participants.pop() {
+                            if active_call
+                                .read()
+                                .await
+                                .as_ref()
+                                .map(|x| x.left_call.contains(&dest))
+                                .unwrap_or_default()
+                            {
+                                continue;
+                            }
                             // if not online and available, don't try to send the signal
                             if multipass
                                 .identity_status(&dest)
@@ -588,6 +598,7 @@ impl Blink for BlinkImpl {
 
         self.init_call(call.clone()).await?;
 
+        let own_id = self.own_id.clone();
         let active_call = self.active_call.clone();
         let participants = call.participants();
         let ipfs = self.get_ipfs().await?;
@@ -596,6 +607,32 @@ impl Blink for BlinkImpl {
         let multipass = self.multipass.clone();
         tokio::task::spawn(async move {
             let handle_signals = async {
+                // this block ensures the lock gets dropped
+                {
+                    // send InitiationSignal::Join to everyone so they can update their pending calls correctly
+                    let lock = own_id.read().await;
+                    let own_id = match lock.as_ref() {
+                        Some(r) => r,
+                        None => {
+                            log::error!("error accepting call. couldn't get own_id");
+                            return;
+                        }
+                    };
+                    // send extra quit signal to participants who aren't connected - to update their pending call info
+                    for participant in participants.iter() {
+                        if participant == own_id {
+                            continue;
+                        }
+                        let topic = ipfs_routes::call_initiation_route(participant);
+                        let signal = InitiationSignal::Join { call_id };
+                        if let Err(e) =
+                            send_signal_ecdh(&ipfs, own_id, participant, signal, topic).await
+                        {
+                            log::error!("failed to send signal: {e}");
+                        }
+                    }
+                }
+
                 loop {
                     // this scope is to make sure the locks drop
                     {

@@ -91,6 +91,7 @@ pub async fn run(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEve
                             }
                         }
                         active_call.connected_participants.insert(sender.clone(), PeerState::Initializing);
+                        active_call.left_call.remove(&sender);
                         // todo: properly hang up on error.
                         // emits CallInitiated Event, which returns the local sdp. will be sent to the peer with the dial signal
                         if let Err(e) = webrtc_controller.write().await.dial(&sender).await {
@@ -116,6 +117,7 @@ pub async fn run(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEve
                             log::error!("participant tried to leave call who wasn't part of the call");
                             continue;
                         }
+                        active_call.left_call.insert(sender.clone());
                         webrtc_controller.write().await.hang_up(&sender).await;
                         if let Err(e) = ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
                             log::error!("failed to send ParticipantLeft event: {e}");
