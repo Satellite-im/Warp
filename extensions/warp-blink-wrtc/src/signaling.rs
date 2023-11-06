@@ -28,7 +28,6 @@ pub enum CallSignal {
     Join { call_id: Uuid },
     #[display(fmt = "Leave")]
     Leave { call_id: Uuid },
-
     #[display(fmt = "Muted")]
     Muted,
     #[display(fmt = "Unmuted")]
