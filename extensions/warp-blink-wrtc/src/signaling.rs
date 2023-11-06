@@ -2,11 +2,28 @@ use derive_more::Display;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warp::blink::CallInfo;
+use warp::{blink::CallInfo, crypto::DID};
 use webrtc::{
     ice_transport::ice_candidate::RTCIceCandidate,
     peer_connection::sdp::session_description::RTCSessionDescription,
 };
+
+pub enum GossipSubSignal {
+    Peer {
+        sender: DID,
+        call_id: Uuid,
+        signal: PeerSignal,
+    },
+    Call {
+        sender: DID,
+        call_id: Uuid,
+        signal: CallSignal,
+    },
+    Initiation {
+        sender: DID,
+        signal: InitiationSignal,
+    },
+}
 
 #[derive(Serialize, Deserialize, Display)]
 pub enum PeerSignal {
@@ -25,9 +42,9 @@ pub enum PeerSignal {
 #[derive(Serialize, Deserialize, Display)]
 pub enum CallSignal {
     #[display(fmt = "Join")]
-    Join { call_id: Uuid },
+    Join,
     #[display(fmt = "Leave")]
-    Leave { call_id: Uuid },
+    Leave,
     #[display(fmt = "Muted")]
     Muted,
     #[display(fmt = "Unmuted")]

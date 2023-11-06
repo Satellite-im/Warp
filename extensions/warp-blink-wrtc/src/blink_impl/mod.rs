@@ -8,6 +8,7 @@ mod webrtc_handler;
 use webrtc_handler::run as handle_webrtc;
 use webrtc_handler::WebRtcHandlerParams;
 
+mod gossipsub_listener;
 mod gossipsub_sender;
 
 use anyhow::{bail, Context};
