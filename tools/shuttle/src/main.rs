@@ -269,22 +269,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ch,
                         Either::Right(Response::RegisterResponse(RegisterResponse::Ok)),
                     ));
-
-                    // let did_key = document.did.to_string();
-                    // let ipfs = ipfs.clone();
-                    // let _result = async move {
-                    //     let path = IpfsPath::from(local_peer_id);
-
-                    //     if ipfs
-                    //         .get_dag(path.sub_path("identities")?.sub_path(&did_key)?)
-                    //         .await
-                    //         .is_ok()
-                    //     {
-                    //         return Err(Box::new(warp::error::Error::IdentityExist) as Box<_>);
-                    //     }
-
-                    //     Ok::<_, Box<dyn std::error::Error>>(())
-                    // };
                 }
                 identity::protocol::Request::Synchronized(Synchronized::Store {
                     document,

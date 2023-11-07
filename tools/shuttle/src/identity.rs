@@ -314,7 +314,7 @@ impl Behaviour {
                                 delay.reset(Duration::from_secs(30));
                             }
                         }
-                        let _ = res.send(Ok(identity.clone()));
+                        let _ = res.send(Ok(identity));
                     }
                     LookupResponse::Error(
                         protocol::LookupError::DoesntExist | protocol::LookupError::RateExceeded,
@@ -619,7 +619,7 @@ impl NetworkBehaviour for Behaviour {
                 Poll::Pending => true,
             });
 
-        // Clear out any cache if which timer expired
+        // Clear out any cache where the timer expired
         self.identity_cache
             .retain(|_, (_, timer)| timer.poll_unpin(cx).is_pending());
 
