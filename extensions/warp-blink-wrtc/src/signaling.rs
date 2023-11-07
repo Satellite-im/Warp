@@ -8,6 +8,7 @@ use webrtc::{
     peer_connection::sdp::session_description::RTCSessionDescription,
 };
 
+#[derive(Clone)]
 pub enum GossipSubSignal {
     Peer {
         sender: DID,
@@ -25,7 +26,7 @@ pub enum GossipSubSignal {
     },
 }
 
-#[derive(Serialize, Deserialize, Display)]
+#[derive(Serialize, Deserialize, Display, Clone)]
 pub enum PeerSignal {
     #[display(fmt = "Ice")]
     Ice(RTCIceCandidate),
@@ -39,7 +40,7 @@ pub enum PeerSignal {
 
 // this is used for webrtc signaling.
 // it is somewhat redundant but for now i'll leave it in.
-#[derive(Serialize, Deserialize, Display)]
+#[derive(Serialize, Deserialize, Display, Clone)]
 pub enum CallSignal {
     #[display(fmt = "Join")]
     Join,
@@ -55,7 +56,7 @@ pub enum CallSignal {
     Undeafened,
 }
 
-#[derive(Serialize, Deserialize, Display)]
+#[derive(Serialize, Deserialize, Display, Clone)]
 pub enum InitiationSignal {
     /// invite a peer to join a call
     #[display(fmt = "Offer")]

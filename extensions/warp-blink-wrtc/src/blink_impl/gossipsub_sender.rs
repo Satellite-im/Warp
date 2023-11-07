@@ -1,15 +1,23 @@
-use std::{fmt::Display, sync::Arc};
+use std::{fmt::Display, sync::Arc, time::Duration};
 
 use futures::channel::oneshot;
 use rust_ipfs::Ipfs;
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
-    Notify,
+use tokio::{
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Notify,
+    },
+    time::Instant,
 };
-use warp::crypto::{cipher::Cipher, DID};
+use warp::{
+    crypto::{cipher::Cipher, DID},
+    sync::RwLock,
+};
 
 use crate::store::{ecdh_decrypt, ecdh_encrypt};
+
+use super::data::NotifyWrapper;
 
 enum GossipSubCmd {
     SendAes {
@@ -38,18 +46,8 @@ pub struct GossipSubSender {
     notify: Arc<NotifyWrapper>,
 }
 
-struct NotifyWrapper {
-    notify: Arc<Notify>,
-}
-
-impl Drop for NotifyWrapper {
-    fn drop(&mut self) {
-        self.notify.notify_waiters();
-    }
-}
-
 impl GossipSubSender {
-    pub fn init(own_id: DID, ipfs: Ipfs) -> Self {
+    pub fn new(own_id: Arc<RwLock<Option<DID>>>, ipfs: Arc<RwLock<Option<Ipfs>>>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let notify = Arc::new(Notify::new());
         let notify2 = notify.clone();
@@ -123,11 +121,44 @@ impl GossipSubSender {
 }
 
 async fn run(
-    own_id: DID,
-    ipfs: Ipfs,
+    own_id: Arc<RwLock<Option<DID>>>,
+    ipfs: Arc<RwLock<Option<Ipfs>>>,
     mut ch: UnboundedReceiver<GossipSubCmd>,
     notify: Arc<Notify>,
 ) {
+    let notify2 = notify.clone();
+    let mut timer = tokio::time::interval_at(
+        Instant::now() + Duration::from_millis(100),
+        Duration::from_millis(100),
+    );
+    let own_id = loop {
+        tokio::select! {
+            _ = notify2.notified() => {
+                log::debug!("GossibSubSender channel closed");
+                return;
+            },
+            _ = timer.tick() => {
+                if own_id.read().is_some() {
+                    break own_id.write().take().unwrap();
+                }
+            }
+        }
+    };
+
+    let ipfs = loop {
+        tokio::select! {
+            _ = notify2.notified() => {
+                log::debug!("GossibSubSender channel closed");
+                return;
+            },
+            _ = timer.tick() => {
+                if ipfs.read().is_some() {
+                    break ipfs.read().clone().unwrap();
+                }
+            }
+        }
+    };
+
     loop {
         tokio::select! {
             opt = ch.recv() => match opt {

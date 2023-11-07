@@ -1,13 +1,16 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use rust_ipfs::Ipfs;
-use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
-    Notify,
+use tokio::{
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Notify,
+    },
+    time::Instant,
 };
 use uuid::Uuid;
-use warp::crypto::DID;
+use warp::{crypto::DID, sync::RwLock};
 
 use crate::{
     signaling::{
@@ -17,7 +20,7 @@ use crate::{
     store::PeerIdExt,
 };
 
-use super::gossipsub_sender::GossipSubSender;
+use super::{data::NotifyWrapper, gossipsub_sender::GossipSubSender};
 
 enum GossipSubCmd {
     // unsubscribe from the call and close any webrtc connections
@@ -30,6 +33,7 @@ enum GossipSubCmd {
     // allow peers to offer calls
     ReceiveCalls { own_id: DID },
 }
+#[derive(Clone)]
 pub struct GossipSubListener {
     ch: UnboundedSender<GossipSubCmd>,
     // when GossipSubSender gets cloned, NotifyWrapper doesn't get cloned.
@@ -37,19 +41,9 @@ pub struct GossipSubListener {
     notify: Arc<NotifyWrapper>,
 }
 
-struct NotifyWrapper {
-    notify: Arc<Notify>,
-}
-
-impl Drop for NotifyWrapper {
-    fn drop(&mut self) {
-        self.notify.notify_waiters();
-    }
-}
-
 impl GossipSubListener {
-    pub fn init(
-        ipfs: Ipfs,
+    pub fn new(
+        ipfs: Arc<RwLock<Option<Ipfs>>>,
         event_ch: UnboundedReceiver<GossipSubCmd>,
         rsp_ch: UnboundedSender<GossipSubSignal>,
         gossipsub_sender: GossipSubSender,
@@ -90,17 +84,36 @@ impl GossipSubListener {
 }
 
 async fn run(
-    ipfs: Ipfs,
+    ipfs: Arc<RwLock<Option<Ipfs>>>,
     mut ch: UnboundedReceiver<GossipSubCmd>,
     tx: UnboundedSender<GossipSubSignal>,
     gossipsub_sender: GossipSubSender,
     notify: Arc<Notify>,
 ) {
+    let notify2 = notify.clone();
+    let mut timer = tokio::time::interval_at(
+        Instant::now() + Duration::from_millis(100),
+        Duration::from_millis(100),
+    );
+    let ipfs = loop {
+        tokio::select! {
+            _ = notify2.notified() => {
+                log::debug!("GossibSubListener channel closed");
+                return;
+            },
+            _ = timer.tick() => {
+                if ipfs.read().is_some() {
+                    break ipfs.read().clone().unwrap();
+                }
+            }
+        }
+    };
+
     // for tracking webrtc subscriptions
     let mut current_call: Option<Uuid> = None;
-    let mut connected_peers: HashMap<DID, Arc<Notify>> = HashMap::new();
     let mut subscribed_calls: HashMap<Uuid, Arc<Notify>> = HashMap::new();
 
+    let webrtc_notify = Arc::new(Notify::new());
     let call_signal_notify = Arc::new(Notify::new());
     let call_offer_notify = Arc::new(Notify::new());
     loop {
@@ -113,16 +126,12 @@ async fn run(
                         }
                         if matches!(current_call.as_ref(), Some(&call_id)) {
                             let _ = current_call.take();
-                            for (_peer_id, notify) in connected_peers.drain() {
-                                notify.notify_waiters();
-                            }
+                            webrtc_notify.notify_waiters();
                         }
                     }
                     GossipSubCmd::DisconnectWebrtc { call_id } => {
                         if matches!(current_call.as_ref(), Some(&call_id)) {
-                            for (_peer_id, notify) in connected_peers.drain() {
-                                notify.notify_waiters();
-                            }
+                            webrtc_notify.notify_waiters();
                         }
                     }
                     GossipSubCmd::SubscribeCall { call_id, group_key } => {
@@ -185,15 +194,9 @@ async fn run(
                     GossipSubCmd::ConnectWebRtc { call_id, peer } => {
                         if !matches!(current_call.as_ref(), Some(&call_id)) {
                             if current_call.is_some() {
-                                for (_peer_id, notify) in connected_peers.drain() {
-                                    notify.notify_waiters();
-                                }
+                                webrtc_notify.notify_waiters();
                             }
                             current_call.replace(call_id);
-                        }
-                        let notify = Arc::new(Notify::new());
-                        if let Some(prev) = connected_peers.insert(peer.clone(), notify.clone()) {
-                            prev.notify_waiters();
                         }
 
                         let mut peer_signal_stream = match ipfs
@@ -207,6 +210,7 @@ async fn run(
                             }
                         };
                         let ch = tx.clone();
+                        let notify = webrtc_notify.clone();
                         let gossipsub_sender = gossipsub_sender.clone();
                         tokio::spawn(async move {
                             loop {
@@ -310,9 +314,7 @@ async fn run(
             }
         }
 
-        for (_peer_id, notify) in connected_peers.drain() {
-            notify.notify_waiters();
-        }
+        webrtc_notify.notify_waiters();
         call_signal_notify.notify_waiters();
         call_offer_notify.notify_waiters();
     }

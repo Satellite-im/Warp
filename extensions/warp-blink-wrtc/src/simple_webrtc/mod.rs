@@ -51,7 +51,7 @@ pub mod events;
 pub use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
 
-use self::events::EmittedEvents;
+use self::events::{EmittedEvents, WebRtcEventStream};
 
 /// simple-webrtc
 /// This library augments the [webrtc-rs](https://github.com/webrtc-rs/webrtc) library, hopefully
@@ -141,7 +141,7 @@ impl Controller {
             bail!("peers is not empty after deinit")
         }
     }
-    pub fn get_event_stream(&self) -> anyhow::Result<impl Stream<Item = EmittedEvents>> {
+    pub fn get_event_stream(&self) -> WebRtcEventStream {
         let mut rx = self.event_ch.subscribe();
         let stream = async_stream::stream! {
             loop {
@@ -152,7 +152,7 @@ impl Controller {
                 };
             }
         };
-        Ok(Box::pin(stream))
+        WebRtcEventStream(Box::pin(stream))
     }
 
     /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,

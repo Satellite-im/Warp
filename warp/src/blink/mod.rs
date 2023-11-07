@@ -185,6 +185,10 @@ impl CallInfo {
         self.participants.clone()
     }
 
+    pub fn contains_participant(&self, id: &DID) -> bool {
+        self.participants.contains(id)
+    }
+
     pub fn group_key(&self) -> Vec<u8> {
         self.group_key.clone()
     }

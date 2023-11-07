@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use crate::crypto::DID;
 
@@ -7,7 +7,7 @@ pub struct CallConfig {
     pub self_recording: bool,
     pub self_muted: bool,
     pub self_deafened: bool,
-    pub participants_joined: HashSet<DID, ParticipantState>,
+    pub participants_joined: HashMap<DID, ParticipantState>,
 }
 
 #[derive(Default, Debug, Clone)]

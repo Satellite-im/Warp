@@ -7,7 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
-use warp::blink::BlinkEventKind;
+use warp::blink::{AudioDeviceConfig, BlinkEventKind};
 use warp::crypto::DID;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
@@ -16,13 +16,16 @@ use webrtc::track::track_remote::TrackRemote;
 pub(crate) mod audio;
 use audio::{create_sink_track, create_source_track, AudioCodec, AudioHardwareConfig};
 
-use self::mp4_logger::Mp4LoggerConfig;
+use self::audio::DeviceConfig;
+use self::{audio::AudioSampleRate, mp4_logger::Mp4LoggerConfig};
 
 pub(crate) mod mp4_logger;
 
 struct Data {
     audio_input_device: Option<cpal::Device>,
     audio_output_device: Option<cpal::Device>,
+    audio_source_config: AudioHardwareConfig,
+    audio_sink_config: AudioHardwareConfig,
     audio_source_track: Option<Box<dyn audio::SourceTrack>>,
     audio_sink_tracks: HashMap<DID, Box<dyn audio::SinkTrack>>,
     recording: bool,
@@ -36,6 +39,14 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
     Data {
         audio_input_device: cpal_host.default_input_device(),
         audio_output_device: cpal_host.default_output_device(),
+        audio_source_config: AudioHardwareConfig {
+            sample_rate: AudioSampleRate::High,
+            channels: 1,
+        },
+        audio_sink_config: AudioHardwareConfig {
+            sample_rate: AudioSampleRate::High,
+            channels: 1,
+        },
         audio_source_track: None,
         audio_sink_tracks: HashMap::new(),
         recording: false,
@@ -85,7 +96,6 @@ pub async fn create_audio_source_track(
     event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
     webrtc_codec: AudioCodec,
-    source_config: AudioHardwareConfig,
 ) -> Result<(), Error> {
     let _lock = LOCK.write().await;
     let input_device = match unsafe { DATA.audio_input_device.as_ref() } {
@@ -94,7 +104,7 @@ pub async fn create_audio_source_track(
     };
 
     let muted = unsafe { DATA.muted };
-
+    let source_config = unsafe { DATA.audio_source_config.clone() };
     let source_track = create_source_track(
         own_id,
         event_ch,
@@ -140,7 +150,6 @@ pub async fn create_audio_sink_track(
     track: Arc<TrackRemote>,
     // the format to decode to. Opus supports encoding and decoding to arbitrary sample rates and number of channels.
     webrtc_codec: AudioCodec,
-    sink_config: AudioHardwareConfig,
 ) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
     let output_device = match unsafe { DATA.audio_output_device.as_ref() } {
@@ -150,6 +159,7 @@ pub async fn create_audio_sink_track(
         }
     };
     let deafened = unsafe { DATA.deafened };
+    let sink_config = unsafe { DATA.audio_sink_config.clone() };
     let sink_track = create_sink_track(
         peer_id.clone(),
         event_ch,
@@ -183,11 +193,11 @@ pub async fn create_audio_sink_track(
     Ok(())
 }
 
-pub async fn change_audio_input(
-    device: cpal::Device,
-    source_config: AudioHardwareConfig,
-) -> anyhow::Result<()> {
+pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
+
+    let mut source_config = unsafe { DATA.audio_source_config.clone() };
+    source_config.channels = get_min_source_channels(&device)?;
 
     // change_input_device destroys the audio stream. if that function fails. there should be
     // no audio_input.
@@ -196,19 +206,32 @@ pub async fn change_audio_input(
     }
 
     if let Some(source) = unsafe { DATA.audio_source_track.as_mut() } {
-        source.change_input_device(&device, source_config)?;
+        source.change_input_device(&device, source_config.clone())?;
     }
     unsafe {
         DATA.audio_input_device.replace(device);
+        DATA.audio_source_config = source_config;
     }
     Ok(())
 }
 
-pub async fn change_audio_output(
-    device: cpal::Device,
-    sink_config: AudioHardwareConfig,
-) -> anyhow::Result<()> {
+pub async fn set_audio_source_config(source_config: AudioHardwareConfig) {
     let _lock = LOCK.write().await;
+    unsafe {
+        DATA.audio_source_config = source_config;
+    }
+}
+
+pub async fn get_audio_source_config() -> AudioHardwareConfig {
+    let _lock = LOCK.write().await;
+    unsafe { DATA.audio_source_config.clone() }
+}
+
+pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
+    let _lock = LOCK.write().await;
+
+    let mut sink_config = unsafe { DATA.audio_sink_config.clone() };
+    sink_config.channels = get_min_sink_channels(&device)?;
 
     // todo: if this fails, return an error or keep going?
     for (_k, v) in unsafe { DATA.audio_sink_tracks.iter_mut() } {
@@ -219,8 +242,35 @@ pub async fn change_audio_output(
 
     unsafe {
         DATA.audio_output_device.replace(device);
+        DATA.audio_sink_config = sink_config;
     }
     Ok(())
+}
+
+pub async fn set_audio_sink_config(sink_config: AudioHardwareConfig) {
+    let _lock = LOCK.write().await;
+    unsafe {
+        DATA.audio_sink_config = sink_config;
+    }
+}
+
+pub async fn get_audio_sink_config() -> AudioHardwareConfig {
+    let _lock = LOCK.write().await;
+    unsafe { DATA.audio_sink_config.clone() }
+}
+
+pub async fn get_audio_device_config() -> DeviceConfig {
+    let _lock = LOCK.write().await;
+    unsafe {
+        DeviceConfig::new(
+            DATA.audio_input_device
+                .as_ref()
+                .map(|x| x.name().unwrap_or_default()),
+            DATA.audio_output_device
+                .as_ref()
+                .map(|x| x.name().unwrap_or_default()),
+        )
+    }
 }
 
 pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
@@ -342,4 +392,31 @@ pub async fn set_peer_audio_gain(peer_id: DID, multiplier: f32) -> anyhow::Resul
     }
 
     Ok(())
+}
+
+fn get_min_source_channels(input_device: &cpal::Device) -> anyhow::Result<u16> {
+    let min_channels = input_device
+        .supported_input_configs()?
+        .fold(None, |acc: Option<u16>, x| match acc {
+            None => Some(x.channels()),
+            Some(y) => Some(std::cmp::min(x.channels(), y)),
+        });
+    let channels = min_channels.ok_or(anyhow::anyhow!(
+        "unsupported audio input device - no input configuration available"
+    ))?;
+    Ok(channels)
+}
+
+fn get_min_sink_channels(output_device: &cpal::Device) -> anyhow::Result<u16> {
+    let min_channels =
+        output_device
+            .supported_output_configs()?
+            .fold(None, |acc: Option<u16>, x| match acc {
+                None => Some(x.channels()),
+                Some(y) => Some(std::cmp::min(x.channels(), y)),
+            });
+    let channels = min_channels.ok_or(anyhow::anyhow!(
+        "unsupported audio output device. no output configuration available"
+    ))?;
+    Ok(channels)
 }

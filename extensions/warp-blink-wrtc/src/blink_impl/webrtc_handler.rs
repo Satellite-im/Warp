@@ -6,7 +6,7 @@ use futures::StreamExt;
 use rust_ipfs::{Ipfs, SubscriptionStream};
 use std::sync::Arc;
 use tokio::sync::{
-    broadcast::{self, Sender},
+    broadcast::{self},
     RwLock,
 };
 
@@ -26,7 +26,6 @@ pub struct WebRtcHandlerParams {
     pub active_call: Arc<RwLock<Option<ActiveCall>>>,
     pub webrtc_controller: Arc<RwLock<simple_webrtc::Controller>>,
     pub audio_sink_config: Arc<RwLock<AudioHardwareConfig>>,
-    pub ch: Sender<BlinkEventKind>,
     pub call_signaling_stream: SubscriptionStream,
     pub peer_signaling_stream: SubscriptionStream,
 }
@@ -39,7 +38,6 @@ pub async fn run(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEve
         active_call,
         webrtc_controller,
         audio_sink_config: audio_sink_codec,
-        ch,
         call_signaling_stream,
         peer_signaling_stream,
     } = params;
@@ -92,7 +90,7 @@ pub async fn run(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEve
                             log::error!("failed to dial peer: {e}");
                             continue;
                         }
-                        if let Err(e) = ch.send(BlinkEventKind::ParticipantJoined { call_id, peer_id: sender }) {
+                        if let Err(e) = event_ch.send(BlinkEventKind::ParticipantJoined { call_id, peer_id: sender }) {
                             log::error!("failed to send ParticipantJoined Event: {e}");
                         }
 
@@ -112,27 +110,27 @@ pub async fn run(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEve
                             continue;
                         }
                         webrtc_controller.write().await.hang_up(&sender).await;
-                        if let Err(e) = ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
+                        if let Err(e) = event_ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
                             log::error!("failed to send ParticipantLeft event: {e}");
                         }
                     },
                     CallSignal::Muted => {
-                        if let Err(e) = ch.send(BlinkEventKind::ParticipantMuted { peer_id: sender }) {
+                        if let Err(e) = event_ch.send(BlinkEventKind::ParticipantMuted { peer_id: sender }) {
                             log::error!("failed to send ParticipantMuted event: {e}");
                         }
                     },
                     CallSignal::Unmuted => {
-                        if let Err(e) = ch.send(BlinkEventKind::ParticipantUnmuted { peer_id: sender }) {
+                        if let Err(e) = event_ch.send(BlinkEventKind::ParticipantUnmuted { peer_id: sender }) {
                             log::error!("failed to send ParticipantUnmuted event: {e}");
                         }
                     }
                     CallSignal::Deafened => {
-                        if let Err(e) = ch.send(BlinkEventKind::ParticipantDeafened { peer_id: sender }) {
+                        if let Err(e) = event_ch.send(BlinkEventKind::ParticipantDeafened { peer_id: sender }) {
                             log::error!("failed to send ParticipantDeafened event: {e}");
                         }
                     },
                     CallSignal::Undeafened => {
-                        if let Err(e) = ch.send(BlinkEventKind::ParticipantUndeafened { peer_id: sender }) {
+                        if let Err(e) = event_ch.send(BlinkEventKind::ParticipantUndeafened { peer_id: sender }) {
                             log::error!("failed to send ParticipantUndeafened event: {e}");
                         }
                     },
@@ -261,7 +259,7 @@ pub async fn run(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEve
                             EmittedEvents::Connected { peer } => {
                                 active_call.connected_participants.insert(peer.clone(), PeerState::Connected);
                                 let event = BlinkEventKind::ParticipantJoined { call_id, peer_id: peer};
-                                let _ = ch.send(event);
+                                let _ = event_ch.send(event);
                             }
                             EmittedEvents::ConnectionClosed { peer } => {
                                 // sometimes this event triggers without Disconnected being triggered.
@@ -283,7 +281,7 @@ pub async fn run(params: WebRtcHandlerParams, mut webrtc_event_stream: WebRtcEve
                                     //rtp_logger::deinit().await;
                                     host_media::reset().await;
                                     let event = BlinkEventKind::CallTerminated { call_id };
-                                    let _ = ch.send(event);
+                                    let _ = event_ch.send(event);
                                     // terminate the task on purpose.
                                     return;
                                 }
