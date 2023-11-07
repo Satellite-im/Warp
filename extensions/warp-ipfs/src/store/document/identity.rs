@@ -244,8 +244,6 @@ pub async fn unixfs_fetch(
     let mut stream = ipfs
         .unixfs()
         .cat(IpfsPath::from(cid), None, peers, local, timeout)
-        .await
-        .map_err(anyhow::Error::from)?
         .boxed();
 
     let mut data = vec![];

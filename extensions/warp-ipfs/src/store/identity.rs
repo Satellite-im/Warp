@@ -11,15 +11,11 @@ use futures::{
     channel::oneshot::{self, Canceled},
     SinkExt, StreamExt,
 };
-use ipfs::{
-    libp2p::request_response::{RequestId, ResponseChannel},
-    p2p::MultiaddrExt,
-    Ipfs, IpfsPath, Keypair,
-};
+use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
 
 use libipld::Cid;
 use rust_ipfs as ipfs;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -52,7 +48,7 @@ use super::{
     connected_to_peer, did_keypair,
     document::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
-        root::RootDocumentMap, utils::GetLocalDag, ExtractedRootDocument, RootDocument, ToCid,
+        root::RootDocumentMap, ExtractedRootDocument, RootDocument,
     },
     ecdh_decrypt, ecdh_encrypt,
     phonebook::PhoneBook,
@@ -88,26 +84,6 @@ pub struct IdentityStore {
     tesseract: Tesseract,
 
     event: broadcast::Sender<MultiPassEventKind>,
-
-    _process_identity_event: Arc<
-        Option<
-            futures::channel::mpsc::Receiver<(
-                RequestId,
-                ResponseChannel<shuttle::identity::protocol::Response>,
-                either::Either<
-                    shuttle::identity::protocol::Request,
-                    shuttle::identity::protocol::Response,
-                >,
-                futures::channel::oneshot::Sender<(
-                    ResponseChannel<shuttle::identity::protocol::Response>,
-                    either::Either<
-                        shuttle::identity::protocol::Request,
-                        shuttle::identity::protocol::Response,
-                    >,
-                )>,
-            )>,
-        >,
-    >,
 
     identity_command: Option<futures::channel::mpsc::Sender<shuttle::identity::IdentityCommand>>,
 }
@@ -251,26 +227,9 @@ impl IdentityStore {
         phonebook: PhoneBook,
         config: &config::Config,
         discovery: Discovery,
-        (identity_command, _process_identity_event): (
-            Option<futures::channel::mpsc::Sender<shuttle::identity::IdentityCommand>>,
-            Option<
-                futures::channel::mpsc::Receiver<(
-                    RequestId,
-                    ResponseChannel<shuttle::identity::protocol::Response>,
-                    either::Either<
-                        shuttle::identity::protocol::Request,
-                        shuttle::identity::protocol::Response,
-                    >,
-                    futures::channel::oneshot::Sender<(
-                        ResponseChannel<shuttle::identity::protocol::Response>,
-                        either::Either<
-                            shuttle::identity::protocol::Request,
-                            shuttle::identity::protocol::Response,
-                        >,
-                    )>,
-                )>,
-            >,
-        ),
+        identity_command: Option<
+            futures::channel::mpsc::Sender<shuttle::identity::IdentityCommand>,
+        >,
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
             if !path.exists() {
@@ -308,7 +267,6 @@ impl IdentityStore {
             tesseract,
             event,
             identity_command,
-            _process_identity_event: Arc::new(_process_identity_event),
             did_key,
             queue,
             phonebook,
@@ -1386,7 +1344,7 @@ impl IdentityStore {
         let did_kp = self.get_keypair_did()?;
         let identity = identity.sign(&did_kp)?;
 
-        let ident_cid = identity.to_cid(&self.ipfs).await?;
+        let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
 
         let root_document = RootDocument {
             identity: ident_cid,
@@ -1394,6 +1352,7 @@ impl IdentityStore {
         };
 
         self.root_document.set(root_document).await?;
+        let identity = self.root_document.identity().await?;
 
         if let Some(sender) = self.identity_command.as_mut() {
             if let DiscoveryConfig::Namespace {
@@ -1739,7 +1698,7 @@ impl IdentityStore {
 
         log::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
-        let ident_cid = identity.to_cid(&self.ipfs).await?;
+        let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
         root_document.identity = ident_cid;
 
         self.root_document
@@ -1864,10 +1823,6 @@ impl IdentityStore {
             .map_err(anyhow::Error::from)
     }
 
-    pub async fn get_local_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
-        path.get_local_dag(&self.ipfs).await
-    }
-
     pub async fn own_identity_document(&self) -> Result<IdentityDocument, Error> {
         let identity = self.root_document.identity().await?;
         identity.verify()?;
@@ -1979,7 +1934,7 @@ impl IdentityStore {
         }
 
         for cid in pinned_blocks {
-            ipfs.remove_block(cid).await?;
+            ipfs.remove_block(cid, false).await?;
         }
 
         Ok(())

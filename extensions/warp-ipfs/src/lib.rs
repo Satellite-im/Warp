@@ -225,7 +225,7 @@ impl WarpIpfs {
             Bootstrap::None => true,
         };
 
-        if empty_bootstrap {
+        if empty_bootstrap && !config.ipfs_setting.dht_client {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
@@ -266,14 +266,9 @@ impl WarpIpfs {
 
         let (pb_tx, pb_rx) = channel(50);
         let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
-        let (id_sh_p_tx, id_sh_p_rx) = futures::channel::mpsc::channel(1);
 
         let behaviour = behaviour::Behaviour {
-            shuttle_identity: shuttle::identity::Behaviour::new(
-                &keypair,
-                id_sh_p_tx,
-                Some(id_sh_rx),
-            ),
+            shuttle_identity: shuttle::identity::Behaviour::new(&keypair, None, Some(id_sh_rx)),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
 
@@ -289,7 +284,6 @@ impl WarpIpfs {
                 }
                 idconfig
             }))
-            .with_autonat()
             .with_bitswap(None)
             .with_kademlia(
                 Some(either::Either::Left(KadConfig {
@@ -390,7 +384,7 @@ impl WarpIpfs {
             };
 
             if let Err(e) = ipfs.add_peer(peer_id, addr.clone()).await {
-                warn!("Error error relay: {e}");
+                warn!("Failed to add relay to address book: {e}");
             }
 
             if let Err(e) = ipfs.add_relay(peer_id, addr).await {
@@ -405,27 +399,22 @@ impl WarpIpfs {
             warn!("No relays available");
         }
 
-        tokio::spawn({
-            let ipfs = ipfs.clone();
-            async move {
-                for relay_peer in relay_peers {
-                    if let Err(e) = ipfs.enable_relay(Some(relay_peer)).await {
-                        error!("Error listening on relay peer {relay_peer}: {e}");
-                        continue;
-                    }
-
-                    let list = ipfs.list_relays(true).await.unwrap_or_default();
-                    for addr in list
-                        .iter()
-                        .filter(|(peer_id, _)| *peer_id == relay_peer)
-                        .flat_map(|(_, addrs)| addrs)
-                    {
-                        debug!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
-                    }
-                    break;
-                }
+        for relay_peer in relay_peers {
+            if let Err(e) = ipfs.enable_relay(Some(relay_peer)).await {
+                error!("Failed to use {relay_peer} as a relay: {e}");
+                continue;
             }
-        });
+
+            let list = ipfs.list_relays(true).await.unwrap_or_default();
+            for addr in list
+                .iter()
+                .filter(|(peer_id, _)| *peer_id == relay_peer)
+                .flat_map(|(_, addrs)| addrs)
+            {
+                info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
+            }
+            break;
+        }
 
         if config.ipfs_setting.dht_client {
             ipfs.dht_mode(DhtMode::Client).await?;
@@ -493,7 +482,7 @@ impl WarpIpfs {
             phonebook,
             &config,
             discovery.clone(),
-            (Some(id_sh_tx), Some(id_sh_p_rx)),
+            Some(id_sh_tx),
         )
         .await?;
         info!("Identity initialized");
@@ -507,7 +496,7 @@ impl WarpIpfs {
 
         *self.file_store.write() = Some(filestore);
 
-        *self.message_store.write() = MessageStore::new(
+        let message_store = MessageStore::new(
             ipfs.clone(),
             config.path.map(|path| path.join("messages")),
             identity_store,
@@ -522,8 +511,9 @@ impl WarpIpfs {
                 config.store_setting.with_friends,
             ),
         )
-        .await
-        .ok();
+        .await?;
+
+        *self.message_store.write() = Some(message_store);
 
         info!("Messaging store initialized");
 
@@ -680,14 +670,14 @@ impl MultiPass for WarpIpfs {
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
         let store = self.identity_store(true).await?;
 
-        let idents = match id {
-            Identifier::DID(pk) => store.lookup(LookupBy::DidKey(pk)).await,
-            Identifier::Username(username) => store.lookup(LookupBy::Username(username)).await,
-            Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
+        let kind = match id {
+            Identifier::DID(pk) => LookupBy::DidKey(pk),
+            Identifier::Username(username) => LookupBy::Username(username),
+            Identifier::DIDList(list) => LookupBy::DidKeys(list),
             Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
-        }?;
+        };
 
-        Ok(idents)
+        store.lookup(kind).await
     }
 
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {

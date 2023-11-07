@@ -1,15 +1,12 @@
 use futures::{stream::BoxStream, StreamExt};
 use libipld::{serde::to_ipld, Cid};
-use rust_ipfs::{Ipfs, PeerId};
+use rust_ipfs::{Ipfs, IpfsPath, PeerId};
 use serde::{Deserialize, Serialize};
 use std::task::Poll;
 use tracing::log;
 use warp::{constellation::file::FileType, error::Error, multipass::identity::IdentityImage};
 
-use super::{
-    identity::unixfs_fetch,
-    utils::{GetDag, GetLocalDag},
-};
+use super::identity::unixfs_fetch;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ImageDag {
@@ -25,7 +22,7 @@ pub async fn store_photo(
     file_type: FileType,
     limit: Option<usize>,
 ) -> Result<Cid, Error> {
-    let mut stream = ipfs.add_unixfs(stream).await?;
+    let mut stream = ipfs.add_unixfs(stream);
 
     let mut size = 0;
 
@@ -106,10 +103,13 @@ pub async fn get_image(
     local: bool,
     limit: Option<usize>,
 ) -> Result<IdentityImage, Error> {
-    let dag: ImageDag = match local {
-        true => cid.get_local_dag(ipfs).await?,
-        false => cid.get_dag(ipfs, None).await?,
-    };
+    let mut dag = ipfs.dag().get_dag(IpfsPath::from(cid));
+
+    if local {
+        dag = dag.local();
+    }
+
+    let dag: ImageDag = dag.deserialized().await?;
 
     match limit {
         Some(size) if dag.size > size as _ => {

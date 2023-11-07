@@ -1,12 +1,11 @@
-use anyhow::Result;
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
-    SampleRate,
+    BuildStreamError, SampleRate,
 };
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{sync::broadcast, task::JoinHandle};
-use warp::{blink::BlinkEventKind, crypto::DID, sync::RwLock};
+use warp::{blink::BlinkEventKind, crypto::DID, error::Error, sync::RwLock};
 
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
@@ -54,7 +53,7 @@ impl OpusSink {
         track: Arc<TrackRemote>,
         webrtc_codec: AudioCodec,
         sink_config: AudioHardwareConfig,
-    ) -> Result<Self> {
+    ) -> Result<Self, Error> {
         let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
         let mp4_logger2 = mp4_logger.clone();
         let resampler_config = match webrtc_codec.sample_rate().cmp(&sink_config.sample_rate()) {
@@ -76,7 +75,8 @@ impl OpusSink {
         let max_late = 512;
         let webrtc_sample_rate = webrtc_codec.sample_rate();
 
-        let decoder = opus::Decoder::new(webrtc_sample_rate, opus::Channels::Mono)?;
+        let decoder = opus::Decoder::new(webrtc_sample_rate, opus::Channels::Mono)
+            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
         let (producer, mut consumer) = ring.split();
 
@@ -126,17 +126,31 @@ impl OpusSink {
                 }
             }
         };
-        let output_stream = output_device.build_output_stream(
-            &cpal_config,
-            output_data_fn,
-            move |err| {
-                log::error!("an error occurred on stream: {}", err);
-                if matches!(err, cpal::StreamError::DeviceNotAvailable) {
-                    let _ = event_ch3.send(BlinkEventKind::AudioOutputDeviceNoLongerAvailable);
-                }
-            },
-            None,
-        )?;
+        let output_stream = output_device
+            .build_output_stream(
+                &cpal_config,
+                output_data_fn,
+                move |err| {
+                    log::error!("an error occurred on stream: {}", err);
+                    let evt = match err {
+                        cpal::StreamError::DeviceNotAvailable => {
+                            BlinkEventKind::AudioOutputDeviceNoLongerAvailable
+                        }
+                        _ => BlinkEventKind::AudioStreamError,
+                    };
+                    let _ = event_ch3.send(evt);
+                },
+                None,
+            )
+            .map_err(|e| match e {
+                BuildStreamError::StreamConfigNotSupported => Error::InvalidAudioConfig,
+                BuildStreamError::DeviceNotAvailable => Error::AudioDeviceNotFound,
+                e => Error::OtherWithContext(format!(
+                    "failed to build output stream: {e}, {}, {}",
+                    file!(),
+                    line!()
+                )),
+            })?;
 
         Ok(Self {
             peer_id,
@@ -161,7 +175,7 @@ impl SinkTrack for OpusSink {
         track: Arc<TrackRemote>,
         webrtc_codec: AudioCodec,
         sink_config: AudioHardwareConfig,
-    ) -> Result<Self> {
+    ) -> Result<Self, Error> {
         OpusSink::init_internal(
             peer_id,
             event_ch,
@@ -172,22 +186,29 @@ impl SinkTrack for OpusSink {
         )
     }
 
-    fn play(&self) -> Result<()> {
+    fn play(&self) -> Result<(), Error> {
         *self.muted.write() = false;
-        self.stream.play()?;
-        Ok(())
+        self.stream.play().map_err(|err| match err {
+            cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+            _ => Error::OtherWithContext(err.to_string()),
+        })
     }
-    fn pause(&self) -> Result<()> {
+
+    fn pause(&self) -> Result<(), Error> {
         *self.muted.write() = true;
-        self.stream.pause()?;
-        Ok(())
+        self.stream.pause().map_err(|err| match err {
+            cpal::PauseStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+            _ => Error::OtherWithContext(err.to_string()),
+        })
     }
     fn change_output_device(
         &mut self,
         output_device: &cpal::Device,
         sink_config: AudioHardwareConfig,
-    ) -> Result<()> {
-        self.stream.pause()?;
+    ) -> Result<(), Error> {
+        self.stream
+            .pause()
+            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         self.decoder_handle.abort();
         let new_sink = OpusSink::init_internal(
             self.peer_id.clone(),
@@ -199,24 +220,27 @@ impl SinkTrack for OpusSink {
         )?;
         *self = new_sink;
         if !*self.muted.read() {
-            self.stream.play()?;
+            self.stream.play().map_err(|err| match err {
+                cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
+                _ => Error::OtherWithContext(err.to_string()),
+            })?;
         }
 
         Ok(())
     }
 
-    fn init_mp4_logger(&mut self) -> Result<()> {
+    fn init_mp4_logger(&mut self) -> Result<(), Error> {
         let mp4_logger = mp4_logger::get_audio_logger(&self.peer_id)?;
         self.mp4_logger.write().replace(mp4_logger);
         Ok(())
     }
 
-    fn remove_mp4_logger(&mut self) -> Result<()> {
+    fn remove_mp4_logger(&mut self) -> Result<(), Error> {
         self.mp4_logger.write().take();
         Ok(())
     }
 
-    fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<()> {
+    fn set_audio_multiplier(&mut self, multiplier: f32) -> Result<(), Error> {
         *self.audio_multiplier.write() = multiplier;
         Ok(())
     }
@@ -235,7 +259,7 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     audio_multiplier: Arc<RwLock<f32>>,
 }
 
-async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<()>
+async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<(), Error>
 where
     T: Depacketizer,
 {

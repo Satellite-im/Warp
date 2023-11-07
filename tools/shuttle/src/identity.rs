@@ -13,9 +13,9 @@ use futures_timer::Delay;
 use rust_ipfs::{
     libp2p::{
         core::Endpoint,
-        request_response::{RequestId, ResponseChannel},
+        request_response::{InboundRequestId, OutboundRequestId, ResponseChannel},
         swarm::{
-            ConnectionDenied, ConnectionId, ExternalAddresses, FromSwarm, PollParameters, THandler,
+            ConnectionDenied, ConnectionId, ExternalAddresses, FromSwarm, THandler,
             THandlerInEvent, THandlerOutEvent, ToSwarm,
         },
     },
@@ -39,25 +39,28 @@ pub struct Behaviour {
     keypair: Keypair,
 
     waiting_on_request: HashMap<
-        RequestId,
+        InboundRequestId,
         futures::channel::oneshot::Receiver<(ResponseChannel<Response>, Either<Request, Response>)>,
     >,
 
-    waiting_on_response: HashMap<RequestId, IdentityResponse>,
+    waiting_on_response: HashMap<OutboundRequestId, IdentityResponse>,
 
-    process_event: futures::channel::mpsc::Sender<(
-        RequestId,
-        ResponseChannel<Response>,
-        either::Either<Request, Response>,
-        futures::channel::oneshot::Sender<(
+    process_event: Option<
+        futures::channel::mpsc::Sender<(
+            InboundRequestId,
             ResponseChannel<Response>,
             either::Either<Request, Response>,
+            futures::channel::oneshot::Sender<(
+                ResponseChannel<Response>,
+                either::Either<Request, Response>,
+            )>,
         )>,
-    )>,
+    >,
 
     process_command: Option<futures::channel::mpsc::Receiver<IdentityCommand>>,
 
-    queue_event: HashMap<RequestId, (Option<ResponseChannel<Response>>, Either<Request, Response>)>,
+    queue_event:
+        HashMap<InboundRequestId, (Option<ResponseChannel<Response>>, Either<Request, Response>)>,
 
     external_addresses: ExternalAddresses,
 }
@@ -108,15 +111,17 @@ impl Behaviour {
     #[allow(clippy::type_complexity)]
     pub fn new(
         keypair: &Keypair,
-        process_event: futures::channel::mpsc::Sender<(
-            RequestId,
-            ResponseChannel<Response>,
-            either::Either<Request, Response>,
-            futures::channel::oneshot::Sender<(
+        process_event: Option<
+            futures::channel::mpsc::Sender<(
+                InboundRequestId,
                 ResponseChannel<Response>,
                 either::Either<Request, Response>,
+                futures::channel::oneshot::Sender<(
+                    ResponseChannel<Response>,
+                    either::Either<Request, Response>,
+                )>,
             )>,
-        )>,
+        >,
         process_command: Option<futures::channel::mpsc::Receiver<IdentityCommand>>,
     ) -> Self {
         Self {
@@ -137,7 +142,7 @@ impl Behaviour {
 
     fn process_request(
         &mut self,
-        request_id: RequestId,
+        request_id: InboundRequestId,
         request: Request,
         channel: ResponseChannel<Response>,
     ) {
@@ -270,7 +275,7 @@ impl Behaviour {
             .insert(request_id, (Some(channel), Either::Left(request)));
     }
 
-    fn process_response(&mut self, id: RequestId, response: Response) {
+    fn process_response(&mut self, id: OutboundRequestId, response: Response) {
         match response {
             Response::RegisterResponse(response) => {
                 let res = match self.waiting_on_response.remove(&id) {
@@ -428,16 +433,12 @@ impl NetworkBehaviour for Behaviour {
             .on_connection_handler_event(peer_id, connection_id, event)
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         self.external_addresses.on_swarm_event(&event);
         self.inner.on_swarm_event(event)
     }
 
-    fn poll(
-        &mut self,
-        cx: &mut Context,
-        params: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(rx) = self.process_command.as_mut() {
             loop {
                 match rx.poll_next_unpin(cx) {
@@ -506,12 +507,9 @@ impl NetworkBehaviour for Behaviour {
             }
         }
 
-        loop {
-            match self.inner.poll(cx, params) {
-                Poll::Ready(ToSwarm::GenerateEvent(request_response::Event::Message {
-                    peer: _,
-                    message,
-                })) => {
+        while let Poll::Ready(event) = self.inner.poll(cx) {
+            match event {
+                ToSwarm::GenerateEvent(request_response::Event::Message { peer: _, message }) => {
                     match message {
                         request_response::Message::Request {
                             request_id,
@@ -527,46 +525,26 @@ impl NetworkBehaviour for Behaviour {
 
                     continue;
                 }
-                Poll::Ready(ToSwarm::GenerateEvent(request_response::Event::InboundFailure {
+                ToSwarm::GenerateEvent(request_response::Event::InboundFailure {
                     peer: _,
                     request_id,
-                    error,
-                })) => {
-                    if let Some(ch) = self.waiting_on_response.remove(&request_id) {
-                        match ch {
-                            IdentityResponse::Register { response } => {
-                                let _ =
-                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
-                            }
-                            IdentityResponse::Lookup { response } => {
-                                let _ =
-                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
-                            }
-                            IdentityResponse::Synchronized { response } => {
-                                let _ =
-                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
-                            }
-                            IdentityResponse::SynchronizedFetch { response } => {
-                                let _ =
-                                    response.send(Err(warp::error::Error::Boxed(Box::new(error))));
-                            }
-                        }
-                    }
+                    error: _,
+                }) => {
                     self.queue_event.remove(&request_id);
                     self.waiting_on_request.remove(&request_id);
-                    continue;
+                    // continue;
                 }
-                Poll::Ready(ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
+                ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
                     peer: _,
                     request_id: _,
-                })) => {
+                }) => {
                     continue;
                 }
-                Poll::Ready(ToSwarm::GenerateEvent(request_response::Event::OutboundFailure {
+                ToSwarm::GenerateEvent(request_response::Event::OutboundFailure {
                     peer: _,
                     request_id,
                     error,
-                })) => {
+                }) => {
                     if let Some(ch) = self.waiting_on_response.remove(&request_id) {
                         match ch {
                             IdentityResponse::Register { response } => {
@@ -587,45 +565,43 @@ impl NetworkBehaviour for Behaviour {
                             }
                         }
                     }
-                    self.queue_event.remove(&request_id);
-                    self.waiting_on_request.remove(&request_id);
                     continue;
                 }
-                Poll::Ready(
-                    other @ (ToSwarm::ExternalAddrConfirmed(_)
-                    | ToSwarm::ExternalAddrExpired(_)
-                    | ToSwarm::NewExternalAddrCandidate(_)
-                    | ToSwarm::NotifyHandler { .. }
-                    | ToSwarm::Dial { .. }
-                    | ToSwarm::CloseConnection { .. }
-                    | ToSwarm::ListenOn { .. }
-                    | ToSwarm::RemoveListener { .. }),
-                ) => {
+                other @ (ToSwarm::ExternalAddrConfirmed(_)
+                | ToSwarm::ExternalAddrExpired(_)
+                | ToSwarm::NewExternalAddrCandidate(_)
+                | ToSwarm::NotifyHandler { .. }
+                | ToSwarm::Dial { .. }
+                | ToSwarm::CloseConnection { .. }
+                | ToSwarm::ListenOn { .. }
+                | ToSwarm::RemoveListener { .. }) => {
                     let new_to_swarm =
                         other.map_out(|_| unreachable!("we manually map `GenerateEvent` variants"));
                     return Poll::Ready(new_to_swarm);
                 }
-                Poll::Pending => break,
+                _ => {}
             };
         }
 
-        self.queue_event.retain(
-            |id, (channel, req_res)| match self.process_event.poll_ready(cx) {
-                Poll::Ready(Ok(_)) => {
-                    let (tx, rx) = futures::channel::oneshot::channel();
-                    if let Some(channel) = channel.take() {
-                        self.waiting_on_request.insert(*id, rx);
-                        let _ = self
-                            .process_event
-                            .start_send((*id, channel, req_res.clone(), tx));
-                    }
+        if let Some(process_event) = self.process_event.as_mut() {
+            self.queue_event.retain(|id, (channel, req_res)| {
+                match process_event.poll_ready(cx) {
+                    Poll::Ready(Ok(_)) => {
+                        let (tx, rx) = futures::channel::oneshot::channel();
+                        if let Some(channel) = channel.take() {
+                            self.waiting_on_request.insert(*id, rx);
+                            let _ =
+                                process_event
+                                    .start_send((*id, channel, req_res.clone(), tx));
+                        }
 
-                    false
+                        false
+                    }
+                    Poll::Ready(Err(_)) => false,
+                    Poll::Pending => true,
                 }
-                Poll::Ready(Err(_)) => false,
-                Poll::Pending => true,
-            },
-        );
+            });
+        }
 
         //
         self.waiting_on_request

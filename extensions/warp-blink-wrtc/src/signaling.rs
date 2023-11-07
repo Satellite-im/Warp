@@ -28,6 +28,15 @@ pub enum CallSignal {
     Join { call_id: Uuid },
     #[display(fmt = "Leave")]
     Leave { call_id: Uuid },
+
+    #[display(fmt = "Muted")]
+    Muted,
+    #[display(fmt = "Unmuted")]
+    Unmuted,
+    #[display(fmt = "Deafened")]
+    Deafened,
+    #[display(fmt = "Undeafened")]
+    Undeafened,
 }
 
 #[derive(Serialize, Deserialize, Display)]
