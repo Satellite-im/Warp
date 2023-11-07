@@ -4,12 +4,10 @@ pub mod protocol;
 use std::{
     collections::HashMap,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use either::Either;
 use futures::{channel::oneshot::Canceled, FutureExt, StreamExt};
-use futures_timer::Delay;
 use rust_ipfs::{
     libp2p::{
         core::Endpoint,
@@ -34,7 +32,6 @@ use self::{
 #[allow(dead_code)]
 pub struct Behaviour {
     inner: request_response::json::Behaviour<protocol::Request, protocol::Response>,
-    identity_cache: HashMap<DID, (IdentityDocument, Delay)>,
 
     keypair: Keypair,
 
@@ -129,7 +126,6 @@ impl Behaviour {
                 [(protocol::PROTOCOL, request_response::ProtocolSupport::Full)],
                 Default::default(),
             ),
-            identity_cache: Default::default(),
             keypair: keypair.clone(),
             process_event,
             process_command,
@@ -146,131 +142,6 @@ impl Behaviour {
         request: Request,
         channel: ResponseChannel<Response>,
     ) {
-        if let Request::Lookup(event) = &request {
-            match event {
-                Lookup::PublicKey { did } => {
-                    if let Some(response) =
-                        self.identity_cache.get_mut(did).map(|(document, delay)| {
-                            delay.reset(Duration::from_secs(30));
-                            Response::LookupResponse(LookupResponse::Ok {
-                                identity: vec![document.clone()],
-                            })
-                        })
-                    {
-                        let _ = self.inner.send_response(channel, response);
-                        return;
-                    }
-                }
-                Lookup::PublicKeys { dids } => {
-                    let list = dids
-                        .iter()
-                        .filter_map(|did| {
-                            self.identity_cache.get_mut(did).map(|(document, delay)| {
-                                delay.reset(Duration::from_secs(30));
-                                document.clone()
-                            })
-                        })
-                        .collect::<Vec<_>>();
-
-                    if !list.is_empty() {
-                        let response =
-                            Response::LookupResponse(LookupResponse::Ok { identity: list });
-
-                        let _ = self.inner.send_response(channel, response);
-                        return;
-                    }
-                }
-                Lookup::ShortId { short_id } => {
-                    if let Some(response) = self
-                        .identity_cache
-                        .values_mut()
-                        .find(|(document, _)| document.short_id.eq(short_id.as_ref()))
-                        .map(|(document, delay)| {
-                            delay.reset(Duration::from_secs(30));
-                            Response::LookupResponse(LookupResponse::Ok {
-                                identity: vec![document.clone()],
-                            })
-                        })
-                    {
-                        let _ = self.inner.send_response(channel, response);
-                        return;
-                    }
-                }
-                Lookup::Username { username, .. } if username.contains('#') => {
-                    //TODO: Score against invalid username scheme
-                    let split_data = username.split('#').collect::<Vec<&str>>();
-
-                    let list = if split_data.len() != 2 {
-                        self.identity_cache
-                            .values_mut()
-                            .filter(|(document, _)| {
-                                document
-                                    .username
-                                    .to_lowercase()
-                                    .eq(&username.to_lowercase())
-                            })
-                            .map(|(document, delay)| {
-                                delay.reset(Duration::from_secs(30));
-                                document.clone()
-                            })
-                            .collect::<Vec<_>>()
-                    } else {
-                        match (
-                            split_data.first().map(|s| s.to_lowercase()),
-                            split_data.last().map(|s| s.to_lowercase()),
-                        ) {
-                            (Some(name), Some(code)) => self
-                                .identity_cache
-                                .values_mut()
-                                .filter(|(ident, _)| {
-                                    ident.username.to_lowercase().eq(&name)
-                                        && String::from_utf8_lossy(&ident.short_id)
-                                            .to_lowercase()
-                                            .eq(&code)
-                                })
-                                .map(|(document, delay)| {
-                                    delay.reset(Duration::from_secs(30));
-                                    document.clone()
-                                })
-                                .collect::<Vec<_>>(),
-                            _ => vec![],
-                        }
-                    };
-
-                    if !list.is_empty() {
-                        let _ = self.inner.send_response(
-                            channel,
-                            Response::LookupResponse(LookupResponse::Ok { identity: list }),
-                        );
-                        return;
-                    };
-                }
-                Lookup::Username { username, .. } => {
-                    let identity = self
-                        .identity_cache
-                        .values_mut()
-                        .filter(|(document, _)| {
-                            document
-                                .username
-                                .to_lowercase()
-                                .eq(&username.to_lowercase())
-                        })
-                        .map(|(document, delay)| {
-                            delay.reset(Duration::from_secs(30));
-                            document.clone()
-                        })
-                        .collect::<Vec<_>>();
-
-                    if !identity.is_empty() {
-                        let response = Response::LookupResponse(LookupResponse::Ok { identity });
-
-                        let _ = self.inner.send_response(channel, response);
-                        return;
-                    }
-                }
-            }
-        }
-
         self.queue_event
             .insert(request_id, (Some(channel), Either::Left(request)));
     }
@@ -309,11 +180,6 @@ impl Behaviour {
 
                 match response {
                     LookupResponse::Ok { identity } => {
-                        for id in identity.iter().map(|doc| &doc.did) {
-                            if let Some((_, delay)) = self.identity_cache.get_mut(id) {
-                                delay.reset(Duration::from_secs(30));
-                            }
-                        }
                         let _ = res.send(Ok(identity));
                     }
                     LookupResponse::Error(
@@ -532,7 +398,7 @@ impl NetworkBehaviour for Behaviour {
                 }) => {
                     self.queue_event.remove(&request_id);
                     self.waiting_on_request.remove(&request_id);
-                    // continue;
+                    continue;
                 }
                 ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
                     peer: _,
@@ -584,23 +450,21 @@ impl NetworkBehaviour for Behaviour {
         }
 
         if let Some(process_event) = self.process_event.as_mut() {
-            self.queue_event.retain(|id, (channel, req_res)| {
-                match process_event.poll_ready(cx) {
+            self.queue_event.retain(
+                |id, (channel, req_res)| match process_event.poll_ready(cx) {
                     Poll::Ready(Ok(_)) => {
                         let (tx, rx) = futures::channel::oneshot::channel();
                         if let Some(channel) = channel.take() {
                             self.waiting_on_request.insert(*id, rx);
-                            let _ =
-                                process_event
-                                    .start_send((*id, channel, req_res.clone(), tx));
+                            let _ = process_event.start_send((*id, channel, req_res.clone(), tx));
                         }
 
                         false
                     }
                     Poll::Ready(Err(_)) => false,
                     Poll::Pending => true,
-                }
-            });
+                },
+            );
         }
 
         //
@@ -618,10 +482,6 @@ impl NetworkBehaviour for Behaviour {
                 Poll::Ready(Err(Canceled)) => false,
                 Poll::Pending => true,
             });
-
-        // Clear out any cache where the timer expired
-        self.identity_cache
-            .retain(|_, (_, timer)| timer.poll_unpin(cx).is_pending());
 
         Poll::Pending
     }
