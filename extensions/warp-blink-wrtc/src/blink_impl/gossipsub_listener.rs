@@ -21,10 +21,10 @@ use super::gossipsub_sender::GossipSubSender;
 
 enum GossipSubCmd {
     // unsubscribe from the call and close any webrtc connections
-    UnsubCall { call_id: Uuid },
+    UnsubscribeCall { call_id: Uuid },
     DisconnectWebrtc { call_id: Uuid },
     // receive call wide broadcasts
-    SubCall { call_id: Uuid, group_key: Vec<u8> },
+    SubscribeCall { call_id: Uuid, group_key: Vec<u8> },
     // webrtc signaling for a peer
     ConnectWebRtc { call_id: Uuid, peer: DID },
     // allow peers to offer calls
@@ -67,11 +67,25 @@ impl GossipSubListener {
     }
 
     pub fn unsubscribe_call(&self, call_id: Uuid) {
-        let _ = self.ch.send(GossipSubCmd::UnsubCall { call_id });
+        let _ = self.ch.send(GossipSubCmd::UnsubscribeCall { call_id });
     }
 
     pub fn unsubscribe_webrtc(&self, call_id: Uuid) {
         let _ = self.ch.send(GossipSubCmd::DisconnectWebrtc { call_id });
+    }
+
+    pub fn subscribe_call(&self, call_id: Uuid, group_key: Vec<u8>) {
+        let _ = self
+            .ch
+            .send(GossipSubCmd::SubscribeCall { call_id, group_key });
+    }
+
+    pub fn connect_webrtc(&self, call_id: Uuid, peer: DID) {
+        let _ = self.ch.send(GossipSubCmd::ConnectWebRtc { call_id, peer });
+    }
+
+    pub fn receive_calls(&self, own_id: DID) {
+        let _ = self.ch.send(GossipSubCmd::ReceiveCalls { own_id });
     }
 }
 
@@ -93,7 +107,7 @@ async fn run(
         tokio::select! {
             opt = ch.recv() => match opt {
                 Some(cmd) => match cmd {
-                    GossipSubCmd::UnsubCall { call_id } => {
+                    GossipSubCmd::UnsubscribeCall { call_id } => {
                         if let Some(call) = subscribed_calls.remove(&call_id) {
                             call.notify_waiters();
                         }
@@ -111,7 +125,7 @@ async fn run(
                             }
                         }
                     }
-                    GossipSubCmd::SubCall { call_id, group_key } => {
+                    GossipSubCmd::SubscribeCall { call_id, group_key } => {
                         let notify = Arc::new(Notify::new());
                         if let Some(prev) = subscribed_calls.insert(call_id, notify.clone()) {
                             prev.notify_waiters();
