@@ -59,8 +59,8 @@ impl Cipher {
     }
 
     /// Returns the stored key
-    pub fn private_key(&self) -> Vec<u8> {
-        self.private_key.to_owned()
+    pub fn private_key(&self) -> &[u8] {
+        &self.private_key
     }
 
     /// Used to generate and encrypt data with a random key
@@ -130,7 +130,7 @@ impl Cipher {
         stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
-        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key())));
+        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_vec())));
 
         let cipher_stream = cipher.encrypt_async_stream(stream).await?;
 
@@ -156,7 +156,7 @@ impl Cipher {
         reader: R,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
-        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key())));
+        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_vec())));
 
         let cipher_stream = cipher.encrypt_async_read_to_stream(reader).await?;
         let stream = key_stream.chain(cipher_stream);
@@ -381,7 +381,7 @@ impl Cipher {
     /// Encrypts and embeds private key into writer stream
     pub fn self_encrypt_stream(reader: &mut impl Read, writer: &mut impl Write) -> Result<()> {
         let cipher = Cipher::new();
-        writer.write_all(&cipher.private_key())?;
+        writer.write_all(cipher.private_key())?;
         cipher.encrypt_stream(reader, writer)?;
         Ok(())
     }

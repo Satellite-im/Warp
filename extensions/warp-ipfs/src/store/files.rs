@@ -17,6 +17,7 @@ use warp::{
     constellation::{
         directory::Directory, ConstellationEventKind, ConstellationProgressStream, Progression,
     },
+    crypto::cipher::Cipher,
     error::Error,
     sync::RwLock,
 };
@@ -289,6 +290,7 @@ impl FileStore {
         }
 
         let ipfs = self.ipfs.clone();
+        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
 
         let path = PathBuf::from(path);
         if !path.is_file() {
@@ -328,6 +330,18 @@ impl FileStore {
 
         let background = self.config.thumbnail_task;
 
+        let file = tokio::fs::File::open(&path).await?;
+
+        let reader = ReaderStream::new(file).map(|result| result.map(|x| x.into()));
+
+        let cipher = Cipher::new();
+        let encrypted_key = ecdh_encrypt(&key, None, cipher.private_key())?;
+        let reader = cipher
+            .encrypt_async_stream(reader)
+            .await?
+            .map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+            .boxed();
+
         let name = name.to_string();
         let fs = self.clone();
         let progress_stream = async_stream::stream! {
@@ -337,7 +351,7 @@ impl FileStore {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(path.clone(), Some(AddOption { pin: true, ..Default::default() }));
+            let mut stream = ipfs.unixfs().add(reader, Some(AddOption { pin: true, ..Default::default() }));
 
             while let Some(status) = stream.next().await {
                 let name = name.clone();
@@ -385,6 +399,30 @@ impl FileStore {
                         return;
                     }
                 };
+
+            let cid = ipfs_path.root().cid().copied().expect("Cid to exist");
+
+            let root_file = ConstellationRootFileDag {
+                link: cid,
+                size: total_written as _,
+                key: encrypted_key,
+            };
+
+            let fut = async move {
+                ipfs.dag().put().serialize(root_file)?.pin(true).await.map(IpfsPath::from)
+            };
+
+            let ipfs_path = match fut.await {
+                Ok(path) => path,
+                Err(e) => {
+                    yield Progression::ProgressFailed {
+                        name,
+                        last_size: Some(last_written),
+                        error: Some(e.to_string()),
+                    };
+                    return;
+                }
+            };
 
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
@@ -446,18 +484,40 @@ impl FileStore {
     }
 
     pub async fn get(&self, name: &str, path: &str) -> Result<(), Error> {
+        use tokio::io::AsyncWriteExt;
+
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
 
-        let mut stream = ipfs.get_unixfs(reference.parse::<IpfsPath>()?, path);
+        let root = ipfs
+            .get_dag(reference.parse::<IpfsPath>()?)
+            .local()
+            .deserialized::<ConstellationRootFileDag>()
+            .await?;
 
-        while let Some(status) = stream.next().await {
-            if let UnixfsStatus::FailedStatus { error, .. } = status {
-                return Err(error.map(Error::Any).unwrap_or(Error::Other));
-            }
+        let didkey = self.ipfs.keypair().and_then(get_keypair_did)?;
+
+        let key = ecdh_decrypt(&didkey, None, root.key)?;
+
+        let cipber = Cipher::from(key);
+
+        let ipfs_path = IpfsPath::from(root.link);
+
+        let stream = ipfs
+            .cat_unixfs(ipfs_path, None)
+            .map(|s| s.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+            .boxed();
+
+        let mut stream = cipber.decrypt_async_stream(stream).await?.boxed();
+
+        let mut f = tokio::fs::File::create(path).await?;
+
+        while let Some(data) = stream.try_next().await? {
+            f.write_all(&data).await?;
+            f.sync_all().await?;
         }
 
         //TODO: Validate file against the hashed reference
@@ -508,8 +568,15 @@ impl FileStore {
             .insert_buffer(&name, buffer, width, height, exact)
             .await;
 
-        let reader = ReaderStream::new(std::io::Cursor::new(buffer))
-            .map(|result| result.map(|x| x.into()))
+        let cipher = Cipher::new();
+
+        let reader =
+            ReaderStream::new(std::io::Cursor::new(buffer)).map(|result| result.map(|x| x.into()));
+
+        let reader = cipher
+            .encrypt_async_stream(reader)
+            .await?
+            .map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
             .boxed();
 
         let mut total_written = 0;
@@ -538,9 +605,25 @@ impl FileStore {
 
         let ipfs_path = returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
+        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+
+        let encrypted_key = ecdh_encrypt(&key, None, cipher.private_key())?;
+
+        let cid = ipfs_path.root().cid().copied().expect("Cid to exist");
+
+        let root_file = ConstellationRootFileDag {
+            link: cid,
+            size: total_written as _,
+            key: encrypted_key,
+        };
+
+        let dag_cid = ipfs.dag().put().serialize(root_file)?.pin(true).await?;
+
+        let new_path = IpfsPath::from(dag_cid);
+
         let file = warp::constellation::file::File::new(name);
         file.set_size(total_written);
-        file.set_reference(&format!("{ipfs_path}"));
+        file.set_reference(&format!("{new_path}"));
         file.set_file_type(to_file_type(name));
         file.hash_mut().hash_from_slice(buffer)?;
 
@@ -566,19 +649,42 @@ impl FileStore {
     }
 
     pub async fn get_buffer(&self, name: &str) -> Result<Vec<u8>, Error> {
+        use futures::AsyncWriteExt;
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs.cat_unixfs(reference.parse::<IpfsPath>()?, None);
-        pin_mut!(stream);
 
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let mut bytes = data.map_err(anyhow::Error::from)?;
-            buffer.append(&mut bytes);
+        let root = ipfs
+            .get_dag(reference.parse::<IpfsPath>()?)
+            .local()
+            .deserialized::<ConstellationRootFileDag>()
+            .await?;
+
+        let didkey = self.ipfs.keypair().and_then(get_keypair_did)?;
+
+        let key = ecdh_decrypt(&didkey, None, root.key)?;
+
+        let cipber = Cipher::from(key);
+
+        let ipfs_path = IpfsPath::from(root.link);
+
+        let stream = ipfs
+            .cat_unixfs(ipfs_path, None)
+            .map(|s| s.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+            .boxed();
+
+        let mut stream = cipber.decrypt_async_stream(stream).await?.boxed();
+
+        let mut f = futures::io::Cursor::new(vec![]);
+
+        while let Some(data) = stream.try_next().await? {
+            f.write_all(&data).await?;
+            f.flush().await?;
         }
+
+        let buffer = f.into_inner();
 
         //TODO: Validate file against the hashed reference
         let _ = self
@@ -597,7 +703,7 @@ impl FileStore {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let name = name.trim();
         if name.len() < 2 || name.len() > 256 {
@@ -620,10 +726,34 @@ impl FileStore {
             return Err(Error::FileExist);
         }
 
+        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+
         let fs = self.clone();
         let name = name.to_string();
-        let stream = stream.map(Ok::<_, std::io::Error>).boxed();
+
+        let cipher = Cipher::new();
+
+        let encrypted_key = ecdh_encrypt(&key, None, cipher.private_key())?;
+
         let progress_stream = async_stream::stream! {
+
+            let stream = match cipher
+                .encrypt_async_stream(stream)
+                .await
+                .map(|s| {
+                    s.map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                        .boxed()
+                }) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: None,
+                            error: Some(e.to_string())
+                        };
+                        return;
+                    }
+                };
 
             let mut last_written = 0;
 
@@ -694,6 +824,30 @@ impl FileStore {
                     }
                 };
 
+            let cid = ipfs_path.root().cid().copied().expect("Cid to exist");
+
+            let root_file = ConstellationRootFileDag {
+                link: cid,
+                size: total_written as _,
+                key: encrypted_key,
+            };
+
+            let fut = async move {
+                ipfs.dag().put().serialize(root_file)?.pin(true).await.map(IpfsPath::from)
+            };
+
+            let ipfs_path = match fut.await {
+                Ok(path) => path,
+                Err(e) => {
+                    yield Progression::ProgressFailed {
+                        name,
+                        last_size: Some(last_written),
+                        error: Some(e.to_string()),
+                    };
+                    return;
+                }
+            };
+
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
@@ -741,11 +895,30 @@ impl FileStore {
 
         let tx = self.constellation_tx.clone();
 
-        let stream = async_stream::stream! {
-            let cat_stream = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?, None);
+        let didkey = self.ipfs.keypair().and_then(get_keypair_did)?;
 
-            for await data in cat_stream {
+        let stream = async_stream::stream! {
+
+            let root = ipfs
+                .get_dag(reference.parse::<IpfsPath>()?)
+                .local()
+                .deserialized::<ConstellationRootFileDag>()
+                .await?;
+
+            let key = ecdh_decrypt(&didkey, None, root.key)?;
+
+            let cipber = Cipher::from(key);
+
+            let ipfs_path = IpfsPath::from(root.link);
+
+            let stream = ipfs
+                .cat_unixfs(ipfs_path, None)
+                .map(|s| s.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                .boxed();
+
+            let stream = cipber.decrypt_async_stream(stream).await?.boxed();
+
+            for await data in stream {
                 match data {
                     Ok(data) => yield Ok(data),
                     Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
@@ -922,4 +1095,11 @@ impl FileStore {
     pub fn get_path(&self) -> PathBuf {
         PathBuf::from(self.path.read().to_string_lossy().replace('\\', "/"))
     }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ConstellationRootFileDag {
+    pub link: Cid,
+    pub size: u64,
+    pub key: Vec<u8>,
 }

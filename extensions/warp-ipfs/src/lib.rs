@@ -1516,7 +1516,7 @@ impl Constellation for WarpIpfs {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
     ) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?
             .put_stream(name, total_size, stream)
