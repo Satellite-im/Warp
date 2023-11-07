@@ -17,7 +17,7 @@ use warp::{
     constellation::{
         directory::Directory, ConstellationEventKind, ConstellationProgressStream, Progression,
     },
-    crypto::cipher::Cipher,
+    crypto::{cipher::Cipher, DID},
     error::Error,
     sync::RwLock,
 };
@@ -1102,4 +1102,24 @@ pub struct ConstellationRootFileDag {
     pub link: Cid,
     pub size: u64,
     pub key: Vec<u8>,
+}
+
+impl ConstellationRootFileDag {
+    pub fn assign_with_did(mut self, keypair: &DID, did: &DID) -> Result<Self, Error> {
+        let key = ecdh_decrypt(keypair, None, &self.key)?;
+        let new_key = ecdh_encrypt(keypair, Some(did), key)?;
+        self.key = new_key;
+        Ok(self)
+    }
+
+    pub fn assign_with_key(
+        mut self,
+        keypair: &DID,
+        cipher_key: impl AsRef<[u8]>,
+    ) -> Result<Self, Error> {
+        let key = ecdh_decrypt(keypair, None, &self.key)?;
+        let new_key = Cipher::direct_encrypt(&key, cipher_key.as_ref())?;
+        self.key = new_key;
+        Ok(self)
+    }
 }
