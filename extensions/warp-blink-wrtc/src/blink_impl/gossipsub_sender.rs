@@ -35,6 +35,9 @@ enum GossipSubCmd {
         data: Vec<u8>,
         rsp: oneshot::Sender<anyhow::Result<Vec<u8>>>,
     },
+    GetOwnId {
+        rsp: oneshot::Sender<DID>,
+    },
 }
 
 #[derive(Clone)]
@@ -60,6 +63,13 @@ impl GossipSubSender {
         }
     }
 
+    pub async fn get_own_id(&self) -> anyhow::Result<DID> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(GossipSubCmd::GetOwnId { rsp: tx })?;
+        let id = rx.await?;
+        Ok(id)
+    }
+
     pub fn send_signal_aes<T: Serialize + Display>(
         &self,
         group_key: Vec<u8>,
@@ -71,7 +81,7 @@ impl GossipSubSender {
             group_key,
             signal,
             topic,
-        });
+        })?;
 
         Ok(())
     }
@@ -87,7 +97,7 @@ impl GossipSubSender {
             dest,
             signal,
             topic,
-        });
+        })?;
 
         Ok(())
     }
@@ -113,7 +123,7 @@ impl GossipSubSender {
             src,
             data: message,
             rsp: tx,
-        });
+        })?;
         let bytes = rx.await??;
         let data: T = serde_cbor::from_slice(&bytes)?;
         Ok(data)
@@ -163,6 +173,9 @@ async fn run(
         tokio::select! {
             opt = ch.recv() => match opt {
                 Some(cmd) => match cmd {
+                    GossipSubCmd::GetOwnId { rsp } => {
+                        rsp.send(own_id.clone());
+                    }
                     GossipSubCmd::SendAes { group_key, signal, topic } => {
                         let encrypted = match Cipher::direct_encrypt(&signal, &group_key) {
                             Ok(r) => r,

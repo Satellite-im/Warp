@@ -44,15 +44,14 @@ pub struct GossipSubListener {
 impl GossipSubListener {
     pub fn new(
         ipfs: Arc<RwLock<Option<Ipfs>>>,
-        event_ch: UnboundedReceiver<GossipSubCmd>,
-        rsp_ch: UnboundedSender<GossipSubSignal>,
+        signal_tx: UnboundedSender<GossipSubSignal>,
         gossipsub_sender: GossipSubSender,
     ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let notify = Arc::new(Notify::new());
         let notify2 = notify.clone();
         tokio::spawn(async move {
-            run(ipfs, rx, rsp_ch, gossipsub_sender, notify2).await;
+            run(ipfs, rx, signal_tx, gossipsub_sender, notify2).await;
         });
         Self {
             ch: tx,
@@ -85,8 +84,8 @@ impl GossipSubListener {
 
 async fn run(
     ipfs: Arc<RwLock<Option<Ipfs>>>,
-    mut ch: UnboundedReceiver<GossipSubCmd>,
-    tx: UnboundedSender<GossipSubSignal>,
+    mut cmd_rx: UnboundedReceiver<GossipSubCmd>,
+    signal_tx: UnboundedSender<GossipSubSignal>,
     gossipsub_sender: GossipSubSender,
     notify: Arc<Notify>,
 ) {
@@ -118,7 +117,7 @@ async fn run(
     let call_offer_notify = Arc::new(Notify::new());
     loop {
         tokio::select! {
-            opt = ch.recv() => match opt {
+            opt = cmd_rx.recv() => match opt {
                 Some(cmd) => match cmd {
                     GossipSubCmd::UnsubscribeCall { call_id } => {
                         if let Some(call) = subscribed_calls.remove(&call_id) {
@@ -151,7 +150,7 @@ async fn run(
                             }
                         };
 
-                        let ch = tx.clone();
+                        let ch = signal_tx.clone();
                         let gossipsub_sender = gossipsub_sender.clone();
                         tokio::spawn(async move {
                             loop {
@@ -209,7 +208,7 @@ async fn run(
                                 continue;
                             }
                         };
-                        let ch = tx.clone();
+                        let ch = signal_tx.clone();
                         let notify = webrtc_notify.clone();
                         let gossipsub_sender = gossipsub_sender.clone();
                         tokio::spawn(async move {
@@ -262,7 +261,7 @@ async fn run(
                                 continue;
                             }
                         };
-                        let ch = tx.clone();
+                        let ch = signal_tx.clone();
                         let notify = call_offer_notify.clone();
                         let gossipsub_sender = gossipsub_sender.clone();
                         tokio::spawn(async move {

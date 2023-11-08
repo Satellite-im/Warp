@@ -13,8 +13,6 @@ use crate::{
     store::{decode_gossipsub_msg_ecdh, PeerIdExt},
 };
 
-use super::data::PendingCall;
-
 pub async fn run(
     own_id: Arc<RwLock<Option<DID>>>,
     pending_calls: Arc<RwLock<HashMap<Uuid, PendingCall>>>,

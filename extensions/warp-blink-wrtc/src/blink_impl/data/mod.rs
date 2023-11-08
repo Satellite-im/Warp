@@ -1,6 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use uuid::Uuid;
 use warp::{
-    blink::{CallConfig, CallInfo},
+    blink::{CallInfo, CallState},
     crypto::DID,
 };
 
@@ -8,43 +9,129 @@ mod notify_wrapper;
 pub use notify_wrapper::*;
 
 #[derive(Clone)]
-pub struct ActiveCall {
-    pub call: CallInfo,
-    pub connected_participants: HashMap<DID, PeerState>,
-    pub call_state: CallState,
-    pub call_config: CallConfig,
+pub struct CallData {
+    pub info: CallInfo,
+    pub state: CallState,
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub enum PeerState {
-    Disconnected,
-    Initializing,
-    Connected,
-    Closed,
-}
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum CallState {
-    // the call was offered but no one joined and there is no peer connection
-    Uninitialized,
-    // at least one peer has connected
-    Started,
-    Closing,
-    Closed,
+impl CallData {
+    pub fn new(info: CallInfo, state: CallState) -> Self {
+        Self { info, state }
+    }
+
+    pub fn get_info(&self) -> CallInfo {
+        self.info.clone()
+    }
+
+    pub fn get_state(&self) -> CallState {
+        self.state.clone()
+    }
 }
 
-// used when a call is accepted
-impl From<CallInfo> for ActiveCall {
-    fn from(value: CallInfo) -> Self {
+pub struct CallDataMap {
+    pub own_id: DID,
+    pub map: HashMap<Uuid, CallData>,
+}
+
+impl CallDataMap {
+    pub fn new(own_id: DID) -> Self {
         Self {
-            call: value,
-            connected_participants: HashMap::new(),
-            call_state: CallState::Uninitialized,
-            call_config: CallConfig::default(),
+            own_id,
+            map: HashMap::default(),
+        }
+    }
+    pub fn add_call(&mut self, info: CallInfo, sender: &DID) {
+        let call_id = info.call_id();
+        if self.map.contains_key(&call_id) {
+            log::warn!("tried to add a call for which a key already exists");
+            return;
+        }
+
+        let mut state = CallState::new(self.own_id.clone());
+        state.add_participant(sender);
+        self.map.insert(call_id, CallData::new(info, state));
+    }
+
+    pub fn get_pending_calls(&self) -> Vec<CallInfo> {
+        self.map.values().map(|x| x.get_info()).collect()
+    }
+}
+
+impl CallDataMap {
+    pub fn add_participant(&mut self, call_id: Uuid, peer_id: &DID) {
+        if let Some(data) = self.map.get_mut(&call_id) {
+            if data.info.contains_participant(peer_id) {
+                data.state.add_participant(peer_id);
+            }
+        }
+    }
+
+    pub fn call_empty(&self, call_id: Uuid) -> bool {
+        self.map
+            .get(&call_id)
+            .map(|data| data.state.participants_joined.is_empty())
+            .unwrap_or(true)
+    }
+
+    pub fn contains_participant(&self, call_id: Uuid, peer_id: &DID) -> bool {
+        self.map
+            .get(&call_id)
+            .map(|data| data.info.contains_participant(peer_id))
+            .unwrap_or_default()
+    }
+
+    pub fn get_call_info(&self, id: Uuid) -> Option<CallInfo> {
+        self.map.get(&id).map(|x| x.get_info())
+    }
+
+    pub fn get_call_state(&self, id: Uuid) -> Option<CallState> {
+        self.map.get(&id).map(|x| x.get_state())
+    }
+
+    pub fn insert(&mut self, id: Uuid, data: CallData) {
+        self.map.insert(id, data);
+    }
+
+    pub fn get_call_config(&self, id: Uuid) -> Option<CallState> {
+        self.map.get(&id).map(|x| x.get_state())
+    }
+
+    pub fn leave_call(&mut self, call_id: Uuid) {
+        if let Some(data) = self.map.get_mut(&call_id) {
+            data.state.reset_self();
+        }
+    }
+
+    pub fn participant_in_call(&self, call_id: Uuid, peer_id: &DID) -> bool {
+        self.map
+            .get(&call_id)
+            .map(|x| x.info.contains_participant(peer_id))
+            .unwrap_or_default()
+    }
+
+    pub fn remove_call(&mut self, call_id: Uuid) {
+        self.map.remove(&call_id);
+    }
+
+    pub fn remove_participant(&mut self, call_id: Uuid, peer_id: &DID) {
+        if let Some(data) = self.map.get_mut(&call_id) {
+            if data.info.contains_participant(peer_id) {
+                data.state.remove_participant(peer_id);
+            }
         }
     }
 }
 
-pub struct PendingCall {
-    pub call: CallInfo,
-    pub connected_participants: HashSet<DID>,
+impl CallDataMap {
+    pub fn set_muted(&mut self, call_id: Uuid, participant: &DID, value: bool) {
+        if let Some(data) = self.map.get_mut(&call_id) {
+            data.state.set_muted(participant, value);
+        }
+    }
+
+    pub fn set_deafened(&mut self, call_id: Uuid, participant: &DID, value: bool) {
+        if let Some(data) = self.map.get_mut(&call_id) {
+            data.state.set_deafened(participant, value);
+        }
+    }
 }

@@ -16,12 +16,15 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use rust_ipfs::{Ipfs, Keypair};
 use std::{any::Any, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
-    sync::broadcast::{self},
+    sync::{
+        broadcast::{self},
+        mpsc,
+    },
     task::JoinHandle,
 };
 use uuid::Uuid;
 use warp::{
-    blink::{AudioDeviceConfig, Blink, BlinkEventKind, BlinkEventStream, CallConfig, CallInfo},
+    blink::{AudioDeviceConfig, Blink, BlinkEventKind, BlinkEventStream, CallInfo, CallState},
     crypto::{did_key::Generate, zeroize::Zeroizing, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     module::Module,
@@ -95,11 +98,15 @@ impl BlinkImpl {
             log::warn!("blink started with no output device");
         }
 
+        // todo: ensure rx doesn't get dropped
+        let (ui_event_ch, _rx) = broadcast::channel(1024);
+        let (signal_tx, signal_rx) = mpsc::unbounded_channel();
+
         let ipfs = Arc::new(warp::sync::RwLock::new(None));
         let own_id_private = Arc::new(warp::sync::RwLock::new(None));
-        let gossipsub_sender = GossipSubSender::new(own_id_private, ipfs.clone());
+        let gossipsub_sender = GossipSubSender::new(own_id_private.clone(), ipfs.clone());
         let gossipsub_listener =
-            GossipSubListener::new(ipfs.clone(), todo!(), todo!(), gossipsub_sender.clone());
+            GossipSubListener::new(ipfs.clone(), signal_tx, gossipsub_sender.clone());
 
         let webrtc_controller = simple_webrtc::Controller::new()?;
         let webrtc_event_stream = webrtc_controller.get_event_stream();
@@ -107,10 +114,11 @@ impl BlinkImpl {
             webrtc_controller,
             webrtc_event_stream,
             gossipsub_sender.clone(),
-            todo!(),
+            gossipsub_listener.clone(),
+            signal_rx,
+            ui_event_ch.clone(),
         );
 
-        let (ui_event_ch, _rx) = broadcast::channel(1024);
         let blink_impl = Self {
             own_id: Arc::new(warp::sync::RwLock::new(None)),
             ui_event_ch,
@@ -169,51 +177,6 @@ impl BlinkImpl {
         Ok(Box::new(blink_impl))
     }
 
-    async fn init_call(&mut self, call: CallInfo) -> Result<(), Error> {
-        //rtp_logger::init(call.call_id(), std::path::PathBuf::from("")).await?;
-
-        let own_id = self
-            .own_id
-            .read()
-            .clone()
-            .ok_or(Error::BlinkNotInitialized)?;
-
-        self.event_handler.set_active_call(call.clone());
-
-        let webrtc_codec = AudioCodec::default();
-        // ensure there is an audio source track
-        let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-            mime_type: webrtc_codec.mime_type(),
-            clock_rate: webrtc_codec.sample_rate(),
-            channels: 1,
-            ..Default::default()
-        };
-        let track = self
-            .event_handler
-            .add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec)
-            .await?;
-        if let Err(e) = host_media::create_audio_source_track(
-            own_id.clone(),
-            self.ui_event_ch.clone(),
-            track,
-            webrtc_codec,
-        )
-        .await
-        {
-            let _ = self
-                .event_handler
-                .remove_media_source(host_media::AUDIO_SOURCE_ID.into());
-            return Err(e);
-        }
-
-        self.gossipsub_listener
-            .subscribe_call(call.call_id(), call.group_key());
-        self.gossipsub_listener
-            .connect_webrtc(call.call_id(), own_id);
-
-        Ok(())
-    }
-
     async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error> {
         let host = cpal::default_host();
         let device: cpal::Device = if device_name.to_ascii_lowercase().eq("default") {
@@ -245,18 +208,6 @@ impl BlinkImpl {
         };
 
         host_media::change_audio_output(device).await?;
-        Ok(())
-    }
-}
-
-impl BlinkImpl {
-    async fn ensure_call_not_in_progress(&self) -> Result<(), Error> {
-        if let Some(ac) = self.active_call.read().await.as_ref() {
-            if ac.call_state != CallState::Closed {
-                return Err(Error::OtherWithContext("previous call not finished".into()));
-            }
-        }
-
         Ok(())
     }
 }
@@ -313,7 +264,6 @@ impl Blink for BlinkImpl {
         conversation_id: Option<Uuid>,
         mut participants: Vec<DID>,
     ) -> Result<Uuid, Error> {
-        self.ensure_call_not_in_progress().await?;
         let own_id = self
             .own_id
             .read()
@@ -324,116 +274,25 @@ impl Blink for BlinkImpl {
             participants.push(DID::from_str(&own_id.fingerprint())?);
         };
 
-        let call_info = CallInfo::new(conversation_id, participants.clone());
-        self.init_call(call_info.clone()).await?;
+        let call_info = CallInfo::new(conversation_id, participants);
+        self.event_handler.offer_call(call_info).await?;
 
-        // todo: periodically re-send offer signal
-        participants.retain(|x| x != &own_id);
-        for dest in participants {
-            let topic = ipfs_routes::call_initiation_route(&dest);
-            let signal = InitiationSignal::Offer {
-                call_info: call_info.clone(),
-            };
-
-            if let Err(e) = self.gossipsub_sender.send_signal_ecdh(dest, signal, topic) {
-                log::error!("failed to send signal: {e}");
-            }
-        }
         Ok(call_info.call_id())
     }
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
-        self.ensure_call_not_in_progress().await?;
-        let call = match self.pending_calls.write().await.remove(&call_id) {
-            Some(r) => r.call,
-            None => {
-                return Err(Error::OtherWithContext(
-                    "could not answer call: not found".into(),
-                ))
-            }
-        };
-
-        self.init_call(call.clone()).await?;
-
+        self.event_handler.answer_call(call_id).await
         // todo: periodically re-send join signals
-        let call_id = call.call_id();
-        let topic = ipfs_routes::call_signal_route(&call_id);
-        let signal = CallSignal::Join;
-        if let Err(e) = self
-            .gossipsub_sender
-            .send_signal_aes(call.group_key(), signal, topic)
-        {
-            log::error!("failed to send signal: {e}");
-            Err(Error::OtherWithContext("could not answer call".into()))
-        } else {
-            Ok(())
-        }
     }
     /// use the Leave signal as a courtesy, to let the group know not to expect you to join.
     async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error> {
-        if let Some(pc) = self.pending_calls.write().await.remove(&call_id) {
-            let topic = ipfs_routes::call_signal_route(&call_id);
-            let signal = CallSignal::Leave;
-            if let Err(e) =
-                self.gossipsub_sender
-                    .send_signal_aes(pc.call.group_key(), signal, topic)
-            {
-                log::error!("failed to send signal: {e}");
-            }
-            Ok(())
-        } else {
-            Err(Error::OtherWithContext(
-                "could not reject call: not found".into(),
-            ))
-        }
+        self.event_handler.leave_call(Some(call_id));
+        Ok(())
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
-        let own_id = self
-            .own_id
-            .read()
-            .clone()
-            .ok_or(Error::BlinkNotInitialized)?;
-
-        if let Some(ac) = self.active_call.write().await.as_mut() {
-            match ac.call_state.clone() {
-                CallState::Started => {
-                    ac.call_state = CallState::Closing;
-                }
-                CallState::Closed => {
-                    log::info!("call already closed");
-                    return Ok(());
-                }
-                CallState::Uninitialized => {
-                    log::info!("cancelling call");
-                    ac.call_state = CallState::Closed;
-                }
-                CallState::Closing => {
-                    log::warn!("leave_call when call_state is: {:?}", ac.call_state);
-                    return Ok(());
-                }
-            };
-
-            let call_id = ac.call.call_id();
-            let topic = ipfs_routes::call_signal_route(&call_id);
-            let signal = CallSignal::Leave;
-            if let Err(e) =
-                self.gossipsub_sender
-                    .send_signal_aes(ac.call.group_key(), signal, topic)
-            {
-                log::error!("failed to send signal: {e}");
-            }
-
-            let r = self.event_handler.leave_call();
-            host_media::reset().await;
-            //rtp_logger::deinit().await;
-            let _ = r?;
-            Ok(())
-        } else {
-            Err(Error::OtherWithContext(
-                "tried to leave nonexistent call".into(),
-            ))
-        }
+        self.event_handler.leave_call(None);
+        Ok(())
     }
 
     // ------ Select input/output devices ------
@@ -466,104 +325,24 @@ impl Blink for BlinkImpl {
     // ------ Media controls ------
 
     async fn mute_self(&mut self) -> Result<(), Error> {
-        if self.active_call.read().await.is_none() {
-            return Err(Error::CallNotInProgress);
-        }
-        host_media::mute_self().await?;
-
-        if let Some(ac) = self.active_call.write().await.as_mut() {
-            ac.call_config.self_muted = true;
-            let call_id = ac.call.call_id();
-            let topic = ipfs_routes::call_signal_route(&call_id);
-            let signal = CallSignal::Muted;
-            if let Err(e) =
-                self.gossipsub_sender
-                    .send_signal_aes(ac.call.group_key(), signal, topic)
-            {
-                log::error!("failed to send signal: {e}");
-            } else {
-                log::debug!("sent signal to mute self");
-            }
-        }
-
+        self.event_handler.mute_self()?;
         Ok(())
     }
     async fn unmute_self(&mut self) -> Result<(), Error> {
-        if self.active_call.read().await.is_none() {
-            return Err(Error::CallNotInProgress);
-        }
-        host_media::unmute_self().await?;
-
-        if let Some(ac) = self.active_call.write().await.as_mut() {
-            ac.call_config.self_muted = false;
-            let call_id = ac.call.call_id();
-            let topic = ipfs_routes::call_signal_route(&call_id);
-            let signal = CallSignal::Unmuted;
-            if let Err(e) =
-                self.gossipsub_sender
-                    .send_signal_aes(ac.call.group_key(), signal, topic)
-            {
-                log::error!("failed to send signal: {e}");
-            } else {
-                log::debug!("sent signal to unmute self");
-            }
-        }
-
+        self.event_handler.unmute_self()?;
         Ok(())
     }
     async fn silence_call(&mut self) -> Result<(), Error> {
-        if self.active_call.read().await.is_none() {
-            return Err(Error::CallNotInProgress);
-        }
-        host_media::deafen().await?;
-
-        if let Some(ac) = self.active_call.write().await.as_mut() {
-            ac.call_config.self_deafened = true;
-            let call_id = ac.call.call_id();
-            let topic = ipfs_routes::call_signal_route(&call_id);
-            let signal = CallSignal::Deafened;
-            if let Err(e) =
-                self.gossipsub_sender
-                    .send_signal_aes(ac.call.group_key(), signal, topic)
-            {
-                log::error!("failed to send signal: {e}");
-            } else {
-                log::debug!("sent signal to deafen self");
-            }
-        }
-
+        self.event_handler.silence_call()?;
         Ok(())
     }
     async fn unsilence_call(&mut self) -> Result<(), Error> {
-        if self.active_call.read().await.is_none() {
-            return Err(Error::CallNotInProgress);
-        }
-        host_media::undeafen().await?;
-        if let Some(ac) = self.active_call.write().await.as_mut() {
-            ac.call_config.self_deafened = false;
-            let call_id = ac.call.call_id();
-            let topic = ipfs_routes::call_signal_route(&call_id);
-            let signal = CallSignal::Undeafened;
-            if let Err(e) =
-                self.gossipsub_sender
-                    .send_signal_aes(ac.call.group_key(), signal, topic)
-            {
-                log::error!("failed to send signal: {e}");
-            } else {
-                log::debug!("sent signal to undeafen self");
-            }
-        }
-
+        self.event_handler.unsilence_call()?;
         Ok(())
     }
 
-    async fn get_call_config(&self) -> Result<Option<CallConfig>, Error> {
-        Ok(self
-            .active_call
-            .read()
-            .await
-            .as_ref()
-            .map(|x| x.call_config.clone()))
+    async fn get_call_state(&self) -> Result<Option<CallState>, Error> {
+        self.event_handler.get_active_call_state().await
     }
 
     async fn enable_camera(&mut self) -> Result<(), Error> {
@@ -573,30 +352,10 @@ impl Blink for BlinkImpl {
         Err(Error::Unimplemented)
     }
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error> {
-        match self.active_call.read().await.as_ref() {
-            None => return Err(Error::CallNotInProgress),
-            Some(ActiveCall { call, .. }) => {
-                host_media::init_recording(Mp4LoggerConfig {
-                    call_id: call.call_id(),
-                    participants: call.participants(),
-                    audio_codec: AudioCodec::default(),
-                    log_path: output_dir.into(),
-                })
-                .await?;
-            }
-        }
-
-        Ok(())
+        self.event_handler.record_call(output_dir.into()).await
     }
     async fn stop_recording(&mut self) -> Result<(), Error> {
-        match self.active_call.read().await.as_ref() {
-            None => return Err(Error::CallNotInProgress),
-            Some(_) => {
-                host_media::pause_recording().await?;
-            }
-        }
-
-        Ok(())
+        self.event_handler.stop_recording().await
     }
 
     fn enable_automute(&mut self) -> Result<(), Error> {
@@ -618,20 +377,22 @@ impl Blink for BlinkImpl {
     // ------ Utility Functions ------
 
     async fn pending_calls(&self) -> Vec<CallInfo> {
-        Vec::from_iter(
-            self.pending_calls
-                .read()
-                .await
-                .values()
-                .map(|x| x.call.clone()),
-        )
+        match self.event_handler.get_pending_calls().await {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("{e}");
+                vec![]
+            }
+        }
     }
     async fn current_call(&self) -> Option<CallInfo> {
-        self.active_call
-            .read()
-            .await
-            .as_ref()
-            .map(|x| x.call.clone())
+        match self.event_handler.get_active_call_info().await {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("{e}");
+                None
+            }
+        }
     }
 }
 

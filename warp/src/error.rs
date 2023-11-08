@@ -224,6 +224,8 @@ pub enum Error {
     AudioHostError(String),
     #[error("BlinkNotInitialized")]
     BlinkNotInitialized,
+    #[error("CallNotFound")]
+    CallNotFound,
     #[error("CallNotInProgress")]
     CallNotInProgress,
     #[error("FailedToSendSignal: {_0}")]
