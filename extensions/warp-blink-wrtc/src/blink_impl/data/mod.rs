@@ -102,13 +102,6 @@ impl CallDataMap {
         }
     }
 
-    pub fn participant_in_call(&self, call_id: Uuid, peer_id: &DID) -> bool {
-        self.map
-            .get(&call_id)
-            .map(|x| x.info.contains_participant(peer_id))
-            .unwrap_or_default()
-    }
-
     pub fn remove_call(&mut self, call_id: Uuid) {
         self.map.remove(&call_id);
     }

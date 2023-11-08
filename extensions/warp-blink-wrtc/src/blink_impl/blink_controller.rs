@@ -602,7 +602,7 @@ async fn run(
                             log::debug!("received webrtc signal for non-active call");
                             continue;
                         }
-                        _ if !call_data_map.participant_in_call(call_id, &sender) => {
+                        _ if !call_data_map.contains_participant(call_id, &sender) => {
                             log::debug!("received signal from someone who isn't part of the call");
                             continue;
                         }
@@ -626,7 +626,7 @@ async fn run(
                         },
                     },
                     GossipSubSignal::Call { sender, call_id, signal } => match signal {
-                        _ if !call_data_map.participant_in_call(call_id, &sender) => {
+                        _ if !call_data_map.contains_participant(call_id, &sender) => {
                             log::debug!("received signal from someone who isn't part of the call");
                             continue;
                         }
@@ -754,14 +754,16 @@ async fn run(
                         }
                     },
                     simple_webrtc::events::EmittedEvents::Disconnected { peer }
-                    | simple_webrtc::events::EmittedEvents::ConnectionFailed { peer }
-                    | simple_webrtc::events::EmittedEvents::ConnectionClosed { peer }=> {
+                    | simple_webrtc::events::EmittedEvents::ConnectionFailed { peer } => {
+                        // todo: dont' call this multiple times per peer
                         let ac = active_call.unwrap_or_default();
                         call_data_map.remove_participant(ac, &peer);
 
                         if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
                             log::error!("failed to send media_track command: {e}");
                         }
+
+                        // possibly redundant
                         webrtc_controller.hang_up(&peer).await;
 
                         if let Some(data) = call_data_map.map.get(&ac) {
@@ -777,6 +779,10 @@ async fn run(
                             }
                         }
                     },
+                    simple_webrtc::events::EmittedEvents::ConnectionClosed { peer } => {
+                        // hoping this will trigger the Disconnected event.
+                        webrtc_controller.hang_up(&peer).await;
+                    }
                     simple_webrtc::events::EmittedEvents::Sdp { dest, sdp } => {
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
                         let signal = PeerSignal::Sdp(*sdp);
