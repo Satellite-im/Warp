@@ -754,9 +754,9 @@ async fn run(
                         }
                     },
                     simple_webrtc::events::EmittedEvents::Disconnected { peer }
-                    | simple_webrtc::events::EmittedEvents::ConnectionFailed { peer } => {
-                        log::debug!("webrtc: disconnected or connection failed");
-                        // todo: dont' call this multiple times per peer
+                    | simple_webrtc::events::EmittedEvents::ConnectionFailed { peer }
+                    | simple_webrtc::events::EmittedEvents::ConnectionClosed { peer } => {
+                        log::debug!("webrtc: closed, disconnected or connection failed");
                         let ac = active_call.unwrap_or_default();
                         call_data_map.remove_participant(ac, &peer);
 
@@ -780,11 +780,6 @@ async fn run(
                             }
                         }
                     },
-                    simple_webrtc::events::EmittedEvents::ConnectionClosed { peer } => {
-                        log::debug!("webrtc: connection closed");
-                        // hoping this will trigger the Disconnected event.
-                        webrtc_controller.hang_up(&peer).await;
-                    }
                     simple_webrtc::events::EmittedEvents::Sdp { dest, sdp } => {
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
                         let signal = PeerSignal::Sdp(*sdp);
