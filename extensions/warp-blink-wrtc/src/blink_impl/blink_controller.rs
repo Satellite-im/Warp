@@ -285,6 +285,7 @@ async fn run(
                         break;
                     }
                 };
+                log::debug!("blink cmd: {:?}", std::mem::discriminant(&cmd));
                 match cmd {
                     Cmd::OfferCall { call_info, rsp } => {
                         let prev_active = active_call.unwrap_or_default();
@@ -589,14 +590,15 @@ async fn run(
                 }
             },
             opt = signal_rx.recv() => {
-                let cmd = match opt {
+                let signal = match opt {
                     Some(r) => r,
                     None => {
                         log::debug!("blink handler signal_rx channel is closed. quitting");
                         break;
                     }
                 };
-                match cmd {
+                log::debug!("gossipsub signal: {:?}", std::mem::discriminant(&signal));
+                match signal {
                     GossipSubSignal::Peer { sender, call_id, signal } => match *signal {
                         _ if !active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() => {
                             log::debug!("received webrtc signal for non-active call");
@@ -735,7 +737,7 @@ async fn run(
                         continue;
                     }
                 };
-
+                log::debug!("webrtc event: {:?}", std::mem::discriminant(&event));
                 match event {
                     simple_webrtc::events::EmittedEvents::Ice { dest, candidate } => {
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
