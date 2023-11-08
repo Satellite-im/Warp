@@ -32,6 +32,7 @@ use super::{
     gossipsub_sender::GossipSubSender,
 };
 
+#[derive(Debug)]
 enum Cmd {
     OfferCall {
         call_info: CallInfo,
@@ -285,7 +286,6 @@ async fn run(
                         break;
                     }
                 };
-                log::debug!("blink cmd: {:?}", std::mem::discriminant(&cmd));
                 match cmd {
                     Cmd::OfferCall { call_info, rsp } => {
                         let prev_active = active_call.unwrap_or_default();
@@ -597,7 +597,6 @@ async fn run(
                         break;
                     }
                 };
-                log::debug!("gossipsub signal: {:?}", std::mem::discriminant(&signal));
                 match signal {
                     GossipSubSignal::Peer { sender, call_id, signal } => match *signal {
                         _ if !active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() => {
@@ -737,7 +736,7 @@ async fn run(
                         continue;
                     }
                 };
-                log::debug!("webrtc event: {:?}", std::mem::discriminant(&event));
+                log::debug!("webrtc event: {:?}", &event);
                 match event {
                     simple_webrtc::events::EmittedEvents::Ice { dest, candidate } => {
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
