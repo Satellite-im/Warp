@@ -1,6 +1,10 @@
 use futures::channel::oneshot;
 use futures::StreamExt;
 
+use super::signaling::{
+    self, ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal,
+};
+
 use std::sync::Arc;
 use tokio::sync::{
     broadcast,
@@ -19,7 +23,6 @@ use webrtc::{
 
 use crate::{
     host_media::{self, audio::AudioCodec, mp4_logger::Mp4LoggerConfig},
-    signaling::{ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal},
     simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
 };
 
@@ -555,18 +558,18 @@ async fn run(
                             log::debug!("received signal from someone who isn't part of the call");
                             continue;
                         }
-                        crate::signaling::PeerSignal::Ice(ice) => {
+                        signaling::PeerSignal::Ice(ice) => {
                             if let Err(e) = webrtc_controller.recv_ice(&sender, ice).await {
                                 log::error!("failed to recv_ice {}", e);
                             }
                         },
-                        crate::signaling::PeerSignal::Sdp(sdp) => {
+                        signaling::PeerSignal::Sdp(sdp) => {
                             log::debug!("received signal: SDP");
                             if let Err(e) = webrtc_controller.recv_sdp(&sender, sdp).await {
                                 log::error!("failed to recv_sdp: {}", e);
                             }
                         },
-                        crate::signaling::PeerSignal::Dial(sdp) => {
+                        signaling::PeerSignal::Dial(sdp) => {
                             log::debug!("received signal: Dial");
                             // emits the SDP Event, which is sent to the peer via the SDP signal
                             if let Err(e) = webrtc_controller.accept_call(&sender, sdp).await {
@@ -579,7 +582,7 @@ async fn run(
                             log::debug!("received signal from someone who isn't part of the call");
                             continue;
                         }
-                        crate::signaling::CallSignal::Join => {
+                        signaling::CallSignal::Join => {
                             call_data_map.add_participant(call_id, &sender);
 
                             if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
@@ -592,7 +595,7 @@ async fn run(
                                 }
                             }
                         },
-                        crate::signaling::CallSignal::Leave => {
+                        signaling::CallSignal::Leave => {
                             call_data_map.remove_participant(call_id, &sender);
                             let is_call_empty = call_data_map.call_empty(call_id);
 
@@ -608,7 +611,7 @@ async fn run(
                                 }
                             }
                         },
-                        crate::signaling::CallSignal::Muted => {
+                        signaling::CallSignal::Muted => {
                             call_data_map.set_muted(call_id, &sender, true);
 
                             if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
@@ -617,7 +620,7 @@ async fn run(
                                 }
                             }
                         },
-                        crate::signaling::CallSignal::Unmuted => {
+                        signaling::CallSignal::Unmuted => {
                             call_data_map.set_muted(call_id, &sender, false);
 
                             if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
@@ -626,7 +629,7 @@ async fn run(
                                 }
                             }
                         },
-                        crate::signaling::CallSignal::Deafened => {
+                        signaling::CallSignal::Deafened => {
                             call_data_map.set_deafened(call_id, &sender, true);
 
                             if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
@@ -635,7 +638,7 @@ async fn run(
                                 }
                             }
                         },
-                        crate::signaling::CallSignal::Undeafened => {
+                        signaling::CallSignal::Undeafened => {
                             call_data_map.set_deafened(call_id, &sender, false);
 
                             if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
@@ -646,7 +649,7 @@ async fn run(
                         },
                     },
                     GossipSubSignal::Initiation { sender, signal } => match signal {
-                        crate::signaling::InitiationSignal::Offer { call_info } => {
+                        signaling::InitiationSignal::Offer { call_info } => {
                             let call_id = call_info.call_id();
                             let conversation_id = call_info.conversation_id();
                             let participants = call_info.participants();

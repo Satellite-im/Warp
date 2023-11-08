@@ -3,6 +3,8 @@ mod data;
 mod blink_controller;
 mod gossipsub_listener;
 mod gossipsub_sender;
+mod signaling;
+mod store;
 
 use anyhow::bail;
 use async_trait::async_trait;

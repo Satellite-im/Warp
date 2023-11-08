@@ -15,7 +15,7 @@ use warp::{
     sync::RwLock,
 };
 
-use crate::store::{ecdh_decrypt, ecdh_encrypt};
+use super::store::{ecdh_decrypt, ecdh_encrypt};
 
 use super::data::NotifyWrapper;
 
