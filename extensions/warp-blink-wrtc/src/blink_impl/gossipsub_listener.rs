@@ -314,9 +314,9 @@ async fn run(
                 break;
             }
         }
-
-        log::debug!("quitting gossipsub listener");
-        webrtc_notify.notify_waiters();
-        call_offer_notify.notify_waiters();
     }
+
+    log::debug!("quitting gossipsub listener");
+    webrtc_notify.notify_waiters();
+    call_offer_notify.notify_waiters();
 }
