@@ -1,21 +1,18 @@
 use futures::channel::oneshot;
 use futures::StreamExt;
-use serde::{de::DeserializeOwned, Serialize};
-use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
+
+use std::{sync::Arc};
 use tokio::{
     sync::{
         broadcast,
         mpsc::{self, UnboundedReceiver, UnboundedSender},
         Notify,
     },
-    time::Instant,
 };
 use uuid::Uuid;
 use warp::{
-    blink::{BlinkEventKind, CallInfo, CallState, ParticipantState},
-    crypto::{cipher::Cipher, DID},
+    blink::{BlinkEventKind, CallInfo, CallState},
     error::Error,
-    sync::RwLock,
 };
 use webrtc::{
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
@@ -23,10 +20,9 @@ use webrtc::{
 };
 
 use crate::{
-    blink_impl::data::CallData,
     host_media::{
         self,
-        audio::{AudioCodec, AudioHardwareConfig},
+        audio::{AudioCodec},
         mp4_logger::Mp4LoggerConfig,
     },
     signaling::{ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal},
@@ -294,7 +290,7 @@ async fn run(
                             let _ = webrtc_controller.deinit().await;
                             host_media::reset().await;
                         }
-                        call_data_map.add_call(call_info.clone(), &own_id);
+                        call_data_map.add_call(call_info.clone(), own_id);
 
                         // automatically add an audio track
                         let webrtc_codec = AudioCodec::default();

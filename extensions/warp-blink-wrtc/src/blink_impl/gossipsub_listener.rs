@@ -172,7 +172,7 @@ async fn run(
                                                 Ok(msg) => {
                                                     let _ = ch.send(GossipSubSignal::Call{
                                                         sender,
-                                                        call_id: call_id.clone(),
+                                                        call_id,
                                                         signal: msg
                                                     });
                                                 },
@@ -231,7 +231,7 @@ async fn run(
                                                 Ok(msg) => {
                                                     let _ = ch.send(GossipSubSignal::Peer {
                                                         sender,
-                                                        call_id: call_id.clone(),
+                                                        call_id,
                                                         signal: msg
                                                     });
                                                 },

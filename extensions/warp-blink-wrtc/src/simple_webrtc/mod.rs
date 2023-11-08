@@ -17,7 +17,7 @@
 //!
 
 use anyhow::{bail, Result};
-use futures::Stream;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
