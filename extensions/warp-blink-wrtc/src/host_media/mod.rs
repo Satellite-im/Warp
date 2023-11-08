@@ -7,7 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
-use warp::blink::{BlinkEventKind};
+use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
