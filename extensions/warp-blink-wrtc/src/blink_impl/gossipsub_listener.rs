@@ -73,7 +73,7 @@ impl GossipSubListener {
             .send(GossipSubCmd::SubscribeCall { call_id, group_key });
     }
 
-    pub fn connect_webrtc(&self, call_id: Uuid, peer: DID) {
+    pub fn subscribe_webrtc(&self, call_id: Uuid, peer: DID) {
         let _ = self.ch.send(GossipSubCmd::ConnectWebRtc { call_id, peer });
     }
 
@@ -112,8 +112,8 @@ async fn run(
     let mut current_call: Option<Uuid> = None;
     let mut subscribed_calls: HashMap<Uuid, Arc<Notify>> = HashMap::new();
 
-    let webrtc_notify = Arc::new(Notify::new());
-    let call_signal_notify = Arc::new(Notify::new());
+    // replace webrtc_notify after notifying waiters
+    let mut webrtc_notify = Arc::new(Notify::new());
     let call_offer_notify = Arc::new(Notify::new());
     loop {
         tokio::select! {
@@ -126,11 +126,13 @@ async fn run(
                         if current_call.as_ref().map(|x| x == &call_id).unwrap_or_default(){
                             let _ = current_call.take();
                             webrtc_notify.notify_waiters();
+                            webrtc_notify = Arc::new(Notify::new());
                         }
                     }
                     GossipSubCmd::DisconnectWebrtc { call_id } => {
                         if current_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                             webrtc_notify.notify_waiters();
+                            webrtc_notify = Arc::new(Notify::new());
                         }
                     }
                     GossipSubCmd::SubscribeCall { call_id, group_key } => {
@@ -194,6 +196,7 @@ async fn run(
                         if !current_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                             if current_call.is_some() {
                                 webrtc_notify.notify_waiters();
+                                webrtc_notify = Arc::new(Notify::new());
                             }
                             current_call.replace(call_id);
                         }
@@ -250,7 +253,6 @@ async fn run(
                         });
                     },
                     GossipSubCmd::ReceiveCalls { own_id } => {
-                        call_offer_notify.notify_waiters();
                         let mut call_offer_stream = match ipfs
                             .pubsub_subscribe(call_initiation_route(&own_id))
                             .await
@@ -313,8 +315,8 @@ async fn run(
             }
         }
 
+        log::debug!("quitting gossipsub listener");
         webrtc_notify.notify_waiters();
-        call_signal_notify.notify_waiters();
         call_offer_notify.notify_waiters();
     }
 }
