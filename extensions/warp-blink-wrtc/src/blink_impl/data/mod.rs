@@ -134,4 +134,10 @@ impl CallDataMap {
             data.state.set_deafened(participant, value);
         }
     }
+
+    pub fn set_recording(&mut self, call_id: Uuid, participant: &DID, value: bool) {
+        if let Some(data) = self.map.get_mut(&call_id) {
+            data.state.set_recording(participant, value);
+        }
+    }
 }

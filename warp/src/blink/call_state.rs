@@ -50,6 +50,12 @@ impl CallState {
         }
     }
 
+    pub fn set_recording(&mut self, id: &DID, recording: bool) {
+        if let Some(participant) = self.participants_joined.get_mut(id) {
+            participant.recording = recording;
+        }
+    }
+
     pub fn set_self_muted(&mut self, muted: bool) {
         let own_id = self.own_id.clone();
         self.set_muted(&own_id, muted);
@@ -58,6 +64,11 @@ impl CallState {
     pub fn set_self_deafened(&mut self, deafened: bool) {
         let own_id = self.own_id.clone();
         self.set_deafened(&own_id, deafened);
+    }
+
+    pub fn set_self_recording(&mut self, recording: bool) {
+        let own_id = self.own_id.clone();
+        self.set_recording(&own_id, recording);
     }
 
     pub fn reset_self(&mut self) {

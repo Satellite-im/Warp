@@ -53,6 +53,10 @@ pub enum CallSignal {
     Deafened,
     #[display(fmt = "Undeafened")]
     Undeafened,
+    #[display(fmt = "Recording")]
+    Recording,
+    #[display(fmt = "NotRecording")]
+    NotRecording,
 }
 
 #[derive(Serialize, Deserialize, Display, Clone)]

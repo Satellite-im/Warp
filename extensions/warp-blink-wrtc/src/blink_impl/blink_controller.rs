@@ -113,9 +113,9 @@ impl BlinkController {
                 webrtc_event_stream,
                 gossipsub_sender,
                 gossipsub_listener,
-                cmd_rx,
                 signal_rx,
                 ui_event_ch,
+                cmd_rx,
                 notify2,
             )
             .await;
@@ -235,14 +235,15 @@ impl BlinkController {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run(
     mut webrtc_controller: simple_webrtc::Controller,
     mut webrtc_event_stream: WebRtcEventStream,
     gossipsub_sender: GossipSubSender,
     gossipsub_listener: GossipSubListener,
-    mut cmd_rx: UnboundedReceiver<Cmd>,
     mut signal_rx: UnboundedReceiver<GossipSubSignal>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
+    mut cmd_rx: UnboundedReceiver<Cmd>,
     notify: Arc<Notify>,
 ) {
     let own_id = {
@@ -525,28 +526,64 @@ async fn run(
                         }
                     }
                     Cmd::RecordCall { output_dir, rsp } => {
-                        match active_call.and_then(|call_id| call_data_map.get_call_info(call_id)) {
-                            Some(call) => {
-                                let r = host_media::init_recording(Mp4LoggerConfig {
-                                    call_id: call.call_id(),
-                                    participants: call.participants(),
+                        let call_id = active_call.unwrap_or_default();
+                        if let Some(data) = call_data_map.map.get_mut(&call_id) {
+                            let info = data.get_info();
+                            match
+                                 host_media::init_recording(Mp4LoggerConfig {
+                                    call_id: info.call_id(),
+                                    participants: info.participants(),
                                     audio_codec: AudioCodec::default(),
                                     log_path: output_dir.into(),
                                 })
-                                .await;
-                                let _ = rsp.send(r.map_err(|x| Error::OtherWithContext(x.to_string())));
+                                .await
+                            {
+                                Ok(_) => {
+                                    data.state.set_self_recording(true);
+                                    let topic = ipfs_routes::call_signal_route(&info.call_id());
+                                    let signal = CallSignal::Recording;
+                                    if let Err(e) =
+                                        gossipsub_sender
+                                            .send_signal_aes(info.group_key(), signal, topic)
+                                    {
+                                        log::error!("failed to send signal: {e}");
+                                    }
+                                    let _ = rsp.send(Ok(()));
+                                }
+                                Err(e) => {
+                                    let _ = rsp.send(Err(Error::OtherWithContext(e.to_string())));
+                                }
                             }
-                            None => {
-                                let _ = rsp.send(Err(Error::CallNotInProgress));
-                            }
+                        } else {
+                            let _ = rsp.send(Err(Error::CallNotInProgress));
                         }
                     }
                     Cmd::StopRecording { rsp } => {
-                        if active_call.is_none() {
-                            let _ = rsp.send(Err(Error::CallNotInProgress));
+                        let call_id = active_call.unwrap_or_default();
+                        if let Some(data) = call_data_map.map.get_mut(&call_id) {
+                            let info = data.get_info();
+                            match
+                                 host_media::pause_recording()
+                                .await
+                            {
+                                Ok(_) => {
+                                    data.state.set_self_recording(false);
+                                    let topic = ipfs_routes::call_signal_route(&info.call_id());
+                                    let signal = CallSignal::NotRecording;
+                                    if let Err(e) =
+                                        gossipsub_sender
+                                            .send_signal_aes(info.group_key(), signal, topic)
+                                    {
+                                        log::error!("failed to send signal: {e}");
+                                    }
+                                    let _ = rsp.send(Ok(()));
+                                }
+                                Err(e) => {
+                                    let _ = rsp.send(Err(Error::OtherWithContext(e.to_string())));
+                                }
+                            }
                         } else {
-                            let r = host_media::pause_recording().await;
-                            let _ = rsp.send(r.map_err(|x| Error::OtherWithContext(x.to_string())));
+                            let _ = rsp.send(Err(Error::CallNotInProgress));
                         }
                     }
                 }
@@ -658,6 +695,22 @@ async fn run(
                                 }
                             }
                         },
+                        signaling::CallSignal::Recording => {
+                            call_data_map.set_recording(call_id, &sender, true);
+                            if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
+                                if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantRecording { peer_id: sender }) {
+                                    log::error!("failed to send ParticipantRecording event: {e}");
+                                }
+                            }
+                        }
+                        signaling::CallSignal::NotRecording => {
+                            call_data_map.set_recording(call_id, &sender, false);
+                            if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
+                                if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantNotRecording { peer_id: sender }) {
+                                    log::error!("failed to send ParticipantNotRecording event: {e}");
+                                }
+                            }
+                        }
                     },
                     GossipSubSignal::Initiation { sender, signal } => match signal {
                         signaling::InitiationSignal::Offer { call_info } => {
