@@ -174,30 +174,30 @@ async fn run(
             opt = ch.recv() => match opt {
                 Some(cmd) => match cmd {
                     GossipSubCmd::GetOwnId { rsp } => {
-                        rsp.send(own_id.clone());
+                        let _ = rsp.send(own_id.clone());
                     }
                     GossipSubCmd::SendAes { group_key, signal, topic } => {
                         let encrypted = match Cipher::direct_encrypt(&signal, &group_key) {
                             Ok(r) => r,
                             Err(e) => {
-                                log::error!("failed to encrypt aes message");
+                                log::error!("failed to encrypt aes message: {e}");
                                 continue;
                             }
                         };
                         if let Err(e) = ipfs.pubsub_publish(topic, encrypted).await {
-                            log::error!("failed to publish message");
+                            log::error!("failed to publish message: {e}");
                         }
                     },
                     GossipSubCmd::SendEcdh { dest, signal, topic } => {
                         let encrypted = match ecdh_encrypt(&own_id, &dest, signal) {
                             Ok(r) => r,
                             Err(e) => {
-                                log::error!("failed to encrypt ecdh message");
+                                log::error!("failed to encrypt ecdh message: {e}");
                                 continue;
                             }
                         };
                         if let Err(e) = ipfs.pubsub_publish(topic, encrypted).await {
-                            log::error!("failed to publish message");
+                            log::error!("failed to publish message: {e}");
                         }
                     }
                    GossipSubCmd::DecodeEcdh { src, data, rsp } => {
@@ -206,7 +206,7 @@ async fn run(
                             Ok(bytes)
                         };
 
-                        rsp.send(r());
+                        let _ = rsp.send(r());
                    }
                 }
                 None => {

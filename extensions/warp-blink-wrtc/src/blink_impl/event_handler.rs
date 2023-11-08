@@ -133,7 +133,8 @@ impl EventHandler {
     pub async fn answer_call(&self, call_id: Uuid) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.ch
-            .send(EventHandlerCmd::AnswerCall { call_id, rsp: tx });
+            .send(EventHandlerCmd::AnswerCall { call_id, rsp: tx })
+            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         rx.await
             .map_err(|x| Error::FailedToSendSignal(x.to_string()))?
     }
@@ -256,7 +257,7 @@ async fn run(
                 match r {
                     Ok(r) => r,
                     Err(e) => {
-                        log::debug!("failed to get own id. quitting blink event handler");
+                        log::debug!("failed to get own id. quitting blink event handler: {e}");
                         return;
                     }
                 }
@@ -290,7 +291,7 @@ async fn run(
                             data.state.reset_self();
                         }
                         if active_call.replace(call_info.call_id()).is_some() {
-                            webrtc_controller.deinit();
+                            let _ = webrtc_controller.deinit().await;
                             host_media::reset().await;
                         }
                         call_data_map.add_call(call_info.clone(), &own_id);
@@ -330,16 +331,16 @@ async fn run(
                                                 log::error!("failed to send signal: {e}");
                                             }
                                         }
-                                        rsp.send(Ok(()));
+                                        let _ = rsp.send(Ok(()));
                                     }
                                     Err(e) => {
-                                        webrtc_controller.remove_media_source(host_media::AUDIO_SOURCE_ID.into()).await;
-                                        rsp.send(Err(e));
+                                        let _ = webrtc_controller.remove_media_source(host_media::AUDIO_SOURCE_ID.into()).await;
+                                        let _ = rsp.send(Err(e));
                                     }
                                 }
                             }
                             Err(e) => {
-                                rsp.send(Err(Error::OtherWithContext(e.to_string())));
+                                let _ = rsp.send(Err(Error::OtherWithContext(e.to_string())));
                             }
                         }
                     },
@@ -347,7 +348,7 @@ async fn run(
                         let call_info = match call_data_map.get_call_info(call_id) {
                             Some(r) => r,
                             None => {
-                                rsp.send(Err(Error::CallNotFound));
+                                let _ = rsp.send(Err(Error::CallNotFound));
                                 continue;
                             }
                         };
@@ -357,7 +358,7 @@ async fn run(
                             data.state.reset_self();
                         }
                         if active_call.replace(call_id).is_some() {
-                            webrtc_controller.deinit();
+                            let _ = webrtc_controller.deinit().await;
                             host_media::reset().await;
                         }
 
@@ -388,19 +389,19 @@ async fn run(
                                             gossipsub_sender
                                             .send_signal_aes(call_info.group_key(), signal, topic)
                                         {
-                                           rsp.send(Err(Error::FailedToSendSignal(e.to_string())));
+                                            let _ = rsp.send(Err(Error::FailedToSendSignal(e.to_string())));
                                         } else {
-                                            rsp.send(Ok(()));
+                                            let _ = rsp.send(Ok(()));
                                         }
                                     }
                                     Err(e) => {
-                                        webrtc_controller.remove_media_source(host_media::AUDIO_SOURCE_ID.into()).await;
-                                        rsp.send(Err(e));
+                                        let _ = webrtc_controller.remove_media_source(host_media::AUDIO_SOURCE_ID.into()).await;
+                                        let _ = rsp.send(Err(e));
                                     }
                                 }
                             }
                             Err(e) => {
-                                rsp.send(Err(e.into()));
+                                let _ = rsp.send(Err(e.into()));
                             }
                         }
                     }
@@ -430,10 +431,10 @@ async fn run(
                                 log::error!("failed to leave call - not found");
                             }
                         }
-                        if matches!(active_call.as_ref(), Some(&call_id)) {
+                        if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                             call_data_map.leave_call(call_id);
                             let _ = active_call.take();
-                            webrtc_controller.deinit();
+                            let _ = webrtc_controller.deinit().await;
                             host_media::reset().await;
                             if let Err(e) = ui_event_ch.send(BlinkEventKind::CallTerminated { call_id }) {
                                 log::error!("failed to send CallTerminated Event: {e}");
@@ -511,16 +512,16 @@ async fn run(
                     }
                     EventHandlerCmd::GetActiveCallState { rsp } => {
                         if active_call.is_none() {
-                            rsp.send(None);
+                            let _ = rsp.send(None);
                         } else {
-                            rsp.send(call_data_map.get_call_state(active_call.unwrap_or_default()));
+                            let _ = rsp.send(call_data_map.get_call_state(active_call.unwrap_or_default()));
                         }
                     }
                     EventHandlerCmd::GetActiveCallInfo { rsp } => {
                         if active_call.is_none() {
-                            rsp.send(None);
+                            let _ = rsp.send(None);
                         } else {
-                            rsp.send(call_data_map.get_call_info(active_call.unwrap_or_default()));
+                            let _ = rsp.send(call_data_map.get_call_info(active_call.unwrap_or_default()));
                         }
                     }
                     EventHandlerCmd::RecordCall { output_dir, rsp } => {
@@ -536,16 +537,16 @@ async fn run(
                                 let _ = rsp.send(r.map_err(|x| Error::OtherWithContext(x.to_string())));
                             }
                             None => {
-                                rsp.send(Err(Error::CallNotInProgress));
+                                let _ = rsp.send(Err(Error::CallNotInProgress));
                             }
                         }
                     }
                     EventHandlerCmd::StopRecording { rsp } => {
                         if active_call.is_none() {
-                            rsp.send(Err(Error::CallNotInProgress));
+                            let _ = rsp.send(Err(Error::CallNotInProgress));
                         } else {
                             let r = host_media::pause_recording().await;
-                            rsp.send(r.map_err(|x| Error::OtherWithContext(x.to_string())));
+                            let _ = rsp.send(r.map_err(|x| Error::OtherWithContext(x.to_string())));
                         }
                     }
                 }
@@ -560,7 +561,7 @@ async fn run(
                 };
                 match cmd {
                     GossipSubSignal::Peer { sender, call_id, signal } => match signal {
-                        _ if !matches!(active_call.as_ref(), Some(&call_id)) => {
+                        _ if !active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() => {
                             log::debug!("received webrtc signal for non-active call");
                             continue;
                         }
@@ -595,7 +596,7 @@ async fn run(
                         crate::signaling::CallSignal::Join => {
                             call_data_map.add_participant(call_id, &sender);
 
-                            if matches!(active_call.as_ref(), Some(&call_id)) {
+                            if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                                 if let Err(e) = webrtc_controller.dial(&sender).await {
                                     log::error!("failed to dial peer: {e}");
                                     continue;
@@ -609,7 +610,7 @@ async fn run(
                             call_data_map.remove_participant(call_id, &sender);
                             let is_call_empty = call_data_map.call_empty(call_id);
 
-                            if matches!(active_call.as_ref(), Some(&call_id)) {
+                            if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                                 webrtc_controller.hang_up(&sender).await;
                                 if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantLeft { call_id, peer_id: sender }) {
                                     log::error!("failed to send ParticipantLeft event: {e}");
@@ -624,7 +625,7 @@ async fn run(
                         crate::signaling::CallSignal::Muted => {
                             call_data_map.set_muted(call_id, &sender, true);
 
-                            if matches!(active_call.as_ref(), Some(&call_id)) {
+                            if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                                 if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantMuted { peer_id: sender }) {
                                     log::error!("failed to send ParticipantMuted event: {e}");
                                 }
@@ -633,7 +634,7 @@ async fn run(
                         crate::signaling::CallSignal::Unmuted => {
                             call_data_map.set_muted(call_id, &sender, false);
 
-                            if matches!(active_call.as_ref(), Some(&call_id)) {
+                            if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                                 if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantUnmuted { peer_id: sender }) {
                                     log::error!("failed to send ParticipantUnmuted event: {e}");
                                 }
@@ -642,7 +643,7 @@ async fn run(
                         crate::signaling::CallSignal::Deafened => {
                             call_data_map.set_deafened(call_id, &sender, true);
 
-                            if matches!(active_call.as_ref(), Some(&call_id)) {
+                            if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                                 if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantDeafened { peer_id: sender }) {
                                     log::error!("failed to send ParticipantDeafened event: {e}");
                                 }
@@ -651,7 +652,7 @@ async fn run(
                         crate::signaling::CallSignal::Undeafened => {
                             call_data_map.set_deafened(call_id, &sender, false);
 
-                            if matches!(active_call.as_ref(), Some(&call_id)) {
+                            if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                                 if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantUndeafened { peer_id: sender }) {
                                     log::error!("failed to send ParticipantUndeafened event: {e}");
                                 }
@@ -709,7 +710,9 @@ async fn run(
                         }
                         webrtc_controller.hang_up(&peer).await;
                     },
-                    simple_webrtc::events::EmittedEvents::ConnectionClosed { peer } => todo!(),
+                    simple_webrtc::events::EmittedEvents::ConnectionClosed { peer: _ } => {
+                        // todo
+                    },
                     simple_webrtc::events::EmittedEvents::Sdp { dest, sdp } => {
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
                         let signal = PeerSignal::Sdp(*sdp);

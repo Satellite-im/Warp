@@ -123,13 +123,13 @@ async fn run(
                         if let Some(call) = subscribed_calls.remove(&call_id) {
                             call.notify_waiters();
                         }
-                        if matches!(current_call.as_ref(), Some(&call_id)) {
+                        if current_call.as_ref().map(|x| x == &call_id).unwrap_or_default(){
                             let _ = current_call.take();
                             webrtc_notify.notify_waiters();
                         }
                     }
                     GossipSubCmd::DisconnectWebrtc { call_id } => {
-                        if matches!(current_call.as_ref(), Some(&call_id)) {
+                        if current_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                             webrtc_notify.notify_waiters();
                         }
                     }
@@ -191,7 +191,7 @@ async fn run(
                         });
                     },
                     GossipSubCmd::ConnectWebRtc { call_id, peer } => {
-                        if !matches!(current_call.as_ref(), Some(&call_id)) {
+                        if !current_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                             if current_call.is_some() {
                                 webrtc_notify.notify_waiters();
                             }

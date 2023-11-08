@@ -1,10 +1,5 @@
-mod call_initiation;
-use call_initiation::run as handle_call_initiation;
-
 mod data;
 use data::*;
-
-mod webrtc_handler;
 
 mod event_handler;
 mod gossipsub_listener;
@@ -56,9 +51,6 @@ pub struct BlinkImpl {
     own_id: Arc<warp::sync::RwLock<Option<DID>>>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 
-    // subscribes to IPFS topic to receive incoming calls
-    offer_handler: Arc<warp::sync::RwLock<JoinHandle<()>>>,
-
     gossipsub_listener: GossipSubListener,
     gossipsub_sender: GossipSubSender,
     event_handler: event_handler::EventHandler,
@@ -81,18 +73,14 @@ impl BlinkImpl {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Box<Self>> {
         log::trace!("initializing WebRTC");
 
-        let mut selected_speaker = None;
-        let mut selected_microphone = None;
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            selected_microphone = input_device.name().ok();
             host_media::change_audio_input(input_device).await?;
         } else {
             log::warn!("blink started with no input device");
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            selected_speaker = output_device.name().ok();
             host_media::change_audio_output(output_device).await?;
         } else {
             log::warn!("blink started with no output device");
@@ -122,7 +110,6 @@ impl BlinkImpl {
         let blink_impl = Self {
             own_id: Arc::new(warp::sync::RwLock::new(None)),
             ui_event_ch,
-            offer_handler: Arc::new(warp::sync::RwLock::new(tokio::spawn(async {}))),
             gossipsub_sender,
             gossipsub_listener,
             event_handler,
@@ -130,8 +117,6 @@ impl BlinkImpl {
         };
 
         let own_id = blink_impl.own_id.clone();
-        let offer_handler = blink_impl.offer_handler.clone();
-        let ui_event_ch = blink_impl.ui_event_ch.clone();
         let gossipsub_listener = blink_impl.gossipsub_listener.clone();
 
         tokio::spawn(async move {
@@ -155,7 +140,7 @@ impl BlinkImpl {
                 };
 
                 let _own_id = get_keypair_did(_ipfs.keypair()?)?;
-                let public_did = _own_id.clone();
+                let public_did = identity.did_key();
                 // this one better not be cloned
                 own_id_private.write().replace(_own_id);
                 // this one is for blink and can be cloned. might not even be needed.
@@ -275,9 +260,10 @@ impl Blink for BlinkImpl {
         };
 
         let call_info = CallInfo::new(conversation_id, participants);
+        let call_id = call_info.call_id();
         self.event_handler.offer_call(call_info).await?;
 
-        Ok(call_info.call_id())
+        Ok(call_id)
     }
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
@@ -286,12 +272,12 @@ impl Blink for BlinkImpl {
     }
     /// use the Leave signal as a courtesy, to let the group know not to expect you to join.
     async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error> {
-        self.event_handler.leave_call(Some(call_id));
+        self.event_handler.leave_call(Some(call_id))?;
         Ok(())
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
-        self.event_handler.leave_call(None);
+        self.event_handler.leave_call(None)?;
         Ok(())
     }
 
