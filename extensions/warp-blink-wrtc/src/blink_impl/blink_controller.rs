@@ -765,7 +765,7 @@ async fn run(
                         webrtc_controller.hang_up(&peer).await;
 
                         if let Some(data) = call_data_map.map.get(&ac) {
-                            if data.info.participants().len() == 2 && data.state.participants_joined.iter().count() <= 1 {
+                            if data.info.participants().len() == 2 && data.state.participants_joined.len() <= 1 {
                                 log::info!("all participants have successfully been disconnected");
                                 if let Err(e) = webrtc_controller.deinit().await {
                                     log::error!("webrtc deinit failed: {e}");
