@@ -84,15 +84,26 @@ pub struct BlinkController {
     notify: Arc<NotifyWrapper>,
 }
 
+pub struct Args {
+    pub webrtc_controller: simple_webrtc::Controller,
+    pub webrtc_event_stream: WebRtcEventStream,
+    pub gossipsub_sender: GossipSubSender,
+    pub gossipsub_listener: GossipSubListener,
+    pub signal_rx: UnboundedReceiver<GossipSubSignal>,
+    pub ui_event_ch: broadcast::Sender<BlinkEventKind>,
+}
+
 impl BlinkController {
-    pub fn new(
-        webrtc_controller: simple_webrtc::Controller,
-        webrtc_event_stream: WebRtcEventStream,
-        gossipsub_sender: GossipSubSender,
-        gossipsub_listener: GossipSubListener,
-        signal_rx: UnboundedReceiver<GossipSubSignal>,
-        event_ch: broadcast::Sender<BlinkEventKind>,
-    ) -> Self {
+    pub fn new(args: Args) -> Self {
+        let Args {
+            webrtc_controller,
+            webrtc_event_stream,
+            gossipsub_sender,
+            gossipsub_listener,
+            signal_rx,
+            ui_event_ch,
+        } = args;
+
         let (tx, cmd_rx) = mpsc::unbounded_channel();
         let notify = Arc::new(Notify::new());
         let notify2 = notify.clone();
@@ -104,7 +115,7 @@ impl BlinkController {
                 gossipsub_listener,
                 cmd_rx,
                 signal_rx,
-                event_ch,
+                ui_event_ch,
                 notify2,
             )
             .await;

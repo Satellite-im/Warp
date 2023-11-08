@@ -26,6 +26,7 @@ use warp::{
 };
 
 use crate::{
+    blink_impl::blink_controller::BlinkController,
     host_media::{
         self,
         audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
@@ -90,14 +91,14 @@ impl BlinkImpl {
 
         let webrtc_controller = simple_webrtc::Controller::new()?;
         let webrtc_event_stream = webrtc_controller.get_event_stream();
-        let blink_controller = blink_controller::BlinkController::new(
+        let blink_controller = BlinkController::new(blink_controller::Args {
             webrtc_controller,
             webrtc_event_stream,
-            gossipsub_sender.clone(),
-            gossipsub_listener.clone(),
+            gossipsub_sender: gossipsub_sender.clone(),
+            gossipsub_listener: gossipsub_listener.clone(),
             signal_rx,
-            ui_event_ch.clone(),
-        );
+            ui_event_ch: ui_event_ch.clone(),
+        });
 
         let blink_impl = Self {
             own_id: Arc::new(warp::sync::RwLock::new(None)),
