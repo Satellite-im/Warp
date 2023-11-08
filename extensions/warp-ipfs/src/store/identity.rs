@@ -8,10 +8,10 @@ use crate::{
 use chrono::Utc;
 
 use futures::{channel::oneshot, StreamExt};
-use ipfs::{Ipfs, IpfsPath, Keypair};
+use ipfs::{Ipfs, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -44,7 +44,7 @@ use super::{
     connected_to_peer, did_keypair,
     document::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
-        root::RootDocumentMap, utils::GetLocalDag, ExtractedRootDocument, RootDocument, ToCid,
+        root::RootDocumentMap, ExtractedRootDocument, RootDocument,
     },
     ecdh_decrypt, ecdh_encrypt,
     phonebook::PhoneBook,
@@ -1322,7 +1322,7 @@ impl IdentityStore {
         let did_kp = self.get_keypair_did()?;
         let identity = identity.sign(&did_kp)?;
 
-        let ident_cid = identity.to_cid(&self.ipfs).await?;
+        let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
 
         let root_document = RootDocument {
             identity: ident_cid,
@@ -1331,7 +1331,7 @@ impl IdentityStore {
 
         self.root_document.set(root_document).await?;
 
-        let identity = identity.resolve()?;
+        let identity = self.root_document.identity().await?.resolve()?;
 
         Ok(identity)
     }
@@ -1476,7 +1476,7 @@ impl IdentityStore {
 
         log::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
-        let ident_cid = identity.to_cid(&self.ipfs).await?;
+        let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
         root_document.identity = ident_cid;
 
         self.root_document
@@ -1597,10 +1597,6 @@ impl IdentityStore {
             .map_err(anyhow::Error::from)
     }
 
-    pub async fn get_local_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
-        path.get_local_dag(&self.ipfs).await
-    }
-
     pub async fn own_identity_document(&self) -> Result<IdentityDocument, Error> {
         let identity = self.root_document.identity().await?;
         identity.verify()?;
@@ -1712,7 +1708,7 @@ impl IdentityStore {
         }
 
         for cid in pinned_blocks {
-            ipfs.remove_block(cid).await?;
+            ipfs.remove_block(cid, false).await?;
         }
 
         Ok(())
