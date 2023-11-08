@@ -244,7 +244,7 @@ async fn run(
                                             };
                                         }
                                         None => {
-                                            log::debug!("peer signal stream terminated!");
+                                            log::debug!("peer signal stream closed!");
                                             break;
                                         }
                                     }
@@ -295,7 +295,7 @@ async fn run(
                                             };
                                         }
                                         None => {
-                                            log::debug!("call offer stream terminated!");
+                                            log::debug!("call offer stream closed!");
                                             break;
                                         }
                                     }

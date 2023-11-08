@@ -293,9 +293,17 @@ async fn run(
                             data.state.reset_self();
                         }
                         let call_id = call_info.call_id();
-                        if active_call.as_ref().map(|x| x != &call_id).unwrap_or_default() {
+                        if let Some(prev_id) = active_call.as_ref() {
+                            if prev_id == &call_id {
+                                log::debug!("tried to offer call which is already in progress");
+                                continue;
+                            }
+                            let _ = ui_event_ch.send(BlinkEventKind::CallTerminated { call_id: *prev_id });
                             let _ = webrtc_controller.deinit().await;
                             host_media::reset().await;
+                            if let Some(data) = call_data_map.map.get_mut(prev_id) {
+                                data.state.reset_self();
+                            }
                         }
                         active_call.replace(call_id);
                         call_data_map.add_call(call_info.clone(), own_id);
@@ -357,13 +365,17 @@ async fn run(
                             }
                         };
 
-                        let prev_active = active_call.unwrap_or_default();
-                        if let Some(data) = call_data_map.map.get_mut(&prev_active) {
-                            data.state.reset_self();
-                        }
-                        if active_call.as_ref().map(|x| x != &call_id).unwrap_or_default() {
+                        if let Some(prev_id) = active_call.as_ref() {
+                            if prev_id == &call_id {
+                                log::debug!("tried to answer call which is already in progress");
+                                continue;
+                            }
+                            let _ = ui_event_ch.send(BlinkEventKind::CallTerminated { call_id: *prev_id });
                             let _ = webrtc_controller.deinit().await;
                             host_media::reset().await;
+                            if let Some(data) = call_data_map.map.get_mut(prev_id) {
+                                data.state.reset_self();
+                            }
                         }
                         active_call.replace(call_id);
 
