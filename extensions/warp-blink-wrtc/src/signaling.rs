@@ -7,13 +7,12 @@ use webrtc::{
     ice_transport::ice_candidate::RTCIceCandidate,
     peer_connection::sdp::session_description::RTCSessionDescription,
 };
-
 #[derive(Clone)]
 pub enum GossipSubSignal {
     Peer {
         sender: DID,
         call_id: Uuid,
-        signal: PeerSignal,
+        signal: Box<PeerSignal>,
     },
     Call {
         sender: DID,

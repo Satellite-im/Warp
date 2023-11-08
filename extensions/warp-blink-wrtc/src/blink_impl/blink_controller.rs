@@ -1,13 +1,11 @@
 use futures::channel::oneshot;
 use futures::StreamExt;
 
-use std::{sync::Arc};
-use tokio::{
-    sync::{
-        broadcast,
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Notify,
-    },
+use std::sync::Arc;
+use tokio::sync::{
+    broadcast,
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    Notify,
 };
 use uuid::Uuid;
 use warp::{
@@ -20,11 +18,7 @@ use webrtc::{
 };
 
 use crate::{
-    host_media::{
-        self,
-        audio::{AudioCodec},
-        mp4_logger::Mp4LoggerConfig,
-    },
+    host_media::{self, audio::AudioCodec, mp4_logger::Mp4LoggerConfig},
     signaling::{ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal},
     simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
 };
@@ -35,7 +29,7 @@ use super::{
     gossipsub_sender::GossipSubSender,
 };
 
-enum EventHandlerCmd {
+enum Cmd {
     OfferCall {
         call_info: CallInfo,
         rsp: oneshot::Sender<Result<(), Error>>,
@@ -82,12 +76,12 @@ enum EventHandlerCmd {
 }
 
 #[derive(Clone)]
-pub struct EventHandler {
-    ch: UnboundedSender<EventHandlerCmd>,
+pub struct BlinkController {
+    ch: UnboundedSender<Cmd>,
     notify: Arc<NotifyWrapper>,
 }
 
-impl EventHandler {
+impl BlinkController {
     pub fn new(
         webrtc_controller: simple_webrtc::Controller,
         webrtc_event_stream: WebRtcEventStream,
@@ -120,8 +114,7 @@ impl EventHandler {
 
     pub async fn offer_call(&self, call_info: CallInfo) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
-        self.ch
-            .send(EventHandlerCmd::OfferCall { call_info, rsp: tx })?;
+        self.ch.send(Cmd::OfferCall { call_info, rsp: tx })?;
         rx.await??;
         Ok(())
     }
@@ -129,7 +122,7 @@ impl EventHandler {
     pub async fn answer_call(&self, call_id: Uuid) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.ch
-            .send(EventHandlerCmd::AnswerCall { call_id, rsp: tx })
+            .send(Cmd::AnswerCall { call_id, rsp: tx })
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         rx.await
             .map_err(|x| Error::FailedToSendSignal(x.to_string()))?
@@ -141,7 +134,7 @@ impl EventHandler {
         codec: RTCRtpCodecCapability,
     ) -> anyhow::Result<Arc<TrackLocalStaticRTP>> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(EventHandlerCmd::AddMediaSource {
+        self.ch.send(Cmd::AddMediaSource {
             source_id,
             codec,
             rsp: tx,
@@ -150,46 +143,43 @@ impl EventHandler {
     }
 
     pub fn remove_media_source(&self, source_id: MediaSourceId) -> anyhow::Result<()> {
-        self.ch
-            .send(EventHandlerCmd::RemoveMediaSource { source_id })?;
+        self.ch.send(Cmd::RemoveMediaSource { source_id })?;
         Ok(())
     }
 
     pub async fn get_call_info(&self, call_id: Uuid) -> Option<CallInfo> {
         let (tx, rx) = oneshot::channel();
-        self.ch
-            .send(EventHandlerCmd::GetCallInfo { call_id, rsp: tx })
-            .ok()?;
+        self.ch.send(Cmd::GetCallInfo { call_id, rsp: tx }).ok()?;
         rx.await.ok()?
     }
 
     pub fn leave_call(&self, call_id: Option<Uuid>) -> anyhow::Result<()> {
-        self.ch.send(EventHandlerCmd::LeaveCall { call_id })?;
+        self.ch.send(Cmd::LeaveCall { call_id })?;
         Ok(())
     }
 
     pub fn mute_self(&self) -> anyhow::Result<()> {
-        self.ch.send(EventHandlerCmd::MuteSelf)?;
+        self.ch.send(Cmd::MuteSelf)?;
         Ok(())
     }
 
     pub fn unmute_self(&self) -> anyhow::Result<()> {
-        self.ch.send(EventHandlerCmd::UnmuteSelf)?;
+        self.ch.send(Cmd::UnmuteSelf)?;
         Ok(())
     }
     pub fn silence_call(&self) -> anyhow::Result<()> {
-        self.ch.send(EventHandlerCmd::SilenceCall)?;
+        self.ch.send(Cmd::SilenceCall)?;
         Ok(())
     }
     pub fn unsilence_call(&self) -> anyhow::Result<()> {
-        self.ch.send(EventHandlerCmd::UnsilenceCall)?;
+        self.ch.send(Cmd::UnsilenceCall)?;
         Ok(())
     }
 
     pub async fn get_pending_calls(&self) -> Result<Vec<CallInfo>, Error> {
         let (tx, rx) = oneshot::channel();
         self.ch
-            .send(EventHandlerCmd::GetPendingCalls { rsp: tx })
+            .send(Cmd::GetPendingCalls { rsp: tx })
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         rx.await.map_err(|x| Error::OtherWithContext(x.to_string()))
     }
@@ -197,7 +187,7 @@ impl EventHandler {
     pub async fn get_active_call_info(&self) -> Result<Option<CallInfo>, Error> {
         let (tx, rx) = oneshot::channel();
         self.ch
-            .send(EventHandlerCmd::GetActiveCallInfo { rsp: tx })
+            .send(Cmd::GetActiveCallInfo { rsp: tx })
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         rx.await.map_err(|x| Error::OtherWithContext(x.to_string()))
     }
@@ -205,14 +195,14 @@ impl EventHandler {
     pub async fn get_active_call_state(&self) -> Result<Option<CallState>, Error> {
         let (tx, rx) = oneshot::channel();
         self.ch
-            .send(EventHandlerCmd::GetActiveCallState { rsp: tx })
+            .send(Cmd::GetActiveCallState { rsp: tx })
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         rx.await.map_err(|x| Error::OtherWithContext(x.to_string()))
     }
     pub async fn record_call(&self, output_dir: String) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.ch
-            .send(EventHandlerCmd::RecordCall {
+            .send(Cmd::RecordCall {
                 output_dir,
                 rsp: tx,
             })
@@ -224,7 +214,7 @@ impl EventHandler {
     pub async fn stop_recording(&self) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.ch
-            .send(EventHandlerCmd::StopRecording { rsp: tx })
+            .send(Cmd::StopRecording { rsp: tx })
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         rx.await
             .map_err(|x| Error::OtherWithContext(x.to_string()))?
@@ -236,7 +226,7 @@ async fn run(
     mut webrtc_event_stream: WebRtcEventStream,
     gossipsub_sender: GossipSubSender,
     gossipsub_listener: GossipSubListener,
-    mut cmd_rx: UnboundedReceiver<EventHandlerCmd>,
+    mut cmd_rx: UnboundedReceiver<Cmd>,
     mut signal_rx: UnboundedReceiver<GossipSubSignal>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     notify: Arc<Notify>,
@@ -281,7 +271,7 @@ async fn run(
                     }
                 };
                 match cmd {
-                    EventHandlerCmd::OfferCall { call_info, rsp } => {
+                    Cmd::OfferCall { call_info, rsp } => {
                         let prev_active = active_call.unwrap_or_default();
                         if let Some(data) = call_data_map.map.get_mut(&prev_active) {
                             data.state.reset_self();
@@ -340,7 +330,7 @@ async fn run(
                             }
                         }
                     },
-                    EventHandlerCmd::AnswerCall { call_id, rsp } => {
+                    Cmd::AnswerCall { call_id, rsp } => {
                         let call_info = match call_data_map.get_call_info(call_id) {
                             Some(r) => r,
                             None => {
@@ -401,17 +391,17 @@ async fn run(
                             }
                         }
                     }
-                    EventHandlerCmd::AddMediaSource { source_id, codec, rsp } => {
+                    Cmd::AddMediaSource { source_id, codec, rsp } => {
                         let r = webrtc_controller.add_media_source(source_id, codec).await;
                         let _ = rsp.send(r);
                     },
-                    EventHandlerCmd::GetCallInfo { call_id, rsp } => {
+                    Cmd::GetCallInfo { call_id, rsp } => {
                         let _ = rsp.send(call_data_map.get_call_info(call_id));
                     }
-                    EventHandlerCmd::RemoveMediaSource { source_id } => {
+                    Cmd::RemoveMediaSource { source_id } => {
                         let _ = webrtc_controller.remove_media_source(source_id).await;
                     },
-                    EventHandlerCmd::LeaveCall { call_id } => {
+                    Cmd::LeaveCall { call_id } => {
                         let call_id = call_id.unwrap_or(active_call.unwrap_or_default());
                         match call_data_map.get_call_info(call_id) {
                             Some(info) => {
@@ -437,7 +427,7 @@ async fn run(
                             }
                         }
                     },
-                    EventHandlerCmd::MuteSelf => {
+                    Cmd::MuteSelf => {
                         let call_id = active_call.unwrap_or_default();
                         if let Some(data) = call_data_map.map.get_mut(&call_id) {
                             data.state.set_self_muted(true);
@@ -453,7 +443,7 @@ async fn run(
                             }
                         }
                     }
-                    EventHandlerCmd::UnmuteSelf => {
+                    Cmd::UnmuteSelf => {
                         let call_id = active_call.unwrap_or_default();
                         if let Some(data) = call_data_map.map.get_mut(&call_id) {
                             data.state.set_self_muted(false);
@@ -469,7 +459,7 @@ async fn run(
                             }
                         }
                     }
-                    EventHandlerCmd::SilenceCall => {
+                    Cmd::SilenceCall => {
                         let call_id = active_call.unwrap_or_default();
                         if let Some(data) = call_data_map.map.get_mut(&call_id) {
                             if let Err(e) = host_media::deafen().await {
@@ -486,7 +476,7 @@ async fn run(
                             }
                         }
                     }
-                    EventHandlerCmd::UnsilenceCall => {
+                    Cmd::UnsilenceCall => {
                         let call_id = active_call.unwrap_or_default();
                         if let Some(data) = call_data_map.map.get_mut(&call_id) {
                             if let Err(e) = host_media::undeafen().await {
@@ -503,24 +493,24 @@ async fn run(
                             }
                         }
                     }
-                    EventHandlerCmd::GetPendingCalls { rsp } => {
+                    Cmd::GetPendingCalls { rsp } => {
                         let _ = rsp.send(call_data_map.get_pending_calls());
                     }
-                    EventHandlerCmd::GetActiveCallState { rsp } => {
+                    Cmd::GetActiveCallState { rsp } => {
                         if active_call.is_none() {
                             let _ = rsp.send(None);
                         } else {
                             let _ = rsp.send(call_data_map.get_call_state(active_call.unwrap_or_default()));
                         }
                     }
-                    EventHandlerCmd::GetActiveCallInfo { rsp } => {
+                    Cmd::GetActiveCallInfo { rsp } => {
                         if active_call.is_none() {
                             let _ = rsp.send(None);
                         } else {
                             let _ = rsp.send(call_data_map.get_call_info(active_call.unwrap_or_default()));
                         }
                     }
-                    EventHandlerCmd::RecordCall { output_dir, rsp } => {
+                    Cmd::RecordCall { output_dir, rsp } => {
                         match active_call.and_then(|call_id| call_data_map.get_call_info(call_id)) {
                             Some(call) => {
                                 let r = host_media::init_recording(Mp4LoggerConfig {
@@ -537,7 +527,7 @@ async fn run(
                             }
                         }
                     }
-                    EventHandlerCmd::StopRecording { rsp } => {
+                    Cmd::StopRecording { rsp } => {
                         if active_call.is_none() {
                             let _ = rsp.send(Err(Error::CallNotInProgress));
                         } else {
@@ -556,7 +546,7 @@ async fn run(
                     }
                 };
                 match cmd {
-                    GossipSubSignal::Peer { sender, call_id, signal } => match signal {
+                    GossipSubSignal::Peer { sender, call_id, signal } => match *signal {
                         _ if !active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() => {
                             log::debug!("received webrtc signal for non-active call");
                             continue;

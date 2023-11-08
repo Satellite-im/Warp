@@ -1,7 +1,6 @@
 mod data;
 
-
-mod event_handler;
+mod blink_controller;
 mod gossipsub_listener;
 mod gossipsub_sender;
 
@@ -10,11 +9,9 @@ use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
 use rust_ipfs::{Ipfs, Keypair};
 use std::{any::Any, str::FromStr, sync::Arc, time::Duration};
-use tokio::{
-    sync::{
-        broadcast::{self},
-        mpsc,
-    },
+use tokio::sync::{
+    broadcast::{self},
+    mpsc,
 };
 use uuid::Uuid;
 use warp::{
@@ -26,13 +23,10 @@ use warp::{
     Extension, SingleHandle,
 };
 
-
 use crate::{
     host_media::{
         self,
-        audio::{
-            automute::{AutoMuteCmd, AUDIO_CMD_CH},
-        },
+        audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
     },
     simple_webrtc::{self},
 };
@@ -49,7 +43,7 @@ pub struct BlinkImpl {
 
     gossipsub_listener: GossipSubListener,
     gossipsub_sender: GossipSubSender,
-    event_handler: event_handler::EventHandler,
+    blink_controller: blink_controller::BlinkController,
 
     drop_handler: Arc<DropHandler>,
 }
@@ -94,7 +88,7 @@ impl BlinkImpl {
 
         let webrtc_controller = simple_webrtc::Controller::new()?;
         let webrtc_event_stream = webrtc_controller.get_event_stream();
-        let event_handler = event_handler::EventHandler::new(
+        let blink_controller = blink_controller::BlinkController::new(
             webrtc_controller,
             webrtc_event_stream,
             gossipsub_sender.clone(),
@@ -108,7 +102,7 @@ impl BlinkImpl {
             ui_event_ch,
             gossipsub_sender,
             gossipsub_listener,
-            event_handler,
+            blink_controller,
             drop_handler: Arc::new(DropHandler {}),
         };
 
@@ -257,23 +251,23 @@ impl Blink for BlinkImpl {
 
         let call_info = CallInfo::new(conversation_id, participants);
         let call_id = call_info.call_id();
-        self.event_handler.offer_call(call_info).await?;
+        self.blink_controller.offer_call(call_info).await?;
 
         Ok(call_id)
     }
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
-        self.event_handler.answer_call(call_id).await
+        self.blink_controller.answer_call(call_id).await
         // todo: periodically re-send join signals
     }
     /// use the Leave signal as a courtesy, to let the group know not to expect you to join.
     async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error> {
-        self.event_handler.leave_call(Some(call_id))?;
+        self.blink_controller.leave_call(Some(call_id))?;
         Ok(())
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
-        self.event_handler.leave_call(None)?;
+        self.blink_controller.leave_call(None)?;
         Ok(())
     }
 
@@ -307,24 +301,24 @@ impl Blink for BlinkImpl {
     // ------ Media controls ------
 
     async fn mute_self(&mut self) -> Result<(), Error> {
-        self.event_handler.mute_self()?;
+        self.blink_controller.mute_self()?;
         Ok(())
     }
     async fn unmute_self(&mut self) -> Result<(), Error> {
-        self.event_handler.unmute_self()?;
+        self.blink_controller.unmute_self()?;
         Ok(())
     }
     async fn silence_call(&mut self) -> Result<(), Error> {
-        self.event_handler.silence_call()?;
+        self.blink_controller.silence_call()?;
         Ok(())
     }
     async fn unsilence_call(&mut self) -> Result<(), Error> {
-        self.event_handler.unsilence_call()?;
+        self.blink_controller.unsilence_call()?;
         Ok(())
     }
 
     async fn get_call_state(&self) -> Result<Option<CallState>, Error> {
-        self.event_handler.get_active_call_state().await
+        self.blink_controller.get_active_call_state().await
     }
 
     async fn enable_camera(&mut self) -> Result<(), Error> {
@@ -334,10 +328,10 @@ impl Blink for BlinkImpl {
         Err(Error::Unimplemented)
     }
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error> {
-        self.event_handler.record_call(output_dir.into()).await
+        self.blink_controller.record_call(output_dir.into()).await
     }
     async fn stop_recording(&mut self) -> Result<(), Error> {
-        self.event_handler.stop_recording().await
+        self.blink_controller.stop_recording().await
     }
 
     fn enable_automute(&mut self) -> Result<(), Error> {
@@ -359,7 +353,7 @@ impl Blink for BlinkImpl {
     // ------ Utility Functions ------
 
     async fn pending_calls(&self) -> Vec<CallInfo> {
-        match self.event_handler.get_pending_calls().await {
+        match self.blink_controller.get_pending_calls().await {
             Ok(r) => r,
             Err(e) => {
                 log::error!("{e}");
@@ -368,7 +362,7 @@ impl Blink for BlinkImpl {
         }
     }
     async fn current_call(&self) -> Option<CallInfo> {
-        match self.event_handler.get_active_call_info().await {
+        match self.blink_controller.get_active_call_info().await {
             Ok(r) => r,
             Err(e) => {
                 log::error!("{e}");

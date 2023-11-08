@@ -232,7 +232,7 @@ async fn run(
                                                     let _ = ch.send(GossipSubSignal::Peer {
                                                         sender,
                                                         call_id,
-                                                        signal: msg
+                                                        signal: Box::new(msg)
                                                     });
                                                 },
                                                 Err(e) => {
