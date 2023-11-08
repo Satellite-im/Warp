@@ -754,7 +754,8 @@ async fn run(
                         }
                     },
                     simple_webrtc::events::EmittedEvents::Disconnected { peer }
-                    | simple_webrtc::events::EmittedEvents::ConnectionFailed { peer } => {
+                    | simple_webrtc::events::EmittedEvents::ConnectionFailed { peer }
+                    | simple_webrtc::events::EmittedEvents::ConnectionClosed { peer }=> {
                         let ac = active_call.unwrap_or_default();
                         call_data_map.remove_participant(ac, &peer);
 
@@ -762,9 +763,19 @@ async fn run(
                             log::error!("failed to send media_track command: {e}");
                         }
                         webrtc_controller.hang_up(&peer).await;
-                    },
-                    simple_webrtc::events::EmittedEvents::ConnectionClosed { peer: _ } => {
-                        // todo
+
+                        if let Some(data) = call_data_map.map.get(&ac) {
+                            if data.info.participants().len() == 2 && data.state.participants_joined.iter().count() <= 1 {
+                                log::info!("all participants have successfully been disconnected");
+                                if let Err(e) = webrtc_controller.deinit().await {
+                                    log::error!("webrtc deinit failed: {e}");
+                                }
+                                //rtp_logger::deinit().await;
+                                host_media::reset().await;
+                                let event = BlinkEventKind::CallTerminated { call_id: ac };
+                                let _ = ui_event_ch.send(event);
+                            }
+                        }
                     },
                     simple_webrtc::events::EmittedEvents::Sdp { dest, sdp } => {
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
