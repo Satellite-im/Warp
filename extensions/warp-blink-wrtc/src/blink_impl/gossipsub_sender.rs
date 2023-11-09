@@ -272,17 +272,17 @@ async fn run(
                     },
                     GossipSubCmd::SendEcdh { dest, signal, topic } => {
                         // only add to the queue if sending fails
-                            let encrypted = match ecdh_encrypt(&own_id, &dest, signal.clone()) {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    log::error!("failed to encrypt ecdh message: {e}");
-                                    continue;
-                                }
-                            };
-                            if ipfs.pubsub_publish(topic.clone(), encrypted).await.is_err() {
-                                let queue = ecdh_queue.entry(dest.clone()).or_default();
-                                queue.push_back(GossipSubCmd::SendEcdh { dest, signal, topic });
+                        let encrypted = match ecdh_encrypt(&own_id, &dest, signal.clone()) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                log::error!("failed to encrypt ecdh message: {e}");
+                                continue;
                             }
+                        };
+                        if ipfs.pubsub_publish(topic.clone(), encrypted).await.is_err() {
+                            let queue = ecdh_queue.entry(dest.clone()).or_default();
+                            queue.push_back(GossipSubCmd::SendEcdh { dest, signal, topic });
+                        }
                     }
                     GossipSubCmd::Announce { group_key, signal, topic } => {
                         let encrypted = match Cipher::direct_encrypt(&signal, &group_key) {
