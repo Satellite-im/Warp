@@ -275,7 +275,7 @@ async fn run(
                 break;
             },
             _ = dial_timer.tick() => {
-                log::debug!("dial timer: tick");
+                //log::trace!("dial timer: tick");
                 if let Some(data) = call_data_map.get_active() {
                     let call_id = data.info.call_id();
                     for (peer_id, _) in data.state.participants_joined.iter() {
@@ -296,7 +296,6 @@ async fn run(
                             }
                         }
                         if should_dial {
-                            log::debug!("dialing peer");
                             if let Err(e) = webrtc_controller.dial(peer_id).await {
                                 log::error!("failed to dial peer: {e}");
                                 continue;
@@ -673,7 +672,7 @@ async fn run(
                             continue;
                         }
                         signaling::CallSignal::Announce => {
-                            log::debug!("received announce from {}", &sender);
+                            //log::trace!("received announce from {}", &sender);
                             call_data_map.add_participant(call_id, &sender);
                         },
                         signaling::CallSignal::Leave => {
