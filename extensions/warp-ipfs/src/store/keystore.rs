@@ -131,6 +131,10 @@ impl KeyEntry {
     pub fn new(id: usize, key: Vec<u8>) -> Self {
         Self { id, key }
     }
+
+    pub fn id(&self) -> usize {
+        self.id
+    }
 }
 
 impl PartialOrd for KeyEntry {

@@ -1,5 +1,5 @@
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -10,7 +10,7 @@ use chrono::Utc;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::SelectAll;
-use futures::{SinkExt, Stream, StreamExt};
+use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 
 use serde::{Deserialize, Serialize};
@@ -1412,6 +1412,7 @@ impl MessageStore {
                 name,
                 conversation_id,
                 list,
+                messages,
                 signature,
             } => {
                 let did = &*self.did;
@@ -1429,7 +1430,7 @@ impl MessageStore {
                 }
 
                 info!("Creating conversation");
-                let convo = ConversationDocument::new(
+                let mut convo = ConversationDocument::new(
                     did,
                     name,
                     list.clone(),
@@ -1437,7 +1438,7 @@ impl MessageStore {
                     ConversationType::Group,
                     None,
                     None,
-                    Some(creator),
+                    Some(creator.clone()),
                     signature,
                 )?;
                 info!(
@@ -1454,32 +1455,56 @@ impl MessageStore {
 
                 let topic = convo.topic();
 
+                convo.messages = messages;
+
                 self.conversations.set(convo).await?;
 
-                let stream = match self.ipfs.pubsub_subscribe(topic).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        error!("Error subscribing to conversation: {e}");
-                        return Ok(());
-                    }
-                };
+                let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
                 self.set_conversation_keystore(conversation_id, keystore)
                     .await?;
 
                 self.start_task(conversation_id, stream).await;
 
+                for recipient in list.iter().filter(|d| did.ne(d)) {
+                    if let Err(e) = self.request_key(conversation_id, recipient).await {
+                        tracing::log::warn!("Failed to send exchange request to {recipient}: {e}");
+                    }
+                }
+
+                if let Some(cid) = messages {
+                    tokio::spawn({
+                        let ipfs = self.ipfs.clone();
+                        async move {
+                            let peer_id = creator.to_peer_id()?;
+
+                            let list = ipfs
+                                .get_dag(IpfsPath::from(cid))
+                                .provider(peer_id)
+                                .deserialized::<BTreeSet<MessageDocument>>()
+                                .await?
+                                .iter()
+                                .filter_map(|m| m.message)
+                                .collect::<Vec<_>>();
+
+                            let mut block_str = ipfs.repo().get_blocks(&list, &[], false).await?;
+
+                            while let Some(result) = block_str.next().await {
+                                if let Err(e) = result {
+                                    warn!("Unable to resolve message: {e}.");
+                                }
+                            }
+
+                            Ok::<_, anyhow::Error>(())
+                        }
+                    });
+                }
+
                 if let Err(e) = self
                     .event
                     .send(RayGunEventKind::ConversationCreated { conversation_id })
                 {
                     error!("Error broadcasting event: {e}");
-                }
-
-                for recipient in list.iter().filter(|d| did.ne(d)) {
-                    if let Err(e) = self.request_key(conversation_id, recipient).await {
-                        tracing::log::warn!("Failed to send exchange request to {recipient}: {e}");
-                    }
                 }
             }
             ConversationEvents::LeaveConversation {
@@ -1874,6 +1899,7 @@ impl MessageStore {
             name: conversation.name(),
             conversation_id: conversation.id(),
             list: recipient.clone(),
+            messages: None,
             signature: conversation.signature.clone(),
         })?;
 
@@ -2410,7 +2436,7 @@ impl MessageStore {
         self.conversations.set(conversation).await?;
 
         let conversation = self.conversations.get(conversation_id).await?;
-        let Some(signature) = conversation.signature.clone() else {
+        let Some(signature) = &conversation.signature else {
             return Err(Error::InvalidSignature);
         };
 
@@ -2435,7 +2461,8 @@ impl MessageStore {
             name: conversation.name(),
             conversation_id: conversation.id(),
             list: conversation.recipients(),
-            signature: Some(signature),
+            messages: conversation.messages,
+            signature: Some(signature.clone()),
         };
 
         self.send_single_conversation_event(did_key, conversation_id, new_event)

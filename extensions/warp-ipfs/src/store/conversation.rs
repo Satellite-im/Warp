@@ -9,6 +9,7 @@ use rust_ipfs::Ipfs;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
+use tracing::warn;
 use uuid::Uuid;
 use warp::{
     crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
@@ -528,12 +529,24 @@ impl ConversationDocument {
     pub async fn delete_message(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
         let mut messages = self.get_message_list(ipfs).await?;
 
-        let document = messages
+        let mut document = messages
             .iter()
-            .find(|document| document.id == message_id)
+            .find(|document| document.id == message_id && document.message.is_some())
             .copied()
             .ok_or(Error::MessageNotFound)?;
-        messages.remove(&document);
+
+        let cid = document.remove()?;
+
+        messages.insert(document);
+
+        if ipfs.is_pinned(&cid).await? {
+            ipfs.remove_pin(&cid, false).await?;
+        }
+
+        if let Err(e) = ipfs.remove_block(cid, false).await {
+            warn!("Unable to remove message from blockstore: {e}. Will ignore since message will can be cleaned up later.");
+        }
+
         self.set_message_list(ipfs, messages).await?;
         Ok(())
     }
@@ -543,7 +556,13 @@ impl ConversationDocument {
         let (cid, messages): (Cid, BTreeSet<MessageDocument>) = match cid {
             Some(cid) => (
                 cid,
-                ipfs.dag().get().path(cid).local().deserialized().await?,
+                ipfs.dag()
+                    .get()
+                    .local()
+                    .path(cid)
+                    .local()
+                    .deserialized()
+                    .await?,
             ),
             None => return Ok(()),
         };
@@ -553,10 +572,19 @@ impl ConversationDocument {
         }
 
         for document in messages {
-            if ipfs.is_pinned(&document.message).await? {
-                ipfs.remove_pin(&document.message, false).await?;
+            let cid = match document.message {
+                Some(cid) => cid,
+                None => continue,
+            };
+            if ipfs.is_pinned(&cid).await? {
+                ipfs.remove_pin(&cid, false).await?;
             }
         }
+
+        //Recursively remove nexted links
+        //TODO: Test
+        //ipfs.remove_block(cid, true).await?;
+
         Ok(())
     }
 }
@@ -587,7 +615,7 @@ pub struct MessageDocument {
     pub conversation_id: Uuid,
     pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
-    pub message: Cid,
+    pub message: Option<Cid>,
 }
 
 impl PartialOrd for MessageDocument {
@@ -633,21 +661,16 @@ impl MessageDocument {
             sender,
             conversation_id,
             date,
-            message,
+            message: Some(message),
         };
 
         Ok(document)
     }
 
-    // pub async fn remove(&self, ipfs: &Ipfs) -> Result<(), Error> {
-    //     let cid = self.message;
-    //     if ipfs.is_pinned(&cid).await? {
-    //         ipfs.remove_pin(&cid, false).await?;
-    //     }
-    //     ipfs.remove_block(cid).await?;
-
-    //     Ok(())
-    // }
+    pub fn remove(&mut self) -> Result<Cid, Error> {
+        //Remove CID from document, returning it to be used upstream
+        self.message.take().ok_or(Error::MessageNotFound)
+    }
 
     pub async fn update(
         &mut self,
@@ -680,7 +703,7 @@ impl MessageDocument {
         let message_cid = ipfs.dag().put().serialize(data)?.await?;
 
         info!("Setting Message to document");
-        self.message = message_cid;
+        self.message = Some(message_cid);
         info!("Message is updated");
         Ok(())
     }
@@ -691,13 +714,9 @@ impl MessageDocument {
         did: &DID,
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
-        let bytes: Vec<u8> = ipfs
-            .dag()
-            .get()
-            .path(self.message)
-            .local()
-            .deserialized()
-            .await?;
+        let cid = self.message.ok_or(Error::MessageNotFound)?;
+
+        let bytes: Vec<u8> = ipfs.dag().get().local().path(cid).deserialized().await?;
 
         let sender = self.sender.to_did();
         let data = match keystore {

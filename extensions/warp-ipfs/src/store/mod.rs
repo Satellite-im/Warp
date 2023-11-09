@@ -10,6 +10,7 @@ pub mod phonebook;
 pub mod queue;
 
 use chrono::{DateTime, Utc};
+use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -113,6 +114,7 @@ pub enum ConversationEvents {
         name: Option<String>,
         conversation_id: Uuid,
         list: Vec<DID>,
+        messages: Option<Cid>,
         signature: Option<String>,
     },
     LeaveConversation {
@@ -143,6 +145,7 @@ pub enum ConversationRequestResponse {
 #[allow(clippy::type_complexity)]
 #[serde(rename_all = "lowercase")]
 pub enum ConversationRequestKind {
+    Replicate,
     Key,
     Ping,
     RetrieveMessages {
