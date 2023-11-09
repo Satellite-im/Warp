@@ -329,7 +329,7 @@ async fn run(
                                                 call_info: call_info.clone(),
                                             };
 
-                                            if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic).await {
+                                            if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic) {
                                                 log::error!("failed to send signal: {e}");
                                             }
                                         }
@@ -395,7 +395,7 @@ async fn run(
                                         let signal = CallSignal::Join;
                                         if let Err(e) =
                                             gossipsub_sender
-                                            .send_signal_aes(call_info.group_key(), signal, topic).await
+                                            .send_signal_aes(call_info.group_key(), signal, topic)
                                         {
                                             let _ = rsp.send(Err(Error::FailedToSendSignal(e.to_string())));
                                         } else {
@@ -428,6 +428,7 @@ async fn run(
                         let info = call_data_map.get_call_info(call_id);
                         if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
                             call_data_map.leave_call(call_id);
+                            let _ = gossipsub_sender.empty_queue();
                             let _ = active_call.take();
                             let _ = webrtc_controller.deinit().await;
                             host_media::reset().await;
@@ -441,7 +442,7 @@ async fn run(
                                 let topic = ipfs_routes::call_signal_route(&call_id);
                                 let signal = CallSignal::Leave;
                                 if let Err(e) = gossipsub_sender
-                                    .send_signal_aes(info.group_key(), signal, topic).await
+                                    .send_signal_aes(info.group_key(), signal, topic)
                                 {
                                     log::error!("failed to send signal: {e}");
                                 }
@@ -459,7 +460,7 @@ async fn run(
                             let signal = CallSignal::Muted;
                             if let Err(e) =
                                 gossipsub_sender
-                                    .send_signal_aes(data.info.group_key(), signal, topic).await
+                                    .send_signal_aes(data.info.group_key(), signal, topic)
                             {
                                 log::error!("failed to send signal: {e}");
                             } else {
@@ -475,7 +476,7 @@ async fn run(
                             let signal = CallSignal::Unmuted;
                             if let Err(e) =
                                 gossipsub_sender
-                                    .send_signal_aes(data.info.group_key(), signal, topic).await
+                                    .send_signal_aes(data.info.group_key(), signal, topic)
                             {
                                 log::error!("failed to send signal: {e}");
                             } else {
@@ -494,7 +495,7 @@ async fn run(
                             let signal = CallSignal::Deafened;
                             if let Err(e) =
                                 gossipsub_sender
-                                    .send_signal_aes(data.info.group_key(), signal, topic).await
+                                    .send_signal_aes(data.info.group_key(), signal, topic)
                             {
                                 log::error!("failed to send signal: {e}");
                             }
@@ -511,7 +512,7 @@ async fn run(
                             let signal = CallSignal::Undeafened;
                             if let Err(e) =
                                 gossipsub_sender
-                                    .send_signal_aes(data.info.group_key(), signal, topic).await
+                                    .send_signal_aes(data.info.group_key(), signal, topic)
                             {
                                 log::error!("failed to send signal: {e}");
                             }
@@ -553,7 +554,7 @@ async fn run(
                                     let signal = CallSignal::Recording;
                                     if let Err(e) =
                                         gossipsub_sender
-                                            .send_signal_aes(info.group_key(), signal, topic).await
+                                            .send_signal_aes(info.group_key(), signal, topic)
                                     {
                                         log::error!("failed to send signal: {e}");
                                     }
@@ -581,7 +582,7 @@ async fn run(
                                     let signal = CallSignal::NotRecording;
                                     if let Err(e) =
                                         gossipsub_sender
-                                            .send_signal_aes(info.group_key(), signal, topic).await
+                                            .send_signal_aes(info.group_key(), signal, topic)
                                     {
                                         log::error!("failed to send signal: {e}");
                                     }
@@ -749,7 +750,7 @@ async fn run(
                     simple_webrtc::events::EmittedEvents::Ice { dest, candidate } => {
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
                         let signal = PeerSignal::Ice(*candidate);
-                        if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic).await {
+                        if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic) {
                             log::error!("failed to send signal: {e}");
                         }
                     },
@@ -789,13 +790,14 @@ async fn run(
 
                                 gossipsub_listener.unsubscribe_call(ac);
                                 gossipsub_listener.unsubscribe_webrtc(ac);
+                                let _ = gossipsub_sender.empty_queue();
                             }
                         }
                     },
                     simple_webrtc::events::EmittedEvents::Sdp { dest, sdp } => {
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
                         let signal = PeerSignal::Sdp(*sdp);
-                        if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic).await {
+                        if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic) {
                             log::error!("failed to send signal: {e}");
                         }
                     },
@@ -803,7 +805,7 @@ async fn run(
                         log::debug!("sending dial signal");
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
                         let signal = PeerSignal::Dial(*sdp);
-                        if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic).await {
+                        if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic) {
                             log::error!("failed to send signal: {e}");
                         }
                     },

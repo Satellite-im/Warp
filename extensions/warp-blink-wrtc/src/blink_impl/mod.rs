@@ -3,7 +3,6 @@ mod data;
 mod blink_controller;
 mod gossipsub_listener;
 mod gossipsub_sender;
-mod sender_queue;
 mod signaling;
 mod store;
 

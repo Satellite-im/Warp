@@ -1,4 +1,9 @@
-use std::{fmt::Display, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt::Display,
+    sync::Arc,
+    time::Duration,
+};
 
 use futures::channel::oneshot;
 use rust_ipfs::Ipfs;
@@ -24,13 +29,11 @@ enum GossipSubCmd {
         group_key: Vec<u8>,
         signal: Vec<u8>,
         topic: String,
-        rsp: oneshot::Sender<anyhow::Result<()>>,
     },
     SendEcdh {
         dest: DID,
         signal: Vec<u8>,
         topic: String,
-        rsp: oneshot::Sender<anyhow::Result<()>>,
     },
     DecodeEcdh {
         src: DID,
@@ -40,6 +43,7 @@ enum GossipSubCmd {
     GetOwnId {
         rsp: oneshot::Sender<DID>,
     },
+    EmptyQueue,
 }
 
 #[derive(Clone)]
@@ -72,39 +76,33 @@ impl GossipSubSender {
         Ok(id)
     }
 
-    pub async fn send_signal_aes<T: Serialize + Display>(
+    pub fn send_signal_aes<T: Serialize + Display>(
         &self,
         group_key: Vec<u8>,
         signal: T,
         topic: String,
     ) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
         let signal = serde_cbor::to_vec(&signal)?;
         self.ch.send(GossipSubCmd::SendAes {
             group_key,
             signal,
             topic,
-            rsp: tx,
         })?;
-        rx.await??;
         Ok(())
     }
 
-    pub async fn send_signal_ecdh<T: Serialize + Display>(
+    pub fn send_signal_ecdh<T: Serialize + Display>(
         &self,
         dest: DID,
         signal: T,
         topic: String,
     ) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
         let signal = serde_cbor::to_vec(&signal)?;
         self.ch.send(GossipSubCmd::SendEcdh {
             dest,
             signal,
             topic,
-            rsp: tx,
         })?;
-        rx.await??;
         Ok(())
     }
 
@@ -133,6 +131,11 @@ impl GossipSubSender {
         let bytes = rx.await??;
         let data: T = serde_cbor::from_slice(&bytes)?;
         Ok(data)
+    }
+
+    pub fn empty_queue(&self) -> anyhow::Result<()> {
+        self.ch.send(GossipSubCmd::EmptyQueue)?;
+        Ok(())
     }
 }
 
@@ -175,44 +178,56 @@ async fn run(
         }
     };
 
+    let mut ecdh_queue: HashMap<DID, VecDeque<GossipSubCmd>> = HashMap::new();
+
     loop {
         tokio::select! {
+            _ = timer.tick() => {
+                for (_dest, queue) in ecdh_queue.iter_mut() {
+                    while let Some(cmd) = queue.pop_front() {
+                        match cmd {
+                            GossipSubCmd::SendEcdh { dest, signal, topic } => {
+                                let encrypted = match ecdh_encrypt(&own_id, &dest, signal.clone()) {
+                                    Ok(r) => r,
+                                    Err(e) => {
+                                        log::error!("failed to encrypt ecdh message: {e}");
+                                        break;
+                                    }
+                                };
+                                if ipfs.pubsub_publish(topic.clone(), encrypted).await.is_err() {
+                                    queue.push_front(GossipSubCmd::SendEcdh { dest, signal, topic });
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             opt = ch.recv() => match opt {
                 Some(cmd) => match cmd {
+                    GossipSubCmd::EmptyQueue => {
+                        ecdh_queue.clear();
+                    }
                     GossipSubCmd::GetOwnId { rsp } => {
                         let _ = rsp.send(own_id.clone());
                     }
-                    GossipSubCmd::SendAes { group_key, signal, topic, rsp } => {
+                    GossipSubCmd::SendAes { group_key, signal, topic } => {
                         let encrypted = match Cipher::direct_encrypt(&signal, &group_key) {
                             Ok(r) => r,
                             Err(e) => {
                                 log::error!("failed to encrypt aes message: {e}");
-                                let _ = rsp.send(Err(anyhow::anyhow!(e)));
                                 continue;
                             }
                         };
                         if let Err(e) = ipfs.pubsub_publish(topic, encrypted).await {
                             log::error!("failed to publish message: {e}");
-                            let _ = rsp.send(Err(anyhow::anyhow!(e)));
-                        } else {
-                            let _ = rsp.send(Ok(()));
+
                         }
                     },
-                    GossipSubCmd::SendEcdh { dest, signal, topic, rsp } => {
-                        let encrypted = match ecdh_encrypt(&own_id, &dest, signal) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                log::error!("failed to encrypt ecdh message: {e}");
-                                let _ = rsp.send(Err(anyhow::anyhow!(e)));
-                                continue;
-                            }
-                        };
-                        if let Err(e) = ipfs.pubsub_publish(topic, encrypted).await {
-                            log::error!("failed to publish message: {e}");
-                            let _ = rsp.send(Err(anyhow::anyhow!(e)));
-                        }else {
-                            let _ = rsp.send(Ok(()));
-                        }
+                    GossipSubCmd::SendEcdh { dest, signal, topic } => {
+                        let queue = ecdh_queue.entry(dest.clone()).or_insert(VecDeque::new());
+                        queue.push_back(GossipSubCmd::SendEcdh { dest, signal, topic });
                     }
                    GossipSubCmd::DecodeEcdh { src, data, rsp } => {
                         let r = || {
