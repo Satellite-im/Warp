@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::crypto::DID;
 
 #[derive(Debug, Clone)]
@@ -8,7 +10,7 @@ pub struct CallState {
     pub participants_joined: HashMap<DID, ParticipantState>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ParticipantState {
     pub muted: bool,
     pub deafened: bool,
@@ -22,12 +24,8 @@ impl CallState {
             participants_joined: HashMap::default(),
         }
     }
-    pub fn add_participant(&mut self, id: &DID) {
-        if self.participants_joined.contains_key(id) {
-            return;
-        }
-        self.participants_joined
-            .insert(id.clone(), ParticipantState::default());
+    pub fn add_participant(&mut self, id: &DID, state: ParticipantState) {
+        self.participants_joined.insert(id.clone(), state);
     }
 
     pub fn is_call_empty(&self) -> bool {

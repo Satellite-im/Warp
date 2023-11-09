@@ -2,7 +2,10 @@ use derive_more::Display;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warp::{blink::CallInfo, crypto::DID};
+use warp::{
+    blink::{CallInfo, ParticipantState},
+    crypto::DID,
+};
 use webrtc::{
     ice_transport::ice_candidate::RTCIceCandidate,
     peer_connection::sdp::session_description::RTCSessionDescription,
@@ -41,22 +44,10 @@ pub enum PeerSignal {
 // it is somewhat redundant but for now i'll leave it in.
 #[derive(Serialize, Deserialize, Display, Clone)]
 pub enum CallSignal {
-    #[display(fmt = "Join")]
-    Announce,
+    #[display(fmt = "Announce")]
+    Announce { participant_state: ParticipantState },
     #[display(fmt = "Leave")]
     Leave,
-    #[display(fmt = "Muted")]
-    Muted,
-    #[display(fmt = "Unmuted")]
-    Unmuted,
-    #[display(fmt = "Deafened")]
-    Deafened,
-    #[display(fmt = "Undeafened")]
-    Undeafened,
-    #[display(fmt = "Recording")]
-    Recording,
-    #[display(fmt = "NotRecording")]
-    NotRecording,
 }
 
 #[derive(Serialize, Deserialize, Display, Clone)]

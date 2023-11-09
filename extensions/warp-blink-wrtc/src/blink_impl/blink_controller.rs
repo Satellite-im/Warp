@@ -16,7 +16,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{BlinkEventKind, CallInfo, CallState},
+    blink::{BlinkEventKind, CallInfo, CallState, ParticipantState},
     error::Error,
 };
 use webrtc::{
@@ -370,8 +370,9 @@ async fn run(
                                             }
                                         }
 
+                                        let own_state = call_data_map.get_own_state().unwrap_or_default();
                                         let topic = ipfs_routes::call_signal_route(&call_id);
-                                        let signal = CallSignal::Announce;
+                                        let signal = CallSignal::Announce { participant_state: own_state };
                                         if let Err(e) =
                                             gossipsub_sender.announce(call_info.group_key(), signal, topic)
                                         {
@@ -434,8 +435,10 @@ async fn run(
                                         log::debug!("answering call");
                                         gossipsub_listener.subscribe_call(call_id, call_info.group_key());
                                         gossipsub_listener.subscribe_webrtc(call_id, own_id.clone());
+
+                                        let own_state = call_data_map.get_own_state().unwrap_or_default();
                                         let topic = ipfs_routes::call_signal_route(&call_id);
-                                        let signal = CallSignal::Announce;
+                                        let signal = CallSignal::Announce { participant_state: own_state };
                                         if let Err(e) =
                                             gossipsub_sender.announce(call_info.group_key(), signal, topic)
                                         {
@@ -497,15 +500,13 @@ async fn run(
                         if let Some(data) = call_data_map.get_active_mut() {
                             let call_id = data.info.call_id();
                             data.state.set_self_muted(true);
+                            let own_state = data.state.participants_joined.get(&own_id).cloned().unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
-                            let signal = CallSignal::Muted;
+                            let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =
-                                gossipsub_sender
-                                    .send_signal_aes(data.info.group_key(), signal, topic)
+                                gossipsub_sender.announce(data.info.group_key(), signal, topic)
                             {
-                                log::error!("failed to send signal: {e}");
-                            } else {
-                                log::debug!("sent signal to mute self");
+                                log::error!("failed to send announce signal: {e}");
                             }
                         }
                     }
@@ -513,15 +514,13 @@ async fn run(
                         if let Some(data) = call_data_map.get_active_mut() {
                             let call_id = data.info.call_id();
                             data.state.set_self_muted(false);
+                            let own_state = data.state.participants_joined.get(&own_id).cloned().unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
-                            let signal = CallSignal::Unmuted;
+                            let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =
-                                gossipsub_sender
-                                    .send_signal_aes(data.info.group_key(), signal, topic)
+                                gossipsub_sender.announce(data.info.group_key(), signal, topic)
                             {
-                                log::error!("failed to send signal: {e}");
-                            } else {
-                                log::debug!("sent signal to unmute self");
+                                log::error!("failed to send announce signal: {e}");
                             }
                         }
                     }
@@ -532,13 +531,13 @@ async fn run(
                                 log::error!("{e}");
                             }
                             data.state.set_deafened(own_id, true);
+                            let own_state = data.state.participants_joined.get(&own_id).cloned().unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
-                            let signal = CallSignal::Deafened;
+                            let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =
-                                gossipsub_sender
-                                    .send_signal_aes(data.info.group_key(), signal, topic)
+                                gossipsub_sender.announce(data.info.group_key(), signal, topic)
                             {
-                                log::error!("failed to send signal: {e}");
+                                log::error!("failed to send announce signal: {e}");
                             }
                         }
                     }
@@ -549,13 +548,13 @@ async fn run(
                                 log::error!("{e}");
                             }
                             data.state.set_deafened(own_id, false);
+                            let own_state = data.state.participants_joined.get(&own_id).cloned().unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
-                            let signal = CallSignal::Undeafened;
+                            let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =
-                                gossipsub_sender
-                                    .send_signal_aes(data.info.group_key(), signal, topic)
+                                gossipsub_sender.announce(data.info.group_key(), signal, topic)
                             {
-                                log::error!("failed to send signal: {e}");
+                                log::error!("failed to send announce signal: {e}");
                             }
                         }
                     }
@@ -582,13 +581,13 @@ async fn run(
                             {
                                 Ok(_) => {
                                     data.state.set_self_recording(true);
+                                    let own_state = data.state.participants_joined.get(&own_id).cloned().unwrap_or_default();
                                     let topic = ipfs_routes::call_signal_route(&info.call_id());
-                                    let signal = CallSignal::Recording;
+                                    let signal = CallSignal::Announce { participant_state: own_state };
                                     if let Err(e) =
-                                        gossipsub_sender
-                                            .send_signal_aes(info.group_key(), signal, topic)
+                                        gossipsub_sender.announce(data.info.group_key(), signal, topic)
                                     {
-                                        log::error!("failed to send signal: {e}");
+                                        log::error!("failed to send announce signal: {e}");
                                     }
                                     let _ = rsp.send(Ok(()));
                                 }
@@ -602,20 +601,19 @@ async fn run(
                     }
                     Cmd::StopRecording { rsp } => {
                         if let Some(data) = call_data_map.get_active_mut() {
-                            let info = data.get_info();
                             match
                                  host_media::pause_recording()
                                 .await
                             {
                                 Ok(_) => {
                                     data.state.set_self_recording(false);
-                                    let topic = ipfs_routes::call_signal_route(&info.call_id());
-                                    let signal = CallSignal::NotRecording;
+                                    let own_state = data.state.participants_joined.get(&own_id).cloned().unwrap_or_default();
+                                    let topic = ipfs_routes::call_signal_route(&data.info.call_id());
+                                    let signal = CallSignal::Announce { participant_state: own_state };
                                     if let Err(e) =
-                                        gossipsub_sender
-                                            .send_signal_aes(info.group_key(), signal, topic)
+                                        gossipsub_sender.announce(data.info.group_key(), signal, topic)
                                     {
-                                        log::error!("failed to send signal: {e}");
+                                        log::error!("failed to send announce signal: {e}");
                                     }
                                     let _ = rsp.send(Ok(()));
                                 }
@@ -671,9 +669,14 @@ async fn run(
                             log::debug!("received signal from someone who isn't part of the call");
                             continue;
                         }
-                        signaling::CallSignal::Announce => {
+                        signaling::CallSignal::Announce { participant_state } => {
                             //log::trace!("received announce from {}", &sender);
-                            call_data_map.add_participant(call_id, &sender);
+                            let prev_state = call_data_map.get_participant_state(call_id, &sender);
+                            let state_changed = prev_state.as_ref().map(|x| x != &participant_state).unwrap_or(true);
+                            call_data_map.add_participant(call_id, &sender, participant_state.clone());
+                            if state_changed {
+                                let _ = ui_event_ch.send(BlinkEventKind::ParticipantStateChanged { peer_id: sender, state: participant_state });
+                            }
                         },
                         signaling::CallSignal::Leave => {
                             call_data_map.remove_participant(call_id, &sender);
@@ -692,58 +695,6 @@ async fn run(
                                 }
                             }
                         },
-                        signaling::CallSignal::Muted => {
-                            call_data_map.set_muted(call_id, &sender, true);
-
-                            if call_data_map.is_active_call(call_id) {
-                                if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantMuted { peer_id: sender }) {
-                                    log::error!("failed to send ParticipantMuted event: {e}");
-                                }
-                            }
-                        },
-                        signaling::CallSignal::Unmuted => {
-                            call_data_map.set_muted(call_id, &sender, false);
-
-                            if call_data_map.is_active_call(call_id) {
-                                if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantUnmuted { peer_id: sender }) {
-                                    log::error!("failed to send ParticipantUnmuted event: {e}");
-                                }
-                            }
-                        },
-                        signaling::CallSignal::Deafened => {
-                            call_data_map.set_deafened(call_id, &sender, true);
-
-                            if call_data_map.is_active_call(call_id) {
-                                if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantDeafened { peer_id: sender }) {
-                                    log::error!("failed to send ParticipantDeafened event: {e}");
-                                }
-                            }
-                        },
-                        signaling::CallSignal::Undeafened => {
-                            call_data_map.set_deafened(call_id, &sender, false);
-
-                            if call_data_map.is_active_call(call_id) {
-                                if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantUndeafened { peer_id: sender }) {
-                                    log::error!("failed to send ParticipantUndeafened event: {e}");
-                                }
-                            }
-                        },
-                        signaling::CallSignal::Recording => {
-                            call_data_map.set_recording(call_id, &sender, true);
-                            if call_data_map.is_active_call(call_id) {
-                                if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantRecording { peer_id: sender }) {
-                                    log::error!("failed to send ParticipantRecording event: {e}");
-                                }
-                            }
-                        }
-                        signaling::CallSignal::NotRecording => {
-                            call_data_map.set_recording(call_id, &sender, false);
-                            if call_data_map.is_active_call(call_id) {
-                                if let Err(e) = ui_event_ch.send(BlinkEventKind::ParticipantNotRecording { peer_id: sender }) {
-                                    log::error!("failed to send ParticipantNotRecording event: {e}");
-                                }
-                            }
-                        }
                     },
                     GossipSubSignal::Initiation { sender, signal } => match signal {
                         signaling::InitiationSignal::Offer { call_info } => {
@@ -783,9 +734,7 @@ async fn run(
                     simple_webrtc::events::EmittedEvents::Connected { peer } => {
                         if let Some(data) = call_data_map.get_active() {
                             let call_id = data.info.call_id();
-                            if call_data_map.contains_participant(call_id, &peer) {
-                                call_data_map.add_participant(call_id, &peer);
-                           } else {
+                            if !call_data_map.contains_participant(call_id, &peer) {
                                 log::warn!("webrtc controller connected to a peer who wasn't in the list for the active call");
                                webrtc_controller.hang_up(&peer).await;
                            }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use uuid::Uuid;
 use warp::{
-    blink::{CallInfo, CallState},
+    blink::{CallInfo, CallState, ParticipantState},
     crypto::DID,
 };
 
@@ -50,7 +50,7 @@ impl CallDataMap {
         }
 
         let mut state = CallState::new(self.own_id.clone());
-        state.add_participant(sender);
+        state.add_participant(sender, ParticipantState::default());
         self.map.insert(call_id, CallData::new(info, state));
     }
 
@@ -89,10 +89,15 @@ impl CallDataMap {
 }
 
 impl CallDataMap {
-    pub fn add_participant(&mut self, call_id: Uuid, peer_id: &DID) {
+    pub fn add_participant(
+        &mut self,
+        call_id: Uuid,
+        peer_id: &DID,
+        participant_state: ParticipantState,
+    ) {
         if let Some(data) = self.map.get_mut(&call_id) {
             if data.info.contains_participant(peer_id) {
-                data.state.add_participant(peer_id);
+                data.state.add_participant(peer_id, participant_state);
             }
         }
     }
@@ -117,6 +122,20 @@ impl CallDataMap {
 
     pub fn get_call_state(&self, id: Uuid) -> Option<CallState> {
         self.map.get(&id).map(|x| x.get_state())
+    }
+
+    pub fn get_own_state(&self) -> Option<ParticipantState> {
+        self.get_active().cloned().and_then(|data| {
+            data.get_state()
+                .participants_joined
+                .get(&self.own_id)
+                .cloned()
+        })
+    }
+
+    pub fn get_participant_state(&self, call_id: Uuid, peer_id: &DID) -> Option<ParticipantState> {
+        self.get_call_state(call_id)
+            .and_then(|state| state.participants_joined.get(peer_id).cloned())
     }
 
     pub fn insert(&mut self, id: Uuid, data: CallData) {

@@ -133,18 +133,11 @@ pub enum BlinkEventKind {
     ParticipantSpeaking { peer_id: DID },
     #[display(fmt = "SelfSpeaking")]
     SelfSpeaking,
-    #[display(fmt = "ParticipantMuted")]
-    ParticipantMuted { peer_id: DID },
-    #[display(fmt = "ParticipantUnmuted")]
-    ParticipantUnmuted { peer_id: DID },
-    #[display(fmt = "ParticipantDeafened")]
-    ParticipantDeafened { peer_id: DID },
-    #[display(fmt = "ParticipantUndeafened")]
-    ParticipantUndeafened { peer_id: DID },
-    #[display(fmt = "ParticipantRecording")]
-    ParticipantRecording { peer_id: DID },
-    #[display(fmt = "ParticipantNotRecording")]
-    ParticipantNotRecording { peer_id: DID },
+    #[display(fmt = "ParticipantStateChanged")]
+    ParticipantStateChanged {
+        peer_id: DID,
+        state: ParticipantState,
+    },
     /// audio packets were dropped for the peer
     #[display(fmt = "AudioDegradation")]
     AudioDegradation { peer_id: DID },
