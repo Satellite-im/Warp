@@ -362,8 +362,7 @@ async fn run(
                                         let topic = ipfs_routes::call_signal_route(&call_id);
                                         let signal = CallSignal::Announce;
                                         if let Err(e) =
-                                            gossipsub_sender
-                                            .send_signal_aes(call_info.group_key(), signal, topic)
+                                            gossipsub_sender.announce(call_info.group_key(), signal, topic)
                                         {
                                             log::error!("failed to send announce signal: {e}");
                                         }
@@ -421,14 +420,13 @@ async fn run(
                                     webrtc_codec).await;
                                 match r {
                                     Ok(_) => {
-                                        log::debug!("answering call. sending join signal");
+                                        log::debug!("answering call");
                                         gossipsub_listener.subscribe_call(call_id, call_info.group_key());
                                         gossipsub_listener.subscribe_webrtc(call_id, own_id.clone());
                                         let topic = ipfs_routes::call_signal_route(&call_id);
                                         let signal = CallSignal::Announce;
                                         if let Err(e) =
-                                            gossipsub_sender
-                                            .send_signal_aes(call_info.group_key(), signal, topic)
+                                            gossipsub_sender.announce(call_info.group_key(), signal, topic)
                                         {
                                             let _ = rsp.send(Err(Error::FailedToSendSignal(e.to_string())));
                                         } else {
