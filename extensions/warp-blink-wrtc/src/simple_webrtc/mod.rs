@@ -223,6 +223,10 @@ impl Controller {
         }
     }
 
+    pub fn is_connected(&self, peer_id: &DID) -> bool {
+        self.peers.contains_key(peer_id)
+    }
+
     /// Spawns a MediaWorker which will receive RTP packets and forward them to all peers
     /// todo: the peers may want to agree on the MimeType
     pub async fn add_media_source(

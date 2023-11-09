@@ -30,6 +30,7 @@ impl CallData {
 
 pub struct CallDataMap {
     pub own_id: DID,
+    pub active_call: Option<Uuid>,
     pub map: HashMap<Uuid, CallData>,
 }
 
@@ -37,6 +38,7 @@ impl CallDataMap {
     pub fn new(own_id: DID) -> Self {
         Self {
             own_id,
+            active_call: None,
             map: HashMap::default(),
         }
     }
@@ -54,6 +56,35 @@ impl CallDataMap {
 
     pub fn get_pending_calls(&self) -> Vec<CallInfo> {
         self.map.values().map(|x| x.get_info()).collect()
+    }
+
+    pub fn is_active_call(&self, call_id: Uuid) -> bool {
+        self.active_call
+            .as_ref()
+            .map(|x| x == &call_id)
+            .unwrap_or_default()
+    }
+
+    pub fn get_mut(&mut self, call_id: Uuid) -> Option<&mut CallData> {
+        self.map.get_mut(&call_id)
+    }
+
+    pub fn get_active_mut(&mut self) -> Option<&mut CallData> {
+        match self.active_call.clone() {
+            None => None,
+            Some(call_id) => self.map.get_mut(&call_id),
+        }
+    }
+
+    pub fn get_active(&self) -> Option<&CallData> {
+        match self.active_call.clone() {
+            None => None,
+            Some(call_id) => self.map.get(&call_id),
+        }
+    }
+
+    pub fn set_active(&mut self, call_id: Uuid) {
+        self.active_call.replace(call_id);
     }
 }
 
@@ -97,6 +128,9 @@ impl CallDataMap {
     }
 
     pub fn leave_call(&mut self, call_id: Uuid) {
+        if self.is_active_call(call_id) {
+            self.active_call.take();
+        }
         if let Some(data) = self.map.get_mut(&call_id) {
             data.state.reset_self();
         }

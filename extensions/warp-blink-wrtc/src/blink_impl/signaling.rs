@@ -42,7 +42,7 @@ pub enum PeerSignal {
 #[derive(Serialize, Deserialize, Display, Clone)]
 pub enum CallSignal {
     #[display(fmt = "Join")]
-    Join,
+    Announce,
     #[display(fmt = "Leave")]
     Leave,
     #[display(fmt = "Muted")]

@@ -228,6 +228,8 @@ pub enum Error {
     CallNotFound,
     #[error("CallNotInProgress")]
     CallNotInProgress,
+    #[error("CallAlreadyInProgress")]
+    CallAlreadyInProgress,
     #[error("FailedToSendSignal: {_0}")]
     FailedToSendSignal(String),
     #[error("Invalid MIME type: {_0}")]
