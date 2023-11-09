@@ -264,8 +264,8 @@ async fn run(
 
     let mut call_data_map = CallDataMap::new(own_id.clone());
     let mut dial_timer = tokio::time::interval_at(
-        Instant::now() + Duration::from_millis(1000),
-        Duration::from_millis(1000),
+        Instant::now() + Duration::from_millis(3000),
+        Duration::from_millis(3000),
     );
 
     loop {
