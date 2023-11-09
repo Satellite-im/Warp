@@ -275,14 +275,27 @@ async fn run(
                 break;
             },
             _ = dial_timer.tick() => {
+                log::debug!("dial timer: tick");
                 if let Some(data) = call_data_map.get_active() {
                     let call_id = data.info.call_id();
                     for (peer_id, _) in data.state.participants_joined.iter() {
+                        if peer_id == own_id {
+                            continue;
+                        }
                         if webrtc_controller.is_connected(peer_id) {
                             continue;
                         }
                         let peer_str = peer_id.to_string();
-                        if peer_str < own_id_str {
+                        let mut should_dial = false;
+                        for (l, r) in std::iter::zip(peer_str.as_bytes(), own_id_str.as_bytes()) {
+                            if l < r {
+                                should_dial = true;
+                                break;
+                            } else if r > l {
+                                break;
+                            }
+                        }
+                        if should_dial {
                             log::debug!("dialing peer");
                             if let Err(e) = webrtc_controller.dial(peer_id).await {
                                 log::error!("failed to dial peer: {e}");
@@ -358,7 +371,6 @@ async fn run(
                                             }
                                         }
 
-                                        // todo: what to do if the signal fails to send? only happens if there's a problem with gossipsub sender
                                         let topic = ipfs_routes::call_signal_route(&call_id);
                                         let signal = CallSignal::Announce;
                                         if let Err(e) =
@@ -661,9 +673,7 @@ async fn run(
                             continue;
                         }
                         signaling::CallSignal::Announce => {
-                            if call_data_map.contains_participant(call_id, &sender) {
-                                continue;
-                            }
+                            log::debug!("received announce from {}", &sender);
                             call_data_map.add_participant(call_id, &sender);
                         },
                         signaling::CallSignal::Leave => {
