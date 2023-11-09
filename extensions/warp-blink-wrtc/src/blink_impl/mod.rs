@@ -81,13 +81,13 @@ impl BlinkImpl {
 
         // todo: ensure rx doesn't get dropped
         let (ui_event_ch, _rx) = broadcast::channel(1024);
-        let (signal_tx, signal_rx) = mpsc::unbounded_channel();
+        let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
 
         let ipfs = Arc::new(warp::sync::RwLock::new(None));
         let own_id_private = Arc::new(warp::sync::RwLock::new(None));
         let gossipsub_sender = GossipSubSender::new(own_id_private.clone(), ipfs.clone());
         let gossipsub_listener =
-            GossipSubListener::new(ipfs.clone(), signal_tx, gossipsub_sender.clone());
+            GossipSubListener::new(ipfs.clone(), gossipsub_tx, gossipsub_sender.clone());
 
         let webrtc_controller = simple_webrtc::Controller::new()?;
         let webrtc_event_stream = webrtc_controller.get_event_stream();
@@ -96,7 +96,7 @@ impl BlinkImpl {
             webrtc_event_stream,
             gossipsub_sender: gossipsub_sender.clone(),
             gossipsub_listener: gossipsub_listener.clone(),
-            signal_rx,
+            signal_rx: gossipsub_rx,
             ui_event_ch: ui_event_ch.clone(),
         });
 
