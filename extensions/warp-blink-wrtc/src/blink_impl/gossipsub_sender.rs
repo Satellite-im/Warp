@@ -296,6 +296,7 @@ async fn run(
                             log::error!("failed to publish aes message: {e}");
                         }
                         to_announce.replace(GossipSubCmd::Announce { group_key, signal, topic });
+                        announce_timer.reset();
                     },
                    GossipSubCmd::DecodeEcdh { src, data, rsp } => {
                         let r = || {
