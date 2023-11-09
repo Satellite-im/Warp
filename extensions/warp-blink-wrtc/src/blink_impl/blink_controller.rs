@@ -330,6 +330,7 @@ async fn run(
                                         gossipsub_listener
                                             .subscribe_webrtc(call_info.call_id(), own_id.clone());
 
+                                        log::debug!("sending offer signal");
                                         // todo: resend periodically. perhaps somewhere else
                                         let mut participants = call_info.participants();
                                         participants.retain(|x| x != own_id);
@@ -400,6 +401,7 @@ async fn run(
                                         gossipsub_listener.subscribe_webrtc(call_id, own_id.clone());
                                         let topic = ipfs_routes::call_signal_route(&call_id);
 
+                                        log::debug!("answering call. sending join signal");
                                         // todo? periodically re-send join signals. perhaps somewhere else
                                         let signal = CallSignal::Join;
                                         if let Err(e) =
@@ -650,8 +652,8 @@ async fn run(
                         }
                         signaling::CallSignal::Join => {
                             call_data_map.add_participant(call_id, &sender);
-
                             if active_call.as_ref().map(|x| x == &call_id).unwrap_or_default() {
+                                log::debug!("dialing peer");
                                 if let Err(e) = webrtc_controller.dial(&sender).await {
                                     log::error!("failed to dial peer: {e}");
                                     continue;
@@ -809,6 +811,7 @@ async fn run(
                         }
                     },
                     simple_webrtc::events::EmittedEvents::CallInitiated { dest, sdp } => {
+                        log::debug!("sending dial signal");
                         let topic = ipfs_routes::peer_signal_route(&dest, &active_call.unwrap_or_default());
                         let signal = PeerSignal::Dial(*sdp);
                         if let Err(e) = gossipsub_sender.send_signal_ecdh(dest, signal, topic) {
