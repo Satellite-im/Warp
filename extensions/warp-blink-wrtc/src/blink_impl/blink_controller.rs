@@ -5,7 +5,7 @@ use super::signaling::{
     self, ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal,
 };
 
-use std::{sync::Arc, time::Duration};
+use std::{cmp, sync::Arc, time::Duration};
 use tokio::{
     sync::{
         broadcast,
@@ -288,11 +288,15 @@ async fn run(
                         let peer_str = peer_id.to_string();
                         let mut should_dial = false;
                         for (l, r) in std::iter::zip(peer_str.as_bytes(), own_id_str.as_bytes()) {
-                            if l < r {
-                                should_dial = true;
-                                break;
-                            } else if r > l {
-                                break;
+                            match l.cmp(r) {
+                                cmp::Ordering::Less => {
+                                    should_dial = true;
+                                    break;
+                                }
+                                cmp::Ordering::Greater => {
+                                    break;
+                                }
+                                _ => {}
                             }
                         }
                         if should_dial {
