@@ -250,7 +250,7 @@ async fn run(
     let own_id = match gossipsub_sender.get_own_id().await {
         Ok(r) => r,
         Err(e) => {
-            log::error!("failed to get own id. quitting bilnk controller: {e}");
+            log::error!("failed to get own id. quitting blink controller: {e}");
             return;
         }
     };
