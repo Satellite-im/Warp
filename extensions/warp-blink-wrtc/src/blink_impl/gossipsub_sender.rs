@@ -179,6 +179,10 @@ async fn run(
     };
 
     let mut ecdh_queue: HashMap<DID, VecDeque<GossipSubCmd>> = HashMap::new();
+    let mut timer = tokio::time::interval_at(
+        Instant::now() + Duration::from_millis(2000),
+        Duration::from_millis(2000),
+    );
 
     loop {
         tokio::select! {
@@ -221,7 +225,7 @@ async fn run(
                             }
                         };
                         if let Err(e) = ipfs.pubsub_publish(topic, encrypted).await {
-                            log::error!("failed to publish message: {e}");
+                            log::error!("failed to publish aes message: {e}");
 
                         }
                     },
