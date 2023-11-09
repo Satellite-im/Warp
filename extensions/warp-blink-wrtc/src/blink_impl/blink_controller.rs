@@ -284,7 +284,7 @@ async fn run(
                         let peer_str = peer_id.to_string();
                         if peer_str < own_id_str {
                             log::debug!("dialing peer");
-                            if let Err(e) = webrtc_controller.dial(&peer_id).await {
+                            if let Err(e) = webrtc_controller.dial(peer_id).await {
                                 log::error!("failed to dial peer: {e}");
                                 continue;
                             }

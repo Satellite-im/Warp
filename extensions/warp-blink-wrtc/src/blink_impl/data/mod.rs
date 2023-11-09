@@ -70,14 +70,14 @@ impl CallDataMap {
     }
 
     pub fn get_active_mut(&mut self) -> Option<&mut CallData> {
-        match self.active_call.clone() {
+        match self.active_call {
             None => None,
             Some(call_id) => self.map.get_mut(&call_id),
         }
     }
 
     pub fn get_active(&self) -> Option<&CallData> {
-        match self.active_call.clone() {
+        match self.active_call {
             None => None,
             Some(call_id) => self.map.get(&call_id),
         }

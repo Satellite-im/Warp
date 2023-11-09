@@ -218,41 +218,33 @@ async fn run(
             _ = retry_timer.tick() => {
                 for (_dest, queue) in ecdh_queue.iter_mut() {
                     while let Some(cmd) = queue.pop_front() {
-                        match cmd {
-                            GossipSubCmd::SendEcdh { dest, signal, topic } => {
-                                let encrypted = match ecdh_encrypt(&own_id, &dest, signal.clone()) {
-                                    Ok(r) => r,
-                                    Err(e) => {
-                                        log::error!("failed to encrypt ecdh message: {e}");
-                                        continue;
-                                    }
-                                };
-                                if ipfs.pubsub_publish(topic.clone(), encrypted).await.is_err() {
-                                    queue.push_front(GossipSubCmd::SendEcdh { dest, signal, topic });
-                                    break;
+                        if let GossipSubCmd::SendEcdh { dest, signal, topic } = cmd {
+                            let encrypted = match ecdh_encrypt(&own_id, &dest, signal.clone()) {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    log::error!("failed to encrypt ecdh message: {e}");
+                                    continue;
                                 }
+                            };
+                            if ipfs.pubsub_publish(topic.clone(), encrypted).await.is_err() {
+                                queue.push_front(GossipSubCmd::SendEcdh { dest, signal, topic });
+                                break;
                             }
-                            _ => {}
                         }
                     }
                 }
             }
             _ = announce_timer.tick() => {
-                if let Some(cmd) = to_announce.as_ref() {
-                    match cmd {
-                        GossipSubCmd::Announce { group_key, signal, topic } => {
-                            let encrypted = match Cipher::direct_encrypt(&signal, &group_key) {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    log::error!("failed to encrypt aes message: {e}");
-                                    continue;
-                                }
-                            };
-                            if let Err(e) = ipfs.pubsub_publish(topic.clone(), encrypted).await {
-                                log::error!("failed to publish aes message: {e}");
-                            }
+                if let Some(GossipSubCmd::Announce { group_key, signal, topic }) = to_announce.as_ref() {
+                    let encrypted = match Cipher::direct_encrypt(signal, group_key) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            log::error!("failed to encrypt aes message: {e}");
+                            continue;
                         }
-                        _ => {}
+                    };
+                    if let Err(e) = ipfs.pubsub_publish(topic.clone(), encrypted).await {
+                        log::error!("failed to publish aes message: {e}");
                     }
                 }
             }
@@ -288,7 +280,7 @@ async fn run(
                                 }
                             };
                             if ipfs.pubsub_publish(topic.clone(), encrypted).await.is_err() {
-                                let queue = ecdh_queue.entry(dest.clone()).or_insert(VecDeque::new());
+                                let queue = ecdh_queue.entry(dest.clone()).or_default();
                                 queue.push_back(GossipSubCmd::SendEcdh { dest, signal, topic });
                             }
                     }
