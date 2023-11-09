@@ -10,7 +10,7 @@ use chrono::Utc;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::SelectAll;
-use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 
 use serde::{Deserialize, Serialize};
