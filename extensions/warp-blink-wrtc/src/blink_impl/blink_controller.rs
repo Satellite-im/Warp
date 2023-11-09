@@ -455,7 +455,7 @@ async fn run(
                         let _ = webrtc_controller.remove_media_source(source_id).await;
                     },
                     Cmd::LeaveCall { call_id } => {
-                        let call_id = call_id.unwrap_or_default();
+                        let call_id = call_id.unwrap_or(call_data_map.active_call.unwrap_or_default());
                         if call_data_map.is_active_call(call_id) {
                             call_data_map.leave_call(call_id);
                             let _ = gossipsub_sender.empty_queue();
