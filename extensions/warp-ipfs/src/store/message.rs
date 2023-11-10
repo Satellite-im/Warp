@@ -16,7 +16,7 @@ use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use uuid::Uuid;
-use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
+use warp::constellation::{ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
 use warp::error::Error;
@@ -41,6 +41,7 @@ use crate::store::{
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::discovery::Discovery;
 use super::document::conversation::Conversations;
+use super::files::FileStore;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
 use super::{verify_serde_sig, ConversationEvents, MessagingEvents};
@@ -69,7 +70,7 @@ pub struct MessageStore {
     discovery: Discovery,
 
     // filesystem instance
-    filesystem: Option<Box<dyn Constellation>>,
+    filesystem: FileStore,
 
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     stream_reqres_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
@@ -98,7 +99,7 @@ impl MessageStore {
         identity: IdentityStore,
         // friends: FriendsStore,
         discovery: Discovery,
-        filesystem: Option<Box<dyn Constellation>>,
+        filesystem: FileStore,
         _: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
@@ -2887,10 +2888,7 @@ impl MessageStore {
         //      this will require uploading to ipfs directly from here
         //      or setting up a separate stream channel related to
         //      the subscribed topic possibly as a configuration option
-        let mut constellation = self
-            .filesystem
-            .clone()
-            .ok_or(Error::ConstellationExtensionUnavailable)?;
+        let mut constellation = self.filesystem.clone();
 
         let files = locations
             .iter()
@@ -3111,10 +3109,7 @@ impl MessageStore {
         path: PathBuf,
         _: bool,
     ) -> Result<ConstellationProgressStream, Error> {
-        let constellation = self
-            .filesystem
-            .clone()
-            .ok_or(Error::ConstellationExtensionUnavailable)?;
+        let constellation = self.filesystem.clone();
 
         let message = self.get_message(conversation, message_id).await?;
 
