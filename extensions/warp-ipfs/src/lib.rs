@@ -272,6 +272,7 @@ impl WarpIpfs {
 
         info!("Starting ipfs");
         let mut uninitialized = UninitializedIpfs::empty()
+            .set_keypair(keypair)
             .with_identify(Some({
                 let mut idconfig = IdentifyConfiguration {
                     protocol_version: "/satellite/warp/0.1".into(),
@@ -301,7 +302,6 @@ impl WarpIpfs {
             .with_relay(true)
             .set_listening_addrs(config.listen_on.clone())
             .with_custom_behaviour(behaviour)
-            .set_keypair(keypair)
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
                 yamux_update_mode: UpdateMode::Read,
@@ -321,8 +321,10 @@ impl WarpIpfs {
             uninitialized = uninitialized.set_path(path);
         }
 
-        for addr in config.bootstrap.address() {
-            uninitialized = uninitialized.add_bootstrap(addr);
+        if config.ipfs_setting.bootstrap {
+            for addr in config.bootstrap.address() {
+                uninitialized = uninitialized.add_bootstrap(addr);
+            }
         }
 
         if config.ipfs_setting.memory_transport {
@@ -477,7 +479,7 @@ impl WarpIpfs {
             config.path.map(|path| path.join("messages")),
             identity_store,
             // friend_store,
-            discovery,
+            discovery.clone(),
             Some(Box::new(self.clone()) as Box<dyn Constellation>),
             false,
             1000,
@@ -495,6 +497,10 @@ impl WarpIpfs {
 
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
+
+        if let Err(e) = discovery.start().await {
+            warn!("Unable to start discovery: {e}.")
+        }
         Ok(())
     }
 

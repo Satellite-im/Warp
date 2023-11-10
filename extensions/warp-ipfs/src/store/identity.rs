@@ -267,22 +267,15 @@ impl IdentityStore {
         let did = store.get_keypair_did()?;
 
         let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
-        let main_stream = store
-            .ipfs
-            .pubsub_subscribe("/identity/announce".into())
-            .await?;
-
-        store.discovery.start().await?;
 
         let mut discovery_rx = store.discovery.events();
 
         log::info!("Loading queue");
         if let Err(_e) = store.queue.load().await {}
 
-        let phonebook = &store.phonebook;
         log::info!("Loading friends list into phonebook");
         if let Ok(friends) = store.friends_list().await {
-            if let Err(_e) = phonebook.add_friend_list(friends).await {
+            if let Err(_e) = store.phonebook.add_friend_list(friends).await {
                 error!("Error adding friends in phonebook: {_e}");
             }
         }
@@ -305,8 +298,6 @@ impl IdentityStore {
         tokio::spawn({
             let mut store = store.clone();
             async move {
-                let _main_stream = main_stream;
-
                 futures::pin_mut!(event_stream);
                 futures::pin_mut!(friend_stream);
 
