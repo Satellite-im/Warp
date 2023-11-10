@@ -148,9 +148,10 @@ pub enum ConversationRequestKind {
     Replicate,
     Key,
     Ping,
-    RetrieveMessages {
-        // start/end
-        range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
+    FetchMessages {
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        ignore: Vec<Uuid>,
     },
     WantMessage {
         message_id: Uuid,
@@ -159,7 +160,7 @@ pub enum ConversationRequestKind {
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ConversationResponseKind {
     Key { key: Vec<u8> },
     Pong,
