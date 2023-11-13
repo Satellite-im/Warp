@@ -166,6 +166,9 @@ impl Behaviour {
                     ) => {
                         let _ = res.send(Err(warp::error::Error::IdentityInvalid));
                     }
+                    RegisterResponse::Error(protocol::RegisterError::InternalError) => {
+                        let _ = res.send(Err(warp::error::Error::Other));
+                    }
                     RegisterResponse::Error(protocol::RegisterError::None) => {
                         //TODO?
                         let _ = res.send(Ok(()));

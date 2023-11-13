@@ -1,13 +1,17 @@
 use either::Either;
 // use libipld::serde::from_ipld;
-use shuttle::identity::{
-    self,
-    document::IdentityDocument,
-    // document::IdentityDocument,
-    protocol::{
-        Lookup, LookupResponse, Register, RegisterResponse, Response, Synchronized,
-        SynchronizedError, SynchronizedResponse,
+use shuttle::{
+    identity::{
+        self,
+        document::IdentityDocument,
+        // document::IdentityDocument,
+        protocol::{
+            Lookup, LookupResponse, Register, RegisterResponse, Response, Synchronized,
+            SynchronizedError, SynchronizedResponse,
+        },
     },
+    subscription_stream::Subscriptions,
+    PeerTopic,
 };
 use warp::crypto::DID;
 
@@ -145,12 +149,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Local PeerID: {local_peer_id}");
     let (id_event_tx, mut id_event_rx) = futures::channel::mpsc::channel(1);
 
-    let mut uninitialized = UninitializedIpfs::empty()
+    let mut uninitialized = UninitializedIpfs::new()
         .with_identify(Some(IdentifyConfiguration {
             agent_version: format!("shuttle/{}", env!("CARGO_PKG_VERSION")),
             ..Default::default()
         }))
-        .with_autonat()
         .with_bitswap(None)
         .with_ping(None)
         .with_pubsub(None)
@@ -158,6 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             identity: identity::Behaviour::new(&keypair, Some(id_event_tx), None),
             dummy: ext_behaviour::Behaviour,
         })
+        .set_keypair(keypair)
         .with_relay(true)
         .with_relay_server(Some(RelayConfig {
             max_circuits: 512,
@@ -190,9 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             ],
         }))
-        .with_rendezvous_server()
         .fd_limit(FDLimit::Max)
-        .set_keypair(keypair)
         .set_idle_connection_timeout(120)
         .default_record_key_validator()
         .set_transport_configuration(TransportConfig {
@@ -200,21 +202,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         })
         .listen_as_external_addr();
-
-    // let str_to_maddr = |addr: &str| -> Vec<Multiaddr> {
-    //     let mut addrs = addr
-    //         .split(',')
-    //         .filter_map(|addr| Multiaddr::from_str(addr).ok())
-    //         .collect::<Vec<_>>();
-
-    //     if addrs.is_empty() {
-    //         addrs = vec![
-    //             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
-    //             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
-    //         ];
-    //     }
-    //     addrs
-    // };
 
     let addrs = match opts.listen_addr.as_slice() {
         [] => vec![
@@ -239,6 +226,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut _temp_package: HashMap<DID, Vec<u8>> = HashMap::new();
     let mut _friends_router: HashMap<DID, ()> = HashMap::new();
 
+    let mut subscriptions = Subscriptions::new(&ipfs);
+
     while let Some((_id, ch, which, resp)) = id_event_rx.next().await {
         match which {
             Either::Left(req) => match req {
@@ -260,6 +249,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ))),
                         ));
 
+                        continue;
+                    }
+
+                    if let Err(_e) = subscriptions.subscribe(document.did.inbox()).await {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::None,
+                            ))),
+                        ));
                         continue;
                     }
 
