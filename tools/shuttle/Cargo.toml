@@ -11,7 +11,7 @@ repository.workspace = true
 [dependencies]
 warp.workspace = true
 
-rust-ipfs = { workspace = true, features = ["sled_data_store"] }
+rust-ipfs = { workspace = true, features = ["redb_data_store"] }
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 tokio = { workspace = true, features = ["full"] }
