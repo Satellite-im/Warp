@@ -10,7 +10,7 @@ use base64::{
 use clap::Parser;
 use rust_ipfs::{
     p2p::{RateLimit, RelayConfig, TransportConfig},
-    FDLimit, Keypair, Multiaddr, UninitializedIpfsNoop as UninitializedIpfs,
+    FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
 use zeroize::Zeroizing;
@@ -132,7 +132,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             enable_quic: true,
             ..Default::default()
         })
-        .listen_as_external_addr();
+        .listen_as_external_addr()
+        .with_custom_behaviour(ext_behaviour::Behaviour);
 
     let addrs = match opts.listen_addr.as_slice() {
         [] => vec![
