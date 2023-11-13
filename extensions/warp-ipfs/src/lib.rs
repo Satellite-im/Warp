@@ -271,7 +271,7 @@ impl WarpIpfs {
         };
 
         info!("Starting ipfs");
-        let mut uninitialized = UninitializedIpfs::empty()
+        let mut uninitialized = UninitializedIpfs::new()
             .with_identify(Some({
                 let mut idconfig = IdentifyConfiguration {
                     protocol_version: "/satellite/warp/0.1".into(),
