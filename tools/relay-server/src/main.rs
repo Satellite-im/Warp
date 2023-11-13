@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             ],
             max_reservations_per_peer: 512,
-            max_reservations: 1024,
+            max_reservations: 8198,
             reservation_duration: Duration::from_secs(60 * 60),
             reservation_rate_limiters: vec![
                 RateLimit::PerIp {
