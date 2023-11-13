@@ -81,7 +81,7 @@ either = "1"
 void = "1"
 
 #ipfs dependency
-rust-ipfs = "0.7.0"
+rust-ipfs = "0.7.1"
 
 
 # Blink related crates

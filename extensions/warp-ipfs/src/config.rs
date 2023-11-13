@@ -6,7 +6,7 @@ use std::{
     str::FromStr,
     time::Duration,
 };
-use warp::{multipass::identity::Identity, constellation::file::FileType};
+use warp::{constellation::file::FileType, multipass::identity::Identity};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -249,8 +249,9 @@ pub enum UpdateEvents {
     Disable,
 }
 
-pub type DefaultPfpFn =
-    std::sync::Arc<dyn Fn(&Identity) -> Result<(Vec<u8>, FileType), std::io::Error> + Send + Sync + 'static>;
+pub type DefaultPfpFn = std::sync::Arc<
+    dyn Fn(&Identity) -> Result<(Vec<u8>, FileType), std::io::Error> + Send + Sync + 'static,
+>;
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub enum StoreOffline {

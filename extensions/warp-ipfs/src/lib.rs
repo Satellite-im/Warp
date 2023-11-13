@@ -273,7 +273,7 @@ impl WarpIpfs {
         };
 
         info!("Starting ipfs");
-        let mut uninitialized = UninitializedIpfs::empty()
+        let mut uninitialized = UninitializedIpfs::new()
             .with_identify(Some({
                 let mut idconfig = IdentifyConfiguration {
                     protocol_version: "/satellite/warp/0.1".into(),
@@ -306,6 +306,8 @@ impl WarpIpfs {
             .set_keypair(keypair)
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
+                yamux_receive_window_size: 256*1024,
+                yamux_max_buffer_size: 1024 * 1024,
                 yamux_update_mode: UpdateMode::Read,
                 ..Default::default()
             })
@@ -323,8 +325,10 @@ impl WarpIpfs {
             uninitialized = uninitialized.set_path(path);
         }
 
-        for addr in config.bootstrap.address() {
-            uninitialized = uninitialized.add_bootstrap(addr);
+        if config.ipfs_setting.bootstrap {
+            for addr in config.bootstrap.address() {
+                uninitialized = uninitialized.add_bootstrap(addr);
+            }
         }
 
         if config.ipfs_setting.memory_transport {
@@ -400,10 +404,19 @@ impl WarpIpfs {
         }
 
         for relay_peer in relay_peers {
-            if let Err(e) = ipfs.enable_relay(Some(relay_peer)).await {
-                error!("Failed to use {relay_peer} as a relay: {e}");
-                continue;
-            }
+            match tokio::time::timeout(Duration::from_secs(15), ipfs.enable_relay(Some(relay_peer)))
+                .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    error!("Failed to use {relay_peer} as a relay: {e}");
+                    continue;
+                }
+                Err(_) => {
+                    error!("Relay connection timed out");
+                    continue;
+                }
+            };
 
             let list = ipfs.list_relays(true).await.unwrap_or_default();
             for addr in list
