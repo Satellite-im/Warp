@@ -95,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Local PeerID: {local_peer_id}");
 
     let mut uninitialized = UninitializedIpfs::new()
+        .with_identify(None)
         .with_ping(None)
         .with_relay_server(Some(RelayConfig {
             max_circuits: 8198,
