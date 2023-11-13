@@ -97,8 +97,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut uninitialized = UninitializedIpfs::new()
         .with_ping(None)
         .with_relay_server(Some(RelayConfig {
-            max_circuits: 512,
-            max_circuits_per_peer: 512,
+            max_circuits: 8198,
+            max_circuits_per_peer: 8198,
             max_circuit_duration: Duration::from_secs(2 * 60),
             max_circuit_bytes: 8 * 1024 * 1024,
             circuit_src_rate_limiters: vec![
