@@ -805,6 +805,9 @@ async fn run(
                             log::error!("failed to send media_track command: {e}");
                         }
                     },
+                    simple_webrtc::events::EmittedEvents::DataChannelCreated { peer, data_channel } => {},
+                    simple_webrtc::events::EmittedEvents::DataChannelOpened { peer } => {}
+                    simple_webrtc::events::EmittedEvents::DataChannelClosed { peer } => {}
                 }
             }
         }
