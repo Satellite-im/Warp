@@ -24,7 +24,7 @@ use warp::raygun::{
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_ipfs::config::{Discovery, DiscoveryType};
+use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
@@ -113,6 +113,7 @@ async fn setup<P: AsRef<Path>>(
     }
     if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;
+        config.bootstrap = Bootstrap::None;
         config.ipfs_setting.bootstrap = false;
     }
 
