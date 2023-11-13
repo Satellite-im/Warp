@@ -224,8 +224,14 @@ pub enum Error {
     AudioHostError(String),
     #[error("BlinkNotInitialized")]
     BlinkNotInitialized,
+    #[error("CallNotFound")]
+    CallNotFound,
     #[error("CallNotInProgress")]
     CallNotInProgress,
+    #[error("CallAlreadyInProgress")]
+    CallAlreadyInProgress,
+    #[error("FailedToSendSignal: {_0}")]
+    FailedToSendSignal(String),
     #[error("Invalid MIME type: {_0}")]
     InvalidMimeType(String),
     #[error("InvalidAudioConfig")]

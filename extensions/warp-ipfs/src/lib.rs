@@ -225,7 +225,7 @@ impl WarpIpfs {
             Bootstrap::None => true,
         };
 
-        if empty_bootstrap {
+        if empty_bootstrap && !config.ipfs_setting.dht_client {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
@@ -271,7 +271,7 @@ impl WarpIpfs {
         };
 
         info!("Starting ipfs");
-        let mut uninitialized = UninitializedIpfs::empty()
+        let mut uninitialized = UninitializedIpfs::new()
             .with_identify(Some({
                 let mut idconfig = IdentifyConfiguration {
                     protocol_version: "/satellite/warp/0.1".into(),
@@ -282,7 +282,6 @@ impl WarpIpfs {
                 }
                 idconfig
             }))
-            .with_autonat()
             .with_bitswap(None)
             .with_kademlia(
                 Some(either::Either::Left(KadConfig {
@@ -305,6 +304,8 @@ impl WarpIpfs {
             .set_keypair(keypair)
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
+                yamux_receive_window_size: 256*1024,
+                yamux_max_buffer_size: 1024 * 1024,
                 yamux_update_mode: UpdateMode::Read,
                 ..Default::default()
             })
@@ -322,8 +323,10 @@ impl WarpIpfs {
             uninitialized = uninitialized.set_path(path);
         }
 
-        for addr in config.bootstrap.address() {
-            uninitialized = uninitialized.add_bootstrap(addr);
+        if config.ipfs_setting.bootstrap {
+            for addr in config.bootstrap.address() {
+                uninitialized = uninitialized.add_bootstrap(addr);
+            }
         }
 
         if config.ipfs_setting.memory_transport {
@@ -383,7 +386,7 @@ impl WarpIpfs {
             };
 
             if let Err(e) = ipfs.add_peer(peer_id, addr.clone()).await {
-                warn!("Error error relay: {e}");
+                warn!("Failed to add relay to address book: {e}");
             }
 
             if let Err(e) = ipfs.add_relay(peer_id, addr).await {
@@ -398,27 +401,31 @@ impl WarpIpfs {
             warn!("No relays available");
         }
 
-        tokio::spawn({
-            let ipfs = ipfs.clone();
-            async move {
-                for relay_peer in relay_peers {
-                    if let Err(e) = ipfs.enable_relay(Some(relay_peer)).await {
-                        error!("Error listening on relay peer {relay_peer}: {e}");
-                        continue;
-                    }
-
-                    let list = ipfs.list_relays(true).await.unwrap_or_default();
-                    for addr in list
-                        .iter()
-                        .filter(|(peer_id, _)| *peer_id == relay_peer)
-                        .flat_map(|(_, addrs)| addrs)
-                    {
-                        debug!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
-                    }
-                    break;
+        for relay_peer in relay_peers {
+            match tokio::time::timeout(Duration::from_secs(15), ipfs.enable_relay(Some(relay_peer)))
+                .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    error!("Failed to use {relay_peer} as a relay: {e}");
+                    continue;
                 }
+                Err(_) => {
+                    error!("Relay connection timed out");
+                    continue;
+                }
+            };
+
+            let list = ipfs.list_relays(true).await.unwrap_or_default();
+            for addr in list
+                .iter()
+                .filter(|(peer_id, _)| *peer_id == relay_peer)
+                .flat_map(|(_, addrs)| addrs)
+            {
+                info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
             }
-        });
+            break;
+        }
 
         if config.ipfs_setting.dht_client {
             ipfs.dht_mode(DhtMode::Client).await?;
@@ -478,7 +485,7 @@ impl WarpIpfs {
 
         *self.file_store.write() = Some(filestore);
 
-        *self.message_store.write() = MessageStore::new(
+        let message_store = MessageStore::new(
             ipfs.clone(),
             config.path.map(|path| path.join("messages")),
             identity_store,
@@ -493,8 +500,9 @@ impl WarpIpfs {
                 config.store_setting.with_friends,
             ),
         )
-        .await
-        .ok();
+        .await?;
+
+        *self.message_store.write() = Some(message_store);
 
         info!("Messaging store initialized");
 
@@ -651,14 +659,14 @@ impl MultiPass for WarpIpfs {
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
         let store = self.identity_store(true).await?;
 
-        let idents = match id {
-            Identifier::DID(pk) => store.lookup(LookupBy::DidKey(pk)).await,
-            Identifier::Username(username) => store.lookup(LookupBy::Username(username)).await,
-            Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
+        let kind = match id {
+            Identifier::DID(pk) => LookupBy::DidKey(pk),
+            Identifier::Username(username) => LookupBy::Username(username),
+            Identifier::DIDList(list) => LookupBy::DidKeys(list),
             Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
-        }?;
+        };
 
-        Ok(idents)
+        store.lookup(kind).await
     }
 
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
