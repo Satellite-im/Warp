@@ -304,6 +304,8 @@ impl WarpIpfs {
             .set_keypair(keypair)
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
+                yamux_receive_window_size: 256*1024,
+                yamux_max_buffer_size: 1024 * 1024,
                 yamux_update_mode: UpdateMode::Read,
                 ..Default::default()
             })
