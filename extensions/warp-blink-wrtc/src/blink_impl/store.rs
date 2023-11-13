@@ -78,7 +78,7 @@ pub fn decode_gossipsub_msg_aes<T: DeserializeOwned + Display>(
     Ok(data)
 }
 
-fn ecdh_encrypt<K: AsRef<[u8]>>(own_did: &DID, recipient: &DID, data: K) -> Result<Vec<u8>> {
+pub fn ecdh_encrypt<K: AsRef<[u8]>>(own_did: &DID, recipient: &DID, data: K) -> Result<Vec<u8>> {
     let prikey = Ed25519KeyPair::from_secret_key(&own_did.private_key_bytes()).get_x25519();
     let did_pubkey = recipient.public_key_bytes();
 
@@ -89,7 +89,7 @@ fn ecdh_encrypt<K: AsRef<[u8]>>(own_did: &DID, recipient: &DID, data: K) -> Resu
     Ok(data)
 }
 
-fn ecdh_decrypt<K: AsRef<[u8]>>(own_did: &DID, sender: &DID, data: K) -> Result<Vec<u8>> {
+pub fn ecdh_decrypt<K: AsRef<[u8]>>(own_did: &DID, sender: &DID, data: K) -> Result<Vec<u8>> {
     let prikey = Ed25519KeyPair::from_secret_key(&own_did.private_key_bytes()).get_x25519();
     let did_pubkey = sender.public_key_bytes();
 
