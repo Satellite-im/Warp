@@ -17,7 +17,7 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{Identifier, IdentityUpdate};
 
-use self::identity::{IdentityProfile, IdentityStatus, Platform, Relationship, IdentityImage};
+use self::identity::{IdentityImage, IdentityProfile, IdentityStatus, Platform, Relationship};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
