@@ -321,8 +321,10 @@ impl WarpIpfs {
             uninitialized = uninitialized.set_path(path);
         }
 
-        for addr in config.bootstrap.address() {
-            uninitialized = uninitialized.add_bootstrap(addr);
+        if config.ipfs_setting.bootstrap {
+            for addr in config.bootstrap.address() {
+                uninitialized = uninitialized.add_bootstrap(addr);
+            }
         }
 
         if config.ipfs_setting.memory_transport {
@@ -398,10 +400,19 @@ impl WarpIpfs {
         }
 
         for relay_peer in relay_peers {
-            if let Err(e) = ipfs.enable_relay(Some(relay_peer)).await {
-                error!("Failed to use {relay_peer} as a relay: {e}");
-                continue;
-            }
+            match tokio::time::timeout(Duration::from_secs(15), ipfs.enable_relay(Some(relay_peer)))
+                .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    error!("Failed to use {relay_peer} as a relay: {e}");
+                    continue;
+                }
+                Err(_) => {
+                    error!("Relay connection timed out");
+                    continue;
+                }
+            };
 
             let list = ipfs.list_relays(true).await.unwrap_or_default();
             for addr in list

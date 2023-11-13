@@ -12,7 +12,7 @@ use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus, IdentityUpdate};
 use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
 use warp::tesseract::Tesseract;
-use warp_ipfs::config::{Config, Discovery, DiscoveryType};
+use warp_ipfs::config::{Bootstrap, Config, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
@@ -96,6 +96,7 @@ async fn account(
     }
     if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;
+        config.bootstrap = Bootstrap::None;
         config.ipfs_setting.bootstrap = false;
     }
 
