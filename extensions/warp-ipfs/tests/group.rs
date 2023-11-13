@@ -766,7 +766,6 @@ mod test {
         assert!(conversation.recipients().contains(&did_b));
         assert!(conversation.recipients().contains(&did_c));
 
-
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
 
@@ -918,7 +917,6 @@ mod test {
         assert!(conversation.recipients().contains(&did_b));
         assert!(conversation.recipients().contains(&did_c));
 
-
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
 
@@ -926,7 +924,8 @@ mod test {
 
         tokio::time::timeout(Duration::from_secs(60), async {
             loop {
-                if let Some(MultiPassEventKind::BlockedBy { did }) = account_subscribe_a.next().await
+                if let Some(MultiPassEventKind::BlockedBy { did }) =
+                    account_subscribe_a.next().await
                 {
                     assert_eq!(did, did_c);
                     break;
@@ -967,8 +966,7 @@ mod test {
 
         tokio::time::timeout(Duration::from_secs(60), async {
             loop {
-                if let Some(MultiPassEventKind::Blocked { did }) =
-                    account_subscribe_c.next().await
+                if let Some(MultiPassEventKind::Blocked { did }) = account_subscribe_c.next().await
                 {
                     assert_eq!(did, did_a);
                     break;
