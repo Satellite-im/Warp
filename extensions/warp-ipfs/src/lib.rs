@@ -321,8 +321,10 @@ impl WarpIpfs {
             uninitialized = uninitialized.set_path(path);
         }
 
-        for addr in config.bootstrap.address() {
-            uninitialized = uninitialized.add_bootstrap(addr);
+        if config.ipfs_setting.bootstrap {
+            for addr in config.bootstrap.address() {
+                uninitialized = uninitialized.add_bootstrap(addr);
+            }
         }
 
         if config.ipfs_setting.memory_transport {
