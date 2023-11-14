@@ -259,6 +259,7 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     audio_multiplier: Arc<RwLock<f32>>,
 }
 
+// todo: emit event when the stream closes
 async fn decode_media_stream<T>(args: DecodeMediaStreamArgs<T>) -> Result<(), Error>
 where
     T: Depacketizer,

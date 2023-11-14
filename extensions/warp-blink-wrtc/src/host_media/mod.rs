@@ -21,6 +21,8 @@ use self::{audio::AudioSampleRate, mp4_logger::Mp4LoggerConfig};
 
 pub(crate) mod mp4_logger;
 
+mod controller;
+
 struct Data {
     audio_input_device: Option<cpal::Device>,
     audio_output_device: Option<cpal::Device>,

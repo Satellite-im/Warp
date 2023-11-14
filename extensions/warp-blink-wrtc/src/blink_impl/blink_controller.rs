@@ -30,10 +30,10 @@ use crate::{
 };
 
 use super::{
-    data::{CallDataMap, NotifyWrapper},
-    gossipsub_listener::GossipSubListener,
-    gossipsub_sender::GossipSubSender,
+    data::CallDataMap, gossipsub_listener::GossipSubListener, gossipsub_sender::GossipSubSender,
 };
+
+use crate::notify_wrapper::NotifyWrapper;
 
 #[derive(Debug)]
 enum Cmd {
