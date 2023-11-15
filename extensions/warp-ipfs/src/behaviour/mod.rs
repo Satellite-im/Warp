@@ -6,6 +6,6 @@ use rust_ipfs::libp2p;
 #[derive(NetworkBehaviour)]
 #[behaviour(prelude = "libp2p::swarm::derive_prelude", to_swarm = "void::Void")]
 pub struct Behaviour {
-    pub shuttle_identity: shuttle::identity::Behaviour,
+    pub shuttle_identity: shuttle::identity::client::Behaviour,
     pub phonebook: phonebook::Behaviour,
 }

@@ -45,4 +45,3 @@ pub enum ShuttleNodeQuorum {
     Select(PeerId),
     All,
 }
-

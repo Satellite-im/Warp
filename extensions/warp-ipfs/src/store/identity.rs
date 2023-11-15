@@ -85,7 +85,7 @@ pub struct IdentityStore {
 
     event: broadcast::Sender<MultiPassEventKind>,
 
-    identity_command: Option<futures::channel::mpsc::Sender<shuttle::identity::IdentityCommand>>,
+    identity_command: futures::channel::mpsc::Sender<shuttle::identity::client::IdentityCommand>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,8 +227,8 @@ impl IdentityStore {
         phonebook: PhoneBook,
         config: &config::Config,
         discovery: Discovery,
-        identity_command: Option<
-            futures::channel::mpsc::Sender<shuttle::identity::IdentityCommand>,
+        identity_command: futures::channel::mpsc::Sender<
+            shuttle::identity::client::IdentityCommand,
         >,
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
@@ -1354,42 +1354,42 @@ impl IdentityStore {
         self.root_document.set(root_document).await?;
         let identity = self.root_document.identity().await?;
 
-        if let Some(sender) = self.identity_command.as_mut() {
-            if let DiscoveryConfig::Namespace {
-                discovery_type: DiscoveryType::RzPoint { addresses },
-                ..
-            } = self.discovery.discovery_config()
-            {
-                for addr in addresses {
-                    let Some(peer_id) = addr.peer_id() else {
+        if let DiscoveryConfig::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = self.discovery.discovery_config()
+        {
+            for addr in addresses {
+                let Some(peer_id) = addr.peer_id() else {
+                    continue;
+                };
+
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::Register {
+                        peer_id,
+                        identity: identity.clone().into(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        log::error!("Error registering identity to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        log::error!("Channel been unexpectedly closed for {peer_id}");
                         continue;
-                    };
-
-                    let (tx, rx) = futures::channel::oneshot::channel();
-                    let _ = sender
-                        .send(shuttle::identity::IdentityCommand::Register {
-                            peer_id,
-                            identity: identity.clone().into(),
-                            response: tx,
-                        })
-                        .await;
-
-                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
-                        Ok(Ok(Ok(_))) => {
-                            break;
-                        }
-                        Ok(Ok(Err(e))) => {
-                            log::error!("Error registering identity to {peer_id}: {e}");
-                            break;
-                        }
-                        Ok(Err(Canceled)) => {
-                            log::error!("Channel been unexpectedly closed for {peer_id}");
-                            continue;
-                        }
-                        Err(_) => {
-                            log::error!("Request timeout for {peer_id}");
-                            continue;
-                        }
+                    }
+                    Err(_) => {
+                        log::error!("Request timeout for {peer_id}");
+                        continue;
                     }
                 }
             }
@@ -1401,42 +1401,42 @@ impl IdentityStore {
     }
 
     pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
-        if let Some(sender) = self.identity_command.as_mut() {
-            if let DiscoveryConfig::Namespace {
-                discovery_type: DiscoveryType::RzPoint { addresses },
-                ..
-            } = self.discovery.discovery_config()
-            {
-                for addr in addresses {
-                    let Some(peer_id) = addr.peer_id() else {
+        if let DiscoveryConfig::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = self.discovery.discovery_config()
+        {
+            for addr in addresses {
+                let Some(peer_id) = addr.peer_id() else {
+                    continue;
+                };
+
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::Fetch {
+                        peer_id,
+                        did: did.clone(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(package))) => {
+                        return Ok(package);
+                    }
+                    Ok(Ok(Err(e))) => {
+                        log::error!("Error importing from {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        log::error!("Channel been unexpectedly closed for {peer_id}");
                         continue;
-                    };
-
-                    let (tx, rx) = futures::channel::oneshot::channel();
-                    let _ = sender
-                        .send(shuttle::identity::IdentityCommand::Fetch {
-                            peer_id,
-                            did: did.clone(),
-                            response: tx,
-                        })
-                        .await;
-
-                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
-                        Ok(Ok(Ok(package))) => {
-                            return Ok(package);
-                        }
-                        Ok(Ok(Err(e))) => {
-                            log::error!("Error importing from {peer_id}: {e}");
-                            break;
-                        }
-                        Ok(Err(Canceled)) => {
-                            log::error!("Channel been unexpectedly closed for {peer_id}");
-                            continue;
-                        }
-                        Err(_) => {
-                            log::error!("Request timeout for {peer_id}");
-                            continue;
-                        }
+                    }
+                    Err(_) => {
+                        log::error!("Request timeout for {peer_id}");
+                        continue;
                     }
                 }
             }
@@ -1448,43 +1448,43 @@ impl IdentityStore {
         let document = self.own_identity_document().await?;
         let package = self.root_document.export_bytes().await?;
 
-        if let Some(sender) = self.identity_command.as_mut() {
-            if let DiscoveryConfig::Namespace {
-                discovery_type: DiscoveryType::RzPoint { addresses },
-                ..
-            } = self.discovery.discovery_config()
-            {
-                for addr in addresses {
-                    let Some(peer_id) = addr.peer_id() else {
+        if let DiscoveryConfig::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = self.discovery.discovery_config()
+        {
+            for addr in addresses {
+                let Some(peer_id) = addr.peer_id() else {
+                    continue;
+                };
+
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::Synchronized {
+                        peer_id,
+                        identity: document.clone().into(),
+                        package: Some(package.clone()),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        log::error!("Error exporting to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        log::error!("Channel been unexpectedly closed for {peer_id}");
                         continue;
-                    };
-
-                    let (tx, rx) = futures::channel::oneshot::channel();
-                    let _ = sender
-                        .send(shuttle::identity::IdentityCommand::Synchronized {
-                            peer_id,
-                            identity: document.clone().into(),
-                            package: Some(package.clone()),
-                            response: tx,
-                        })
-                        .await;
-
-                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
-                        Ok(Ok(Ok(_))) => {
-                            break;
-                        }
-                        Ok(Ok(Err(e))) => {
-                            log::error!("Error exporting to {peer_id}: {e}");
-                            break;
-                        }
-                        Ok(Err(Canceled)) => {
-                            log::error!("Channel been unexpectedly closed for {peer_id}");
-                            continue;
-                        }
-                        Err(_) => {
-                            log::error!("Request timeout for {peer_id}");
-                            continue;
-                        }
+                    }
+                    Err(_) => {
+                        log::error!("Request timeout for {peer_id}");
+                        continue;
                     }
                 }
             }
@@ -1615,65 +1615,65 @@ impl IdentityStore {
                 .collect::<Vec<_>>(),
         };
         if idents_docs.is_empty() {
-            if let Some(sender) = self.identity_command.clone().as_mut() {
-                let kind = match lookup {
-                    LookupBy::DidKey(did) => shuttle::identity::protocol::Lookup::PublicKey { did },
-                    LookupBy::DidKeys(list) => {
-                        shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
-                    }
-                    LookupBy::Username(username) => {
-                        shuttle::identity::protocol::Lookup::Username { username, count: 0 }
-                    }
-                    LookupBy::ShortId(short_id) => shuttle::identity::protocol::Lookup::ShortId {
-                        short_id: short_id.try_into()?,
-                    },
-                };
-                if let DiscoveryConfig::Namespace {
-                    discovery_type: DiscoveryType::RzPoint { addresses },
-                    ..
-                } = self.discovery.discovery_config()
-                {
-                    for addr in addresses {
-                        let Some(peer_id) = addr.peer_id() else {
-                            continue;
-                        };
+            let kind = match lookup {
+                LookupBy::DidKey(did) => shuttle::identity::protocol::Lookup::PublicKey { did },
+                LookupBy::DidKeys(list) => {
+                    shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
+                }
+                LookupBy::Username(username) => {
+                    shuttle::identity::protocol::Lookup::Username { username, count: 0 }
+                }
+                LookupBy::ShortId(short_id) => shuttle::identity::protocol::Lookup::ShortId {
+                    short_id: short_id.try_into()?,
+                },
+            };
+            if let DiscoveryConfig::Namespace {
+                discovery_type: DiscoveryType::RzPoint { addresses },
+                ..
+            } = self.discovery.discovery_config()
+            {
+                for addr in addresses {
+                    let Some(peer_id) = addr.peer_id() else {
+                        continue;
+                    };
 
-                        let (tx, rx) = futures::channel::oneshot::channel();
-                        let _ = sender
-                            .send(shuttle::identity::IdentityCommand::Lookup {
-                                peer_id,
-                                kind: kind.clone(),
-                                response: tx,
-                            })
-                            .await;
+                    let (tx, rx) = futures::channel::oneshot::channel();
+                    let _ = self
+                        .identity_command
+                        .clone()
+                        .send(shuttle::identity::client::IdentityCommand::Lookup {
+                            peer_id,
+                            kind: kind.clone(),
+                            response: tx,
+                        })
+                        .await;
 
-                        match tokio::time::timeout(Duration::from_secs(20), rx).await {
-                            Ok(Ok(Ok(list))) => {
-                                for ident in &list {
-                                    let ident = ident.clone().into();
-                                    _ = self.identity_cache.insert(&ident).await;
+                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                        Ok(Ok(Ok(list))) => {
+                            for ident in &list {
+                                let ident = ident.clone().into();
+                                _ = self.identity_cache.insert(&ident).await;
 
-                                    if self.discovery.contains(&ident.did).await {
-                                        continue;
-                                    }
-                                    let _ = self.discovery.insert(&ident.did).await;
+                                if self.discovery.contains(&ident.did).await {
+                                    continue;
                                 }
+                                let _ = self.discovery.insert(&ident.did).await;
+                            }
 
-                                idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
-                                break;
-                            }
-                            Ok(Ok(Err(e))) => {
-                                error!("Error registering identity to {peer_id}: {e}");
-                                break;
-                            }
-                            Ok(Err(Canceled)) => {
-                                error!("Channel been unexpectedly closed for {peer_id}");
-                                continue;
-                            }
-                            Err(_) => {
-                                error!("Request timed out for {peer_id}");
-                                continue;
-                            }
+                            idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
+                            break;
+                        }
+                        Ok(Ok(Err(e))) => {
+                            error!("Error registering identity to {peer_id}: {e}");
+                            break;
+                        }
+                        Ok(Err(Canceled)) => {
+                            error!("Channel been unexpectedly closed for {peer_id}");
+                            continue;
+                        }
+                        Err(_) => {
+                            error!("Request timed out for {peer_id}");
+                            continue;
                         }
                     }
                 }

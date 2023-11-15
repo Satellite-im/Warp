@@ -268,7 +268,7 @@ impl WarpIpfs {
         let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
 
         let behaviour = behaviour::Behaviour {
-            shuttle_identity: shuttle::identity::Behaviour::new(&keypair, None, Some(id_sh_rx)),
+            shuttle_identity: shuttle::identity::client::Behaviour::new(&keypair, id_sh_rx),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
 
@@ -495,7 +495,7 @@ impl WarpIpfs {
             phonebook,
             &config,
             discovery.clone(),
-            Some(id_sh_tx),
+            id_sh_tx,
         )
         .await?;
         info!("Identity initialized");

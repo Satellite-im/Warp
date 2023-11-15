@@ -68,7 +68,7 @@ fn encode_kp(kp: &Keypair) -> anyhow::Result<String> {
 #[derive(NetworkBehaviour)]
 #[behaviour(prelude = "libp2p::swarm::derive_prelude", to_swarm = "void::Void")]
 pub struct Behaviour {
-    identity: identity::Behaviour,
+    identity: identity::server::Behaviour,
     dummy: ext_behaviour::Behaviour,
 }
 
@@ -158,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_ping(None)
         .with_pubsub(None)
         .with_custom_behaviour(Behaviour {
-            identity: identity::Behaviour::new(&keypair, Some(id_event_tx), None),
+            identity: identity::server::Behaviour::new(&keypair, id_event_tx),
             dummy: ext_behaviour::Behaviour,
         })
         .set_keypair(keypair)
