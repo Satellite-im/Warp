@@ -18,8 +18,8 @@ use mime_types::*;
 use uuid::Uuid;
 mod audio_config;
 pub use audio_config::*;
-mod call_config;
-pub use call_config::*;
+mod call_state;
+pub use call_state::*;
 
 use crate::{
     crypto::DID,
@@ -86,7 +86,7 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error>;
     async fn stop_recording(&mut self) -> Result<(), Error>;
 
-    async fn get_call_config(&self) -> Result<Option<CallConfig>, Error>;
+    async fn get_call_state(&self) -> Result<Option<CallState>, Error>;
 
     fn enable_automute(&mut self) -> Result<(), Error>;
     fn disable_automute(&mut self) -> Result<(), Error>;
@@ -133,14 +133,11 @@ pub enum BlinkEventKind {
     ParticipantSpeaking { peer_id: DID },
     #[display(fmt = "SelfSpeaking")]
     SelfSpeaking,
-    #[display(fmt = "ParticipantMuted")]
-    ParticipantMuted { peer_id: DID },
-    #[display(fmt = "ParticipantUnmuted")]
-    ParticipantUnmuted { peer_id: DID },
-    #[display(fmt = "ParticipantDeafened")]
-    ParticipantDeafened { peer_id: DID },
-    #[display(fmt = "ParticipantUndeafened")]
-    ParticipantUndeafened { peer_id: DID },
+    #[display(fmt = "ParticipantStateChanged")]
+    ParticipantStateChanged {
+        peer_id: DID,
+        state: ParticipantState,
+    },
     /// audio packets were dropped for the peer
     #[display(fmt = "AudioDegradation")]
     AudioDegradation { peer_id: DID },
@@ -152,7 +149,7 @@ pub enum BlinkEventKind {
     AudioStreamError,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CallInfo {
     call_id: Uuid,
     conversation_id: Option<Uuid>,
@@ -183,6 +180,10 @@ impl CallInfo {
 
     pub fn participants(&self) -> Vec<DID> {
         self.participants.clone()
+    }
+
+    pub fn contains_participant(&self, id: &DID) -> bool {
+        self.participants.contains(id)
     }
 
     pub fn group_key(&self) -> Vec<u8> {
