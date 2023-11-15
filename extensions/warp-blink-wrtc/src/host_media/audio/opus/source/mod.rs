@@ -6,7 +6,10 @@ use rand::Rng;
 use ringbuf::HeapRb;
 
 use std::{ops::Mul, sync::Arc, time::Duration};
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, Notify},
+    task::JoinHandle,
+};
 use warp::{blink::BlinkEventKind, crypto::DID, error::Error};
 
 use webrtc::{
@@ -32,16 +35,15 @@ pub struct OpusSource {
     webrtc_codec: AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
-    // used to cancel the current packetizer when the input device is changed.
-    packetizer_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_logger: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
     muted: Arc<warp::sync::RwLock<bool>>,
+    notify: Arc<Notify>,
 }
 
 impl Drop for OpusSource {
     fn drop(&mut self) {
-        self.packetizer_handle.abort();
+        self.notify.notify_waiters();
     }
 }
 
@@ -76,7 +78,6 @@ impl SourceTrack for OpusSource {
             track,
             webrtc_codec,
             stream: input_stream,
-            packetizer_handle: join_handle,
             mp4_logger,
             muted,
         })

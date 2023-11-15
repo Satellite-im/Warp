@@ -4,7 +4,10 @@ use cpal::{
 };
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, Notify},
+    task::JoinHandle,
+};
 use warp::{blink::BlinkEventKind, crypto::DID, error::Error, sync::RwLock};
 
 use webrtc::{
@@ -31,17 +34,16 @@ pub struct OpusSink {
     webrtc_codec: AudioCodec,
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
-    decoder_handle: JoinHandle<()>,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_logger: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
     muted: Arc<RwLock<bool>>,
     audio_multiplier: Arc<RwLock<f32>>,
+    notify: Arc<Notify>,
 }
 
 impl Drop for OpusSink {
     fn drop(&mut self) {
-        // this is a failsafe in case the caller doesn't close the associated TrackRemote
-        self.decoder_handle.abort();
+        self.notify.notify_waiters();
     }
 }
 
@@ -90,7 +92,9 @@ impl OpusSink {
         let muted2 = muted.clone();
         let audio_multiplier = Arc::new(RwLock::new(1.0));
         let audio_multiplier2 = audio_multiplier.clone();
-        let join_handle = tokio::spawn(async move {
+        let notify = Arc::new(Notify::new());
+        let notify2 = notify.clone();
+        tokio::spawn(async move {
             if let Err(e) = decode_media_stream(DecodeMediaStreamArgs {
                 track: track2,
                 sample_builder,
@@ -102,6 +106,7 @@ impl OpusSink {
                 mp4_writer: mp4_logger2,
                 muted: muted2,
                 audio_multiplier: audio_multiplier2,
+                notify: notify2,
             })
             .await
             {
@@ -157,11 +162,11 @@ impl OpusSink {
             stream: output_stream,
             track,
             webrtc_codec,
-            decoder_handle: join_handle,
             event_ch,
             mp4_logger,
             muted,
             audio_multiplier,
+            notify,
         })
     }
 }
@@ -209,7 +214,7 @@ impl SinkTrack for OpusSink {
         self.stream
             .pause()
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
-        self.decoder_handle.abort();
+        self.notify.notify_waiters();
         let new_sink = OpusSink::init_internal(
             self.peer_id.clone(),
             self.event_ch.clone(),
@@ -229,6 +234,7 @@ impl SinkTrack for OpusSink {
         Ok(())
     }
 
+    // todo: this seems wrong. would only allow for recording one track at a time
     fn init_mp4_logger(&mut self) -> Result<(), Error> {
         let mp4_logger = mp4_logger::get_audio_logger(&self.peer_id)?;
         self.mp4_logger.write().replace(mp4_logger);
@@ -257,6 +263,7 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     mp4_writer: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
     muted: Arc<RwLock<bool>>,
     audio_multiplier: Arc<RwLock<f32>>,
+    notify: Arc<Notify>,
 }
 
 // todo: emit event when the stream closes
@@ -275,6 +282,7 @@ where
         mp4_writer,
         muted,
         audio_multiplier,
+        notify,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
