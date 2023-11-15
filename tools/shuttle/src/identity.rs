@@ -303,6 +303,7 @@ impl NetworkBehaviour for Behaviour {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
+        //TODO: Add external address in peer record to pass to peers
         self.external_addresses.on_swarm_event(&event);
         self.inner.on_swarm_event(event)
     }
