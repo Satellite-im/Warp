@@ -4,7 +4,7 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt, TryFutureExt,
 };
-use libipld::{Cid, Ipld};
+use libipld::Cid;
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -15,8 +15,8 @@ use warp::{
     error::Error,
     logging::tracing::log::info,
     raygun::{
-        Conversation, ConversationType, Message, MessageOptions, MessagePage, Messages,
-        MessagesType,
+        Conversation, ConversationType, Message, MessageOptions, MessagePage, MessageReference,
+        Messages, MessagesType,
     },
 };
 
@@ -286,19 +286,13 @@ impl ConversationDocument {
     }
 
     pub async fn messages_length(&self, ipfs: &Ipfs) -> Result<usize, Error> {
-        let document = self.get_raw_message_list(ipfs).await?;
-        if let Ipld::List(list) = document {
-            return Ok(list.len());
-        }
-        Err(Error::InvalidDataType)
+        self.get_message_list(ipfs).await.map(|l| l.len())
     }
 
     pub async fn get_message_list(&self, ipfs: &Ipfs) -> Result<BTreeSet<MessageDocument>, Error> {
         match self.messages {
             Some(cid) => ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -308,19 +302,6 @@ impl ConversationDocument {
         }
     }
 
-    pub async fn get_raw_message_list(&self, ipfs: &Ipfs) -> Result<Ipld, Error> {
-        match self.messages {
-            Some(cid) => ipfs
-                .dag()
-                .get()
-                .path(cid)
-                .local()
-                .await
-                .map_err(anyhow::Error::from)
-                .map_err(Error::from),
-            None => Ok(Ipld::List(vec![])),
-        }
-    }
     pub async fn set_message_list(
         &mut self,
         ipfs: &Ipfs,
@@ -345,6 +326,65 @@ impl ConversationDocument {
             .collect::<Vec<_>>()
             .await;
         Ok(list)
+    }
+
+    pub async fn get_messages_reference_stream<'a>(
+        &self,
+        ipfs: &Ipfs,
+        option: MessageOptions,
+    ) -> Result<BoxStream<'a, MessageReference>, Error> {
+        let message_list = self.get_message_list(ipfs).await?;
+
+        if message_list.is_empty() {
+            return Ok(stream::empty().boxed());
+        }
+
+        let mut messages = Vec::from_iter(message_list);
+
+        if option.reverse() {
+            messages.reverse()
+        }
+
+        if option.first_message() && !messages.is_empty() {
+            let message = messages.first().copied().ok_or(Error::MessageNotFound)?;
+            return Ok(stream::once(async move { message.into() }).boxed());
+        }
+
+        if option.last_message() && !messages.is_empty() {
+            let message = messages.last().copied().ok_or(Error::MessageNotFound)?;
+            return Ok(stream::once(async move { message.into() }).boxed());
+        }
+
+        let stream = async_stream::stream! {
+            let mut remaining = option.limit();
+            for (index, document) in messages.iter().enumerate() {
+                if remaining.as_ref().map(|x| *x == 0).unwrap_or_default() {
+                    break;
+                }
+                if let Some(range) = option.range() {
+                    if range.start > index || range.end < index {
+                        continue
+                    }
+                }
+                if let Some(range) = option.date_range() {
+                    if !(document.date >= range.start && document.date <= range.end) {
+                        continue
+                    }
+                }
+
+                if option.pinned() && !document.pinned {
+                    continue;
+                }
+
+                if let Some(remaining) = remaining.as_mut() {
+                    *remaining = remaining.saturating_sub(1);
+                }
+
+                yield document.into()
+            }
+        };
+
+        Ok(stream.boxed())
     }
 
     pub async fn get_messages_stream<'a>(
@@ -587,7 +627,35 @@ pub struct MessageDocument {
     pub conversation_id: Uuid,
     pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replied: Option<Uuid>,
     pub message: Cid,
+}
+
+impl From<MessageDocument> for MessageReference {
+    fn from(document: MessageDocument) -> Self {
+        Self::from(&document)
+    }
+}
+
+impl From<&MessageDocument> for MessageReference {
+    fn from(document: &MessageDocument) -> Self {
+        let mut reference = MessageReference::default();
+        reference.set_id(document.id);
+        reference.set_conversation_id(document.conversation_id);
+        reference.set_date(document.date);
+        if let Some(modified) = document.modified {
+            reference.set_modified(modified);
+        }
+        reference.set_pinned(document.pinned);
+        reference.set_replied(document.replied);
+        reference.set_sender(document.sender.to_did());
+        reference
+    }
 }
 
 impl PartialOrd for MessageDocument {
@@ -613,6 +681,9 @@ impl MessageDocument {
         let conversation_id = message.conversation_id();
         let date = message.date();
         let sender = message.sender();
+        let pinned = message.pinned();
+        let modified = message.modified();
+        let replied = message.replied();
 
         let bytes = serde_json::to_vec(&message)?;
 
@@ -634,6 +705,9 @@ impl MessageDocument {
             conversation_id,
             date,
             message,
+            pinned,
+            modified,
+            replied,
         };
 
         Ok(document)
@@ -676,6 +750,9 @@ impl MessageDocument {
             }
             None => ecdh_encrypt(did, Some(&self.sender.to_did()), &bytes)?,
         };
+
+        self.pinned = message.pinned();
+        self.modified = message.modified();
 
         let message_cid = ipfs.dag().put().serialize(data)?.await?;
 
