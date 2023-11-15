@@ -48,7 +48,9 @@ enum Cmd {
         webrtc_codec: AudioCodec,
         rsp: oneshot::Sender<Result<(), Error>>,
     },
-    // RemoveAudioSinkTrack,
+    RemoveSinkTrack {
+        peer_id: DID,
+    },
     ChangeAudioInput {
         device: cpal::Device,
         rsp: oneshot::Sender<Result<(), Error>>,
@@ -71,9 +73,6 @@ enum Cmd {
     },
     GetAudioDeviceConfig {
         rsp: oneshot::Sender<DeviceConfig>,
-    },
-    RemoveSinkTrack {
-        peer_id: DID,
     },
     MuteSelf,
     UnmuteSelf,
