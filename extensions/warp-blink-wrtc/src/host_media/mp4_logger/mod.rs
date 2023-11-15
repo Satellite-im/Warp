@@ -66,7 +66,7 @@ struct MpLoggerConfigInternal {
     // video_track_ids: HashMap<DID, u32>,
 }
 
-pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
+pub fn init(config: Mp4LoggerConfig) -> Result<()> {
     let call_id = config.call_id;
     let log_path = config.log_path.clone();
 
@@ -129,7 +129,7 @@ pub fn resume() {
     }
 }
 
-pub async fn deinit() {
+pub fn deinit() {
     let _ = MP4_LOGGER.write().take();
 }
 

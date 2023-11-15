@@ -99,25 +99,20 @@ pub struct Args {
 #[derive(Clone)]
 pub struct Controller {
     ch: UnboundedSender<Cmd>,
-    notify: Arc<NotifyWrapper>,
 }
 
 impl Controller {
     pub fn new(args: Args) -> Self {
-        let notify = Arc::new(Notify::new());
-        let notify2 = notify.clone();
         let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(async {
-            if let Err(e) = run(args, rx, notify2).await {
+        std::thread::spawn(|| {
+            if let Err(e) = run(args, rx) {
                 log::error!("host_media controller: {e}");
             } else {
                 log::debug!("terminating host_media controller");
             }
         });
-        Self {
-            ch: tx,
-            notify: Arc::new(NotifyWrapper { notify }),
-        }
+
+        Self { ch: tx }
     }
 }
 
@@ -156,28 +151,10 @@ impl ControllerInternal {
     }
 }
 
-async fn run(
-    args: Args,
-    mut ch: UnboundedReceiver<Cmd>,
-    notify: Arc<Notify>,
-) -> anyhow::Result<()> {
+fn run(args: Args, mut ch: UnboundedReceiver<Cmd>) -> anyhow::Result<()> {
     let mut data = ControllerInternal::new();
 
-    loop {
-        let cmd = tokio::select! {
-            _ = notify.notified() => {
-                log::debug!("audio controller terminated via notify");
-                break;
-            }
-            opt = ch.recv() => match opt {
-                Some(cmd) => cmd,
-                None => {
-                    log::debug!("audio controller cmd channel closed. terminating");
-                    break;
-                }
-            }
-        };
-
+    while let Some(cmd) = ch.blocking_recv() {
         match cmd {
             Cmd::GetInputDeviceName { rsp } => {
                 let _ = rsp.send(data.get_input_device_name());
@@ -186,7 +163,7 @@ async fn run(
                 let _ = rsp.send(data.get_output_device_name());
             }
             Cmd::Reset => {
-                data.reset().await;
+                data.reset();
             }
             Cmd::HasAudioSource { rsp } => {
                 let _ = rsp.send(data.has_audio_source());
@@ -197,15 +174,12 @@ async fn run(
                 webrtc_codec,
                 rsp,
             } => {
-                let _ = rsp.send(
-                    data.create_audio_source_track(
-                        own_id,
-                        args.ui_event_ch.clone(),
-                        track,
-                        webrtc_codec,
-                    )
-                    .await,
-                );
+                let _ = rsp.send(data.create_audio_source_track(
+                    own_id,
+                    args.ui_event_ch.clone(),
+                    track,
+                    webrtc_codec,
+                ));
             }
             Cmd::RemoveAudioSourceTrack => {
                 data.remove_audio_source_track();
@@ -223,7 +197,6 @@ async fn run(
                         track,
                         webrtc_codec,
                     )
-                    .await
                     .map_err(|e| Error::OtherWithContext(e.to_string())),
                 );
             }
@@ -280,7 +253,6 @@ async fn run(
             Cmd::InitRecording { config, rsp } => {
                 let _ = rsp.send(
                     data.init_recording(config)
-                        .await
                         .map_err(|e| Error::OtherWithContext(e.to_string())),
                 );
             }
@@ -317,14 +289,14 @@ impl ControllerInternal {
             .and_then(|x| x.name().ok())
     }
 
-    pub async fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.audio_source_track.take();
         self.audio_sink_tracks.clear();
         self.recording = false;
         self.muted = false;
         self.deafened = false;
 
-        mp4_logger::deinit().await;
+        mp4_logger::deinit();
     }
 
     pub fn has_audio_source(&self) -> bool {
@@ -334,7 +306,7 @@ impl ControllerInternal {
     // turns a track, device, and codec into a SourceTrack, which reads and packetizes audio input.
     // webrtc should remove the old media source before this is called.
     // use AUDIO_SOURCE_ID
-    pub async fn create_audio_source_track(
+    pub fn create_audio_source_track(
         &mut self,
         own_id: DID,
         ui_event_ch: broadcast::Sender<BlinkEventKind>,
@@ -384,7 +356,7 @@ impl ControllerInternal {
         Ok(())
     }
 
-    pub async fn create_audio_sink_track(
+    pub fn create_audio_sink_track(
         &mut self,
         peer_id: DID,
         event_ch: broadcast::Sender<BlinkEventKind>,
@@ -542,14 +514,14 @@ impl ControllerInternal {
     // but that instance (when uninitialized) won't do anything.
     // when the user issues the command to begin recording, mp4_logger needs to be initialized and
     // the source and sink tracks need to be told to get a new instance of mp4_logger.
-    pub async fn init_recording(&mut self, config: Mp4LoggerConfig) -> anyhow::Result<()> {
+    pub fn init_recording(&mut self, config: Mp4LoggerConfig) -> anyhow::Result<()> {
         if self.recording {
             // this function was called twice for the same call. assume they mean to resume
             mp4_logger::resume();
             return Ok(());
         }
 
-        mp4_logger::init(config).await?;
+        mp4_logger::init(config)?;
 
         self.recording = true;
 
