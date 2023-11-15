@@ -454,6 +454,68 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{table}")?;
                         },
+                        Some("/list-references") => {
+
+                            let local_topic = *topic.read();
+                            let mut lower_range = None;
+                            let mut upper_range = None;
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(lower) => {
+                                        lower_range = Some(lower);
+                                        if let Some(id) = cmd_line.next() {
+                                            match id.parse() {
+                                                Ok(upper) => {
+                                                    upper_range = Some(upper);
+                                                },
+                                                Err(e) => {
+                                                    writeln!(stdout, "Error parsing upper range: {e}")?;
+                                                    continue
+                                                }
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing lower range: {e}")?;
+                                        continue
+                                    }
+                                }
+                            };
+
+                            let mut opt = MessageOptions::default();
+                            if let Some(lower) = lower_range {
+                                if let Some(upper) = upper_range {
+                                    opt = opt.set_range(lower..upper);
+                                } else {
+                                    opt = opt.set_range(0..lower);
+                                }
+                            }
+
+                            let mut messages_stream = match chat.get_message_references(local_topic, opt).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+
+
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Conversation ID", "Date", "Modified", "Sender", "Pinned"]);
+                            while let Some(message) = messages_stream.next().await {
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &format!("{}", message.pinned()),
+                                ]);
+                            }
+                            writeln!(stdout, "{table}")?
+                        }
                         Some("/list") => {
 
                             let local_topic = *topic.read();
