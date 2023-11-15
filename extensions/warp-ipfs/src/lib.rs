@@ -46,9 +46,9 @@ use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
 use warp::raygun::{
     AttachmentEventStream, Conversation, EmbedState, Location, Message, MessageEvent,
-    MessageEventStream, MessageOptions, MessageStatus, Messages, PinState, RayGun,
-    RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents, RayGunGroupConversation,
-    RayGunStream, ReactionState,
+    MessageEventStream, MessageOptions, MessageReference, MessageStatus, Messages, PinState,
+    RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
+    RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 
@@ -304,7 +304,7 @@ impl WarpIpfs {
             .set_keypair(keypair)
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
-                yamux_receive_window_size: 256*1024,
+                yamux_receive_window_size: 256 * 1024,
                 yamux_max_buffer_size: 1024 * 1024,
                 yamux_update_mode: UpdateMode::Read,
                 ..Default::default()
@@ -1283,6 +1283,26 @@ impl RayGun for WarpIpfs {
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
         self.messaging_store()?
             .get_message(conversation_id, message_id)
+            .await
+    }
+
+    async fn get_message_references(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        self.messaging_store()?
+            .get_message_references(conversation_id, opt)
+            .await
+    }
+
+    async fn get_message_reference(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        self.messaging_store()?
+            .get_message_reference(conversation_id, message_id)
             .await
     }
 
