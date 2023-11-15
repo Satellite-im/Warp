@@ -442,10 +442,12 @@ impl ConversationDocument {
                         continue
                     }
                 }
+
+                if option.pinned() && !document.pinned {
+                    continue;
+                }
+
                 if let Ok(message) = document.resolve(&ipfs, &did, keystore.as_ref()).await {
-                    if option.pinned() && !message.pinned() {
-                        continue;
-                    }
                     let should_yield = if let Some(keyword) = option.keyword() {
                          message
                             .lines()
