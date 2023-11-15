@@ -132,7 +132,7 @@ impl ControllerInternal {
         Ok(())
     }
 
-    pub async fn remove_audio_source_track(&mut self) -> anyhow::Result<()> {
+    pub fn remove_audio_source_track(&mut self) -> anyhow::Result<()> {
         self.audio_source_track.take();
         Ok(())
     }

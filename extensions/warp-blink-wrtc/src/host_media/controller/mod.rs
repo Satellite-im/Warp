@@ -118,6 +118,157 @@ impl Controller {
     }
 }
 
+impl Controller {
+    pub async fn get_input_device_name(&self) -> Option<String> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::GetInputDeviceName { rsp: tx }).ok()?;
+        rx.await.ok()?
+    }
+
+    pub async fn get_output_device_name(&self) -> Option<String> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::GetOutputDeviceName { rsp: tx }).ok()?;
+        rx.await.ok()?
+    }
+
+    pub async fn reset(&mut self) {
+        let _ = self.ch.send(Cmd::Reset);
+    }
+
+    pub async fn has_audio_source(&self) -> bool {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::HasAudioSource { rsp: tx });
+        rx.await.ok().unwrap_or_default()
+    }
+
+    pub async fn create_audio_source_track(
+        &mut self,
+        own_id: DID,
+        track: Arc<TrackLocalStaticRTP>,
+        webrtc_codec: AudioCodec,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::CreateAudioSourceTrack {
+            own_id,
+            track,
+            webrtc_codec,
+            rsp: tx,
+        });
+        rx.await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?
+    }
+
+    pub async fn remove_audio_source_track(&mut self) {
+        self.ch.send(Cmd::RemoveAudioSourceTrack);
+    }
+
+    pub async fn create_audio_sink_track(
+        &mut self,
+        peer_id: DID,
+        track: Arc<TrackRemote>,
+        // the format to decode to. Opus supports encoding and decoding to arbitrary sample rates and number of channels.
+        webrtc_codec: AudioCodec,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::CreateAudioSinkTrack {
+            peer_id,
+            track,
+            webrtc_codec,
+            rsp: tx,
+        });
+        rx.await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?
+    }
+
+    pub async fn change_audio_input(&mut self, device: cpal::Device) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::ChangeAudioInput { device, rsp: tx });
+        rx.await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?
+    }
+
+    pub async fn set_audio_source_config(&mut self, source_config: AudioHardwareConfig) {
+        self.ch.send(Cmd::SetAudioSourceConfig { source_config });
+    }
+
+    pub async fn get_audio_source_config(&self) -> Result<AudioHardwareConfig, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::GetAudioSourceConfig { rsp: tx });
+        Ok(rx
+            .await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?)
+    }
+
+    pub async fn change_audio_output(&mut self, device: cpal::Device) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::ChangeAudioInput { device, rsp: tx });
+        rx.await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?
+    }
+
+    pub async fn set_audio_sink_config(&mut self, sink_config: AudioHardwareConfig) {
+        self.ch.send(Cmd::SetAudioSinkConfig { sink_config });
+    }
+
+    pub async fn get_audio_sink_config(&self) -> Result<AudioHardwareConfig, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::GetAudioSinkConfig { rsp: tx });
+        Ok(rx
+            .await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?)
+    }
+
+    pub async fn get_audio_device_config(&self) -> Result<DeviceConfig, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::GetAudioDeviceConfig { rsp: tx });
+        Ok(rx
+            .await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?)
+    }
+
+    pub async fn remove_sink_track(&mut self, peer_id: DID) {
+        self.ch.send(Cmd::RemoveSinkTrack { peer_id });
+    }
+
+    pub async fn mute_self(&mut self) {
+        self.ch.send(Cmd::MuteSelf);
+    }
+
+    pub async fn unmute_self(&mut self) {
+        self.ch.send(Cmd::UnmuteSelf);
+    }
+
+    pub async fn deafen(&mut self) {
+        self.ch.send(Cmd::Deafen);
+    }
+
+    pub async fn undeafen(&mut self) {
+        self.ch.send(Cmd::Undeafen);
+    }
+
+    pub async fn init_recording(&mut self, config: Mp4LoggerConfig) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::InitRecording { config, rsp: tx });
+        rx.await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?
+    }
+
+    pub async fn set_peer_audio_gain(
+        &mut self,
+        peer_id: DID,
+        multiplier: f32,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.ch.send(Cmd::SetPeerAudioGain {
+            peer_id,
+            multiplier,
+            rsp: tx,
+        });
+        rx.await
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?
+    }
+}
+
 fn run(args: Args, mut ch: UnboundedReceiver<Cmd>) -> anyhow::Result<()> {
     let mut controller = ControllerInternal::new();
 
