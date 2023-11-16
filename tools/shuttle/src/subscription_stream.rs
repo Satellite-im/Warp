@@ -1,8 +1,8 @@
-use futures::stream::SelectAll;
 use futures::SinkExt;
 use futures::StreamExt;
 use rust_ipfs::Ipfs;
 use rust_ipfs::SubscriptionStream;
+use tokio_stream::StreamMap;
 
 #[derive(Clone)]
 pub struct Subscriptions {
@@ -15,7 +15,7 @@ impl Subscriptions {
 
         let mut task = SubscriptionTask {
             ipfs: ipfs.clone(),
-            select_stream: SelectAll::default(),
+            select_stream: StreamMap::default(),
             rx,
         };
 
@@ -43,7 +43,7 @@ impl Subscriptions {
 
 struct SubscriptionTask {
     ipfs: Ipfs,
-    select_stream: SelectAll<SubscriptionStream>,
+    select_stream: StreamMap<String, SubscriptionStream>,
     rx: futures::channel::mpsc::Receiver<SubscriptionCommand>,
 }
 
@@ -52,12 +52,15 @@ impl SubscriptionTask {
         loop {
             tokio::select! {
                 //Poll all streams so the internal channels can be flushed out without
-                //stopping those subcribed streams 
+                //stopping those subcribed streams
                 _ = self.select_stream.next() => {},
                 Some(command) = self.rx.next() => {
                     match command {
                         SubscriptionCommand::Susbcribe { topic, response } => {
                             _ = response.send(self.subscribe(topic).await);
+                        },
+                        SubscriptionCommand::Unsubscribe { topic, response } => {
+                            _ = response.send(self.unsubscribe(topic).await);
                         },
                     }
                 }
@@ -66,14 +69,24 @@ impl SubscriptionTask {
     }
 
     async fn subscribe(&mut self, topic: String) -> Result<(), anyhow::Error> {
-        let stream = self.ipfs.pubsub_subscribe(topic).await?;
-        self.select_stream.push(stream);
+        let stream = self.ipfs.pubsub_subscribe(topic.clone()).await?;
+        self.select_stream.insert(topic, stream);
+        Ok(())
+    }
+
+    async fn unsubscribe(&mut self, topic: String) -> Result<(), anyhow::Error> {
+        self.ipfs.pubsub_unsubscribe(&topic).await?;
+        self.select_stream.remove(&topic);
         Ok(())
     }
 }
 
 enum SubscriptionCommand {
     Susbcribe {
+        topic: String,
+        response: futures::channel::oneshot::Sender<Result<(), anyhow::Error>>,
+    },
+    Unsubscribe {
         topic: String,
         response: futures::channel::oneshot::Sender<Result<(), anyhow::Error>>,
     },
