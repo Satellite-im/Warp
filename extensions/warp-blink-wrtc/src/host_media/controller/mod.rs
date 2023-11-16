@@ -1,25 +1,23 @@
-use anyhow::bail;
-use cpal::traits::{DeviceTrait, HostTrait};
+
+
 use futures::channel::oneshot;
-use once_cell::sync::Lazy;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{broadcast, RwLock};
+
+use std::{sync::Arc};
+use tokio::sync::{broadcast};
 use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-use crate::notify_wrapper::NotifyWrapper;
+
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
-    Notify,
 };
 
 use super::{
     audio::{
-        self, create_sink_track, create_source_track, AudioCodec, AudioHardwareConfig,
-        AudioSampleRate, DeviceConfig,
+        self, AudioCodec, AudioHardwareConfig, DeviceConfig,
     },
     mp4_logger::{self, Mp4LoggerConfig},
 };
@@ -194,9 +192,9 @@ impl Controller {
     pub async fn get_audio_source_config(&self) -> Result<AudioHardwareConfig, Error> {
         let (tx, rx) = oneshot::channel();
         self.ch.send(Cmd::GetAudioSourceConfig { rsp: tx });
-        Ok(rx
+        rx
             .await
-            .map_err(|e| Error::OtherWithContext(e.to_string()))?)
+            .map_err(|e| Error::OtherWithContext(e.to_string()))
     }
 
     pub async fn change_audio_output(&self, device: cpal::Device) -> Result<(), Error> {
@@ -213,17 +211,17 @@ impl Controller {
     pub async fn get_audio_sink_config(&self) -> Result<AudioHardwareConfig, Error> {
         let (tx, rx) = oneshot::channel();
         self.ch.send(Cmd::GetAudioSinkConfig { rsp: tx });
-        Ok(rx
+        rx
             .await
-            .map_err(|e| Error::OtherWithContext(e.to_string()))?)
+            .map_err(|e| Error::OtherWithContext(e.to_string()))
     }
 
     pub async fn get_audio_device_config(&self) -> Result<DeviceConfig, Error> {
         let (tx, rx) = oneshot::channel();
         self.ch.send(Cmd::GetAudioDeviceConfig { rsp: tx });
-        Ok(rx
+        rx
             .await
-            .map_err(|e| Error::OtherWithContext(e.to_string()))?)
+            .map_err(|e| Error::OtherWithContext(e.to_string()))
     }
 
     pub fn remove_sink_track(&self, peer_id: DID) {

@@ -222,7 +222,7 @@ impl BlinkController {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run(mut args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>) {
+async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>) {
     let Args {
         mut webrtc_controller,
         mut webrtc_event_stream,

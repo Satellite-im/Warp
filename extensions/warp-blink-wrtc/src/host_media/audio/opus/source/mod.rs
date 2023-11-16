@@ -15,7 +15,6 @@ use std::{
 };
 use tokio::{
     sync::{broadcast, Notify},
-    task::JoinHandle,
 };
 use warp::{blink::BlinkEventKind, crypto::DID, error::Error};
 

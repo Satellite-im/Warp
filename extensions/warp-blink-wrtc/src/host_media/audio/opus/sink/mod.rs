@@ -6,7 +6,6 @@ use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
 use tokio::{
     sync::{broadcast, Notify},
-    task::JoinHandle,
 };
 use warp::{blink::BlinkEventKind, crypto::DID, error::Error, sync::RwLock};
 
@@ -282,7 +281,7 @@ where
         mp4_writer,
         muted,
         audio_multiplier,
-        notify,
+        notify: _,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
