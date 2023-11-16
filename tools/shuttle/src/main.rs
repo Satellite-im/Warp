@@ -11,7 +11,7 @@ use shuttle::{
         },
     },
     subscription_stream::Subscriptions,
-    PeerTopic,
+    PeerIdExt, PeerTopic,
 };
 use warp::crypto::DID;
 
@@ -23,12 +23,18 @@ use base64::{
     Engine,
 };
 use clap::Parser;
-use futures::StreamExt;
-use rust_ipfs::{libp2p, Ipfs, IpfsPath, PeerId};
+use futures::{SinkExt, StreamExt};
 use rust_ipfs::{
     libp2p::swarm::NetworkBehaviour,
     p2p::{IdentifyConfiguration, RateLimit, RelayConfig, TransportConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
+};
+use rust_ipfs::{
+    libp2p::{
+        self,
+        core::{PeerRecord, SignedEnvelope},
+    },
+    Ipfs, IpfsPath, PeerId,
 };
 
 use zeroize::Zeroizing;
@@ -148,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
     let (id_event_tx, mut id_event_rx) = futures::channel::mpsc::channel(1);
-
+    let (mut precord_tx, precord_rx) = futures::channel::mpsc::channel(256);
     let mut uninitialized = UninitializedIpfs::new()
         .with_identify(Some(IdentifyConfiguration {
             agent_version: format!("shuttle/{}", env!("CARGO_PKG_VERSION")),
@@ -158,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_ping(None)
         .with_pubsub(None)
         .with_custom_behaviour(Behaviour {
-            identity: identity::server::Behaviour::new(&keypair, id_event_tx),
+            identity: identity::server::Behaviour::new(&keypair, id_event_tx, precord_rx),
             dummy: ext_behaviour::Behaviour,
         })
         .set_keypair(keypair)
@@ -300,6 +306,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(package) = package {
                         _temp_package.insert(did, package);
                     }
+
+                    let _ = resp.send((
+                        ch,
+                        Either::Right(Response::SynchronizedResponse(SynchronizedResponse::Ok {
+                            identity: None,
+                            package: None,
+                        })),
+                    ));
+                    continue;
+                }
+                identity::protocol::Request::Synchronized(Synchronized::PeerRecord { record }) => {
+                    let signed_envelope = match SignedEnvelope::from_protobuf_encoding(&record) {
+                        Ok(signed_envelope) => signed_envelope,
+                        Err(e) => {
+                            let _ = resp.send((
+                                ch,
+                                Either::Right(Response::SynchronizedResponse(
+                                    identity::protocol::SynchronizedResponse::Error(
+                                        SynchronizedError::InvalidPayload { msg: e.to_string() },
+                                    ),
+                                )),
+                            ));
+                            continue;
+                        }
+                    };
+
+                    let record = match PeerRecord::from_signed_envelope(signed_envelope) {
+                        Ok(record) => record,
+                        Err(e) => {
+                            let _ = resp.send((
+                                ch,
+                                Either::Right(Response::SynchronizedResponse(
+                                    identity::protocol::SynchronizedResponse::Error(
+                                        SynchronizedError::InvalodRecord { msg: e.to_string() },
+                                    ),
+                                )),
+                            ));
+                            continue;
+                        }
+                    };
+
+                    if !record
+                        .peer_id()
+                        .to_did()
+                        .map(|did| temp_registeration.contains_key(&did))
+                        .unwrap_or_default()
+                    {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::NotRegistered,
+                                ),
+                            )),
+                        ));
+
+                        continue;
+                    }
+
+                    _ = precord_tx.send(record).await;
 
                     let _ = resp.send((
                         ch,

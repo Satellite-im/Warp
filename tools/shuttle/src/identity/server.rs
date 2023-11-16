@@ -4,14 +4,14 @@ use std::{
 };
 
 use either::Either;
-use futures::{channel::oneshot::Canceled, FutureExt};
+use futures::{channel::oneshot::Canceled, FutureExt, StreamExt};
 use rust_ipfs::{
     libp2p::{
-        core::Endpoint,
+        core::{Endpoint, PeerRecord},
         request_response::{InboundRequestId, ResponseChannel},
         swarm::{
-            ConnectionDenied, ConnectionId, ExternalAddresses, FromSwarm, THandler,
-            THandlerInEvent, THandlerOutEvent, ToSwarm,
+            ConnectionDenied, ConnectionId, FromSwarm, THandler, THandlerInEvent, THandlerOutEvent,
+            ToSwarm,
         },
     },
     Keypair, Multiaddr, NetworkBehaviour, PeerId,
@@ -46,7 +46,8 @@ pub struct Behaviour {
     queue_event:
         HashMap<InboundRequestId, (Option<ResponseChannel<Response>>, Either<Request, Response>)>,
 
-    external_addresses: ExternalAddresses,
+    precord_rx: futures::channel::mpsc::Receiver<PeerRecord>,
+    peer_records: HashMap<PeerId, PeerRecord>,
 }
 
 impl Behaviour {
@@ -62,6 +63,7 @@ impl Behaviour {
                 either::Either<Request, Response>,
             )>,
         )>,
+        precord_rx: futures::channel::mpsc::Receiver<PeerRecord>,
     ) -> Self {
         Self {
             inner: request_response::json::Behaviour::new(
@@ -72,7 +74,8 @@ impl Behaviour {
             process_event,
             waiting_on_request: Default::default(),
             queue_event: Default::default(),
-            external_addresses: ExternalAddresses::default(),
+            peer_records: Default::default(),
+            precord_rx,
         }
     }
 
@@ -156,8 +159,6 @@ impl NetworkBehaviour for Behaviour {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
-        //TODO: Add external address in peer record to pass to peers
-        self.external_addresses.on_swarm_event(&event);
         self.inner.on_swarm_event(event)
     }
 
@@ -208,6 +209,11 @@ impl NetworkBehaviour for Behaviour {
                 }
                 _ => {}
             };
+        }
+
+        while let Poll::Ready(Some(record)) = self.precord_rx.poll_next_unpin(cx) {
+            let peer_id = record.peer_id();
+            self.peer_records.insert(peer_id, record);
         }
 
         self.queue_event.retain(

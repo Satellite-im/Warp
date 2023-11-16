@@ -176,6 +176,12 @@ impl Behaviour {
                         super::protocol::SynchronizedError::Invalid => {
                             warp::error::Error::IdentityInvalid
                         }
+                        super::protocol::SynchronizedError::InvalidPayload { msg } => {
+                            warp::error::Error::OtherWithContext(msg)
+                        }
+                        super::protocol::SynchronizedError::InvalodRecord { msg }=> {
+                            warp::error::Error::OtherWithContext(msg)
+                        }
                     };
                     match self.waiting_on_response.remove(&id) {
                         Some(IdentityResponse::Synchronized { response }) => {

@@ -77,6 +77,9 @@ pub enum RegisterError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Synchronized {
+    PeerRecord {
+        record: Vec<u8>,
+    },
     Store {
         document: IdentityDocument,
         package: Option<Vec<u8>>,
@@ -103,4 +106,6 @@ pub enum SynchronizedError {
     Forbidden,
     NotRegistered,
     Invalid,
+    InvalidPayload { msg: String },
+    InvalodRecord { msg: String },
 }
