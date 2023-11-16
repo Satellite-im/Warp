@@ -39,6 +39,20 @@ impl Subscriptions {
 
         rx.await?
     }
+
+    pub async fn unsubscribe(&mut self, topic: String) -> anyhow::Result<()> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+
+        _ = self
+            .tx
+            .send(SubscriptionCommand::Unsubscribe {
+                topic,
+                response: tx,
+            })
+            .await;
+
+        rx.await?
+    }
 }
 
 struct SubscriptionTask {
