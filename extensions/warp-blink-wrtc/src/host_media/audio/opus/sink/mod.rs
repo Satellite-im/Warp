@@ -3,7 +3,13 @@ use cpal::{
     BuildStreamError, SampleRate,
 };
 use ringbuf::HeapRb;
-use std::{cmp::Ordering, sync::Arc};
+use std::{
+    cmp::Ordering,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
+};
 use tokio::sync::{broadcast, Notify};
 use warp::{blink::BlinkEventKind, crypto::DID, error::Error, sync::RwLock};
 
@@ -33,7 +39,7 @@ pub struct OpusSink {
     stream: cpal::Stream,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_logger: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
-    muted: Arc<RwLock<bool>>,
+    muted: Arc<AtomicBool>,
     audio_multiplier: Arc<RwLock<f32>>,
     notify: Arc<Notify>,
 }
@@ -76,7 +82,7 @@ impl OpusSink {
 
         let decoder = opus::Decoder::new(webrtc_sample_rate, opus::Channels::Mono)
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
-        let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 2);
+        let ring = HeapRb::<f32>::new(webrtc_sample_rate as usize * 7);
         let (producer, mut consumer) = ring.split();
 
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket;
@@ -85,7 +91,7 @@ impl OpusSink {
         let event_ch2 = event_ch.clone();
         let event_ch3 = event_ch.clone();
         let peer_id2 = peer_id.clone();
-        let muted = Arc::new(warp::sync::RwLock::new(false));
+        let muted = Arc::new(AtomicBool::new(false));
         let muted2 = muted.clone();
         let audio_multiplier = Arc::new(RwLock::new(1.0));
         let audio_multiplier2 = audio_multiplier.clone();
@@ -189,7 +195,7 @@ impl SinkTrack for OpusSink {
     }
 
     fn play(&self) -> Result<(), Error> {
-        *self.muted.write() = false;
+        self.muted.store(false, atomic::Ordering::Relaxed);
         self.stream.play().map_err(|err| match err {
             cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
             _ => Error::OtherWithContext(err.to_string()),
@@ -197,7 +203,7 @@ impl SinkTrack for OpusSink {
     }
 
     fn pause(&self) -> Result<(), Error> {
-        *self.muted.write() = true;
+        self.muted.store(true, atomic::Ordering::Relaxed);
         self.stream.pause().map_err(|err| match err {
             cpal::PauseStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
             _ => Error::OtherWithContext(err.to_string()),
@@ -221,7 +227,7 @@ impl SinkTrack for OpusSink {
             sink_config,
         )?;
         *self = new_sink;
-        if !*self.muted.read() {
+        if !self.muted.load(atomic::Ordering::Relaxed) {
             self.stream.play().map_err(|err| match err {
                 cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
                 _ => Error::OtherWithContext(err.to_string()),
@@ -257,7 +263,7 @@ struct DecodeMediaStreamArgs<T: Depacketizer> {
     event_ch: broadcast::Sender<BlinkEventKind>,
     peer_id: DID,
     mp4_writer: Arc<RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
-    muted: Arc<RwLock<bool>>,
+    muted: Arc<AtomicBool>,
     audio_multiplier: Arc<RwLock<f32>>,
     notify: Arc<Notify>,
 }
@@ -293,7 +299,16 @@ where
     let task_start_time = std::time::Instant::now();
     let mut last_degradation_time = 0;
 
+    let mut should_automute = false;
     loop {
+        // only use the rw lock once per packet
+        let multiplier = *audio_multiplier.read();
+
+        // only send this once per packet
+        if should_automute {
+            let _ = automute_tx.send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
+            should_automute = false;
+        }
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {
                 // get RTP packet
@@ -307,7 +322,7 @@ where
                     }
                 };
 
-                if !*muted.read() {
+                if !muted.load(atomic::Ordering::Relaxed) {
                     if let Some(writer) = mp4_writer.write().as_mut() {
                         // todo: use the audio codec to determine number of samples and duration
                         writer.log(rtp_packet.payload.clone());
@@ -346,7 +361,7 @@ where
                         continue;
                     }
                     // discard samples if muted
-                    if *muted.read() {
+                    if muted.load(atomic::Ordering::Relaxed) {
                         continue;
                     }
                     match decoder.decode_float(
@@ -355,11 +370,12 @@ where
                         false,
                     ) {
                         Ok(siz) => {
-                            let multiplier = *audio_multiplier.read();
                             let to_send = decoder_output_buf.iter().take(siz);
-                            // hopefully each opus packet is still 10ms
-                            let _ = automute_tx
-                                .send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
+                            if !should_automute {
+                                // trigger an automute after this packet is processed
+                                should_automute = true;
+                            }
+
                             'PROCESS_DECODED_SAMPLES: for audio_sample in to_send {
                                 resampler.process(*audio_sample * multiplier, &mut raw_samples);
                                 for sample in raw_samples.drain(..) {
