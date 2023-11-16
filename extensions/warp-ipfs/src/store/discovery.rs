@@ -152,7 +152,7 @@ impl Discovery {
                     let discovery = self.clone();
                     let register_id = register_id;
                     async move {
-                        let mut registry_refresh_timer = tokio::time::interval_at(
+                        let mut registery_refresh_timer = tokio::time::interval_at(
                             Instant::now() + Duration::from_secs(10),
                             Duration::from_secs(10),
                         );
