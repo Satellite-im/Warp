@@ -162,26 +162,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             dummy: ext_behaviour::Behaviour,
         })
         .set_keypair(keypair)
-        .with_relay(true)
         .with_relay_server(Some(RelayConfig {
-            max_circuits: 512,
-            max_circuits_per_peer: 64,
+            max_circuits: 8198,
+            max_circuits_per_peer: 8198,
             max_circuit_duration: Duration::from_secs(2 * 60),
             max_circuit_bytes: 8 * 1024 * 1024,
-
             circuit_src_rate_limiters: vec![
                 RateLimit::PerIp {
-                    limit: 30.try_into().expect("Greater than 0"),
+                    limit: 256.try_into().expect("Greater than 0"),
                     interval: Duration::from_secs(60 * 2),
                 },
                 RateLimit::PerPeer {
-                    limit: 30.try_into().expect("Greater than 0"),
+                    limit: 256.try_into().expect("Greater than 0"),
                     interval: Duration::from_secs(60),
                 },
             ],
-
-            max_reservations_per_peer: 64,
-            max_reservations: 1024,
+            max_reservations_per_peer: 512,
+            max_reservations: 8198,
             reservation_duration: Duration::from_secs(60 * 60),
             reservation_rate_limiters: vec![
                 RateLimit::PerIp {
@@ -195,6 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ],
         }))
         .fd_limit(FDLimit::Max)
+        .with_rendezvous_server()
         .set_idle_connection_timeout(120)
         .default_record_key_validator()
         .set_transport_configuration(TransportConfig {
