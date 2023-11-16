@@ -5,7 +5,14 @@ use cpal::{
 use rand::Rng;
 use ringbuf::HeapRb;
 
-use std::{ops::Mul, sync::Arc, time::Duration};
+use std::{
+    ops::Mul,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::{
     sync::{broadcast, Notify},
     task::JoinHandle,
@@ -62,7 +69,9 @@ impl SourceTrack for OpusSource {
         let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
         let muted = Arc::new(warp::sync::RwLock::new(false));
         let muted2 = muted.clone();
-        let (input_stream, join_handle) = create_source_track(
+        let notify = Arc::new(Notify::new());
+        let notify2 = notify.clone();
+        let input_stream = create_source_track(
             input_device,
             track.clone(),
             webrtc_codec.clone(),
@@ -70,6 +79,7 @@ impl SourceTrack for OpusSource {
             event_ch.clone(),
             mp4_logger.clone(),
             muted2,
+            notify2,
         )?;
 
         Ok(Self {
@@ -80,6 +90,7 @@ impl SourceTrack for OpusSource {
             stream: input_stream,
             mp4_logger,
             muted,
+            notify,
         })
     }
 
@@ -108,8 +119,9 @@ impl SourceTrack for OpusSource {
         self.stream
             .pause()
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
-        self.packetizer_handle.abort();
-        let (stream, handle) = create_source_track(
+        self.notify.notify_waiters();
+        self.notify = Arc::new(Notify::new());
+        let stream = create_source_track(
             input_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
@@ -117,9 +129,9 @@ impl SourceTrack for OpusSource {
             self.event_ch.clone(),
             self.mp4_logger.clone(),
             self.muted.clone(),
+            self.notify.clone(),
         )?;
         self.stream = stream;
-        self.packetizer_handle = handle;
         if !*self.muted.read() {
             self.stream.play().map_err(|err| match err {
                 cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
@@ -149,7 +161,8 @@ fn create_source_track(
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
     muted: Arc<warp::sync::RwLock<bool>>,
-) -> Result<(cpal::Stream, JoinHandle<()>), Error> {
+    notify: Arc<Notify>,
+) -> Result<cpal::Stream, Error> {
     let config = cpal::StreamConfig {
         channels: source_config.channels(),
         sample_rate: SampleRate(source_config.sample_rate()),
@@ -220,13 +233,20 @@ fn create_source_track(
             )),
         })?;
 
-    let join_handle = tokio::spawn(async move {
+    let notified = Arc::new(AtomicBool::new(false));
+    let notified2 = notified.clone();
+    tokio::spawn(async move {
+        notify.notified().await;
+        notified2.store(true, Ordering::Relaxed);
+    });
+
+    tokio::spawn(async move {
         //let logger = crate::rtp_logger::get_instance("self-audio".to_string());
         //let logger_start_time = std::time::Instant::now();
 
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
-        loop {
+        while !notified.load(Ordering::Relaxed) {
             while let Some(sample) = consumer.pop() {
                 if let Some(output) = framer.frame(sample) {
                     let loudness = match output.loudness.mul(1000.0) {
@@ -294,7 +314,7 @@ fn create_source_track(
         }
     });
 
-    Ok((input_stream, join_handle))
+    Ok(input_stream)
 }
 
 #[cfg(test)]
