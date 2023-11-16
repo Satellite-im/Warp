@@ -3,10 +3,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::StreamExt;
+use futures::{channel::oneshot, FutureExt, StreamExt};
 use rust_ipfs::{
     libp2p::{
-        core::Endpoint,
+        core::{Endpoint, PeerRecord},
         request_response::OutboundRequestId,
         swarm::{
             ConnectionDenied, ConnectionId, ExternalAddresses, FromSwarm, THandler,
@@ -22,8 +22,6 @@ use warp::crypto::DID;
 use super::document::IdentityDocument;
 use super::protocol::{Lookup, LookupResponse, Register, RegisterResponse, Request, Response};
 
-#[allow(clippy::type_complexity)]
-#[allow(dead_code)]
 pub struct Behaviour {
     inner: request_response::json::Behaviour<Request, Response>,
     keypair: Keypair,
@@ -31,6 +29,8 @@ pub struct Behaviour {
     addresses: HashMap<PeerId, HashSet<Multiaddr>>,
     process_command: futures::channel::mpsc::Receiver<IdentityCommand>,
     external_addresses: ExternalAddresses,
+    pending_internal_response:
+        HashMap<OutboundRequestId, oneshot::Receiver<Result<(), warp::error::Error>>>,
 }
 
 #[derive(Debug)]
@@ -99,6 +99,30 @@ impl Behaviour {
             addresses: Default::default(),
             waiting_on_response: Default::default(),
             external_addresses: ExternalAddresses::default(),
+            pending_internal_response: Default::default(),
+        }
+    }
+
+    fn send_record(&mut self) {
+        let addrs = self.external_addresses.iter().cloned().collect::<Vec<_>>();
+        let record = PeerRecord::new(&self.keypair, addrs)
+            .expect("Valid signature")
+            .into_signed_envelope()
+            .into_protobuf_encoding();
+
+        for peer_id in self.addresses.keys() {
+            let id = self.inner.send_request(
+                peer_id,
+                Request::Synchronized(super::protocol::Synchronized::PeerRecord {
+                    record: record.clone(),
+                }),
+            );
+
+            let (tx, rx) = oneshot::channel();
+
+            self.waiting_on_response
+                .insert(id, IdentityResponse::Synchronized { response: tx });
+            self.pending_internal_response.insert(id, rx);
         }
     }
 
@@ -112,6 +136,9 @@ impl Behaviour {
 
                 match response {
                     RegisterResponse::Ok => {
+                        if self.external_addresses.iter().count() > 0 {
+                            self.send_record();
+                        }
                         let _ = res.send(Ok(()));
                     }
                     RegisterResponse::Error(super::protocol::RegisterError::IdentityExist) => {
@@ -179,7 +206,7 @@ impl Behaviour {
                         super::protocol::SynchronizedError::InvalidPayload { msg } => {
                             warp::error::Error::OtherWithContext(msg)
                         }
-                        super::protocol::SynchronizedError::InvalodRecord { msg }=> {
+                        super::protocol::SynchronizedError::InvalodRecord { msg } => {
                             warp::error::Error::OtherWithContext(msg)
                         }
                     };
@@ -268,9 +295,12 @@ impl NetworkBehaviour for Behaviour {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
-        //TODO: Add external address in peer record to pass to peers
-        self.external_addresses.on_swarm_event(&event);
-        self.inner.on_swarm_event(event)
+        let change = self.external_addresses.on_swarm_event(&event);
+        self.inner.on_swarm_event(event);
+
+        if change && self.external_addresses.iter().count() > 0 {
+            self.send_record();
+        }
     }
 
     fn poll(&mut self, cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
@@ -422,6 +452,10 @@ impl NetworkBehaviour for Behaviour {
                 _ => {}
             };
         }
+
+        self.pending_internal_response
+            .retain(|_, r| r.poll_unpin(cx).is_pending());
+
         Poll::Pending
     }
 }

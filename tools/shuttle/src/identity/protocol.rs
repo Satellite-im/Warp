@@ -96,6 +96,7 @@ pub enum SynchronizedResponse {
         identity: Option<IdentityDocument>,
         package: Option<Vec<u8>>,
     },
+    
     Error(SynchronizedError),
 }
 
