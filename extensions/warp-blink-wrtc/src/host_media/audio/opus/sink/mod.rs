@@ -174,7 +174,6 @@ impl OpusSink {
     }
 }
 
-// todo: ensure no zombie threads
 impl SinkTrack for OpusSink {
     fn init(
         peer_id: DID,
@@ -284,7 +283,7 @@ where
         mp4_writer,
         muted,
         audio_multiplier,
-        notify: _,
+        notify,
     } = args;
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = speech::Detector::new(10, 100);
@@ -309,106 +308,108 @@ where
             let _ = automute_tx.send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
             should_automute = false;
         }
-        match track.read(&mut b).await {
-            Ok((siz, _attr)) => {
-                // get RTP packet
-                let mut buf = &b[..siz];
-                // todo: possibly continue on error.
-                let rtp_packet = match webrtc::rtp::packet::Packet::unmarshal(&mut buf) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        log::error!("unmarshall rtp packet failed: {}", e);
-                        break;
-                    }
-                };
 
-                if !muted.load(atomic::Ordering::Relaxed) {
-                    if let Some(writer) = mp4_writer.write().as_mut() {
-                        // todo: use the audio codec to determine number of samples and duration
-                        writer.log(rtp_packet.payload.clone());
-                    }
+        let (siz, _attr) = tokio::select! {
+            x = track.read(&mut b) => match x {
+                Ok(y) => y,
+                Err(e) => {
+                    log::debug!("opus sink task terminated by error: {e}");
+                    break;
                 }
-
-                // if let Some(logger) = logger.as_ref() {
-                //     logger.log(rtp_packet.header.clone(), task_start_time.elapsed().as_millis());
-                // }
-
-                if let Some(extension) = rtp_packet.header.extensions.first() {
-                    // don't yet have the MediaEngine exposed. for now since there's only one extension being used, this way seems to be good enough
-                    // copies extension::audio_level_extension::AudioLevelExtension from the webrtc-rs crate
-                    // todo: use this:
-                    // .media_engine
-                    // .get_header_extension_id(RTCRtpHeaderExtensionCapability {
-                    //     uri: ::sdp::extmap::SDES_MID_URI.to_owned(),
-                    // })
-                    // followed by this: header.get_extension(extension_id)
-                    let audio_level = extension.payload.first().map(|x| x & 0x7F).unwrap_or(0);
-                    if speech_detector.should_emit_event(audio_level) {
-                        let _ = event_ch
-                            .send(BlinkEventKind::ParticipantSpeaking {
-                                peer_id: peer_id.clone(),
-                            })
-                            .is_err();
-                    }
-                }
-
-                // turn RTP packets into samples via SampleBuilder.push
-                sample_builder.push(rtp_packet);
-                // check if a sample can be created
-                while let Some(media_sample) = sample_builder.pop() {
-                    // discard overflow packets
-                    if task_start_time.elapsed().as_millis() - last_degradation_time < 10 {
-                        continue;
-                    }
-                    // discard samples if muted
-                    if muted.load(atomic::Ordering::Relaxed) {
-                        continue;
-                    }
-                    match decoder.decode_float(
-                        media_sample.data.as_ref(),
-                        &mut decoder_output_buf,
-                        false,
-                    ) {
-                        Ok(siz) => {
-                            let to_send = decoder_output_buf.iter().take(siz);
-                            if !should_automute {
-                                // trigger an automute after this packet is processed
-                                should_automute = true;
-                            }
-
-                            'PROCESS_DECODED_SAMPLES: for audio_sample in to_send {
-                                resampler.process(*audio_sample * multiplier, &mut raw_samples);
-                                for sample in raw_samples.drain(..) {
-                                    if let Err(_e) = producer.push(sample) {
-                                        // this is test code, left here for reference. it can be deleted later if needed.
-                                        // *dump_consumer_queue.write() = true;
-
-                                        // log::error!(
-                                        //     "audio degradation: {}",
-                                        //     task_start_time.elapsed().as_millis()
-                                        // );
-
-                                        let _ = event_ch.send(BlinkEventKind::AudioDegradation {
-                                            peer_id: peer_id.clone(),
-                                        });
-
-                                        last_degradation_time =
-                                            task_start_time.elapsed().as_millis();
-                                        break 'PROCESS_DECODED_SAMPLES;
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("decode error: {}", e);
-                            continue;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                log::warn!("closing track: {}", e);
+            },
+            _ = notify.notified() => {
+                log::debug!("opus sink task terminated by notify");
                 break;
+            }
+        };
+
+        // get RTP packet
+        let mut buf = &b[..siz];
+        // todo: possibly continue on error.
+        let rtp_packet = match webrtc::rtp::packet::Packet::unmarshal(&mut buf) {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("unmarshall rtp packet failed: {}", e);
+                break;
+            }
+        };
+
+        if !muted.load(atomic::Ordering::Relaxed) {
+            if let Some(writer) = mp4_writer.write().as_mut() {
+                // todo: use the audio codec to determine number of samples and duration
+                writer.log(rtp_packet.payload.clone());
+            }
+        }
+
+        // if let Some(logger) = logger.as_ref() {
+        //     logger.log(rtp_packet.header.clone(), task_start_time.elapsed().as_millis());
+        // }
+
+        if let Some(extension) = rtp_packet.header.extensions.first() {
+            // don't yet have the MediaEngine exposed. for now since there's only one extension being used, this way seems to be good enough
+            // copies extension::audio_level_extension::AudioLevelExtension from the webrtc-rs crate
+            // todo: use this:
+            // .media_engine
+            // .get_header_extension_id(RTCRtpHeaderExtensionCapability {
+            //     uri: ::sdp::extmap::SDES_MID_URI.to_owned(),
+            // })
+            // followed by this: header.get_extension(extension_id)
+            let audio_level = extension.payload.first().map(|x| x & 0x7F).unwrap_or(0);
+            if speech_detector.should_emit_event(audio_level) {
+                let _ = event_ch
+                    .send(BlinkEventKind::ParticipantSpeaking {
+                        peer_id: peer_id.clone(),
+                    })
+                    .is_err();
+            }
+        }
+
+        // turn RTP packets into samples via SampleBuilder.push
+        sample_builder.push(rtp_packet);
+        // check if a sample can be created
+        while let Some(media_sample) = sample_builder.pop() {
+            // discard overflow packets
+            if task_start_time.elapsed().as_millis() - last_degradation_time < 10 {
+                continue;
+            }
+            // discard samples if muted
+            if muted.load(atomic::Ordering::Relaxed) {
+                continue;
+            }
+            match decoder.decode_float(media_sample.data.as_ref(), &mut decoder_output_buf, false) {
+                Ok(siz) => {
+                    let to_send = decoder_output_buf.iter().take(siz);
+                    if !should_automute {
+                        // trigger an automute after this packet is processed
+                        should_automute = true;
+                    }
+
+                    'PROCESS_DECODED_SAMPLES: for audio_sample in to_send {
+                        resampler.process(*audio_sample * multiplier, &mut raw_samples);
+                        for sample in raw_samples.drain(..) {
+                            if let Err(_e) = producer.push(sample) {
+                                // this is test code, left here for reference. it can be deleted later if needed.
+                                // *dump_consumer_queue.write() = true;
+
+                                // log::error!(
+                                //     "audio degradation: {}",
+                                //     task_start_time.elapsed().as_millis()
+                                // );
+
+                                let _ = event_ch.send(BlinkEventKind::AudioDegradation {
+                                    peer_id: peer_id.clone(),
+                                });
+
+                                last_degradation_time = task_start_time.elapsed().as_millis();
+                                break 'PROCESS_DECODED_SAMPLES;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("decode error: {}", e);
+                    continue;
+                }
             }
         }
     }
