@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     task::{Context, Poll},
 };
 
@@ -28,12 +28,18 @@ pub struct Behaviour {
     inner: request_response::json::Behaviour<Request, Response>,
     keypair: Keypair,
     waiting_on_response: HashMap<OutboundRequestId, IdentityResponse>,
+    addresses: HashMap<PeerId, HashSet<Multiaddr>>,
     process_command: futures::channel::mpsc::Receiver<IdentityCommand>,
     external_addresses: ExternalAddresses,
 }
 
 #[derive(Debug)]
 pub enum IdentityCommand {
+    AddNode {
+        peer_id: PeerId,
+        address: Multiaddr,
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
     Register {
         peer_id: PeerId,
         identity: IdentityDocument,
@@ -90,6 +96,7 @@ impl Behaviour {
             ),
             keypair: keypair.clone(),
             process_command,
+            addresses: Default::default(),
             waiting_on_response: Default::default(),
             external_addresses: ExternalAddresses::default(),
         }
@@ -264,6 +271,26 @@ impl NetworkBehaviour for Behaviour {
         loop {
             match self.process_command.poll_next_unpin(cx) {
                 Poll::Ready(Some(command)) => match command {
+                    IdentityCommand::AddNode {
+                        peer_id,
+                        address,
+                        response,
+                    } => {
+                        if !(self
+                            .addresses
+                            .entry(peer_id)
+                            .or_default()
+                            .insert(address.clone())
+                            && self.inner.add_address(&peer_id, address))
+                        {
+                            _ = response.send(Err(warp::error::Error::OtherWithContext(
+                                "Address exist".into(),
+                            )));
+                            continue;
+                        }
+
+                        _ = response.send(Ok(()));
+                    }
                     IdentityCommand::Register {
                         peer_id,
                         identity,
