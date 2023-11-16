@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use mp4::{TfdtBox, TfhdBox, TrafBox, TrunBox};
+use mp4::{TfdtBox, TfhdBox, TrafBox, TurnBox};
 use tokio::sync::mpsc::Sender;
 
 use crate::host_media::mp4_logger::{Mp4Fragment, Mp4LoggerInstance};
@@ -61,7 +61,7 @@ impl Mp4LoggerInstance for Opus {
 impl Opus {
     fn make_fragment(&mut self) {
         let fragment_start_time = self.fragment_start_time;
-        let num_samples_in_trun = self.sample_lengths.len() as u32;
+        let num_samples_in_turn = self.sample_lengths.len() as u32;
         // create a traf and push to moof.trafs for each track fragment
         let traf = TrafBox {
             //  track fragment header
@@ -86,11 +86,11 @@ impl Opus {
             }),
             // track fragment run
             // size is 13 + sample_length + header_size
-            trun: Some(TrunBox {
+            turn: Some(TurnBox {
                 version: 0,
                 // data-offset-present, sample-size-present
                 flags: 1 | 0x200,
-                sample_count: num_samples_in_trun,
+                sample_count: num_samples_in_turn,
                 // warning: this needs to be changed after the moof box is declared
                 data_offset: Some(0),
                 sample_sizes: self.sample_lengths.clone(),
@@ -102,7 +102,7 @@ impl Opus {
 
         self.sample_buffer_len = 0;
         self.sample_lengths.clear();
-        self.fragment_start_time += num_samples_in_trun;
+        self.fragment_start_time += num_samples_in_turn;
 
         let _ = self.tx.try_send(Mp4Fragment {
             traf,
