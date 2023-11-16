@@ -298,6 +298,7 @@ where
     let task_start_time = std::time::Instant::now();
     let mut last_degradation_time = 0;
 
+    let mut log_decode_error_once = false;
     let mut should_automute = false;
     loop {
         // only use the rw lock once per packet
@@ -325,12 +326,15 @@ where
 
         // get RTP packet
         let mut buf = &b[..siz];
-        // todo: possibly continue on error.
         let rtp_packet = match webrtc::rtp::packet::Packet::unmarshal(&mut buf) {
             Ok(r) => r,
             Err(e) => {
-                log::error!("unmarshall rtp packet failed: {}", e);
-                break;
+                if !log_decode_error_once {
+                    log_decode_error_once = true;
+                    // this only happens if a packet is "short"
+                    log::error!("unmarshall rtp packet failed: {}", e);
+                }
+                continue;
             }
         };
 
