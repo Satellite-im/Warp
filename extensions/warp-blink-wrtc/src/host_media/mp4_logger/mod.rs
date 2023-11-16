@@ -107,7 +107,7 @@ pub fn init(config: Mp4LoggerConfig) -> Result<()> {
     // this will drop the other one, the tx channel will be dropped/closed, and the thread should terminate.
     MP4_LOGGER.write().replace(logger);
 
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         if let Err(e) = run(rx, should_log, internal_config) {
             log::error!("error running mp4_logger: {e}");
         }

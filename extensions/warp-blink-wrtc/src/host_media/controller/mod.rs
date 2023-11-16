@@ -97,7 +97,7 @@ pub struct Controller {
 impl Controller {
     pub fn new(args: Args) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        std::thread::spawn(|| {
+        tokio::task::spawn_blocking(move || {
             if let Err(e) = run(args, rx) {
                 log::error!("host_media controller: {e}");
             } else {
