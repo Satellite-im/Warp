@@ -24,6 +24,7 @@ use warp::{
     multipass::MultiPass,
     Extension, SingleHandle,
 };
+use webrtc::sdp::description::media;
 
 use crate::{
     blink_impl::blink_controller::BlinkController,
@@ -47,18 +48,18 @@ pub struct BlinkImpl {
     gossipsub_listener: GossipSubListener,
     gossipsub_sender: GossipSubSender,
     blink_controller: blink_controller::BlinkController,
+    media_controller: host_media::Controller,
 
     drop_handler: Arc<DropHandler>,
 }
 
-struct DropHandler {}
+struct DropHandler {
+    media_controller: host_media::Controller,
+}
 impl Drop for DropHandler {
     fn drop(&mut self) {
-        tokio::spawn(async move {
-            host_media::audio::automute::stop();
-            host_media::reset().await;
-            log::debug!("blink drop handler finished");
-        });
+        host_media::audio::automute::stop();
+        self.media_controller.reset();
     }
 }
 
@@ -66,22 +67,26 @@ impl BlinkImpl {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Box<Self>> {
         log::trace!("initializing WebRTC");
 
+        // todo: ensure rx doesn't get dropped
+        let (ui_event_ch, _rx) = broadcast::channel(1024);
+        let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
+
+        let media_controller = host_media::Controller::new(host_media::ControllerArgs {
+            ui_event_ch: ui_event_ch.clone(),
+        });
+
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            host_media::change_audio_input(input_device).await?;
+            media_controller.change_audio_input(input_device).await?;
         } else {
             log::warn!("blink started with no input device");
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            host_media::change_audio_output(output_device).await?;
+            media_controller.change_audio_output(output_device).await?;
         } else {
             log::warn!("blink started with no output device");
         }
-
-        // todo: ensure rx doesn't get dropped
-        let (ui_event_ch, _rx) = broadcast::channel(1024);
-        let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
 
         let ipfs = Arc::new(warp::sync::RwLock::new(None));
         let own_id_private = Arc::new(warp::sync::RwLock::new(None));
@@ -96,6 +101,7 @@ impl BlinkImpl {
             webrtc_event_stream,
             gossipsub_sender: gossipsub_sender.clone(),
             gossipsub_listener: gossipsub_listener.clone(),
+            media_controller: media_controller.clone(),
             signal_rx: gossipsub_rx,
             ui_event_ch: ui_event_ch.clone(),
         });
@@ -106,7 +112,10 @@ impl BlinkImpl {
             gossipsub_sender,
             gossipsub_listener,
             blink_controller,
-            drop_handler: Arc::new(DropHandler {}),
+            drop_handler: Arc::new(DropHandler {
+                media_controller: media_controller.clone(),
+            }),
+            media_controller,
         };
 
         let own_id = blink_impl.own_id.clone();
@@ -168,7 +177,7 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        host_media::change_audio_input(device).await?;
+        self.media_controller.change_audio_input(device).await?;
         Ok(())
     }
 
@@ -185,7 +194,7 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        host_media::change_audio_output(device).await?;
+        self.media_controller.change_audio_output(device).await?;
         Ok(())
     }
 }
@@ -276,8 +285,10 @@ impl Blink for BlinkImpl {
 
     // ------ Select input/output devices ------
 
-    async fn get_audio_device_config(&self) -> Box<dyn AudioDeviceConfig> {
-        Box::new(host_media::get_audio_device_config().await)
+    async fn get_audio_device_config(&self) -> Result<Box<dyn AudioDeviceConfig>, Error> {
+        Ok(Box::new(
+            self.media_controller.get_audio_device_config().await?,
+        ))
     }
 
     async fn set_audio_device_config(
@@ -349,8 +360,9 @@ impl Blink for BlinkImpl {
     }
 
     async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error> {
-        host_media::set_peer_audio_gain(peer_id, multiplier).await?;
-        Ok(())
+        self.media_controller
+            .set_peer_audio_gain(peer_id, multiplier)
+            .await
     }
 
     // ------ Utility Functions ------
