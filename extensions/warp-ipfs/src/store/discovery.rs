@@ -152,7 +152,7 @@ impl Discovery {
                     let discovery = self.clone();
                     let register_id = register_id;
                     async move {
-                        let mut registry_refresh_timer = tokio::time::interval_at(
+                        let mut registery_refresh_timer = tokio::time::interval_at(
                             Instant::now() + Duration::from_secs(10),
                             Duration::from_secs(10),
                         );
@@ -163,7 +163,7 @@ impl Discovery {
 
                         loop {
                             tokio::select! {
-                                _ = registry_refresh_timer.tick() => {
+                                _ = registery_refresh_timer.tick() => {
                                     for peer_id in &register_id {
                                         if let Err(e) = discovery
                                             .ipfs
