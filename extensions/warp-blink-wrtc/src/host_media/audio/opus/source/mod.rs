@@ -247,7 +247,7 @@ fn create_source_track(
                         continue;
                     }
                     // triggered when someone else is talking
-                    if *crate::host_media::audio::automute::SHOULD_MUTE.read() {
+                    if crate::host_media::audio::automute::SHOULD_MUTE.load(Ordering::Relaxed) {
                         continue;
                     }
                     if speech_detector.should_emit_event(loudness) {

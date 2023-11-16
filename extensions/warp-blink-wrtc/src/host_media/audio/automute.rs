@@ -1,8 +1,13 @@
 use anyhow::{bail, Result};
 use once_cell::sync::Lazy;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::sync::mpsc::{self, error::TryRecvError};
-use warp::sync::RwLock;
 
 // tells the automute module how much longer to delay before unmuting
 pub struct AudioMuteChannels {
@@ -17,7 +22,7 @@ pub static AUDIO_CMD_CH: Lazy<AudioMuteChannels> = Lazy::new(|| {
     }
 });
 
-pub static SHOULD_MUTE: Lazy<RwLock<bool>> = Lazy::new(|| RwLock::new(false));
+pub static SHOULD_MUTE: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
 pub enum AutoMuteCmd {
     Quit,
@@ -59,14 +64,14 @@ async fn run() -> Result<()> {
                     Ok(ms) => {
                         if remaining_ms < ms {
                             remaining_ms = ms;
-                            if !*SHOULD_MUTE.read() {
-                                *SHOULD_MUTE.write() = true;
+                            if !SHOULD_MUTE.load(Ordering::Relaxed) {
+                                SHOULD_MUTE.store(true, Ordering::Relaxed);
                                 //log::debug!("automute on");
                             }
                         }
                     }
                     Err(TryRecvError::Disconnected) => {
-                        *SHOULD_MUTE.write() = false;
+                        SHOULD_MUTE.store(false, Ordering::Relaxed);
                         break 'OUTER_LOOP;
                     }
                     _ => break 'FAKE_WHILE,
@@ -75,8 +80,8 @@ async fn run() -> Result<()> {
 
             tokio::time::sleep(Duration::from_millis(5)).await;
             remaining_ms = remaining_ms.saturating_sub(5);
-            if remaining_ms == 0 && *SHOULD_MUTE.read() {
-                *SHOULD_MUTE.write() = false;
+            if remaining_ms == 0 && SHOULD_MUTE.load(Ordering::Relaxed) {
+                SHOULD_MUTE.store(false, Ordering::Relaxed);
                 //log::debug!("automute off");
             }
         }
@@ -88,7 +93,7 @@ async fn run() -> Result<()> {
         match cmd {
             AutoMuteCmd::Quit => {
                 log::debug!("quitting automute");
-                *SHOULD_MUTE.write() = false;
+                SHOULD_MUTE.store(false, Ordering::Relaxed);
                 break;
             }
             AutoMuteCmd::MuteFor(millis) => {
