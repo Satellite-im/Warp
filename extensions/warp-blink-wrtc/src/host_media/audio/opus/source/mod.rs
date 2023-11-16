@@ -13,9 +13,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{
-    sync::{broadcast, Notify},
-};
+use tokio::sync::broadcast;
 use warp::{blink::BlinkEventKind, crypto::DID, error::Error};
 
 use webrtc::{
@@ -43,13 +41,13 @@ pub struct OpusSource {
     stream: cpal::Stream,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_logger: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
-    muted: Arc<warp::sync::RwLock<bool>>,
-    notify: Arc<Notify>,
+    muted: Arc<AtomicBool>,
+    should_quit: Arc<AtomicBool>,
 }
 
 impl Drop for OpusSource {
     fn drop(&mut self) {
-        self.notify.notify_waiters();
+        self.should_quit.store(true, Ordering::Relaxed);
     }
 }
 
@@ -66,10 +64,10 @@ impl SourceTrack for OpusSource {
         Self: Sized,
     {
         let mp4_logger = Arc::new(warp::sync::RwLock::new(None));
-        let muted = Arc::new(warp::sync::RwLock::new(false));
+        let muted = Arc::new(AtomicBool::new(false));
         let muted2 = muted.clone();
-        let notify = Arc::new(Notify::new());
-        let notify2 = notify.clone();
+        let should_quit = Arc::new(AtomicBool::new(false));
+        let should_quit2 = should_quit.clone();
         let input_stream = create_source_track(
             input_device,
             track.clone(),
@@ -78,7 +76,7 @@ impl SourceTrack for OpusSource {
             event_ch.clone(),
             mp4_logger.clone(),
             muted2,
-            notify2,
+            should_quit2,
         )?;
 
         Ok(Self {
@@ -89,7 +87,7 @@ impl SourceTrack for OpusSource {
             stream: input_stream,
             mp4_logger,
             muted,
-            notify,
+            should_quit,
         })
     }
 
@@ -98,7 +96,7 @@ impl SourceTrack for OpusSource {
             cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
             _ => Error::OtherWithContext(err.to_string()),
         })?;
-        *self.muted.write() = false;
+        self.muted.store(false, Ordering::Relaxed);
         Ok(())
     }
     fn pause(&self) -> Result<(), Error> {
@@ -106,7 +104,7 @@ impl SourceTrack for OpusSource {
             cpal::PauseStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
             _ => Error::OtherWithContext(err.to_string()),
         })?;
-        *self.muted.write() = true;
+        self.muted.store(true, Ordering::Relaxed);
         Ok(())
     }
     // should not require RTP renegotiation
@@ -118,9 +116,9 @@ impl SourceTrack for OpusSource {
         self.stream
             .pause()
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
-        self.notify.notify_waiters();
-        self.notify = Arc::new(Notify::new());
-        let stream = create_source_track(
+        self.should_quit.store(true, Ordering::Relaxed);
+        self.should_quit = Arc::new(AtomicBool::new(false));
+        self.stream = create_source_track(
             input_device,
             self.track.clone(),
             self.webrtc_codec.clone(),
@@ -128,10 +126,9 @@ impl SourceTrack for OpusSource {
             self.event_ch.clone(),
             self.mp4_logger.clone(),
             self.muted.clone(),
-            self.notify.clone(),
+            self.should_quit.clone(),
         )?;
-        self.stream = stream;
-        if !*self.muted.read() {
+        if !self.muted.load(Ordering::Relaxed) {
             self.stream.play().map_err(|err| match err {
                 cpal::PlayStreamError::DeviceNotAvailable => Error::AudioDeviceDisconnected,
                 _ => Error::OtherWithContext(err.to_string()),
@@ -159,8 +156,8 @@ fn create_source_track(
     source_config: AudioHardwareConfig,
     event_ch: broadcast::Sender<BlinkEventKind>,
     mp4_writer: Arc<warp::sync::RwLock<Option<Box<dyn Mp4LoggerInstance>>>>,
-    muted: Arc<warp::sync::RwLock<bool>>,
-    notify: Arc<Notify>,
+    muted: Arc<AtomicBool>,
+    should_quit: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, Error> {
     let config = cpal::StreamConfig {
         channels: source_config.channels(),
@@ -232,20 +229,13 @@ fn create_source_track(
             )),
         })?;
 
-    let notified = Arc::new(AtomicBool::new(false));
-    let notified2 = notified.clone();
-    tokio::spawn(async move {
-        notify.notified().await;
-        notified2.store(true, Ordering::Relaxed);
-    });
-
     tokio::spawn(async move {
         //let logger = crate::rtp_logger::get_instance("self-audio".to_string());
         //let logger_start_time = std::time::Instant::now();
 
         // speech_detector should emit at most 1 event per second
         let mut speech_detector = speech::Detector::new(10, 100);
-        while !notified.load(Ordering::Relaxed) {
+        while !should_quit.load(Ordering::Relaxed) {
             while let Some(sample) = consumer.pop() {
                 if let Some(output) = framer.frame(sample) {
                     let loudness = match output.loudness.mul(1000.0) {
@@ -253,7 +243,7 @@ fn create_source_track(
                         x => x as u8,
                     };
                     // discard packet if muted
-                    if *muted.read() {
+                    if muted.load(Ordering::Relaxed) {
                         continue;
                     }
                     // triggered when someone else is talking
@@ -309,7 +299,7 @@ fn create_source_track(
                     }
                 }
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
     });
 
