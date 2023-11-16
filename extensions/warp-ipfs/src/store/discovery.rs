@@ -163,7 +163,7 @@ impl Discovery {
 
                         loop {
                             tokio::select! {
-                                _ = registry_refresh_timer.tick() => {
+                                _ = registery_refresh_timer.tick() => {
                                     for peer_id in &register_id {
                                         if let Err(e) = discovery
                                             .ipfs
