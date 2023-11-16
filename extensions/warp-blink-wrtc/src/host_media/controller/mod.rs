@@ -1,24 +1,17 @@
-
-
 use futures::channel::oneshot;
 
-use std::{sync::Arc};
-use tokio::sync::{broadcast};
+use std::sync::Arc;
+use tokio::sync::broadcast;
 use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-
-use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
-};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::{
-    audio::{
-        self, AudioCodec, AudioHardwareConfig, DeviceConfig,
-    },
+    audio::{self, AudioCodec, AudioHardwareConfig, DeviceConfig},
     mp4_logger::{self, Mp4LoggerConfig},
 };
 
@@ -135,7 +128,7 @@ impl Controller {
 
     pub async fn has_audio_source(&self) -> bool {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::HasAudioSource { rsp: tx });
+        let _ = self.ch.send(Cmd::HasAudioSource { rsp: tx });
         rx.await.ok().unwrap_or_default()
     }
 
@@ -146,7 +139,7 @@ impl Controller {
         webrtc_codec: AudioCodec,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::CreateAudioSourceTrack {
+        let _ = self.ch.send(Cmd::CreateAudioSourceTrack {
             own_id,
             track,
             webrtc_codec,
@@ -157,7 +150,7 @@ impl Controller {
     }
 
     pub async fn remove_audio_source_track(&self) {
-        self.ch.send(Cmd::RemoveAudioSourceTrack);
+        let _ = self.ch.send(Cmd::RemoveAudioSourceTrack);
     }
 
     pub async fn create_audio_sink_track(
@@ -168,7 +161,7 @@ impl Controller {
         webrtc_codec: AudioCodec,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::CreateAudioSinkTrack {
+        let _ = self.ch.send(Cmd::CreateAudioSinkTrack {
             peer_id,
             track,
             webrtc_codec,
@@ -180,84 +173,78 @@ impl Controller {
 
     pub async fn change_audio_input(&self, device: cpal::Device) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::ChangeAudioInput { device, rsp: tx });
+        let _ = self.ch.send(Cmd::ChangeAudioInput { device, rsp: tx });
         rx.await
             .map_err(|e| Error::OtherWithContext(e.to_string()))?
     }
 
     pub async fn set_audio_source_config(&self, source_config: AudioHardwareConfig) {
-        self.ch.send(Cmd::SetAudioSourceConfig { source_config });
+        let _ = self.ch.send(Cmd::SetAudioSourceConfig { source_config });
     }
 
     pub async fn get_audio_source_config(&self) -> Result<AudioHardwareConfig, Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::GetAudioSourceConfig { rsp: tx });
-        rx
-            .await
-            .map_err(|e| Error::OtherWithContext(e.to_string()))
+        let _ = self.ch.send(Cmd::GetAudioSourceConfig { rsp: tx });
+        rx.await.map_err(|e| Error::OtherWithContext(e.to_string()))
     }
 
     pub async fn change_audio_output(&self, device: cpal::Device) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::ChangeAudioInput { device, rsp: tx });
+        let _ = self.ch.send(Cmd::ChangeAudioInput { device, rsp: tx });
         rx.await
             .map_err(|e| Error::OtherWithContext(e.to_string()))?
     }
 
     pub async fn set_audio_sink_config(&self, sink_config: AudioHardwareConfig) {
-        self.ch.send(Cmd::SetAudioSinkConfig { sink_config });
+        let _ = self.ch.send(Cmd::SetAudioSinkConfig { sink_config });
     }
 
     pub async fn get_audio_sink_config(&self) -> Result<AudioHardwareConfig, Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::GetAudioSinkConfig { rsp: tx });
-        rx
-            .await
-            .map_err(|e| Error::OtherWithContext(e.to_string()))
+        let _ = self.ch.send(Cmd::GetAudioSinkConfig { rsp: tx });
+        rx.await.map_err(|e| Error::OtherWithContext(e.to_string()))
     }
 
     pub async fn get_audio_device_config(&self) -> Result<DeviceConfig, Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::GetAudioDeviceConfig { rsp: tx });
-        rx
-            .await
-            .map_err(|e| Error::OtherWithContext(e.to_string()))
+        let _ = self.ch.send(Cmd::GetAudioDeviceConfig { rsp: tx });
+        rx.await.map_err(|e| Error::OtherWithContext(e.to_string()))
     }
 
     pub fn remove_sink_track(&self, peer_id: DID) {
-        self.ch.send(Cmd::RemoveSinkTrack { peer_id });
+        let _ = self.ch.send(Cmd::RemoveSinkTrack { peer_id });
     }
 
     pub fn mute_self(&self) {
-        self.ch.send(Cmd::MuteSelf);
+        let _ = self.ch.send(Cmd::MuteSelf);
     }
 
     pub fn unmute_self(&self) {
-        self.ch.send(Cmd::UnmuteSelf);
+        let _ = self.ch.send(Cmd::UnmuteSelf);
     }
 
     pub fn deafen(&self) {
-        self.ch.send(Cmd::Deafen);
+        let _ = self.ch.send(Cmd::Deafen);
     }
 
     pub fn undeafen(&self) {
-        self.ch.send(Cmd::Undeafen);
+        let _ = self.ch.send(Cmd::Undeafen);
     }
 
     pub async fn init_recording(&self, config: Mp4LoggerConfig) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::InitRecording { config, rsp: tx });
+        let _ = self.ch.send(Cmd::InitRecording { config, rsp: tx });
         rx.await
             .map_err(|e| Error::OtherWithContext(e.to_string()))?
     }
 
     pub fn pause_recording(&self) {
-        self.ch.send(Cmd::PauseRecording);
+        let _ = self.ch.send(Cmd::PauseRecording);
     }
 
     pub async fn set_peer_audio_gain(&self, peer_id: DID, multiplier: f32) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
-        self.ch.send(Cmd::SetPeerAudioGain {
+        let _ = self.ch.send(Cmd::SetPeerAudioGain {
             peer_id,
             multiplier,
             rsp: tx,

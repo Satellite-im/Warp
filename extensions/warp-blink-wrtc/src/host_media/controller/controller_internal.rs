@@ -1,17 +1,13 @@
 use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 
-
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{broadcast};
+use tokio::sync::broadcast;
 use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
-
-
-
 
 use super::{
     audio::{
@@ -129,9 +125,8 @@ impl ControllerInternal {
         Ok(())
     }
 
-    pub fn remove_audio_source_track(&mut self) -> anyhow::Result<()> {
+    pub fn remove_audio_source_track(&mut self) {
         self.audio_source_track.take();
-        Ok(())
     }
 
     pub fn create_audio_sink_track(
