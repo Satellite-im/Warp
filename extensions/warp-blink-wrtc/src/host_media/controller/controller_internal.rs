@@ -324,12 +324,14 @@ impl ControllerInternal {
 }
 
 fn get_min_source_channels(input_device: &cpal::Device) -> anyhow::Result<u16> {
-    let min_channels = input_device
-        .supported_input_configs()?
-        .fold(None, |acc: Option<u16>, x| match acc {
-            None => Some(x.channels()),
-            Some(y) => Some(std::cmp::min(x.channels(), y)),
-        });
+    let min_channels =
+        input_device
+            .supported_input_configs()?
+            .into_iter()
+            .fold(None, |acc: Option<u16>, x| match acc {
+                None => Some(x.channels()),
+                Some(y) => Some(std::cmp::min(x.channels(), y)),
+            });
     let channels = min_channels.ok_or(anyhow::anyhow!(
         "unsupported audio input device - no input configuration available"
     ))?;
@@ -340,6 +342,7 @@ fn get_min_sink_channels(output_device: &cpal::Device) -> anyhow::Result<u16> {
     let min_channels =
         output_device
             .supported_output_configs()?
+            .into_iter()
             .fold(None, |acc: Option<u16>, x| match acc {
                 None => Some(x.channels()),
                 Some(y) => Some(std::cmp::min(x.channels(), y)),

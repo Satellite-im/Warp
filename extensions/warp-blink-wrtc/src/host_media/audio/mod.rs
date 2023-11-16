@@ -1,6 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::Arc;
-use tokio::sync::{broadcast};
+use tokio::sync::broadcast;
 use warp::blink::{BlinkEventKind, MimeType};
 use warp::crypto::DID;
 use warp::error::Error;

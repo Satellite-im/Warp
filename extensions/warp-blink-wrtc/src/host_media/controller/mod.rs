@@ -190,7 +190,7 @@ impl Controller {
 
     pub async fn change_audio_output(&self, device: cpal::Device) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.ch.send(Cmd::ChangeAudioInput { device, rsp: tx });
+        let _ = self.ch.send(Cmd::ChangeAudioOutput { device, rsp: tx });
         rx.await
             .map_err(|e| Error::OtherWithContext(e.to_string()))?
     }
