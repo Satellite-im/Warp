@@ -170,34 +170,34 @@ async fn handle_command(
             blink.disable_automute()?;
         }
         Repl::ShowSelectedDevices => {
-            let config = blink.get_audio_device_config().await;
+            let config = blink.get_audio_device_config().await?;
             println!("microphone: {:?}", config.microphone_device_name());
             println!("speaker: {:?}", config.speaker_device_name());
         }
         Repl::ShowAvailableDevices => {
-            let config = blink.get_audio_device_config().await;
+            let config = blink.get_audio_device_config().await?;
             let microphones = config.get_available_microphones();
             let speakers = config.get_available_speakers();
             println!("available microphones: {microphones:#?}");
             println!("available speakers: {speakers:#?}");
         }
         Repl::ConnectMicrophone { device_name } => {
-            let mut config = blink.get_audio_device_config().await;
+            let mut config = blink.get_audio_device_config().await?;
             config.set_microphone(&device_name);
             blink.set_audio_device_config(config).await?;
         }
         Repl::ConnectSpeaker { device_name } => {
-            let mut config = blink.get_audio_device_config().await;
+            let mut config = blink.get_audio_device_config().await?;
             config.set_speaker(&device_name);
             blink.set_audio_device_config(config).await?;
         }
         Repl::TestMicrophone { device_name } => {
-            let mut config = blink.get_audio_device_config().await;
+            let mut config = blink.get_audio_device_config().await?;
             config.set_microphone(&device_name);
             config.test_microphone()?;
         }
         Repl::TestSpeaker { device_name } => {
-            let mut config = blink.get_audio_device_config().await;
+            let mut config = blink.get_audio_device_config().await?;
             config.set_speaker(&device_name);
             config.test_speaker()?;
         }
