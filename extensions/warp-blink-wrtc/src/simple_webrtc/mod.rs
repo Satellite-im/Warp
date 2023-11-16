@@ -394,6 +394,7 @@ impl Controller {
                         }
                     }
                     RTCPeerConnectionState::Disconnected => {
+                        // todo: possibly jut remove the track and wait for another track to be added..
                         if let Err(e) = tx.send(EmittedEvents::Disconnected { peer: dest.clone() })
                         {
                             log::error!(
