@@ -4,9 +4,7 @@ use cpal::{
 };
 use ringbuf::HeapRb;
 use std::{cmp::Ordering, sync::Arc};
-use tokio::{
-    sync::{broadcast, Notify},
-};
+use tokio::sync::{broadcast, Notify};
 use warp::{blink::BlinkEventKind, crypto::DID, error::Error, sync::RwLock};
 
 use webrtc::{
@@ -233,7 +231,6 @@ impl SinkTrack for OpusSink {
         Ok(())
     }
 
-    // todo: this seems wrong. would only allow for recording one track at a time
     fn init_mp4_logger(&mut self) -> Result<(), Error> {
         let mp4_logger = mp4_logger::get_audio_logger(&self.peer_id)?;
         self.mp4_logger.write().replace(mp4_logger);

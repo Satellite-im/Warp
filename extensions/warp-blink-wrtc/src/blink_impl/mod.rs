@@ -25,7 +25,6 @@ use warp::{
     Extension, SingleHandle,
 };
 
-
 use crate::{
     blink_impl::blink_controller::BlinkController,
     host_media::{
@@ -77,13 +76,17 @@ impl BlinkImpl {
 
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            media_controller.change_audio_input(input_device).await?;
+            if let Err(e) = media_controller.change_audio_input(input_device).await {
+                log::error!("BlinkImpl failed to set audio input device: {e}");
+            }
         } else {
             log::warn!("blink started with no input device");
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            media_controller.change_audio_output(output_device).await?;
+            if let Err(e) = media_controller.change_audio_output(output_device).await {
+                log::error!("BlinkImpl failed to set audio output device: {e}");
+            }
         } else {
             log::warn!("blink started with no output device");
         }
