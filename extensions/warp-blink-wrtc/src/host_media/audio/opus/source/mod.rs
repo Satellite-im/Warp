@@ -149,6 +149,7 @@ impl SourceTrack for OpusSource {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_source_track(
     input_device: &cpal::Device,
     track: Arc<TrackLocalStaticRTP>,
