@@ -122,92 +122,25 @@ impl Default for RelayClient {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Swarm {
-    /// Concurrent dial factor
-    pub dial_factor: u8,
-    pub notify_buffer_size: usize,
-    pub connection_buffer_size: usize,
-    pub limit: Option<ConnectionLimit>,
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct Swarm {
+//     /// Concurrent dial factor
+//     pub dial_factor: u8,
+//     pub notify_buffer_size: usize,
+//     pub connection_buffer_size: usize,
+//     pub limit: Option<ConnectionLimit>,
+// }
 
-impl Default for Swarm {
-    fn default() -> Self {
-        Self {
-            dial_factor: 8, //Same dial factor as default for libp2p
-            notify_buffer_size: 32,
-            connection_buffer_size: 1024,
-            limit: None,
-        }
-    }
-}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionLimit {
-    pub max_pending_incoming: Option<u32>,
-    pub max_pending_outgoing: Option<u32>,
-    pub max_established_incoming: Option<u32>,
-    pub max_established_outgoing: Option<u32>,
-    pub max_established: Option<u32>,
-    pub max_established_per_peer: Option<u32>,
-}
-
-impl ConnectionLimit {
-    pub fn testing() -> Self {
-        Self {
-            max_pending_incoming: Some(10),
-            max_pending_outgoing: Some(10),
-            max_established_incoming: Some(32),
-            max_established_outgoing: Some(32),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-
-    pub fn minimal() -> Self {
-        Self {
-            max_pending_incoming: Some(128),
-            max_pending_outgoing: Some(128),
-            max_established_incoming: Some(128),
-            max_established_outgoing: Some(128),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-
-    pub fn recommended() -> Self {
-        Self {
-            max_pending_incoming: Some(512),
-            max_pending_outgoing: Some(512),
-            max_established_incoming: Some(512),
-            max_established_outgoing: Some(512),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-
-    pub fn maximum() -> Self {
-        Self {
-            max_pending_incoming: Some(512),
-            max_pending_outgoing: Some(512),
-            max_established_incoming: Some(1024),
-            max_established_outgoing: Some(1024),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-
-    pub fn unrestricted() -> Self {
-        Self {
-            max_pending_incoming: None,
-            max_pending_outgoing: None,
-            max_established_incoming: None,
-            max_established_outgoing: None,
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-}
+// impl Default for Swarm {
+//     fn default() -> Self {
+//         Self {
+//             dial_factor: 8, //Same dial factor as default for libp2p
+//             notify_buffer_size: 32,
+//             connection_buffer_size: 1024,
+//             limit: None,
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pubsub {
@@ -227,7 +160,6 @@ pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
     pub pubsub: Pubsub,
-    pub swarm: Swarm,
     pub bootstrap: bool,
     pub portmapping: bool,
     pub agent_version: Option<String>,
