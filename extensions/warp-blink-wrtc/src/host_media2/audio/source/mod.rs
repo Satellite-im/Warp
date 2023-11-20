@@ -93,7 +93,7 @@ impl SourceTrack {
             should_quit,
             num_channels: todo!(),
             buf_len: todo!(),
-            frame_size: todo!(),
+            resampler_config: todo!(),
         }));
 
         // spawn the sender task

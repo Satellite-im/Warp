@@ -1,5 +1,4 @@
 use std::{
-    cmp,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -10,6 +9,8 @@ use std::{
 use futures::channel::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::{error::TryRecvError, UnboundedSender};
 
+use crate::host_media2::audio::utils::ResamplerConfig;
+
 use super::super::utils::{FramerOutput, SpeechDetector};
 
 pub struct Args {
@@ -19,7 +20,7 @@ pub struct Args {
     pub should_quit: Arc<AtomicBool>,
     pub num_channels: usize,
     pub buf_len: usize,
-    pub frame_size: usize,
+    pub resampler_config: ResamplerConfig,
 }
 
 pub fn run(args: Args) {
@@ -30,12 +31,12 @@ pub fn run(args: Args) {
         should_quit,
         num_channels,
         buf_len,
-        frame_size,
+        resampler_config,
     } = args;
 
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = SpeechDetector::new(10, 100);
-    let mut opus_out = vec![0_f32, frame_size * 4];
+    let mut opus_out = vec![0_f32, buf_len * 4];
 
     while !should_quit.load(Ordering::Relaxed) {
         let mut buf: Vec<f32> = match rx.try_recv() {
@@ -63,30 +64,30 @@ pub fn run(args: Args) {
             buf = buf2;
         }
 
+        // really shouldn't need this
         // resample if needed
-        match buf_len.cmp(&frame_size) {
-            cmp::Ordering::Equal => {}
-            cmp::Ordering::Less => {
-                let up_sample = frame_size / buf_len;
-                let iter = buf.iter();
-                let mut buf2 = vec![0_f32, frame_size];
-                for chunk in (&buf2).chunks_exact_mut(up_sample) {
-                    let v = *iter.next().unwrap_or_default();
-                    for x in chunk {
-                        *x = v;
-                    }
-                }
-                buf = buf2;
-            }
-            cmp::Ordering::Greater => {
-                let down_sample = buf_len / frame_size;
-                let buf2 = (&buf)
-                    .chunks_exact(down_sample)
-                    .map(|x| x.get(0).unwrap_or_default())
-                    .collect();
-                buf = buf2;
-            }
-        }
+        // match resampler_config {
+        //     ResamplerConfig::None => {}
+        //     // hopefully the target hardware can handle 48mhz and upsampling here is never needed
+        //     ResamplerConfig::UpSample(rate) => {
+        //         let iter = buf.iter();
+        //         let mut buf2 = vec![0_f32, rate * buf_len];
+        //         for chunk in (&buf2).chunks_exact_mut(rate) {
+        //             let v = *iter.next().unwrap_or_default();
+        //             for x in chunk {
+        //                 *x = v;
+        //             }
+        //         }
+        //         buf = buf2;
+        //     }
+        //     ResamplerConfig::DownSample(rate) => {
+        //         let buf2 = (&buf)
+        //             .chunks_exact(buf_len / rate)
+        //             .map(|x| x.get(0).unwrap_or_default())
+        //             .collect();
+        //         buf = buf2;
+        //     }
+        // }
 
         // calculate rms of frame
         let rms = f32::sqrt(buf.iter().map(|x| x * x).sum() / buf.len() as f32);
