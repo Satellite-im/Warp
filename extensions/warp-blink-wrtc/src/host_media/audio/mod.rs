@@ -68,6 +68,12 @@ pub enum AudioSampleRate {
     High,
 }
 
+impl Default for AudioSampleRate {
+    fn default() -> Self {
+        Self::High
+    }
+}
+
 impl AudioSampleRate {
     pub fn to_u32(&self) -> u32 {
         match self {

@@ -1,24 +1,15 @@
-use std::{
-    cmp,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
 };
 
 use cpal::BuildStreamError;
-use futures::channel::mpsc::UnboundedReceiver;
-use tokio::sync::{
-    broadcast,
-    mpsc::{self, error::TryRecvError, UnboundedSender},
-    Notify,
-};
+use tokio::sync::{broadcast, mpsc, Notify};
 use warp::blink::BlinkEventKind;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
-use super::utils::{AudioHardwareConfig, Framer, FramerOutput, SpeechDetector};
+use super::utils::{AudioHardwareConfig, FramerOutput};
 
 mod encoder_task;
 mod sender_task;
