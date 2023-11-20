@@ -393,7 +393,9 @@ impl WarpIpfs {
             break;
         }
 
-        if config.ipfs_setting.dht_client {
+        if config.ipfs_setting.dht_client
+            && config.store_setting.discovery != config::Discovery::None
+        {
             ipfs.dht_mode(DhtMode::Client).await?;
         }
 
