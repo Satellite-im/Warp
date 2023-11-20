@@ -285,11 +285,11 @@ impl WarpIpfs {
                 })),
                 Default::default(),
             );
-        }
 
-        if config.ipfs_setting.bootstrap {
-            for addr in config.bootstrap.address() {
-                uninitialized = uninitialized.add_bootstrap(addr);
+            if config.ipfs_setting.bootstrap {
+                for addr in config.bootstrap.address() {
+                    uninitialized = uninitialized.add_bootstrap(addr);
+                }
             }
         }
 
