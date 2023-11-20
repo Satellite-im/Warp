@@ -296,7 +296,7 @@ impl Default for Config {
             store_setting: Default::default(),
             enable_relay: false,
             save_phrase: false,
-            max_storage_size: Some(1024 * 1024 * 1024),
+            max_storage_size: Some(10 * 1024 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
             thumbnail_size: (128, 128),
             chunking: None,
