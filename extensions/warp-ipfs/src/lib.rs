@@ -260,6 +260,7 @@ impl WarpIpfs {
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
                 yamux_update_mode: UpdateMode::Read,
+                enable_quic: !config.ipfs_setting.disable_quic,
                 ..Default::default()
             });
 

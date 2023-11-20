@@ -166,6 +166,7 @@ pub struct IpfsSetting {
     /// Used for testing with a memory transport
     pub memory_transport: bool,
     pub dht_client: bool,
+    pub disable_quic: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -284,7 +285,7 @@ impl Default for Config {
             path: None,
             network: Network::Ipfs,
             bootstrap: Bootstrap::Ipfs,
-            listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
+            listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"]
                 .iter()
                 .filter_map(|s| Multiaddr::from_str(s).ok())
                 .collect::<Vec<_>>(),
