@@ -28,21 +28,21 @@ impl SourceTrack {
     pub fn new(
         track: Arc<TrackLocalStaticRTP>,
         source_device: &cpal::Device,
-        source_config: AudioHardwareConfig,
+        num_channels: usize,
         ui_event_ch: broadcast::Sender<BlinkEventKind>,
     ) -> Result<Self, Error> {
         let quit_encoder_task = Arc::new(AtomicBool::new(false));
         let quit_sender_task = Arc::new(Notify::new());
         let muted = Arc::new(AtomicBool::new(false));
 
-        // 10ms
-        let buffer_size: u32 = source_config.sample_rate() * source_config.channels() / 100;
+        // 10ms at 48KHz
+        let buffer_size: u32 = 480 * num_channels;
         let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
         let (encoded_tx, encoded_rx) = mpsc::unbounded_channel::<FramerOutput>();
 
         let config = cpal::StreamConfig {
-            channels: source_config.channels(),
-            sample_rate: cpal::SampleRate(source_config.sample_rate()),
+            channels: num_channels,
+            sample_rate: cpal::SampleRate(48000),
             buffer_size: cpal::BufferSize::Fixed(buffer_size),
         };
 
@@ -93,7 +93,6 @@ impl SourceTrack {
             should_quit,
             num_channels: todo!(),
             buf_len: todo!(),
-            resampler_config: todo!(),
         }));
 
         // spawn the sender task

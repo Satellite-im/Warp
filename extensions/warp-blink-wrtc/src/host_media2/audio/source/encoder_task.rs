@@ -20,7 +20,6 @@ pub struct Args {
     pub should_quit: Arc<AtomicBool>,
     pub num_channels: usize,
     pub buf_len: usize,
-    pub resampler_config: ResamplerConfig,
 }
 
 pub fn run(args: Args) {
@@ -31,7 +30,6 @@ pub fn run(args: Args) {
         should_quit,
         num_channels,
         buf_len,
-        resampler_config,
     } = args;
 
     // speech_detector should emit at most 1 event per second
@@ -43,7 +41,7 @@ pub fn run(args: Args) {
             Ok(r) => r,
             Err(e) => match e {
                 TryRecvError::Empty => {
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::sleep(Duration::from_millis(5));
                     continue;
                 }
                 TryRecvError::Disconnected => {
@@ -63,31 +61,6 @@ pub fn run(args: Args) {
                 .collect();
             buf = buf2;
         }
-
-        // really shouldn't need this
-        // resample if needed
-        // match resampler_config {
-        //     ResamplerConfig::None => {}
-        //     // hopefully the target hardware can handle 48mhz and upsampling here is never needed
-        //     ResamplerConfig::UpSample(rate) => {
-        //         let iter = buf.iter();
-        //         let mut buf2 = vec![0_f32, rate * buf_len];
-        //         for chunk in (&buf2).chunks_exact_mut(rate) {
-        //             let v = *iter.next().unwrap_or_default();
-        //             for x in chunk {
-        //                 *x = v;
-        //             }
-        //         }
-        //         buf = buf2;
-        //     }
-        //     ResamplerConfig::DownSample(rate) => {
-        //         let buf2 = (&buf)
-        //             .chunks_exact(buf_len / rate)
-        //             .map(|x| x.get(0).unwrap_or_default())
-        //             .collect();
-        //         buf = buf2;
-        //     }
-        // }
 
         // calculate rms of frame
         let rms = f32::sqrt(buf.iter().map(|x| x * x).sum() / buf.len() as f32);

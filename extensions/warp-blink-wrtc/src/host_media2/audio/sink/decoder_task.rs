@@ -36,7 +36,6 @@ pub struct Args {
     pub cmd_rx: UnboundedReceiver<Cmd>,
     pub should_quit: Arc<AtomicBool>,
     pub num_channels: usize,
-    pub resampler_config: ResamplerConfig,
 }
 
 pub fn run(args: Args) {
@@ -44,7 +43,6 @@ pub fn run(args: Args) {
         mut cmd_rx,
         should_quit,
         num_channels,
-        resampler_config,
     } = args;
 
     let mut connections: Vec<Entry> = vec![];
@@ -89,50 +87,11 @@ pub fn run(args: Args) {
                         .decode(&packet, &mut decoder_output_buf, false)
                     {
                         Ok(size) => {
-                            decoder_output_buf.resize(size, 0_f32);
-
-                            // really shouldn't need this
-                            // match resampler_config {
-                            //     ResamplerConfig::None => {}
-                            //     ResamplerConfig::UpSample(rate) => {
-                            //         let iter = decoder_output_buf.iter();
-                            //         let mut buf2 =
-                            //             vec![0_f32, rate * decoder_output_buf.len() * num_channels];
-                            //         for chunk in (&buf2).chunks_exact_mut(rate * num_channels) {
-                            //             let v = *iter.next().unwrap_or_default();
-                            //             for x in chunk {
-                            //                 *x = v;
-                            //             }
-                            //         }
-                            //         decoder_output_buf = buf2;
-                            //     }
-                            //     // hopefully the target hardware can handle 48mhz and downsampling here is never needed
-                            //     ResamplerConfig::DownSample(rate) => {
-                            //         let buf2: Vec<f32> = (&decoder_output_buf)
-                            //             .chunks_exact(decoder_output_buf.len() / rate)
-                            //             .map(|x| x.get(0).unwrap_or_default())
-                            //             .collect();
-                            //         if num_channels == 1 {
-                            //             decoder_output_buf = buf2;
-                            //         } else {
-                            //             let mut buf3 = vec![0, buf2.len() * num_channels];
-                            //             let iter = buf2.iter();
-                            //             for chunk in (&buf3).chunks_exact_mut(num_channels) {
-                            //                 let v = *iter.next().unwrap_or_default();
-                            //                 for x in chunk {
-                            //                     *x = v;
-                            //                 }
-                            //             }
-                            //             decoder_output_buf = buf3
-                            //         }
-                            //     }
-                            // }
-
-                            let iter = decoder_output_buf.iter();
-                            let mut buf2 = vec![0_f32, decoder_output_buf.len() * num_channels];
-                            for chunk in (&buf2).chunks_exact_mut(num_channels) {
-                                let v = *iter.next().unwrap_or_default();
-                                chunk.fill_with(v);
+                            let mut buf2 = vec![0_f32, size * num_channels];
+                            let it1 = (&buf2).chunks_exact_mut(num_channels);
+                            let it2 = decoder_output_buf.iter().take(size);
+                            for (chunk, val) in std::iter::zip(it1, it2) {
+                                chunk.fill_with(*val);
                             }
                             entry.sample_tx.send(buf2);
                         }

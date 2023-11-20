@@ -26,7 +26,7 @@ pub struct SinkTrack {
     quit_receiver_task: Arc<Notify>,
     quit_decoder_task: Arc<AtomicBool>,
     silenced: Arc<AtomicBool>,
-    sink_config: AudioHardwareConfig,
+    num_channels: usize,
     cmd_tx: mpsc::UnboundedSender<Cmd>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     streams: HashMap<DID, cpal::Stream>,
@@ -34,7 +34,7 @@ pub struct SinkTrack {
 
 impl SinkTrack {
     pub fn new(
-        sink_config: AudioHardwareConfig,
+        num_channels: usize,
         ui_event_ch: broadcast::Sender<BlinkEventKind>,
     ) -> Result<Self> {
         let quit_receiver_task = Arc::new(Notify::new());
@@ -49,7 +49,7 @@ impl SinkTrack {
             quit_receiver_task,
             quit_decoder_task,
             silenced,
-            sink_config,
+            num_channels,
             cmd_tx,
             ui_event_ch,
             streams,
@@ -62,11 +62,11 @@ impl SinkTrack {
         // create channel pair to go from decoder thread to cpal callback
         let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
         // create cpal stream and add to self
-        // 10ms
-        let buffer_size: u32 = self.sink_config.sample_rate() * self.sink_config.channels() / 100;
+        // 10ms at 48KHz
+        let buffer_size: u32 = 480 * self.sink_config.channels();
         let config = cpal::StreamConfig {
-            channels: self.sink_config.channels(),
-            sample_rate: cpal::SampleRate(self.sink_config.sample_rate()),
+            channels: self.num_channels,
+            sample_rate: cpal::SampleRate(48000),
             buffer_size: cpal::BufferSize::Fixed(buffer_size),
         };
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
