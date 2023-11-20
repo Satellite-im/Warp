@@ -3,13 +3,13 @@ use std::sync::{
     Arc,
 };
 
-use cpal::BuildStreamError;
+use cpal::{traits::DeviceTrait, BuildStreamError};
 use tokio::sync::{broadcast, mpsc, Notify};
 use warp::blink::BlinkEventKind;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
-use super::utils::{AudioHardwareConfig, FramerOutput};
+use super::utils::FramerOutput;
 
 mod encoder_task;
 mod sender_task;
@@ -35,15 +35,19 @@ impl SourceTrack {
         let quit_sender_task = Arc::new(Notify::new());
         let muted = Arc::new(AtomicBool::new(false));
 
+        // fail fast if the opus encoder can't be created. needed by the encoder task
+        let encoder = opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip)
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?;
+
         // 10ms at 48KHz
-        let buffer_size: u32 = 480 * num_channels;
+        let buffer_size = 480 * num_channels;
         let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
         let (encoded_tx, encoded_rx) = mpsc::unbounded_channel::<FramerOutput>();
 
         let config = cpal::StreamConfig {
-            channels: num_channels,
+            channels: num_channels as _,
             sample_rate: cpal::SampleRate(48000),
-            buffer_size: cpal::BufferSize::Fixed(buffer_size),
+            buffer_size: cpal::BufferSize::Fixed(buffer_size as _),
         };
 
         let muted2 = muted.clone();
@@ -86,25 +90,26 @@ impl SourceTrack {
 
         // spawn encoder task
         let should_quit = quit_encoder_task.clone();
-        std::thread::spawn(encoder_task::run(encoder_task::Args {
-            encoder: todo!(),
-            rx: sample_rx,
-            tx: encoded_tx,
-            should_quit,
-            num_channels: todo!(),
-            buf_len: todo!(),
-        }));
+        std::thread::spawn(move || {
+            encoder_task::run(encoder_task::Args {
+                encoder,
+                rx: sample_rx,
+                tx: encoded_tx,
+                should_quit,
+                num_channels,
+                num_samples: 480,
+            });
+        });
 
         // spawn the sender task
         let notify = quit_sender_task.clone();
         tokio::task::spawn(async move {
             sender_task::run(sender_task::Args {
-                packetizer: todo!(),
                 track,
                 ui_event_ch,
                 rx: encoded_rx,
                 notify,
-                frame_size: todo!(),
+                num_samples: 480,
             })
             .await;
         });

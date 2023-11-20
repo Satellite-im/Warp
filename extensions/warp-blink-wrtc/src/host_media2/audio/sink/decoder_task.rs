@@ -3,21 +3,20 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use warp::crypto::DID;
-use webrtc::rtp;
+use webrtc::media::Sample;
 
-use crate::host_media2::audio::utils::{AudioSampleRate, ResamplerConfig};
 use rayon::prelude::*;
 
 pub enum Cmd {
     AddTrack {
         decoder: opus::Decoder,
         peer_id: DID,
-        packet_rx: UnboundedReceiver<rtp::packet::Packet>,
+        packet_rx: UnboundedReceiver<Sample>,
         sample_tx: UnboundedSender<Vec<f32>>,
     },
     RemoveTrack {
@@ -28,7 +27,7 @@ pub enum Cmd {
 struct Entry {
     decoder: opus::Decoder,
     peer_id: DID,
-    packet_rx: UnboundedReceiver<rtp::packet::Packet>,
+    packet_rx: UnboundedReceiver<Sample>,
     sample_tx: UnboundedSender<Vec<f32>>,
 }
 
@@ -56,7 +55,8 @@ pub fn run(args: Args) {
                     packet_rx,
                     sample_tx,
                 } => {
-                    connections.retain(|x| x.peer_id != &peer_id);
+                    connections.retain(|x| x.peer_id != peer_id);
+
                     connections.push(Entry {
                         decoder,
                         peer_id,
@@ -65,7 +65,7 @@ pub fn run(args: Args) {
                     });
                 }
                 Cmd::RemoveTrack { peer_id } => {
-                    connections.retain(|x| x.peer_id != &peer_id);
+                    connections.retain(|x| x.peer_id != peer_id);
                 }
             }
             remaining_tries -= 1;
@@ -74,24 +74,26 @@ pub fn run(args: Args) {
             }
         }
 
-        let mut packets_decoded = connections
+        let packets_decoded: u16 = connections
             .par_iter_mut()
             .map(|entry| {
                 let mut ran_once = false;
-                while let Ok(packet) = entry.packet_rx.try_recv() {
+                while let Ok(sample) = entry.packet_rx.try_recv() {
                     ran_once = true;
+
                     // 10ms
-                    let mut decoder_output_buf = vec![0_f32, 480];
-                    match entry
-                        .decoder
-                        .decode(&packet, &mut decoder_output_buf, false)
-                    {
+                    let mut decoder_output_buf = vec![0_f32; 480];
+                    match entry.decoder.decode_float(
+                        sample.data.as_ref(),
+                        &mut decoder_output_buf,
+                        false,
+                    ) {
                         Ok(size) => {
-                            let mut buf2 = vec![0_f32, size * num_channels];
+                            let mut buf2 = vec![0_f32; size * num_channels];
                             let it1 = (&buf2).chunks_exact_mut(num_channels);
                             let it2 = decoder_output_buf.iter().take(size);
                             for (chunk, val) in std::iter::zip(it1, it2) {
-                                chunk.fill_with(*val);
+                                chunk.fill(*val);
                             }
                             entry.sample_tx.send(buf2);
                         }
@@ -101,9 +103,9 @@ pub fn run(args: Args) {
                     }
                 }
                 if ran_once {
-                    1
+                    1_u16
                 } else {
-                    0
+                    0_u16
                 }
             })
             .sum();

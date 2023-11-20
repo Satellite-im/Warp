@@ -13,21 +13,17 @@ use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-pub(crate) mod audio;
-use audio::{create_sink_track, create_source_track, AudioCodec, AudioHardwareConfig};
-
-use self::audio::DeviceConfig;
-use self::{audio::AudioSampleRate, mp4_logger::Mp4LoggerConfig};
-
-pub(crate) mod mp4_logger;
+use super::audio;
+use super::audio::sink::SinkTrack;
+use super::audio::source::SourceTrack;
 
 struct Data {
     audio_input_device: Option<cpal::Device>,
     audio_output_device: Option<cpal::Device>,
-    audio_source_config: AudioHardwareConfig,
-    audio_sink_config: AudioHardwareConfig,
-    audio_source_track: Option<Box<dyn audio::SourceTrack>>,
-    audio_sink_tracks: HashMap<DID, Box<dyn audio::SinkTrack>>,
+    audio_source_channels: usize,
+    audio_sink_channels: usize,
+    audio_source_track: Option<SourceTrack>,
+    audio_sink_tracks: HashMap<DID, SinkTrack>,
     recording: bool,
     muted: bool,
     deafened: bool,
@@ -39,14 +35,8 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
     Data {
         audio_input_device: cpal_host.default_input_device(),
         audio_output_device: cpal_host.default_output_device(),
-        audio_source_config: AudioHardwareConfig {
-            sample_rate: AudioSampleRate::High,
-            channels: 1,
-        },
-        audio_sink_config: AudioHardwareConfig {
-            sample_rate: AudioSampleRate::High,
-            channels: 1,
-        },
+        audio_source_channels: 1,
+        audio_sink_channels: 1,
         audio_source_track: None,
         audio_sink_tracks: HashMap::new(),
         recording: false,
@@ -93,9 +83,8 @@ pub async fn has_audio_source() -> bool {
 // use AUDIO_SOURCE_ID
 pub async fn create_audio_source_track(
     own_id: DID,
-    event_ch: broadcast::Sender<BlinkEventKind>,
+    ui_event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
-    webrtc_codec: AudioCodec,
 ) -> Result<(), Error> {
     let _lock = LOCK.write().await;
     let input_device = match unsafe { DATA.audio_input_device.as_ref() } {
@@ -103,16 +92,10 @@ pub async fn create_audio_source_track(
         None => return Err(Error::MicrophoneMissing),
     };
 
-    let muted = unsafe { DATA.muted };
-    let source_config = unsafe { DATA.audio_source_config.clone() };
-    let source_track = create_source_track(
-        own_id,
-        event_ch,
-        input_device,
-        track,
-        webrtc_codec,
-        source_config,
-    )?;
+    let (muted, num_channels) = unsafe {
+        (DATA.muted, DATA.audio_source_channels);
+    };
+    let source_track = SourceTrack::new(track, input_device, num_channels, ui_event_ch)?;
 
     if !muted {
         source_track.play()?;

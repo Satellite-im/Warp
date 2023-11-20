@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::host_media2::audio::utils::{FramerOutput, SpeechDetector};
 
+use rand::Rng;
 use tokio::sync::{broadcast, mpsc::UnboundedReceiver, Notify};
 use warp::blink::BlinkEventKind;
 use webrtc::{
@@ -10,23 +11,43 @@ use webrtc::{
 };
 
 pub struct Args {
-    pub packetizer: Box<dyn Packetizer>,
     pub track: Arc<TrackLocalStaticRTP>,
     pub ui_event_ch: broadcast::Sender<BlinkEventKind>,
     pub rx: UnboundedReceiver<FramerOutput>,
     pub notify: Arc<Notify>,
-    pub frame_size: usize,
+    pub num_samples: usize,
 }
 
 pub async fn run(args: Args) {
     let Args {
-        mut packetizer,
         track,
         ui_event_ch,
         mut rx,
         notify,
-        frame_size,
+        num_samples,
     } = args;
+
+    let mut packetizer = {
+        // create the ssrc for the RTP packets. ssrc serves to uniquely identify the sender
+        let mut rng = rand::thread_rng();
+        let ssrc: u32 = rng.gen();
+        let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
+        let seq = Box::new(rtp::sequence::new_random_sequencer());
+        rtp::packetizer::new_packetizer(
+            // frame size is number of samples
+            // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
+            (1024) + 12,
+            // payload type means nothing
+            // https://en.wikipedia.org/wiki/RTP_payload_formats
+            // todo: use an enum for this
+            98,
+            // randomly generated and uniquely identifies the source
+            ssrc,
+            opus,
+            seq,
+            48000,
+        )
+    };
 
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = SpeechDetector::new(10, 100);
@@ -54,7 +75,7 @@ pub async fn run(args: Args) {
             continue;
         }
 
-        let packets = match packetizer.packetize(&frame.bytes, frame_size).await {
+        let packets = match packetizer.packetize(&frame.bytes, num_samples as _).await {
             Ok(r) => r,
             Err(e) => {
                 log::error!("failed to packetize for opus: {}", e);

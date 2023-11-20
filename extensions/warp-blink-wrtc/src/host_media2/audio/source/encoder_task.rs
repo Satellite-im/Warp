@@ -6,10 +6,7 @@ use std::{
     time::Duration,
 };
 
-use futures::channel::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::{error::TryRecvError, UnboundedSender};
-
-use crate::host_media2::audio::utils::ResamplerConfig;
+use tokio::sync::mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender};
 
 use super::super::utils::{FramerOutput, SpeechDetector};
 
@@ -19,7 +16,7 @@ pub struct Args {
     pub tx: UnboundedSender<FramerOutput>,
     pub should_quit: Arc<AtomicBool>,
     pub num_channels: usize,
-    pub buf_len: usize,
+    pub num_samples: usize,
 }
 
 pub fn run(args: Args) {
@@ -29,12 +26,12 @@ pub fn run(args: Args) {
         tx,
         should_quit,
         num_channels,
-        buf_len,
+        num_samples,
     } = args;
 
     // speech_detector should emit at most 1 event per second
     let mut speech_detector = SpeechDetector::new(10, 100);
-    let mut opus_out = vec![0_f32, buf_len * 4];
+    let mut opus_out = vec![0_u8; num_samples * 4];
 
     while !should_quit.load(Ordering::Relaxed) {
         let mut buf: Vec<f32> = match rx.try_recv() {
@@ -51,19 +48,23 @@ pub fn run(args: Args) {
             },
         };
 
-        assert_eq!(buf.len(), buf_len);
+        assert_eq!(buf.len(), num_samples * num_channels);
 
         // merge channels
         if num_channels != 1 {
             let buf2: Vec<f32> = (&buf)
                 .chunks_exact(num_channels)
-                .map(|x| x.iter().sum() / num_channels)
+                .map(|x| x.iter().sum::<f32>() / num_channels as f32)
                 .collect();
             buf = buf2;
         }
 
         // calculate rms of frame
-        let rms = f32::sqrt(buf.iter().map(|x| x * x).sum() / buf.len() as f32);
+        let rms = f32::sqrt(buf.iter().map(|x| x * x).sum::<f32>() / buf.len() as f32);
+        let loudness = match rms * 1000.0 {
+            x if x >= 127.0 => 127,
+            x => x as u8,
+        };
 
         // encode and send off to the network bound task
         match encoder.encode_float(buf.as_mut_slice(), opus_out.as_mut_slice()) {
@@ -71,10 +72,7 @@ pub fn run(args: Args) {
                 let slice = opus_out.as_slice();
                 let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
 
-                tx.send(FramerOutput {
-                    bytes,
-                    loudness: rms,
-                });
+                tx.send(FramerOutput { bytes, loudness });
             }
             Err(e) => {
                 log::error!("OpusPacketizer failed to encode: {}", e);

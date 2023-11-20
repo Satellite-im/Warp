@@ -26,7 +26,7 @@ pub struct Framer {
 
 pub struct FramerOutput {
     pub bytes: Bytes,
-    pub loudness: f32,
+    pub loudness: u8,
 }
 
 impl Framer {
