@@ -2,7 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rust_ipfs::Multiaddr;
-use rustyline_async::{Readline, ReadlineError};
+use rustyline_async::Readline;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -151,9 +151,7 @@ async fn account(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {
-        //raising fd limit
-    }
+    _ = fdlimit::raise_fd_limit().is_ok();
 
     let file_appender = match &opt.path {
         Some(path) => tracing_appender::rolling::hourly(path, "warp_mp_identity_interface.log"),
@@ -361,7 +359,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             line = rl.readline().fuse() => match line {
-                Ok(line) => {
+                Ok(rustyline_async::ReadlineEvent::Line(line)) => {
                     rl.add_history_entry(line.clone());
                     let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
@@ -792,8 +790,7 @@ async fn main() -> anyhow::Result<()> {
                         _ => continue
                     }
                 },
-                Err(ReadlineError::Interrupted) => break,
-                Err(ReadlineError::Eof) => break,
+                Ok(rustyline_async::ReadlineEvent::Eof) | Ok(rustyline_async::ReadlineEvent::Interrupted) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {e}")?;
                 }

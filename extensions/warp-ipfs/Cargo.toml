@@ -42,17 +42,15 @@ bytes.workspace = true
 shuttle = { path = "../../tools/shuttle" }
 
 [dev-dependencies]
-fdlimit = "0.2"
-bs58 = "0.4"
-rustyline-async = "0.3"
-comfy-table = "6.1"
+fdlimit = "0.3"
+rustyline-async = "0.4"
+comfy-table = "7.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 
 clap = { version = "4.0", features = ["derive"] }
-dirs = "4.0"
 
-rpassword = "7.2"
+rpassword = "7.3"
 
 
 [features]
