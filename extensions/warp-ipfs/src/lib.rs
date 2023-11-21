@@ -15,8 +15,8 @@ use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 use ipfs::libp2p::core::upgrade::Version;
 use ipfs::libp2p::Transport;
 use ipfs::p2p::{
-    ConnectionLimits, IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig,
-    TransportConfig, UpdateMode,
+    IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
+    UpdateMode,
 };
 
 use rust_ipfs as ipfs;
@@ -46,9 +46,9 @@ use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
 use warp::raygun::{
     AttachmentEventStream, Conversation, EmbedState, Location, Message, MessageEvent,
-    MessageEventStream, MessageOptions, MessageStatus, Messages, PinState, RayGun,
-    RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents, RayGunGroupConversation,
-    RayGunStream, ReactionState,
+    MessageEventStream, MessageOptions, MessageReference, MessageStatus, Messages, PinState,
+    RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
+    RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 
@@ -229,41 +229,6 @@ impl WarpIpfs {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
-        let swarm_config = config.ipfs_setting.swarm.clone();
-
-        let mut swarm_configuration = ipfs::p2p::SwarmConfig {
-            dial_concurrency_factor: swarm_config
-                .dial_factor
-                .try_into()
-                .unwrap_or_else(|_| 8.try_into().expect("8 > 0")),
-            notify_handler_buffer_size: swarm_config
-                .notify_buffer_size
-                .try_into()
-                .unwrap_or_else(|_| 32.try_into().expect("32 > 0")),
-            connection_event_buffer_size: if swarm_config.connection_buffer_size > 0 {
-                swarm_config.connection_buffer_size
-            } else {
-                32
-            },
-            connection: ConnectionLimits::default(),
-            ..Default::default()
-        };
-
-        if let Some(limit) = swarm_config.limit {
-            swarm_configuration.connection = ConnectionLimits::default()
-                .with_max_pending_outgoing(limit.max_pending_outgoing)
-                .with_max_pending_incoming(limit.max_pending_incoming)
-                .with_max_established_incoming(limit.max_established_incoming)
-                .with_max_established_outgoing(limit.max_established_outgoing)
-                .with_max_established(limit.max_established)
-                .with_max_established_per_peer(limit.max_established_per_peer);
-
-            info!(
-                "Connection configuration: {:?}",
-                swarm_configuration.connection
-            );
-        }
-
         let (pb_tx, pb_rx) = channel(50);
 
         let behaviour = behaviour::Behaviour {
@@ -271,7 +236,7 @@ impl WarpIpfs {
         };
 
         info!("Starting ipfs");
-        let mut uninitialized = UninitializedIpfs::empty()
+        let mut uninitialized = UninitializedIpfs::new()
             .with_identify(Some({
                 let mut idconfig = IdentifyConfiguration {
                     protocol_version: "/satellite/warp/0.1".into(),
@@ -283,16 +248,6 @@ impl WarpIpfs {
                 idconfig
             }))
             .with_bitswap(None)
-            .with_kademlia(
-                Some(either::Either::Left(KadConfig {
-                    query_timeout: std::time::Duration::from_secs(60),
-                    publication_interval: Some(Duration::from_secs(30 * 60)),
-                    provider_record_ttl: Some(Duration::from_secs(60 * 60)),
-                    insert_method: KadInserts::Manual,
-                    ..Default::default()
-                })),
-                Default::default(),
-            )
             .with_ping(None)
             .with_pubsub(Some(PubsubConfig {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
@@ -305,10 +260,9 @@ impl WarpIpfs {
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
                 yamux_update_mode: UpdateMode::Read,
+                enable_quic: !config.ipfs_setting.disable_quic,
                 ..Default::default()
-            })
-            .listen_as_external_addr()
-            .set_swarm_configuration(swarm_configuration);
+            });
 
         if let Some(path) = self.config.path.as_ref() {
             info!("Instance will be persistent");
@@ -321,34 +275,51 @@ impl WarpIpfs {
             uninitialized = uninitialized.set_path(path);
         }
 
-        for addr in config.bootstrap.address() {
-            uninitialized = uninitialized.add_bootstrap(addr);
+        if config.store_setting.discovery != config::Discovery::None {
+            uninitialized = uninitialized.with_kademlia(
+                Some(either::Either::Left(KadConfig {
+                    query_timeout: std::time::Duration::from_secs(60),
+                    publication_interval: Some(Duration::from_secs(30 * 60)),
+                    provider_record_ttl: Some(Duration::from_secs(60 * 60)),
+                    insert_method: KadInserts::Manual,
+                    ..Default::default()
+                })),
+                Default::default(),
+            );
+
+            if config.ipfs_setting.bootstrap {
+                for addr in config.bootstrap.address() {
+                    uninitialized = uninitialized.add_bootstrap(addr);
+                }
+            }
         }
 
         if config.ipfs_setting.memory_transport {
-            uninitialized = uninitialized.with_custom_transport(Box::new(
-                |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
-                    let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            uninitialized = uninitialized
+                .with_custom_transport(Box::new(
+                    |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
+                        let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-                    let transport = match relay {
-                        Some(relay) => OrTransport::new(relay, MemoryTransport::default())
-                            .upgrade(Version::V1)
-                            .authenticate(noise_config)
-                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                            .timeout(Duration::from_secs(20))
-                            .boxed(),
-                        None => MemoryTransport::default()
-                            .upgrade(Version::V1)
-                            .authenticate(noise_config)
-                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                            .timeout(Duration::from_secs(20))
-                            .boxed(),
-                    };
+                        let transport = match relay {
+                            Some(relay) => OrTransport::new(relay, MemoryTransport::default())
+                                .upgrade(Version::V1)
+                                .authenticate(noise_config)
+                                .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                                .timeout(Duration::from_secs(20))
+                                .boxed(),
+                            None => MemoryTransport::default()
+                                .upgrade(Version::V1)
+                                .authenticate(noise_config)
+                                .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                                .timeout(Duration::from_secs(20))
+                                .boxed(),
+                        };
 
-                    Ok(transport)
-                },
-            ));
+                        Ok(transport)
+                    },
+                ))
+                .listen_as_external_addr();
         }
 
         if config.ipfs_setting.portmapping {
@@ -398,10 +369,19 @@ impl WarpIpfs {
         }
 
         for relay_peer in relay_peers {
-            if let Err(e) = ipfs.enable_relay(Some(relay_peer)).await {
-                error!("Failed to use {relay_peer} as a relay: {e}");
-                continue;
-            }
+            match tokio::time::timeout(Duration::from_secs(15), ipfs.enable_relay(Some(relay_peer)))
+                .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    error!("Failed to use {relay_peer} as a relay: {e}");
+                    continue;
+                }
+                Err(_) => {
+                    error!("Relay connection timed out");
+                    continue;
+                }
+            };
 
             let list = ipfs.list_relays(true).await.unwrap_or_default();
             for addr in list
@@ -414,15 +394,33 @@ impl WarpIpfs {
             break;
         }
 
-        if config.ipfs_setting.dht_client {
+        if config.ipfs_setting.dht_client
+            && config.store_setting.discovery != config::Discovery::None
+        {
             ipfs.dht_mode(DhtMode::Client).await?;
         }
 
-        if config.ipfs_setting.bootstrap && !empty_bootstrap {
-            //TODO: determine if bootstrap should run in intervals
-            if let Err(e) = ipfs.bootstrap().await {
-                error!("Error bootstrapping: {e}");
-            }
+        if config.store_setting.discovery != config::Discovery::None
+            && config.ipfs_setting.bootstrap
+            && !empty_bootstrap
+        {
+            tokio::spawn({
+                let ipfs = ipfs.clone();
+                async move {
+                    loop {
+                        match ipfs.bootstrap().await {
+                            Ok(task) => {
+                                if let Err(e) = task.await {
+                                    error!("Failed to bootstrap: {e}");
+                                }
+                            }
+                            Err(e) => error!("Failed to bootstrap: {e}"),
+                        };
+
+                        tokio::time::sleep(Duration::from_secs(60 * 5)).await;
+                    }
+                }
+            });
         }
 
         let relays = ipfs
@@ -1270,6 +1268,26 @@ impl RayGun for WarpIpfs {
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
         self.messaging_store()?
             .get_message(conversation_id, message_id)
+            .await
+    }
+
+    async fn get_message_references(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        self.messaging_store()?
+            .get_message_references(conversation_id, opt)
+            .await
+    }
+
+    async fn get_message_reference(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        self.messaging_store()?
+            .get_message_reference(conversation_id, message_id)
             .await
     }
 

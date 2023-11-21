@@ -2,7 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rust_ipfs::Multiaddr;
-use rustyline_async::{Readline, ReadlineError, SharedWriter};
+use rustyline_async::{Readline, SharedWriter};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -24,7 +24,7 @@ use warp::raygun::{
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_ipfs::config::{Discovery, DiscoveryType};
+use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
@@ -113,6 +113,7 @@ async fn setup<P: AsRef<Path>>(
     }
     if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;
+        config.bootstrap = Bootstrap::None;
         config.ipfs_setting.bootstrap = false;
     }
 
@@ -146,9 +147,7 @@ async fn setup<P: AsRef<Path>>(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {
-        //raising fd limit
-    }
+    _ = fdlimit::raise_fd_limit().is_ok();
 
     let mut _log_guard = None;
 
@@ -304,7 +303,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             line = rl.readline().fuse() => match line {
-                Ok(line) => {
+                Ok(rustyline_async::ReadlineEvent::Line(line)) => {
+                    rl.add_history_entry(line.clone());
                     let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
                         Some("/create") => {
@@ -453,6 +453,68 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{table}")?;
                         },
+                        Some("/list-references") => {
+
+                            let local_topic = *topic.read();
+                            let mut lower_range = None;
+                            let mut upper_range = None;
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(lower) => {
+                                        lower_range = Some(lower);
+                                        if let Some(id) = cmd_line.next() {
+                                            match id.parse() {
+                                                Ok(upper) => {
+                                                    upper_range = Some(upper);
+                                                },
+                                                Err(e) => {
+                                                    writeln!(stdout, "Error parsing upper range: {e}")?;
+                                                    continue
+                                                }
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing lower range: {e}")?;
+                                        continue
+                                    }
+                                }
+                            };
+
+                            let mut opt = MessageOptions::default();
+                            if let Some(lower) = lower_range {
+                                if let Some(upper) = upper_range {
+                                    opt = opt.set_range(lower..upper);
+                                } else {
+                                    opt = opt.set_range(0..lower);
+                                }
+                            }
+
+                            let mut messages_stream = match chat.get_message_references(local_topic, opt).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+
+
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Conversation ID", "Date", "Modified", "Sender", "Pinned"]);
+                            while let Some(message) = messages_stream.next().await {
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &format!("{}", message.pinned()),
+                                ]);
+                            }
+                            writeln!(stdout, "{table}")?
+                        }
                         Some("/list") => {
 
                             let local_topic = *topic.read();
@@ -1030,8 +1092,7 @@ async fn main() -> anyhow::Result<()> {
                        }
                     }
                 },
-                Err(ReadlineError::Interrupted) => break,
-                Err(ReadlineError::Eof) => break,
+                Ok(rustyline_async::ReadlineEvent::Eof) | Ok(rustyline_async::ReadlineEvent::Interrupted) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {e}")?;
                 }

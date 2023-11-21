@@ -9,6 +9,7 @@ use crate::{Extension, SingleHandle};
 use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
+use futures::Stream;
 use warp_derive::FFIFree;
 
 use chrono::{DateTime, Utc};
@@ -128,32 +129,26 @@ pub enum AttachmentKind {
 #[derive(FFIFree)]
 pub struct AttachmentEventStream(pub BoxStream<'static, AttachmentKind>);
 
-impl core::ops::Deref for AttachmentEventStream {
-    type Target = BoxStream<'static, AttachmentKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for AttachmentEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for AttachmentEventStream {
+    type Item = AttachmentKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
 #[derive(FFIFree)]
 pub struct MessageEventStream(pub BoxStream<'static, MessageEventKind>);
 
-impl core::ops::Deref for MessageEventStream {
-    type Target = BoxStream<'static, MessageEventKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for MessageEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for MessageEventStream {
+    type Item = MessageEventKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
@@ -166,16 +161,13 @@ impl Debug for MessageStream {
     }
 }
 
-impl core::ops::Deref for MessageStream {
-    type Target = BoxStream<'static, Message>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for MessageStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for MessageStream {
+    type Item = Message;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
@@ -518,6 +510,115 @@ pub enum MessageType {
     #[display(fmt = "event")]
     Event,
 }
+
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+pub struct MessageReference {
+    /// ID of the Message
+    id: Uuid,
+
+    /// Conversion id where `Message` is associated with.
+    conversation_id: Uuid,
+
+    /// ID of the sender of the message
+    sender: DID,
+
+    /// Timestamp of the message
+    date: DateTime<Utc>,
+
+    /// Timestamp of when message was modified
+    modified: Option<DateTime<Utc>>,
+
+    /// Pin a message over other messages
+    pinned: bool,
+
+    /// ID of the message being replied to
+    replied: Option<Uuid>,
+
+    /// Indication that a message been deleted
+    deleted: bool,
+}
+
+impl PartialOrd for MessageReference {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MessageReference {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.date.cmp(&other.date)
+    }
+}
+
+// Getter functions
+impl MessageReference {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn conversation_id(&self) -> Uuid {
+        self.conversation_id
+    }
+
+    pub fn sender(&self) -> DID {
+        self.sender.clone()
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+
+    pub fn modified(&self) -> Option<DateTime<Utc>> {
+        self.modified
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub fn replied(&self) -> Option<Uuid> {
+        self.replied
+    }
+
+    pub fn deleted(&self) -> bool {
+        self.deleted
+    }
+}
+
+impl MessageReference {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id
+    }
+
+    pub fn set_conversation_id(&mut self, id: Uuid) {
+        self.conversation_id = id
+    }
+
+    pub fn set_sender(&mut self, id: DID) {
+        self.sender = id
+    }
+
+    pub fn set_date(&mut self, date: DateTime<Utc>) {
+        self.date = date
+    }
+
+    pub fn set_modified(&mut self, date: DateTime<Utc>) {
+        self.modified = Some(date)
+    }
+
+    pub fn set_pinned(&mut self, pin: bool) {
+        self.pinned = pin
+    }
+
+    pub fn set_replied(&mut self, replied: Option<Uuid>) {
+        self.replied = replied
+    }
+
+    pub fn set_delete(&mut self, deleted: bool) {
+        self.deleted = deleted
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Message {
     /// ID of the Message
@@ -863,6 +964,20 @@ pub trait RayGun:
 
     /// Get a status of a message in a conversation
     async fn message_status(&self, _: Uuid, _: Uuid) -> Result<MessageStatus, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retrieve all message references from a conversation
+    async fn get_message_references(
+        &self,
+        _: Uuid,
+        _: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retrieve a message reference from a conversation
+    async fn get_message_reference(&self, _: Uuid, _: Uuid) -> Result<MessageReference, Error> {
         Err(Error::Unimplemented)
     }
 

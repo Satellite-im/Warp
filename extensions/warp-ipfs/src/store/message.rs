@@ -10,7 +10,7 @@ use chrono::Utc;
 use either::Either;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
-use futures::stream::SelectAll;
+use futures::stream::{BoxStream, SelectAll};
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 
@@ -26,8 +26,9 @@ use warp::logging::tracing::warn;
 use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState, Location,
-    Message, MessageEvent, MessageEventKind, MessageOptions, MessageStatus, MessageStream,
-    MessageType, Messages, MessagesType, PinState, RayGunEventKind, Reaction, ReactionState,
+    Message, MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
+    MessageStream, MessageType, Messages, MessagesType, PinState, RayGunEventKind, Reaction,
+    ReactionState,
 };
 use warp::sync::Arc;
 
@@ -2188,6 +2189,29 @@ impl MessageStore {
         conversation
             .get_message(&self.ipfs, &self.did, message_id, keystore.as_ref())
             .await
+    }
+
+    pub async fn get_message_references<'a>(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<BoxStream<'a, MessageReference>, Error> {
+        let conversation = self.conversations.get(conversation_id).await?;
+        conversation
+            .get_messages_reference_stream(&self.ipfs, opt)
+            .await
+    }
+
+    pub async fn get_message_reference(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        let conversation = self.conversations.get(conversation_id).await?;
+        conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await
+            .map(|document| document.into())
     }
 
     //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself

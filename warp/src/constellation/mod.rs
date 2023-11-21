@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 
 use directory::Directory;
 use dyn_clone::DynClone;
+use futures::Stream;
 use futures::stream::BoxStream;
 use item::Item;
 
@@ -40,16 +41,13 @@ pub enum ConstellationEventKind {
 
 pub struct ConstellationEventStream(pub BoxStream<'static, ConstellationEventKind>);
 
-impl core::ops::Deref for ConstellationEventStream {
-    type Target = BoxStream<'static, ConstellationEventKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for ConstellationEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for ConstellationEventStream {
+    type Item = ConstellationEventKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
@@ -86,16 +84,13 @@ pub enum Progression {
 
 pub struct ConstellationProgressStream(pub BoxStream<'static, Progression>);
 
-impl core::ops::Deref for ConstellationProgressStream {
-    type Target = BoxStream<'static, Progression>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for ConstellationProgressStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for ConstellationProgressStream {
+    type Item = Progression;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
