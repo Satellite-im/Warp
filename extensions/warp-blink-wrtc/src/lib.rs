@@ -9,7 +9,6 @@
 
 #![allow(dead_code)]
 
-mod host_media_old;
 // mod rtp_logger;
 mod blink_impl;
 mod host_media;

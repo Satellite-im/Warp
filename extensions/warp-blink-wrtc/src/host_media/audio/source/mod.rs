@@ -16,7 +16,7 @@ use warp::blink::BlinkEventKind;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
-use crate::host_media_old::audio::automute;
+use crate::host_media::audio::utils::automute;
 
 use super::utils::FramerOutput;
 

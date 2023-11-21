@@ -27,9 +27,9 @@ use warp::{
 
 use crate::{
     blink_impl::blink_controller::BlinkController,
-    host_media_old::{
+    host_media::{
         self,
-        audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
+        audio_utils::automute::{AutoMuteCmd, AUDIO_CMD_CH},
     },
     simple_webrtc::{self},
 };
@@ -47,18 +47,17 @@ pub struct BlinkImpl {
     gossipsub_listener: GossipSubListener,
     gossipsub_sender: GossipSubSender,
     blink_controller: blink_controller::BlinkController,
-    media_controller: host_media_old::Controller,
 
     drop_handler: Arc<DropHandler>,
 }
 
-struct DropHandler {
-    media_controller: host_media_old::Controller,
-}
+struct DropHandler {}
 impl Drop for DropHandler {
     fn drop(&mut self) {
-        host_media_old::audio::automute::stop();
-        self.media_controller.reset();
+        host_media::audio_utils::automute::stop();
+        tokio::spawn(async {
+            host_media::controller::reset().await;
+        });
     }
 }
 
@@ -70,13 +69,9 @@ impl BlinkImpl {
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
 
-        let media_controller = host_media_old::Controller::new(host_media_old::ControllerArgs {
-            ui_event_ch: ui_event_ch.clone(),
-        });
-
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            if let Err(e) = media_controller.change_audio_input(input_device).await {
+            if let Err(e) = host_media::controller::change_audio_input(input_device).await {
                 log::error!("BlinkImpl failed to set audio input device: {e}");
             }
         } else {
@@ -84,7 +79,7 @@ impl BlinkImpl {
         }
 
         if let Some(output_device) = cpal_host.default_output_device() {
-            if let Err(e) = media_controller.change_audio_output(output_device).await {
+            if let Err(e) = host_media::controller::change_audio_output(output_device).await {
                 log::error!("BlinkImpl failed to set audio output device: {e}");
             }
         } else {
@@ -104,7 +99,6 @@ impl BlinkImpl {
             webrtc_event_stream,
             gossipsub_sender: gossipsub_sender.clone(),
             gossipsub_listener: gossipsub_listener.clone(),
-            media_controller: media_controller.clone(),
             signal_rx: gossipsub_rx,
             ui_event_ch: ui_event_ch.clone(),
         });
@@ -115,10 +109,7 @@ impl BlinkImpl {
             gossipsub_sender,
             gossipsub_listener,
             blink_controller,
-            drop_handler: Arc::new(DropHandler {
-                media_controller: media_controller.clone(),
-            }),
-            media_controller,
+            drop_handler: Arc::new(DropHandler {}),
         };
 
         let own_id = blink_impl.own_id.clone();
@@ -163,7 +154,7 @@ impl BlinkImpl {
             }
         });
 
-        host_media_old::audio::automute::start();
+        host_media::audio_utils::automute::start();
         Ok(Box::new(blink_impl))
     }
 
@@ -180,7 +171,7 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        self.media_controller.change_audio_input(device).await?;
+        host_media::controller::change_audio_input(device).await?;
         Ok(())
     }
 
@@ -197,7 +188,7 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        self.media_controller.change_audio_output(device).await?;
+        host_media::controller::change_audio_output(device).await?;
         Ok(())
     }
 }
@@ -290,7 +281,7 @@ impl Blink for BlinkImpl {
 
     async fn get_audio_device_config(&self) -> Result<Box<dyn AudioDeviceConfig>, Error> {
         Ok(Box::new(
-            self.media_controller.get_audio_device_config().await?,
+            host_media::controller::get_audio_device_config().await,
         ))
     }
 
@@ -363,9 +354,8 @@ impl Blink for BlinkImpl {
     }
 
     async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error> {
-        self.media_controller
-            .set_peer_audio_gain(peer_id, multiplier)
-            .await
+        // host_media::controller::set_peer_audio_gain(peer_id, multiplier).await
+        Ok(())
     }
 
     // ------ Utility Functions ------
