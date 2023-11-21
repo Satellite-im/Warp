@@ -9,6 +9,8 @@ use warp::blink::BlinkEventKind;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
+use crate::host_media_old::audio::automute;
+
 use super::utils::FramerOutput;
 
 mod encoder_task;
@@ -53,10 +55,9 @@ impl SourceTrack {
         let muted2 = muted.clone();
         let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
             // don't send if muted
-            if muted2.load(Ordering::Relaxed) {
+            if muted2.load(Ordering::Relaxed) || automute::SHOULD_MUTE.load(Ordering::Relaxed) {
                 return;
             }
-            // todo: check if automute is set
             let mut v = vec![0_f32; buffer_size];
             v.copy_from_slice(data);
             sample_tx.send(v);

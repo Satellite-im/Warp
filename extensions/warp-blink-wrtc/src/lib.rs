@@ -9,10 +9,10 @@
 
 #![allow(dead_code)]
 
-mod host_media;
+mod host_media_old;
 // mod rtp_logger;
 mod blink_impl;
-mod host_media2;
+mod host_media;
 mod notify_wrapper;
 mod simple_webrtc;
 

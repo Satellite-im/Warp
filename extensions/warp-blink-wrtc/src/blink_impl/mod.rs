@@ -27,7 +27,7 @@ use warp::{
 
 use crate::{
     blink_impl::blink_controller::BlinkController,
-    host_media::{
+    host_media_old::{
         self,
         audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
     },
@@ -47,17 +47,17 @@ pub struct BlinkImpl {
     gossipsub_listener: GossipSubListener,
     gossipsub_sender: GossipSubSender,
     blink_controller: blink_controller::BlinkController,
-    media_controller: host_media::Controller,
+    media_controller: host_media_old::Controller,
 
     drop_handler: Arc<DropHandler>,
 }
 
 struct DropHandler {
-    media_controller: host_media::Controller,
+    media_controller: host_media_old::Controller,
 }
 impl Drop for DropHandler {
     fn drop(&mut self) {
-        host_media::audio::automute::stop();
+        host_media_old::audio::automute::stop();
         self.media_controller.reset();
     }
 }
@@ -70,7 +70,7 @@ impl BlinkImpl {
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
 
-        let media_controller = host_media::Controller::new(host_media::ControllerArgs {
+        let media_controller = host_media_old::Controller::new(host_media_old::ControllerArgs {
             ui_event_ch: ui_event_ch.clone(),
         });
 
@@ -163,7 +163,7 @@ impl BlinkImpl {
             }
         });
 
-        host_media::audio::automute::start();
+        host_media_old::audio::automute::start();
         Ok(Box::new(blink_impl))
     }
 

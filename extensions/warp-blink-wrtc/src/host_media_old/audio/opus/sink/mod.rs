@@ -19,8 +19,8 @@ use webrtc::{
 };
 
 use crate::{
-    host_media::audio::{opus::AudioSampleProducer, speech, SinkTrack},
-    host_media::{
+    host_media_old::audio::{opus::AudioSampleProducer, speech, SinkTrack},
+    host_media_old::{
         self,
         audio::{AudioCodec, AudioHardwareConfig},
         mp4_logger::{self, Mp4LoggerInstance},
@@ -292,7 +292,7 @@ where
     // read RTP packets, convert to samples, and send samples via channel
     let mut b = [0u8; 2880 * 4];
 
-    let automute_tx = host_media::audio::automute::AUDIO_CMD_CH.tx.clone();
+    let automute_tx = host_media_old::audio::automute::AUDIO_CMD_CH.tx.clone();
 
     // let logger = crate::rtp_logger::get_instance(format!("{}-audio", peer_id));
     let task_start_time = std::time::Instant::now();
@@ -306,7 +306,7 @@ where
 
         // only send this once per packet
         if should_automute {
-            let _ = automute_tx.send(host_media::audio::automute::AutoMuteCmd::MuteFor(110));
+            let _ = automute_tx.send(host_media_old::audio::automute::AutoMuteCmd::MuteFor(110));
             should_automute = false;
         }
 

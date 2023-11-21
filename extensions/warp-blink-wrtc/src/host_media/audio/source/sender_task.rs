@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::host_media2::audio::utils::{FramerOutput, SpeechDetector};
+use crate::host_media::audio::utils::{FramerOutput, SpeechDetector};
 
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc::UnboundedReceiver, Notify};

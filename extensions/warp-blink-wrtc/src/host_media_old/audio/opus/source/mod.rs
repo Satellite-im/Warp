@@ -23,8 +23,8 @@ use webrtc::{
 
 mod framer;
 use crate::{
-    host_media::audio::{speech, SourceTrack},
-    host_media::{
+    host_media_old::audio::{speech, SourceTrack},
+    host_media_old::{
         audio::{AudioCodec, AudioHardwareConfig},
         mp4_logger::{self, Mp4LoggerInstance},
     },
@@ -248,7 +248,7 @@ fn create_source_track(
                         continue;
                     }
                     // triggered when someone else is talking
-                    if crate::host_media::audio::automute::SHOULD_MUTE.load(Ordering::Relaxed) {
+                    if crate::host_media_old::audio::automute::SHOULD_MUTE.load(Ordering::Relaxed) {
                         continue;
                     }
                     if speech_detector.should_emit_event(loudness) {

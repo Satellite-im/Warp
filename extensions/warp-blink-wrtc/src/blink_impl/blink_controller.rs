@@ -25,7 +25,7 @@ use webrtc::{
 };
 
 use crate::{
-    host_media::{self, audio::AudioCodec, mp4_logger::Mp4LoggerConfig},
+    host_media_old::{self, audio::AudioCodec, mp4_logger::Mp4LoggerConfig},
     simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
 };
 
@@ -93,7 +93,7 @@ pub struct Args {
     pub webrtc_event_stream: WebRtcEventStream,
     pub gossipsub_sender: GossipSubSender,
     pub gossipsub_listener: GossipSubListener,
-    pub media_controller: host_media::Controller,
+    pub media_controller: host_media_old::Controller,
     pub signal_rx: UnboundedReceiver<GossipSubSignal>,
     pub ui_event_ch: broadcast::Sender<BlinkEventKind>,
 }
@@ -328,7 +328,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             channels: 1,
                             ..Default::default()
                         };
-                        match webrtc_controller.add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
+                        match webrtc_controller.add_media_source(host_media_old::AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
                             Ok(track) => {
                                 match media_controller.create_audio_source_track(
                                     own_id.clone(),
@@ -367,7 +367,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                                         let _ = rsp.send(Ok(()));
                                     }
                                     Err(e) => {
-                                        let _ = webrtc_controller.remove_media_source(host_media::AUDIO_SOURCE_ID.into()).await;
+                                        let _ = webrtc_controller.remove_media_source(host_media_old::AUDIO_SOURCE_ID.into()).await;
                                         let _ = rsp.send(Err(e));
                                     }
                                 }
@@ -409,7 +409,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             channels: 1,
                             ..Default::default()
                         };
-                        match webrtc_controller.add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
+                        match webrtc_controller.add_media_source(host_media_old::AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
                             Ok(track) => {
                                 let r = media_controller.create_audio_source_track(
                                     own_id.clone(),
@@ -433,7 +433,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                                         }
                                     }
                                     Err(e) => {
-                                        let _ = webrtc_controller.remove_media_source(host_media::AUDIO_SOURCE_ID.into()).await;
+                                        let _ = webrtc_controller.remove_media_source(host_media_old::AUDIO_SOURCE_ID.into()).await;
                                         let _ = rsp.send(Err(e));
                                     }
                                 }

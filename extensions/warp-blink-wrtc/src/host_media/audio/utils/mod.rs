@@ -1,3 +1,4 @@
+pub mod automute;
 mod codec_config;
 mod framer;
 mod hardware_config;

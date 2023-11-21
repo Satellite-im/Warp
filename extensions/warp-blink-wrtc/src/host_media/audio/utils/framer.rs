@@ -3,10 +3,8 @@ use std::cmp::Ordering;
 use bytes::Bytes;
 use opus::Bitrate;
 
-use crate::host_media::audio::{
-    loudness,
-    opus::{Resampler, ResamplerConfig},
-    AudioCodec, AudioHardwareConfig,
+use crate::host_media::audio::utils::{
+    loudness, AudioCodec, AudioHardwareConfig, Resampler, ResamplerConfig,
 };
 
 pub struct Framer {
@@ -28,7 +26,7 @@ pub struct Framer {
 
 pub struct FramerOutput {
     pub bytes: Bytes,
-    pub loudness: f32,
+    pub loudness: u8,
 }
 
 impl Framer {

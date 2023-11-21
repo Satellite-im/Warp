@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use tokio::sync::{broadcast, mpsc::UnboundedSender, Notify};
 use warp::{blink::BlinkEventKind, crypto::DID};
@@ -8,7 +11,10 @@ use webrtc::{
     util::Unmarshal,
 };
 
-use crate::host_media2::audio::utils::SpeechDetector;
+use crate::host_media::audio::utils::{
+    automute::{self, AutoMuteCmd},
+    SpeechDetector,
+};
 
 pub struct Args {
     pub track: Arc<TrackRemote>,
@@ -27,6 +33,8 @@ pub async fn run(args: Args) {
         peer_id,
     } = args;
 
+    let automute_cmd_tx = automute::AUDIO_CMD_CH.tx.clone();
+
     let mut b = [0u8; 2880 * 4];
     let mut speech_detector = SpeechDetector::new(10, 100);
     let mut log_decode_error_once = false;
@@ -36,6 +44,8 @@ pub async fn run(args: Args) {
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket;
         SampleBuilder::new(max_late, depacketizer, 48000)
     };
+
+    let mut last_mute_time: Option<Instant> = None;
 
     loop {
         let (siz, _attr) = tokio::select! {
@@ -96,11 +106,24 @@ pub async fn run(args: Args) {
             }
         }
 
+        let mut sample_created = false;
         // turn RTP packets into samples via SampleBuilder.push
         sample_builder.push(rtp_packet);
         // check if a sample can be created
         while let Some(media_sample) = sample_builder.pop() {
             let _ = packet_tx.send(media_sample);
+            sample_created = true;
+        }
+
+        if sample_created {
+            let now = Instant::now();
+            if last_mute_time
+                .map(|x| x + Duration::from_millis(100) <= now)
+                .unwrap_or(true)
+            {
+                automute_cmd_tx.send(AutoMuteCmd::MuteAt(now));
+                last_mute_time.replace(now);
+            }
         }
     }
 }

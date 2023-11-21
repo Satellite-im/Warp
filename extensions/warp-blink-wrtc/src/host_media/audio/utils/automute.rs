@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::mpsc::{self, error::TryRecvError};
 
@@ -26,7 +26,7 @@ pub static SHOULD_MUTE: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
 pub enum AutoMuteCmd {
     Quit,
-    MuteFor(u32),
+    MuteAt(Instant),
     Disable,
     Enable,
 }
@@ -53,20 +53,20 @@ async fn run() -> Result<()> {
         Err(e) => bail!("mutex not available: {e}"),
     };
 
-    let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
+    let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel::<Instant>();
 
     tokio::spawn(async move {
         log::debug!("starting automute helper");
-        let mut remaining_ms: u32 = 0;
+        let mut unmute_time: Option<Instant> = None;
         'OUTER_LOOP: loop {
             'FAKE_WHILE: loop {
                 match rx2.try_recv() {
-                    Ok(ms) => {
-                        if remaining_ms < ms {
-                            remaining_ms = ms;
+                    Ok(instant) => {
+                        let future = instant + Duration::from_millis(110);
+                        if unmute_time.map(|x| future > x).unwrap_or(true) {
+                            unmute_time.replace(future);
                             if !SHOULD_MUTE.load(Ordering::Relaxed) {
                                 SHOULD_MUTE.store(true, Ordering::Relaxed);
-                                //log::debug!("automute on");
                             }
                         }
                     }
@@ -78,11 +78,14 @@ async fn run() -> Result<()> {
                 }
             }
 
-            tokio::time::sleep(Duration::from_millis(5)).await;
-            remaining_ms = remaining_ms.saturating_sub(5);
-            if remaining_ms == 0 && SHOULD_MUTE.load(Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            if SHOULD_MUTE.load(Ordering::Relaxed)
+                && unmute_time
+                    .as_ref()
+                    .map(|x| Instant::now() > *x)
+                    .unwrap_or_default()
+            {
                 SHOULD_MUTE.store(false, Ordering::Relaxed);
-                //log::debug!("automute off");
             }
         }
 
@@ -96,11 +99,11 @@ async fn run() -> Result<()> {
                 SHOULD_MUTE.store(false, Ordering::Relaxed);
                 break;
             }
-            AutoMuteCmd::MuteFor(millis) => {
+            AutoMuteCmd::MuteAt(instant) => {
                 if !enabled {
                     continue;
                 }
-                let _ = tx2.send(millis);
+                let _ = tx2.send(instant);
             }
             AutoMuteCmd::Disable => {
                 enabled = false;

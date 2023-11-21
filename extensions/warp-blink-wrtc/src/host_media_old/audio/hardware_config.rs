@@ -4,7 +4,7 @@ use cpal::Sample;
 use tokio::sync::broadcast;
 use warp::blink::AudioDeviceConfig;
 
-use crate::host_media2::audio::utils::{loudness, speech};
+use crate::host_media_old::audio::{loudness, speech};
 
 #[derive(Clone)]
 pub struct DeviceConfig {
