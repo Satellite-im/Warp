@@ -132,7 +132,7 @@ pub async fn run(args: Args) {
                 .map(|x| x + Duration::from_millis(100) <= now)
                 .unwrap_or(true)
             {
-                automute_cmd_tx.send(AutoMuteCmd::MuteAt(now));
+                let _ = automute_cmd_tx.send(AutoMuteCmd::MuteAt(now));
                 last_mute_time.replace(now);
             }
         }

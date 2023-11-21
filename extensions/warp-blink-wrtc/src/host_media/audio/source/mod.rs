@@ -69,11 +69,11 @@ fn create_stream(
                 .chunks_exact(num_channels)
                 .map(|x| x.iter().sum::<f32>() / num_channels as f32)
                 .collect();
-            sample_tx.send(v);
+            let _ = sample_tx.send(v);
         } else {
             let mut v = vec![0_f32; buffer_size];
             v.copy_from_slice(data);
-            sample_tx.send(v);
+            let _ = sample_tx.send(v);
         }
     };
 
@@ -201,7 +201,7 @@ impl SourceTrack {
 
         self.stream = stream;
         if !self.muted {
-            self.play();
+            self.play()?;
         }
         Ok(())
     }

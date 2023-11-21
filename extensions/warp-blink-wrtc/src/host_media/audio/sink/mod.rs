@@ -15,7 +15,7 @@ use tokio::sync::{
     mpsc::{self, UnboundedReceiver},
     Notify,
 };
-use warp::{error::Error};
+use warp::error::Error;
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::{media::Sample, track::track_remote::TrackRemote};
 
@@ -156,7 +156,9 @@ impl SinkTrackController {
             self.ui_event_ch.clone(),
             sample_rx,
         )?;
-        stream.play();
+        stream
+            .play()
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?;
 
         let receiver_task = ReceiverTask {
             should_quit: Arc::new(Notify::new()),
@@ -185,7 +187,7 @@ impl SinkTrackController {
 
     pub fn remove_track(&mut self, peer_id: DID) {
         if let Some(entry) = self.receiver_tasks.remove(&peer_id) {
-            entry.stream.pause();
+            let _ = entry.stream.pause();
             entry.should_quit.notify_waiters();
             let _ = self.cmd_tx.send(Cmd::RemoveTrack { peer_id });
         }
@@ -214,13 +216,13 @@ impl SinkTrackController {
     pub fn silence_call(&mut self) {
         self.silenced.store(true, Ordering::Relaxed);
         for (_id, entry) in self.receiver_tasks.iter_mut() {
-            entry.stream.pause();
+            let _ = entry.stream.pause();
         }
     }
 
     pub fn unsilence_call(&mut self) {
         for (_id, entry) in self.receiver_tasks.iter_mut() {
-            entry.stream.play();
+            let _ = entry.stream.play();
         }
 
         self.silenced.store(false, Ordering::Relaxed);
@@ -233,14 +235,14 @@ impl SinkTrackController {
     ) -> Result<(), Error> {
         self.num_channels = num_channels;
 
-        self.cmd_tx.send(Cmd::PauseAll {
+        let _ = self.cmd_tx.send(Cmd::PauseAll {
             new_num_channels: num_channels,
         });
 
         let silenced = self.silenced.load(Ordering::Relaxed);
 
         for (id, entry) in self.receiver_tasks.iter_mut() {
-            entry.stream.pause();
+            let _ = entry.stream.pause();
 
             // create channel pair to go from decoder thread to cpal callback
             let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
@@ -253,10 +255,10 @@ impl SinkTrackController {
             )?;
 
             if !silenced {
-                stream.play();
+                let _ = stream.play();
             }
 
-            self.cmd_tx.send(Cmd::ReplaceSampleTx {
+            let _ = self.cmd_tx.send(Cmd::ReplaceSampleTx {
                 peer_id: id.clone(),
                 sample_tx,
             });

@@ -61,7 +61,7 @@ pub fn run(args: Args) {
                 let slice = opus_out.as_slice();
                 let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
 
-                tx.send(FramerOutput { bytes, loudness });
+                let _ = tx.send(FramerOutput { bytes, loudness });
             }
             Err(e) => {
                 log::error!("OpusPacketizer failed to encode: {}", e);

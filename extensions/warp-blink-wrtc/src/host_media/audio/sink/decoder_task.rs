@@ -124,7 +124,7 @@ pub fn run(args: Args) {
                             for (chunk, val) in std::iter::zip(it1, it2) {
                                 chunk.fill(*val);
                             }
-                            entry.sample_tx.send(buf2);
+                            let _ = entry.sample_tx.send(buf2);
                         }
                         Err(e) => {
                             log::error!("decode error: {e}");
