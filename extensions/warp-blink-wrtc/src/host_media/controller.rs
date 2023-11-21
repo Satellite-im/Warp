@@ -23,7 +23,7 @@ struct Data {
     audio_source_channels: usize,
     audio_sink_channels: usize,
     audio_source_track: Option<SourceTrack>,
-    audio_sink_tracks: HashMap<DID, SinkTrack>,
+    audio_sink_track: Option<SinkTrack>,
     recording: bool,
     muted: bool,
     deafened: bool,
@@ -38,7 +38,7 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
         audio_source_channels: 1,
         audio_sink_channels: 1,
         audio_source_track: None,
-        audio_sink_tracks: HashMap::new(),
+        audio_sink_track: None,
         recording: false,
         muted: false,
         deafened: false,
@@ -65,7 +65,7 @@ pub async fn reset() {
     let _lock = LOCK.write().await;
     unsafe {
         DATA.audio_source_track.take();
-        DATA.audio_sink_tracks.clear();
+        DATA.audio_sink_track.take();
         DATA.recording = false;
         DATA.muted = false;
         DATA.deafened = false;
@@ -127,50 +127,37 @@ pub async fn remove_audio_source_track() -> anyhow::Result<()> {
 
 pub async fn create_audio_sink_track(
     peer_id: DID,
-    event_ch: broadcast::Sender<BlinkEventKind>,
+    ui_event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackRemote>,
-    // the format to decode to. Opus supports encoding and decoding to arbitrary sample rates and number of channels.
-    webrtc_codec: AudioCodec,
 ) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
-    let output_device = match unsafe { DATA.audio_output_device.as_ref() } {
-        Some(d) => d,
-        None => {
-            bail!("no audio output device selected");
-        }
-    };
-    let deafened = unsafe { DATA.deafened };
-    let sink_config = unsafe { DATA.audio_sink_config.clone() };
-    let sink_track = create_sink_track(
-        peer_id.clone(),
-        event_ch,
-        output_device,
-        track,
-        webrtc_codec,
-        sink_config,
-    )?;
-
-    if !deafened {
-        sink_track
-            .play()
-            .map_err(|e| anyhow::anyhow!("{e}: failed to play sink track"))?;
-    }
 
     unsafe {
-        // don't want two tracks logging at the same time
-        if let Some(mut track) = DATA.audio_sink_tracks.insert(peer_id.clone(), sink_track) {
-            if let Err(e) = track.remove_mp4_logger() {
-                log::error!("failed to remove mp4 logger when replacing sink track: {e}");
+        let output_device = match DATA.audio_output_device.as_ref() {
+            Some(d) => d,
+            None => {
+                bail!("no audio output device selected");
             }
+        };
+        let (deafened, num_channels) = (DATA.deafened, DATA.audio_sink_channels);
+        if DATA.audio_sink_track.is_none() {
+            DATA.audio_sink_track
+                .replace(SinkTrack::new(num_channels, ui_event_ch)?);
         }
-        if DATA.recording {
-            if let Some(sink_track) = DATA.audio_sink_tracks.get_mut(&peer_id) {
-                if let Err(e) = sink_track.init_mp4_logger() {
-                    log::error!("failed to init mp4 logger for sink track: {e}");
-                }
+
+        if let Some(mgr) = DATA.audio_sink_track.as_mut() {
+            mgr.add_track(output_device, peer_id.clone(), track);
+
+            if !deafened {
+                mgr.play(peer_id)?;
             }
+            // todo: manage mp4 logger
+        } else {
+            // unreachable
+            debug_assert!(false);
         }
     }
+
     Ok(())
 }
 
