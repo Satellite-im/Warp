@@ -3,7 +3,10 @@ use std::sync::{
     Arc,
 };
 
-use cpal::{traits::DeviceTrait, BuildStreamError};
+use cpal::{
+    traits::{DeviceTrait, StreamTrait},
+    BuildStreamError,
+};
 use tokio::sync::{broadcast, mpsc, Notify};
 use warp::blink::BlinkEventKind;
 use warp::error::Error;
@@ -121,5 +124,17 @@ impl SourceTrack {
             quit_sender_task,
             muted,
         })
+    }
+
+    pub fn play(&self) -> Result<(), Error> {
+        self.stream
+            .play()
+            .map_err(|e| Error::OtherWithContext(e.to_string()))
+    }
+
+    pub fn pause(&self) -> Result<(), Error> {
+        self.stream
+            .pause()
+            .map_err(|e| Error::OtherWithContext(e.to_string()))
     }
 }

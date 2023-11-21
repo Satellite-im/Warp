@@ -92,9 +92,7 @@ pub async fn create_audio_source_track(
         None => return Err(Error::MicrophoneMissing),
     };
 
-    let (muted, num_channels) = unsafe {
-        (DATA.muted, DATA.audio_source_channels);
-    };
+    let (muted, num_channels) = unsafe { (DATA.muted, DATA.audio_source_channels) };
     let source_track = SourceTrack::new(track, input_device, num_channels, ui_event_ch)?;
 
     if !muted {

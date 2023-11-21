@@ -155,4 +155,24 @@ impl SinkTrack {
             let _ = self.cmd_tx.send(Cmd::RemoveTrack { peer_id });
         }
     }
+
+    pub fn play(&self, peer_id: DID) -> Result<(), Error> {
+        if let Some(entry) = self.receiver_tasks.get(&peer_id) {
+            entry
+                .stream
+                .play()
+                .map_err(|e| Error::OtherWithContext(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    pub fn pause(&self, peer_id: DID) -> Result<(), Error> {
+        if let Some(entry) = self.receiver_tasks.get(&peer_id) {
+            entry
+                .stream
+                .pause()
+                .map_err(|e| Error::OtherWithContext(e.to_string()))?;
+        }
+        Ok(())
+    }
 }
