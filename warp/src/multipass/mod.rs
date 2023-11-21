@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
+use futures::Stream;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
 
@@ -66,16 +67,13 @@ pub enum IdentityImportOption<'a> {
 #[derive(FFIFree)]
 pub struct MultiPassEventStream(pub BoxStream<'static, MultiPassEventKind>);
 
-impl core::ops::Deref for MultiPassEventStream {
-    type Target = BoxStream<'static, MultiPassEventKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for MultiPassEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for MultiPassEventStream {
+    type Item = MultiPassEventKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
