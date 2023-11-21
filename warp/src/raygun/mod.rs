@@ -9,6 +9,7 @@ use crate::{Extension, SingleHandle};
 use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
+use futures::Stream;
 use warp_derive::FFIFree;
 
 use chrono::{DateTime, Utc};
@@ -128,32 +129,26 @@ pub enum AttachmentKind {
 #[derive(FFIFree)]
 pub struct AttachmentEventStream(pub BoxStream<'static, AttachmentKind>);
 
-impl core::ops::Deref for AttachmentEventStream {
-    type Target = BoxStream<'static, AttachmentKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for AttachmentEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for AttachmentEventStream {
+    type Item = AttachmentKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
 #[derive(FFIFree)]
 pub struct MessageEventStream(pub BoxStream<'static, MessageEventKind>);
 
-impl core::ops::Deref for MessageEventStream {
-    type Target = BoxStream<'static, MessageEventKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for MessageEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for MessageEventStream {
+    type Item = MessageEventKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
@@ -166,16 +161,13 @@ impl Debug for MessageStream {
     }
 }
 
-impl core::ops::Deref for MessageStream {
-    type Target = BoxStream<'static, Message>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for MessageStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for MessageStream {
+    type Item = Message;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
