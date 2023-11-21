@@ -48,7 +48,7 @@ fn create_stream(
     let config = cpal::StreamConfig {
         channels: num_channels as _,
         sample_rate: cpal::SampleRate(48000),
-        buffer_size: cpal::BufferSize::Fixed(OPUS_SAMPLES as _),
+        buffer_size: cpal::BufferSize::Default,
     };
 
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {

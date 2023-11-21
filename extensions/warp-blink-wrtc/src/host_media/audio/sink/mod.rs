@@ -63,7 +63,7 @@ fn build_stream(
     let config = cpal::StreamConfig {
         channels: num_channels as _,
         sample_rate: cpal::SampleRate(48000),
-        buffer_size: cpal::BufferSize::Fixed(OPUS_SAMPLES as _),
+        buffer_size: cpal::BufferSize::Default,
     };
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
         if let Ok(mut buf) = audio_buf.lock() {
