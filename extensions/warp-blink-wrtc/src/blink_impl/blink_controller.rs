@@ -16,7 +16,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{BlinkEventKind, CallInfo, CallState},
+    blink::{BlinkEventKind, CallInfo, CallState, MimeType},
     error::Error,
 };
 use webrtc::{
@@ -25,7 +25,7 @@ use webrtc::{
 };
 
 use crate::{
-    host_media,
+    host_media::{self, AUDIO_SOURCE_ID, Mp4LoggerConfig},
     simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
 };
 
@@ -319,19 +319,17 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                         call_data_map.set_active(call_id);
 
                         // automatically add an audio track
-                        let webrtc_codec = AudioCodec::default();
                         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-                            mime_type: webrtc_codec.mime_type(),
-                            clock_rate: webrtc_codec.sample_rate(),
+                            mime_type: MimeType::OPUS.to_string(),
+                            clock_rate: 48000,
                             channels: 1,
                             ..Default::default()
                         };
-                        match webrtc_controller.add_media_source(host_media_old::AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
+                        match webrtc_controller.add_media_source(AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
                             Ok(track) => {
                                 match host_media::controller::create_audio_source_track(
-                                    own_id.clone(),
-                                    track,
-                                    webrtc_codec).await
+                                    ui_event_ch.clone(),
+                                    track).await
                                 {
                                     Ok(_) => {
                                         log::debug!("sending offer signal");
@@ -365,7 +363,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                                         let _ = rsp.send(Ok(()));
                                     }
                                     Err(e) => {
-                                        let _ = webrtc_controller.remove_media_source(host_media_old::AUDIO_SOURCE_ID.into()).await;
+                                        let _ = webrtc_controller.remove_media_source(AUDIO_SOURCE_ID.into()).await;
                                         let _ = rsp.send(Err(e));
                                     }
                                 }
@@ -400,19 +398,17 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                         call_data_map.set_active(call_id);
 
                         // automatically add an audio track
-                        let webrtc_codec = AudioCodec::default();
                         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-                            mime_type: webrtc_codec.mime_type(),
-                            clock_rate: webrtc_codec.sample_rate(),
+                            mime_type: MimeType::OPUS.to_string(),
+                            clock_rate: 48000,
                             channels: 1,
                             ..Default::default()
                         };
-                        match webrtc_controller.add_media_source(host_media_old::AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
+                        match webrtc_controller.add_media_source(AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
                             Ok(track) => {
                                 let r = host_media::controller::create_audio_source_track(
-                                    own_id.clone(),
-                                    track,
-                                    webrtc_codec).await;
+                                    ui_event_ch.clone(),
+                                    track).await;
                                 match r {
                                     Ok(_) => {
                                         log::debug!("answering call");
@@ -431,7 +427,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                                         }
                                     }
                                     Err(e) => {
-                                        let _ = webrtc_controller.remove_media_source(host_media_old::AUDIO_SOURCE_ID.into()).await;
+                                        let _ = webrtc_controller.remove_media_source(AUDIO_SOURCE_ID.into()).await;
                                         let _ = rsp.send(Err(e));
                                     }
                                 }
@@ -553,7 +549,6 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             host_media::controller::init_recording(Mp4LoggerConfig {
                                     call_id: info.call_id(),
                                     participants: info.participants(),
-                                    audio_codec: AudioCodec::default(),
                                     log_path: output_dir.into(),
                                 })
                                 .await
@@ -765,7 +760,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                         }
                     },
                     simple_webrtc::events::EmittedEvents::TrackAdded { peer, track } => {
-                        if let Err(e) =   host_media::controller::create_audio_sink_track(peer.clone(), track).await {
+                        if let Err(e) =   host_media::controller::create_audio_sink_track(peer.clone(), ui_event_ch.clone(), track).await {
                             log::error!("failed to send media_track command: {e}");
                         }
                     },
