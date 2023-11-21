@@ -58,11 +58,10 @@ fn build_stream(
 ) -> Result<cpal::Stream, Error> {
     // create cpal stream and add to self
     // 10ms at 48KHz
-    let buffer_size = 480 * num_channels;
     let config = cpal::StreamConfig {
         channels: num_channels as _,
         sample_rate: cpal::SampleRate(48000),
-        buffer_size: cpal::BufferSize::Fixed(buffer_size as _),
+        buffer_size: cpal::BufferSize::Fixed(480),
     };
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
         if let Ok(v) = sample_rx.try_recv() {
