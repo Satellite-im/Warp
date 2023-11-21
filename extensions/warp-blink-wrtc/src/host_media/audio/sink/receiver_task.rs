@@ -1,5 +1,8 @@
 use std::{
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -20,6 +23,7 @@ pub struct Args {
     pub track: Arc<TrackRemote>,
     pub peer_id: DID,
     pub should_quit: Arc<Notify>,
+    pub silenced: Arc<AtomicBool>,
     pub packet_tx: UnboundedSender<Sample>,
     pub ui_event_ch: broadcast::Sender<BlinkEventKind>,
 }
@@ -28,6 +32,7 @@ pub async fn run(args: Args) {
     let Args {
         track,
         should_quit,
+        silenced,
         packet_tx,
         ui_event_ch,
         peer_id,
@@ -109,7 +114,13 @@ pub async fn run(args: Args) {
         let mut sample_created = false;
         // turn RTP packets into samples via SampleBuilder.push
         sample_builder.push(rtp_packet);
-        // check if a sample can be created
+
+        // if silenced, discard all samples
+        if silenced.load(Ordering::Relaxed) {
+            while sample_builder.pop().is_some() {}
+            continue;
+        }
+
         while let Some(media_sample) = sample_builder.pop() {
             let _ = packet_tx.send(media_sample);
             sample_created = true;

@@ -144,10 +144,11 @@ impl SourceTrack {
 
         // spawn the sender task
         let notify = quit_sender_task.clone();
+        let ui_event_ch2 = ui_event_ch.clone();
         tokio::task::spawn(async move {
             sender_task::run(sender_task::Args {
                 track,
-                ui_event_ch,
+                ui_event_ch: ui_event_ch2,
                 rx: encoded_rx,
                 notify,
                 num_samples: 480,

@@ -22,6 +22,16 @@ pub enum Cmd {
     RemoveTrack {
         peer_id: DID,
     },
+
+    // these last two are for changing the output device. the number of channels could change
+    // and either way a new cpal stream will be created
+    PauseAll {
+        new_num_channels: usize,
+    },
+    ReplaceSampleTx {
+        peer_id: DID,
+        sample_tx: UnboundedSender<Vec<f32>>,
+    },
 }
 
 struct Entry {
@@ -29,6 +39,7 @@ struct Entry {
     peer_id: DID,
     packet_rx: UnboundedReceiver<Sample>,
     sample_tx: UnboundedSender<Vec<f32>>,
+    paused: bool,
 }
 
 pub struct Args {
@@ -41,7 +52,7 @@ pub fn run(args: Args) {
     let Args {
         mut cmd_rx,
         should_quit,
-        num_channels,
+        mut num_channels,
     } = args;
 
     let mut connections: Vec<Entry> = vec![];
@@ -62,10 +73,23 @@ pub fn run(args: Args) {
                         peer_id,
                         packet_rx,
                         sample_tx,
+                        paused: false,
                     });
                 }
                 Cmd::RemoveTrack { peer_id } => {
                     connections.retain(|x| x.peer_id != peer_id);
+                }
+                Cmd::PauseAll { new_num_channels } => {
+                    for peer in connections.iter_mut() {
+                        peer.paused = true;
+                    }
+                    num_channels = new_num_channels;
+                }
+                Cmd::ReplaceSampleTx { peer_id, sample_tx } => {
+                    if let Some(peer) = connections.iter_mut().find(|x| x.peer_id == peer_id) {
+                        peer.sample_tx = sample_tx;
+                        peer.paused = false;
+                    }
                 }
             }
             remaining_tries -= 1;
@@ -81,6 +105,10 @@ pub fn run(args: Args) {
                 while let Ok(sample) = entry.packet_rx.try_recv() {
                     ran_once = true;
 
+                    if entry.paused {
+                        continue;
+                    }
+
                     // 10ms
                     let mut decoder_output_buf = vec![0_f32; 480];
                     match entry.decoder.decode_float(
@@ -89,8 +117,9 @@ pub fn run(args: Args) {
                         false,
                     ) {
                         Ok(size) => {
+                            // todo: mp4 logger
                             let mut buf2 = vec![0_f32; size * num_channels];
-                            let it1 = (&buf2).chunks_exact_mut(num_channels);
+                            let it1 = (&mut buf2).chunks_exact_mut(num_channels);
                             let it2 = decoder_output_buf.iter().take(size);
                             for (chunk, val) in std::iter::zip(it1, it2) {
                                 chunk.fill(*val);

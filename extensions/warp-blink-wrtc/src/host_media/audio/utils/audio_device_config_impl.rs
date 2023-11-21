@@ -7,7 +7,7 @@ use warp::blink::AudioDeviceConfig;
 use crate::host_media::audio::utils::{loudness, speech};
 
 #[derive(Clone)]
-pub struct DeviceConfig {
+pub struct AudioDeviceConfigImpl {
     // device name
     // defaults to the default device or None
     // if no devices are connected
@@ -25,7 +25,7 @@ pub enum AudioTestEvent {
     SpeakerOutput,
 }
 
-impl DeviceConfig {
+impl AudioDeviceConfigImpl {
     pub fn try_default() -> Result<Self> {
         let host = cpal::default_host();
         let output_device = host
@@ -55,7 +55,7 @@ impl DeviceConfig {
     }
 }
 
-impl AudioDeviceConfig for DeviceConfig {
+impl AudioDeviceConfig for AudioDeviceConfigImpl {
     fn set_speaker(&mut self, device_name: &str) {
         self.selected_speaker.replace(device_name.to_string());
     }

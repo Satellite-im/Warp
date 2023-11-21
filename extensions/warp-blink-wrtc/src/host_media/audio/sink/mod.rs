@@ -1,14 +1,21 @@
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
-use tokio::sync::{broadcast, mpsc, Notify};
-use warp::error::Error;
+use tokio::sync::{
+    broadcast,
+    mpsc::{self, UnboundedReceiver},
+    Notify,
+};
+use warp::{blink::Blink, error::Error};
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::{media::Sample, track::track_remote::TrackRemote};
 
@@ -22,6 +29,12 @@ struct ReceiverTask {
     stream: cpal::Stream,
 }
 
+impl Drop for ReceiverTask {
+    fn drop(&mut self) {
+        self.should_quit.notify_waiters();
+    }
+}
+
 pub struct SinkTrackController {
     quit_decoder_task: Arc<AtomicBool>,
     silenced: Arc<AtomicBool>,
@@ -29,6 +42,59 @@ pub struct SinkTrackController {
     cmd_tx: mpsc::UnboundedSender<Cmd>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     receiver_tasks: HashMap<DID, ReceiverTask>,
+}
+
+impl Drop for SinkTrackController {
+    fn drop(&mut self) {
+        self.quit_decoder_task.store(true, Ordering::Relaxed);
+    }
+}
+
+fn build_stream(
+    sink_device: &cpal::Device,
+    num_channels: usize,
+    ui_event_ch: broadcast::Sender<BlinkEventKind>,
+    mut sample_rx: UnboundedReceiver<Vec<f32>>,
+) -> Result<cpal::Stream, Error> {
+    // create cpal stream and add to self
+    // 10ms at 48KHz
+    let buffer_size = 480 * num_channels;
+    let config = cpal::StreamConfig {
+        channels: num_channels as _,
+        sample_rate: cpal::SampleRate(48000),
+        buffer_size: cpal::BufferSize::Fixed(buffer_size as _),
+    };
+    let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+        if let Ok(v) = sample_rx.try_recv() {
+            data.copy_from_slice(&v);
+        }
+    };
+
+    sink_device
+        .build_output_stream(
+            &config,
+            output_data_fn,
+            move |err| {
+                log::error!("an error occurred on stream: {}", err);
+                let evt = match err {
+                    cpal::StreamError::DeviceNotAvailable => {
+                        BlinkEventKind::AudioOutputDeviceNoLongerAvailable
+                    }
+                    _ => BlinkEventKind::AudioStreamError,
+                };
+                let _ = ui_event_ch.send(evt);
+            },
+            None,
+        )
+        .map_err(|e| match e {
+            BuildStreamError::StreamConfigNotSupported => Error::InvalidAudioConfig,
+            BuildStreamError::DeviceNotAvailable => Error::AudioDeviceNotFound,
+            e => Error::OtherWithContext(format!(
+                "failed to build output stream: {e}, {}, {}",
+                file!(),
+                line!()
+            )),
+        })
 }
 
 impl SinkTrackController {
@@ -75,7 +141,7 @@ impl SinkTrackController {
 
         if let Err(e) = self.cmd_tx.send(Cmd::AddTrack {
             decoder,
-            peer_id,
+            peer_id: peer_id.clone(),
             packet_rx,
             sample_tx,
         }) {
@@ -84,46 +150,12 @@ impl SinkTrackController {
             )));
         }
 
-        // create cpal stream and add to self
-        // 10ms at 48KHz
-        let buffer_size = 480 * self.num_channels;
-        let config = cpal::StreamConfig {
-            channels: self.num_channels as _,
-            sample_rate: cpal::SampleRate(48000),
-            buffer_size: cpal::BufferSize::Fixed(buffer_size as _),
-        };
-        let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            if let Ok(v) = sample_rx.try_recv() {
-                data.copy_from_slice(&v);
-            }
-        };
-
-        let err_ch = self.ui_event_ch.clone();
-        let stream: cpal::Stream = sink_device
-            .build_output_stream(
-                &config,
-                output_data_fn,
-                move |err| {
-                    log::error!("an error occurred on stream: {}", err);
-                    let evt = match err {
-                        cpal::StreamError::DeviceNotAvailable => {
-                            BlinkEventKind::AudioOutputDeviceNoLongerAvailable
-                        }
-                        _ => BlinkEventKind::AudioStreamError,
-                    };
-                    let _ = err_ch.send(evt);
-                },
-                None,
-            )
-            .map_err(|e| match e {
-                BuildStreamError::StreamConfigNotSupported => Error::InvalidAudioConfig,
-                BuildStreamError::DeviceNotAvailable => Error::AudioDeviceNotFound,
-                e => Error::OtherWithContext(format!(
-                    "failed to build output stream: {e}, {}, {}",
-                    file!(),
-                    line!()
-                )),
-            })?;
+        let stream = build_stream(
+            sink_device,
+            self.num_channels,
+            self.ui_event_ch.clone(),
+            sample_rx,
+        )?;
         stream.play();
 
         let receiver_task = ReceiverTask {
@@ -132,12 +164,15 @@ impl SinkTrackController {
         };
 
         let should_quit = receiver_task.should_quit.clone();
+        let silenced = self.silenced.clone();
         let ui_event_ch = self.ui_event_ch.clone();
+        let peer_id2 = peer_id.clone();
         tokio::spawn(async move {
             receiver_task::run(receiver_task::Args {
                 track,
-                peer_id,
+                peer_id: peer_id2,
                 should_quit,
+                silenced,
                 packet_tx,
                 ui_event_ch,
             })
@@ -174,5 +209,59 @@ impl SinkTrackController {
                 .map_err(|e| Error::OtherWithContext(e.to_string()))?;
         }
         Ok(())
+    }
+
+    pub fn silence_call(&mut self) {
+        self.silenced.store(true, Ordering::Relaxed);
+        for (_id, entry) in self.receiver_tasks.iter_mut() {
+            entry.stream.pause();
+        }
+    }
+
+    pub fn unsilence_call(&mut self) {
+        for (_id, entry) in self.receiver_tasks.iter_mut() {
+            entry.stream.play();
+        }
+
+        self.silenced.store(false, Ordering::Relaxed);
+    }
+
+    pub fn change_output_device(
+        &mut self,
+        sink_device: &cpal::Device,
+        num_channels: usize,
+    ) -> Result<(), Error> {
+        self.num_channels = num_channels;
+
+        self.cmd_tx.send(Cmd::PauseAll {
+            new_num_channels: num_channels,
+        });
+
+        let silenced = self.silenced.load(Ordering::Relaxed);
+
+        for (id, entry) in self.receiver_tasks.iter_mut() {
+            entry.stream.pause();
+
+            // create channel pair to go from decoder thread to cpal callback
+            let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
+
+            let stream = build_stream(
+                sink_device,
+                self.num_channels,
+                self.ui_event_ch.clone(),
+                sample_rx,
+            )?;
+
+            if !silenced {
+                stream.play();
+            }
+
+            self.cmd_tx.send(Cmd::ReplaceSampleTx {
+                peer_id: id.clone(),
+                sample_tx,
+            });
+        }
+
+        todo!()
     }
 }
