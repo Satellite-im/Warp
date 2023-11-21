@@ -119,7 +119,7 @@ pub fn run(args: Args) {
                         Ok(size) => {
                             // todo: mp4 logger
                             let mut buf2 = vec![0_f32; size * num_channels];
-                            let it1 = (&mut buf2).chunks_exact_mut(num_channels);
+                            let it1 = buf2.chunks_exact_mut(num_channels);
                             let it2 = decoder_output_buf.iter().take(size);
                             for (chunk, val) in std::iter::zip(it1, it2) {
                                 chunk.fill(*val);

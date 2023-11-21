@@ -21,7 +21,6 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 
 use warp::{
-    blink::MimeType,
     crypto::DID,
     sync::{Arc, RwLock},
 };

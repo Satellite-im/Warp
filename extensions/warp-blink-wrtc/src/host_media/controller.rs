@@ -5,7 +5,7 @@
 use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
-use std::{collections::HashMap, sync::Arc};
+use std::{sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
@@ -17,7 +17,7 @@ use super::audio::sink::SinkTrackController;
 use super::audio::source::SourceTrack;
 use super::audio::utils::AudioDeviceConfigImpl;
 use super::mp4_logger::Mp4LoggerConfig;
-use super::{audio, mp4_logger};
+use super::{mp4_logger};
 
 struct Data {
     audio_input_device: Option<cpal::Device>,
@@ -101,11 +101,11 @@ pub async fn create_audio_source_track(
     }
 
     unsafe {
-        if let Some(mut track) = DATA.audio_source_track.replace(source_track) {
+        if let Some(_track) = DATA.audio_source_track.replace(source_track) {
             // todo: mp4 logger
         }
         if DATA.recording {
-            if let Some(source_track) = DATA.audio_source_track.as_mut() {
+            if let Some(_source_track) = DATA.audio_source_track.as_mut() {
                 // todo: mp4 logger
             }
         }
@@ -305,7 +305,7 @@ pub async fn resume_recording() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn set_peer_audio_gain(peer_id: DID, multiplier: f32) -> anyhow::Result<()> {
+pub async fn set_peer_audio_gain(_peer_id: DID, _multiplier: f32) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
     //    if let Some(track) = unsafe { DATA.audio_sink_tracks.get_mut(&peer_id) } {

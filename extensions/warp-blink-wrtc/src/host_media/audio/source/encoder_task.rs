@@ -28,7 +28,7 @@ pub fn run(args: Args) {
     } = args;
 
     // speech_detector should emit at most 1 event per second
-    let mut speech_detector = SpeechDetector::new(10, 100);
+    let _speech_detector = SpeechDetector::new(10, 100);
     let mut opus_out = vec![0_u8; num_samples * 4];
 
     while !should_quit.load(Ordering::Relaxed) {

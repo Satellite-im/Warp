@@ -15,7 +15,7 @@ use tokio::sync::{
     mpsc::{self, UnboundedReceiver},
     Notify,
 };
-use warp::{blink::Blink, error::Error};
+use warp::{error::Error};
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::{media::Sample, track::track_remote::TrackRemote};
 
