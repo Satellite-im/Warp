@@ -13,11 +13,11 @@ use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-use super::audio;
 use super::audio::sink::SinkTrackController;
 use super::audio::source::SourceTrack;
 use super::audio::utils::AudioDeviceConfigImpl;
 use super::mp4_logger::Mp4LoggerConfig;
+use super::{audio, mp4_logger};
 
 struct Data {
     audio_input_device: Option<cpal::Device>,
@@ -142,7 +142,7 @@ pub async fn create_audio_sink_track(
         }
 
         if let Some(controller) = DATA.audio_sink_controller.as_mut() {
-            controller.add_track(output_device, peer_id.clone(), track);
+            controller.add_track(output_device, peer_id.clone(), track)?;
 
             if !deafened {
                 controller.play(peer_id)?;
@@ -273,44 +273,35 @@ pub async fn undeafen() -> anyhow::Result<()> {
 // the source and sink tracks need to be told to get a new instance of mp4_logger.
 pub async fn init_recording(config: Mp4LoggerConfig) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
-    //
-    //     unsafe {
-    //         if DATA.recording {
-    //             // this function was called twice for the same call. assume they mean to resume
-    //             mp4_logger::resume();
-    //             return Ok(());
-    //         }
-    //         DATA.recording = true;
-    //     }
-    //     mp4_logger::init(config).await?;
-    //
-    //     unsafe {
-    //         DATA.recording = true;
-    //     }
-    //
-    //     for track in unsafe { DATA.audio_sink_tracks.values_mut() } {
-    //         if let Err(e) = track.init_mp4_logger() {
-    //             log::error!("failed to init mp4 logger for sink track: {e}");
-    //         }
-    //     }
-    //
-    //     if let Some(track) = unsafe { DATA.audio_source_track.as_mut() } {
-    //         if let Err(e) = track.init_mp4_logger() {
-    //             log::error!("failed to init mp4 logger for source track: {e}");
-    //         }
-    //     }
+
+    unsafe {
+        if DATA.recording {
+            // this function was called twice for the same call. assume they mean to resume
+            mp4_logger::resume();
+            return Ok(());
+        }
+        DATA.recording = true;
+    }
+    mp4_logger::init(config)?;
+
+    // todo: hook up audio tracks
+
+    unsafe {
+        DATA.recording = true;
+    }
+
     Ok(())
 }
 
 pub async fn pause_recording() -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
-    //     mp4_logger::pause();
+    mp4_logger::pause();
     Ok(())
 }
 
 pub async fn resume_recording() -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
-    //     mp4_logger::resume();
+    mp4_logger::resume();
     Ok(())
 }
 
