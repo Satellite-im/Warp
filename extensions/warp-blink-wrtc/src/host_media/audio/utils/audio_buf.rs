@@ -34,10 +34,13 @@ impl AudioBuf {
     }
 
     pub fn copy_to_slice(&mut self, slice: &mut [f32]) {
-        let min = std::cmp::min(slice.len(), self.samples.len());
-        slice.copy_from_slice(&self.samples[0..min]);
-        let mut samples2 = Vec::new();
-        samples2.copy_from_slice(&self.samples[min..]);
+        if self.samples.len() < slice.len() {
+            slice.fill(0_f32);
+            return;
+        }
+        slice.copy_from_slice(&self.samples[0..slice.len()]);
+        let mut samples2 = vec![0_f32; self.samples.len() - slice.len()];
+        samples2.copy_from_slice(&self.samples[slice.len()..]);
         samples2.reserve(self.frame_size);
         self.samples = samples2;
     }
