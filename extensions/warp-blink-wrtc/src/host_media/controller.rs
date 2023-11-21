@@ -5,7 +5,7 @@
 use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
-use std::{sync::Arc};
+use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
@@ -16,8 +16,8 @@ use webrtc::track::track_remote::TrackRemote;
 use super::audio::sink::SinkTrackController;
 use super::audio::source::SourceTrack;
 use super::audio::utils::AudioDeviceConfigImpl;
+use super::mp4_logger;
 use super::mp4_logger::Mp4LoggerConfig;
-use super::{mp4_logger};
 
 struct Data {
     audio_input_device: Option<cpal::Device>,
@@ -242,7 +242,7 @@ pub async fn unmute_self() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn deafen() -> anyhow::Result<()> {
+pub async fn deafen() {
     let _lock = LOCK.write().await;
 
     unsafe {
@@ -251,11 +251,9 @@ pub async fn deafen() -> anyhow::Result<()> {
             controller.silence_call();
         }
     }
-
-    Ok(())
 }
 
-pub async fn undeafen() -> anyhow::Result<()> {
+pub async fn undeafen() {
     let _lock = LOCK.write().await;
     unsafe {
         DATA.deafened = false;
@@ -263,8 +261,6 @@ pub async fn undeafen() -> anyhow::Result<()> {
             controller.unsilence_call();
         }
     }
-
-    Ok(())
 }
 
 // the source and sink tracks will use mp4_logger::get_instance() regardless of whether init_recording is called.
@@ -293,16 +289,14 @@ pub async fn init_recording(config: Mp4LoggerConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn pause_recording() -> anyhow::Result<()> {
+pub async fn pause_recording() {
     let _lock = LOCK.write().await;
     mp4_logger::pause();
-    Ok(())
 }
 
-pub async fn resume_recording() -> anyhow::Result<()> {
+pub async fn resume_recording() {
     let _lock = LOCK.write().await;
     mp4_logger::resume();
-    Ok(())
 }
 
 pub async fn set_peer_audio_gain(_peer_id: DID, _multiplier: f32) -> anyhow::Result<()> {
