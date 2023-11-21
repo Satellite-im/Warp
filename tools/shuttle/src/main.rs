@@ -27,6 +27,7 @@ use futures::{SinkExt, StreamExt};
 use rust_ipfs::{
     libp2p::swarm::NetworkBehaviour,
     p2p::{IdentifyConfiguration, RateLimit, RelayConfig, TransportConfig},
+    repo::{GCConfig, GCTrigger},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 use rust_ipfs::{
@@ -202,9 +203,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_idle_connection_timeout(120)
         .default_record_key_validator()
         .set_transport_configuration(TransportConfig {
-            enable_quic: true,
             ..Default::default()
         })
+        .with_gc(GCConfig {
+            duration: Duration::from_secs(60 * 60),
+            trigger: GCTrigger::None,
+        })
+        .set_temp_pin_duration(Duration::from_secs(60 * 30))
         .listen_as_external_addr();
 
     let addrs = match opts.listen_addr.as_slice() {
