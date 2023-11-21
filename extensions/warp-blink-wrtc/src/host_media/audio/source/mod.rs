@@ -18,7 +18,7 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
 use crate::host_media::audio::utils::automute;
 
-use super::utils::FramerOutput;
+use super::{utils::FramerOutput, OPUS_SAMPLES};
 
 mod encoder_task;
 mod sender_task;
@@ -49,12 +49,12 @@ fn create_stream(
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> Result<cpal::Stream, Error> {
     // 10ms at 48KHz
-    let buffer_size = 480 * num_channels;
+    let buffer_size = OPUS_SAMPLES * num_channels;
 
     let config = cpal::StreamConfig {
         channels: num_channels as _,
         sample_rate: cpal::SampleRate(48000),
-        buffer_size: cpal::BufferSize::Fixed(480),
+        buffer_size: cpal::BufferSize::Fixed(OPUS_SAMPLES as _),
     };
 
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -138,7 +138,7 @@ impl SourceTrack {
                 rx: sample_rx,
                 tx: encoded_tx,
                 should_quit,
-                num_samples: 480,
+                num_samples: OPUS_SAMPLES,
             });
         });
 
@@ -151,7 +151,7 @@ impl SourceTrack {
                 ui_event_ch: ui_event_ch2,
                 rx: encoded_rx,
                 notify,
-                num_samples: 480,
+                num_samples: OPUS_SAMPLES,
             })
             .await;
         });

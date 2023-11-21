@@ -12,6 +12,8 @@ use webrtc::media::Sample;
 
 use rayon::prelude::*;
 
+use crate::host_media::audio::OPUS_SAMPLES;
+
 pub enum Cmd {
     AddTrack {
         decoder: opus::Decoder,
@@ -110,7 +112,7 @@ pub fn run(args: Args) {
                     }
 
                     // 10ms
-                    let mut decoder_output_buf = vec![0_f32; 480];
+                    let mut decoder_output_buf = vec![0_f32; OPUS_SAMPLES];
                     match entry.decoder.decode_float(
                         sample.data.as_ref(),
                         &mut decoder_output_buf,

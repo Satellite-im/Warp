@@ -21,6 +21,8 @@ use webrtc::{media::Sample, track::track_remote::TrackRemote};
 
 use self::decoder_task::Cmd;
 
+use super::OPUS_SAMPLES;
+
 mod decoder_task;
 mod receiver_task;
 
@@ -61,7 +63,7 @@ fn build_stream(
     let config = cpal::StreamConfig {
         channels: num_channels as _,
         sample_rate: cpal::SampleRate(48000),
-        buffer_size: cpal::BufferSize::Fixed(480),
+        buffer_size: cpal::BufferSize::Fixed(OPUS_SAMPLES as _),
     };
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
         if let Ok(v) = sample_rx.try_recv() {
