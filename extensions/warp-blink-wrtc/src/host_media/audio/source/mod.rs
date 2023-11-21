@@ -7,18 +7,17 @@ use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
-use tokio::sync::{
-    broadcast,
-    mpsc::{self, UnboundedSender},
-    Notify,
-};
+use tokio::sync::{broadcast, mpsc, Notify};
 use warp::blink::BlinkEventKind;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
 use crate::host_media::audio::utils::automute;
 
-use super::{utils::FramerOutput, OPUS_SAMPLES};
+use super::{
+    utils::{AudioBuf, FramerOutput},
+    OPUS_SAMPLES,
+};
 
 mod encoder_task;
 mod sender_task;
@@ -29,9 +28,7 @@ pub struct SourceTrack {
     quit_encoder_task: Arc<AtomicBool>,
     quit_sender_task: Arc<Notify>,
     muted: bool,
-    // this lets one create a new stream and attach it to the encoder_task, and continue sending as if nothing ever
-    // happened.
-    sample_tx: UnboundedSender<Vec<f32>>,
+    audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 }
 
@@ -45,12 +42,9 @@ impl Drop for SourceTrack {
 fn create_stream(
     source_device: &cpal::Device,
     num_channels: usize,
-    sample_tx: UnboundedSender<Vec<f32>>,
+    audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> Result<cpal::Stream, Error> {
-    // 10ms at 48KHz
-    let buffer_size = OPUS_SAMPLES * num_channels;
-
     let config = cpal::StreamConfig {
         channels: num_channels as _,
         sample_rate: cpal::SampleRate(48000),
@@ -68,12 +62,13 @@ fn create_stream(
                 .chunks_exact(num_channels)
                 .map(|x| x.iter().sum::<f32>() / num_channels as f32)
                 .collect();
-            let _ = sample_tx.send(v);
+            if let Ok(mut buf) = audio_buf.lock() {
+                buf.insert(&v);
+            }
         } else {
-            let mut v = vec![0_f32; buffer_size];
-            v.resize(data.len(), 0_f32);
-            v.copy_from_slice(data);
-            let _ = sample_tx.send(v);
+            if let Ok(mut buf) = audio_buf.lock() {
+                buf.insert(data);
+            }
         }
     };
 
@@ -120,22 +115,23 @@ impl SourceTrack {
         let encoder = opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip)
             .map_err(|e| Error::OtherWithContext(e.to_string()))?;
 
-        let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
+        let audio_buf = Arc::new(std::sync::Mutex::new(AudioBuf::new(OPUS_SAMPLES)));
         let (encoded_tx, encoded_rx) = mpsc::unbounded_channel::<FramerOutput>();
 
         let stream = create_stream(
             source_device,
             num_channels,
-            sample_tx.clone(),
+            audio_buf.clone(),
             ui_event_ch.clone(),
         )?;
 
         // spawn encoder task
+        let audio_buf2 = audio_buf.clone();
         let should_quit = quit_encoder_task.clone();
         std::thread::spawn(move || {
             encoder_task::run(encoder_task::Args {
                 encoder,
-                rx: sample_rx,
+                audio_buf: audio_buf2,
                 tx: encoded_tx,
                 should_quit,
                 num_samples: OPUS_SAMPLES,
@@ -162,7 +158,7 @@ impl SourceTrack {
             quit_sender_task,
             muted: true,
             ui_event_ch,
-            sample_tx,
+            audio_buf,
         })
     }
 
@@ -195,7 +191,7 @@ impl SourceTrack {
         let stream = create_stream(
             source_device,
             num_channels,
-            self.sample_tx.clone(),
+            self.audio_buf.clone(),
             self.ui_event_ch.clone(),
         )?;
 

@@ -12,14 +12,14 @@ use webrtc::media::Sample;
 
 use rayon::prelude::*;
 
-use crate::host_media::audio::OPUS_SAMPLES;
+use crate::host_media::{audio::OPUS_SAMPLES, audio_utils::AudioBuf};
 
 pub enum Cmd {
     AddTrack {
         decoder: opus::Decoder,
         peer_id: DID,
         packet_rx: UnboundedReceiver<Sample>,
-        sample_tx: UnboundedSender<Vec<f32>>,
+        audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
     },
     RemoveTrack {
         peer_id: DID,
@@ -32,7 +32,7 @@ pub enum Cmd {
     },
     ReplaceSampleTx {
         peer_id: DID,
-        sample_tx: UnboundedSender<Vec<f32>>,
+        audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
     },
 }
 
@@ -40,7 +40,7 @@ struct Entry {
     decoder: opus::Decoder,
     peer_id: DID,
     packet_rx: UnboundedReceiver<Sample>,
-    sample_tx: UnboundedSender<Vec<f32>>,
+    audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
     paused: bool,
 }
 
@@ -66,7 +66,7 @@ pub fn run(args: Args) {
                     decoder,
                     peer_id,
                     packet_rx,
-                    sample_tx,
+                    audio_buf,
                 } => {
                     connections.retain(|x| x.peer_id != peer_id);
 
@@ -74,7 +74,7 @@ pub fn run(args: Args) {
                         decoder,
                         peer_id,
                         packet_rx,
-                        sample_tx,
+                        audio_buf,
                         paused: false,
                     });
                 }
@@ -87,9 +87,9 @@ pub fn run(args: Args) {
                     }
                     num_channels = new_num_channels;
                 }
-                Cmd::ReplaceSampleTx { peer_id, sample_tx } => {
+                Cmd::ReplaceSampleTx { peer_id, audio_buf } => {
                     if let Some(peer) = connections.iter_mut().find(|x| x.peer_id == peer_id) {
-                        peer.sample_tx = sample_tx;
+                        peer.audio_buf = audio_buf;
                         peer.paused = false;
                     }
                 }
@@ -126,7 +126,9 @@ pub fn run(args: Args) {
                             for (chunk, val) in std::iter::zip(it1, it2) {
                                 chunk.fill(*val);
                             }
-                            let _ = entry.sample_tx.send(buf2);
+                            if let Ok(mut audio_buf) = entry.audio_buf.lock() {
+                                audio_buf.insert(&buf2);
+                            }
                         }
                         Err(e) => {
                             log::error!("decode error: {e}");

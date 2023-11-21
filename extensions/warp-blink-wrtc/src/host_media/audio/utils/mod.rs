@@ -1,3 +1,4 @@
+mod audio_buf;
 mod audio_device_config_impl;
 pub mod automute;
 mod codec_config;
@@ -6,6 +7,7 @@ mod loudness;
 mod resampler;
 mod speech;
 
+pub use audio_buf::*;
 pub use audio_device_config_impl::*;
 pub use codec_config::*;
 pub use framer_output::*;

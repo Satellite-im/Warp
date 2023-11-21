@@ -21,7 +21,7 @@ use webrtc::{media::Sample, track::track_remote::TrackRemote};
 
 use self::decoder_task::Cmd;
 
-use super::OPUS_SAMPLES;
+use super::{utils::AudioBuf, OPUS_SAMPLES};
 
 mod decoder_task;
 mod receiver_task;
@@ -56,7 +56,7 @@ fn build_stream(
     sink_device: &cpal::Device,
     num_channels: usize,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
-    mut sample_rx: UnboundedReceiver<Vec<f32>>,
+    audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
 ) -> Result<cpal::Stream, Error> {
     // create cpal stream and add to self
     // 10ms at 48KHz
@@ -66,8 +66,8 @@ fn build_stream(
         buffer_size: cpal::BufferSize::Fixed(OPUS_SAMPLES as _),
     };
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-        if let Ok(v) = sample_rx.try_recv() {
-            data.copy_from_slice(&v);
+        if let Ok(mut buf) = audio_buf.lock() {
+            buf.copy_to_slice(data);
         }
     };
 
@@ -137,14 +137,14 @@ impl SinkTrackController {
 
         // create channel pair to go from receiver task to decoder thread
         let (packet_tx, packet_rx) = mpsc::unbounded_channel::<Sample>();
-        // create channel pair to go from decoder thread to cpal callback
-        let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
+
+        let audio_buf = Arc::new(std::sync::Mutex::new(AudioBuf::new(OPUS_SAMPLES)));
 
         if let Err(e) = self.cmd_tx.send(Cmd::AddTrack {
             decoder,
             peer_id: peer_id.clone(),
             packet_rx,
-            sample_tx,
+            audio_buf: audio_buf.clone(),
         }) {
             return Err(Error::OtherWithContext(format!(
                 "failed to add track for peer {peer_id}: {e}"
@@ -155,7 +155,7 @@ impl SinkTrackController {
             sink_device,
             self.num_channels,
             self.ui_event_ch.clone(),
-            sample_rx,
+            audio_buf,
         )?;
         stream
             .play()
@@ -245,14 +245,13 @@ impl SinkTrackController {
         for (id, entry) in self.receiver_tasks.iter_mut() {
             let _ = entry.stream.pause();
 
-            // create channel pair to go from decoder thread to cpal callback
-            let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
+            let audio_buf = Arc::new(std::sync::Mutex::new(AudioBuf::new(OPUS_SAMPLES)));
 
             let stream = build_stream(
                 sink_device,
                 self.num_channels,
                 self.ui_event_ch.clone(),
-                sample_rx,
+                audio_buf.clone(),
             )?;
 
             if !silenced {
@@ -261,7 +260,7 @@ impl SinkTrackController {
 
             let _ = self.cmd_tx.send(Cmd::ReplaceSampleTx {
                 peer_id: id.clone(),
-                sample_tx,
+                audio_buf,
             });
         }
 

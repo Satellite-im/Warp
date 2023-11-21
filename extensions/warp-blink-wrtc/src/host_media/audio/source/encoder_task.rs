@@ -6,13 +6,15 @@ use std::{
     time::Duration,
 };
 
-use tokio::sync::mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::host_media::audio_utils::AudioBuf;
 
 use super::super::utils::{FramerOutput, SpeechDetector};
 
 pub struct Args {
     pub encoder: opus::Encoder,
-    pub rx: UnboundedReceiver<Vec<f32>>,
+    pub audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
     pub tx: UnboundedSender<FramerOutput>,
     pub should_quit: Arc<AtomicBool>,
     pub num_samples: usize,
@@ -21,7 +23,7 @@ pub struct Args {
 pub fn run(args: Args) {
     let Args {
         mut encoder,
-        mut rx,
+        audio_buf,
         tx,
         should_quit,
         num_samples,
@@ -30,28 +32,22 @@ pub fn run(args: Args) {
     // speech_detector should emit at most 1 event per second
     let _speech_detector = SpeechDetector::new(10, 100);
     let mut opus_out = vec![0_u8; num_samples * 4];
-    let mut sample_queue = Vec::new();
-    sample_queue.reserve(num_samples);
 
     while !should_quit.load(Ordering::Relaxed) {
-        match rx.try_recv() {
-            Ok(mut r) => sample_queue.append(&mut r),
-            Err(e) => match e {
-                TryRecvError::Empty => {
-                    std::thread::sleep(Duration::from_millis(5));
+        let mut buf = match audio_buf.lock() {
+            Ok(mut buf) => match buf.get_frame() {
+                Some(r) => r,
+                None => {
+                    std::thread::sleep(Duration::from_millis(10));
                     continue;
                 }
-                TryRecvError::Disconnected => {
-                    log::error!("source track decoder thread terminated: channel closed");
-                    break;
-                }
             },
+            Err(e) => {
+                // should never happen
+                log::error!("encoder task terminated because of audio_buf: {e}");
+                break;
+            }
         };
-
-        if sample_queue.len() < num_samples {
-            continue;
-        }
-        let buf = &mut sample_queue[0..num_samples];
 
         // calculate rms of frame
         let rms = f32::sqrt(buf.iter().map(|x| x * x).sum::<f32>() / buf.len() as f32);
@@ -61,7 +57,7 @@ pub fn run(args: Args) {
         };
 
         // encode and send off to the network bound task
-        match encoder.encode_float(buf, opus_out.as_mut_slice()) {
+        match encoder.encode_float(buf.as_mut_slice(), opus_out.as_mut_slice()) {
             Ok(size) => {
                 let slice = opus_out.as_slice();
                 let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
@@ -72,11 +68,5 @@ pub fn run(args: Args) {
                 log::error!("OpusPacketizer failed to encode: {}", e);
             }
         }
-
-        let remaining = sample_queue.len() - num_samples;
-        let mut buf2 = vec![0_f32; remaining];
-        buf2.reserve(num_samples);
-        buf2.copy_from_slice(&mut sample_queue[num_samples..]);
-        sample_queue = buf2;
     }
 }
