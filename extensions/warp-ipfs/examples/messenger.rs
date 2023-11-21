@@ -2,7 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rust_ipfs::Multiaddr;
-use rustyline_async::{Readline, ReadlineError, SharedWriter};
+use rustyline_async::{Readline, SharedWriter};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -147,9 +147,7 @@ async fn setup<P: AsRef<Path>>(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {
-        //raising fd limit
-    }
+    _ = fdlimit::raise_fd_limit().is_ok();
 
     let mut _log_guard = None;
 
@@ -305,7 +303,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             line = rl.readline().fuse() => match line {
-                Ok(line) => {
+                Ok(rustyline_async::ReadlineEvent::Line(line)) => {
+                    rl.add_history_entry(line.clone());
                     let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
                         Some("/create") => {
@@ -1093,8 +1092,7 @@ async fn main() -> anyhow::Result<()> {
                        }
                     }
                 },
-                Err(ReadlineError::Interrupted) => break,
-                Err(ReadlineError::Eof) => break,
+                Ok(rustyline_async::ReadlineEvent::Eof) | Ok(rustyline_async::ReadlineEvent::Interrupted) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {e}")?;
                 }

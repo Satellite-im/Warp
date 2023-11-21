@@ -113,101 +113,37 @@ impl Default for RelayClient {
             relay_address: vec![
                 //NYC-1
                 "/ip4/146.190.184.59/tcp/4001/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(), 
+                "/ip4/146.190.184.59/udp/4001/quic-v1/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(), 
                 //SF-1
+                "/ip4/64.225.88.100/udp/4001/quic-v1/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(), 
                 "/ip4/64.225.88.100/tcp/4001/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(), 
                 //NYC-1-EXP
+                "/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
                 "/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
             ]
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Swarm {
-    /// Concurrent dial factor
-    pub dial_factor: u8,
-    pub notify_buffer_size: usize,
-    pub connection_buffer_size: usize,
-    pub limit: Option<ConnectionLimit>,
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct Swarm {
+//     /// Concurrent dial factor
+//     pub dial_factor: u8,
+//     pub notify_buffer_size: usize,
+//     pub connection_buffer_size: usize,
+//     pub limit: Option<ConnectionLimit>,
+// }
 
-impl Default for Swarm {
-    fn default() -> Self {
-        Self {
-            dial_factor: 8, //Same dial factor as default for libp2p
-            notify_buffer_size: 32,
-            connection_buffer_size: 1024,
-            limit: None,
-        }
-    }
-}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionLimit {
-    pub max_pending_incoming: Option<u32>,
-    pub max_pending_outgoing: Option<u32>,
-    pub max_established_incoming: Option<u32>,
-    pub max_established_outgoing: Option<u32>,
-    pub max_established: Option<u32>,
-    pub max_established_per_peer: Option<u32>,
-}
-
-impl ConnectionLimit {
-    pub fn testing() -> Self {
-        Self {
-            max_pending_incoming: Some(10),
-            max_pending_outgoing: Some(10),
-            max_established_incoming: Some(32),
-            max_established_outgoing: Some(32),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-
-    pub fn minimal() -> Self {
-        Self {
-            max_pending_incoming: Some(128),
-            max_pending_outgoing: Some(128),
-            max_established_incoming: Some(128),
-            max_established_outgoing: Some(128),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-
-    pub fn recommended() -> Self {
-        Self {
-            max_pending_incoming: Some(512),
-            max_pending_outgoing: Some(512),
-            max_established_incoming: Some(512),
-            max_established_outgoing: Some(512),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-
-    pub fn maximum() -> Self {
-        Self {
-            max_pending_incoming: Some(512),
-            max_pending_outgoing: Some(512),
-            max_established_incoming: Some(1024),
-            max_established_outgoing: Some(1024),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-
-    pub fn unrestricted() -> Self {
-        Self {
-            max_pending_incoming: None,
-            max_pending_outgoing: None,
-            max_established_incoming: None,
-            max_established_outgoing: None,
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
-}
+// impl Default for Swarm {
+//     fn default() -> Self {
+//         Self {
+//             dial_factor: 8, //Same dial factor as default for libp2p
+//             notify_buffer_size: 32,
+//             connection_buffer_size: 1024,
+//             limit: None,
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pubsub {
@@ -227,13 +163,13 @@ pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
     pub pubsub: Pubsub,
-    pub swarm: Swarm,
     pub bootstrap: bool,
     pub portmapping: bool,
     pub agent_version: Option<String>,
     /// Used for testing with a memory transport
     pub memory_transport: bool,
     pub dht_client: bool,
+    pub disable_quic: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -352,7 +288,7 @@ impl Default for Config {
             path: None,
             network: Network::Ipfs,
             bootstrap: Bootstrap::Ipfs,
-            listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
+            listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"]
                 .iter()
                 .filter_map(|s| Multiaddr::from_str(s).ok())
                 .collect::<Vec<_>>(),
@@ -364,7 +300,7 @@ impl Default for Config {
             store_setting: Default::default(),
             enable_relay: false,
             save_phrase: false,
-            max_storage_size: Some(1024 * 1024 * 1024),
+            max_storage_size: Some(10 * 1024 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
             thumbnail_size: (128, 128),
             chunking: None,
