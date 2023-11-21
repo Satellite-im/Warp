@@ -164,8 +164,10 @@ pub async fn create_audio_sink_track(
 pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
-    let mut source_config = unsafe { DATA.audio_source_config.clone() };
-    source_config.channels = get_min_source_channels(&device)?;
+    let src_channels = get_min_source_channels(&device)?;
+    unsafe {
+        DATA.audio_source_channels = src_channels as _;
+    }
 
     // change_input_device destroys the audio stream. if that function fails. there should be
     // no audio_input.

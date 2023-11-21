@@ -15,7 +15,6 @@ pub struct Args {
     pub rx: UnboundedReceiver<Vec<f32>>,
     pub tx: UnboundedSender<FramerOutput>,
     pub should_quit: Arc<AtomicBool>,
-    pub num_channels: usize,
     pub num_samples: usize,
 }
 
@@ -25,7 +24,6 @@ pub fn run(args: Args) {
         mut rx,
         tx,
         should_quit,
-        num_channels,
         num_samples,
     } = args;
 
@@ -48,16 +46,7 @@ pub fn run(args: Args) {
             },
         };
 
-        assert_eq!(buf.len(), num_samples * num_channels);
-
-        // merge channels
-        if num_channels != 1 {
-            let buf2: Vec<f32> = (&buf)
-                .chunks_exact(num_channels)
-                .map(|x| x.iter().sum::<f32>() / num_channels as f32)
-                .collect();
-            buf = buf2;
-        }
+        assert_eq!(buf.len(), num_samples);
 
         // calculate rms of frame
         let rms = f32::sqrt(buf.iter().map(|x| x * x).sum::<f32>() / buf.len() as f32);

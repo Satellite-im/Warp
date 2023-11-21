@@ -7,7 +7,11 @@ use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
-use tokio::sync::{broadcast, mpsc, Notify};
+use tokio::sync::{
+    broadcast,
+    mpsc::{self, UnboundedSender},
+    Notify,
+};
 use warp::blink::BlinkEventKind;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
@@ -24,7 +28,80 @@ pub struct SourceTrack {
     stream: cpal::Stream,
     quit_encoder_task: Arc<AtomicBool>,
     quit_sender_task: Arc<Notify>,
-    muted: Arc<AtomicBool>,
+    muted: bool,
+    // this lets one create a new stream and attach it to the encoder_task, and continue sending as if nothing ever
+    // happened.
+    sample_tx: UnboundedSender<Vec<f32>>,
+    ui_event_ch: broadcast::Sender<BlinkEventKind>,
+}
+
+impl Drop for SourceTrack {
+    fn drop(&mut self) {
+        self.quit_encoder_task.store(true, Ordering::Relaxed);
+        self.quit_sender_task.notify_waiters();
+    }
+}
+
+fn create_stream(
+    source_device: &cpal::Device,
+    num_channels: usize,
+    sample_tx: UnboundedSender<Vec<f32>>,
+    ui_event_ch: broadcast::Sender<BlinkEventKind>,
+) -> Result<cpal::Stream, Error> {
+    // 10ms at 48KHz
+    let buffer_size = 480 * num_channels;
+
+    let config = cpal::StreamConfig {
+        channels: num_channels as _,
+        sample_rate: cpal::SampleRate(48000),
+        buffer_size: cpal::BufferSize::Fixed(buffer_size as _),
+    };
+
+    let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
+        // don't send if muted
+        if automute::SHOULD_MUTE.load(Ordering::Relaxed) {
+            return;
+        }
+        debug_assert_eq!(data.len(), buffer_size);
+        // merge channels
+        if num_channels != 1 {
+            let v: Vec<f32> = data
+                .chunks_exact(num_channels)
+                .map(|x| x.iter().sum::<f32>() / num_channels as f32)
+                .collect();
+            sample_tx.send(v);
+        } else {
+            let mut v = vec![0_f32; buffer_size];
+            v.copy_from_slice(data);
+            sample_tx.send(v);
+        }
+    };
+
+    source_device
+        .build_input_stream(
+            &config,
+            input_data_fn,
+            move |err| {
+                log::error!("an error occurred on stream: {}", err);
+                let evt = match err {
+                    cpal::StreamError::DeviceNotAvailable => {
+                        BlinkEventKind::AudioInputDeviceNoLongerAvailable
+                    }
+                    _ => BlinkEventKind::AudioStreamError,
+                };
+                let _ = ui_event_ch.send(evt);
+            },
+            None,
+        )
+        .map_err(|e| match e {
+            BuildStreamError::StreamConfigNotSupported => Error::InvalidAudioConfig,
+            BuildStreamError::DeviceNotAvailable => Error::AudioDeviceNotFound,
+            e => Error::OtherWithContext(format!(
+                "failed to build input stream: {e}, {}, {}",
+                file!(),
+                line!()
+            )),
+        })
 }
 
 impl SourceTrack {
@@ -38,59 +115,20 @@ impl SourceTrack {
     ) -> Result<Self, Error> {
         let quit_encoder_task = Arc::new(AtomicBool::new(false));
         let quit_sender_task = Arc::new(Notify::new());
-        let muted = Arc::new(AtomicBool::new(false));
 
         // fail fast if the opus encoder can't be created. needed by the encoder task
         let encoder = opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip)
             .map_err(|e| Error::OtherWithContext(e.to_string()))?;
 
-        // 10ms at 48KHz
-        let buffer_size = 480 * num_channels;
         let (sample_tx, sample_rx) = mpsc::unbounded_channel::<Vec<f32>>();
         let (encoded_tx, encoded_rx) = mpsc::unbounded_channel::<FramerOutput>();
 
-        let config = cpal::StreamConfig {
-            channels: num_channels as _,
-            sample_rate: cpal::SampleRate(48000),
-            buffer_size: cpal::BufferSize::Fixed(buffer_size as _),
-        };
-
-        let muted2 = muted.clone();
-        let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-            // don't send if muted
-            if muted2.load(Ordering::Relaxed) || automute::SHOULD_MUTE.load(Ordering::Relaxed) {
-                return;
-            }
-            let mut v = vec![0_f32; buffer_size];
-            v.copy_from_slice(data);
-            sample_tx.send(v);
-        };
-
-        let stream = source_device
-            .build_input_stream(
-                &config,
-                input_data_fn,
-                move |err| {
-                    log::error!("an error occurred on stream: {}", err);
-                    let evt = match err {
-                        cpal::StreamError::DeviceNotAvailable => {
-                            BlinkEventKind::AudioInputDeviceNoLongerAvailable
-                        }
-                        _ => BlinkEventKind::AudioStreamError,
-                    };
-                    let _ = ui_event_ch.send(evt);
-                },
-                None,
-            )
-            .map_err(|e| match e {
-                BuildStreamError::StreamConfigNotSupported => Error::InvalidAudioConfig,
-                BuildStreamError::DeviceNotAvailable => Error::AudioDeviceNotFound,
-                e => Error::OtherWithContext(format!(
-                    "failed to build input stream: {e}, {}, {}",
-                    file!(),
-                    line!()
-                )),
-            })?;
+        let stream = create_stream(
+            source_device,
+            num_channels,
+            sample_tx.clone(),
+            ui_event_ch.clone(),
+        )?;
 
         // spawn encoder task
         let should_quit = quit_encoder_task.clone();
@@ -100,7 +138,6 @@ impl SourceTrack {
                 rx: sample_rx,
                 tx: encoded_tx,
                 should_quit,
-                num_channels,
                 num_samples: 480,
             });
         });
@@ -122,19 +159,49 @@ impl SourceTrack {
             stream,
             quit_encoder_task,
             quit_sender_task,
-            muted,
+            muted: true,
+            ui_event_ch,
+            sample_tx,
         })
     }
 
-    pub fn play(&self) -> Result<(), Error> {
+    pub fn play(&mut self) -> Result<(), Error> {
         self.stream
             .play()
-            .map_err(|e| Error::OtherWithContext(e.to_string()))
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?;
+        self.muted = false;
+        Ok(())
     }
 
-    pub fn pause(&self) -> Result<(), Error> {
+    pub fn pause(&mut self) -> Result<(), Error> {
         self.stream
             .pause()
-            .map_err(|e| Error::OtherWithContext(e.to_string()))
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?;
+        self.muted = true;
+        Ok(())
+    }
+
+    // should not require RTP renegotiation
+    pub fn change_input_device(
+        &mut self,
+        source_device: &cpal::Device,
+        num_channels: usize,
+    ) -> Result<(), Error> {
+        self.stream
+            .pause()
+            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
+
+        let stream = create_stream(
+            source_device,
+            num_channels,
+            self.sample_tx.clone(),
+            self.ui_event_ch.clone(),
+        )?;
+
+        self.stream = stream;
+        if !self.muted {
+            self.play();
+        }
+        Ok(())
     }
 }
