@@ -54,7 +54,7 @@ fn create_stream(
     let config = cpal::StreamConfig {
         channels: num_channels as _,
         sample_rate: cpal::SampleRate(48000),
-        buffer_size: cpal::BufferSize::Fixed(120),
+        buffer_size: cpal::BufferSize::Fixed(480),
     };
 
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -62,7 +62,6 @@ fn create_stream(
         if automute::SHOULD_MUTE.load(Ordering::Relaxed) {
             return;
         }
-        debug_assert_eq!(data.len(), 120);
         // merge channels
         if num_channels != 1 {
             let v: Vec<f32> = data

@@ -51,19 +51,17 @@ pub fn run(args: Args) {
         if sample_queue.len() < num_samples {
             continue;
         }
-
-        assert_eq!(sample_queue.len(), num_samples);
+        let buf = &mut sample_queue[0..num_samples];
 
         // calculate rms of frame
-        let rms =
-            f32::sqrt(sample_queue.iter().map(|x| x * x).sum::<f32>() / sample_queue.len() as f32);
+        let rms = f32::sqrt(buf.iter().map(|x| x * x).sum::<f32>() / buf.len() as f32);
         let loudness = match rms * 1000.0 {
             x if x >= 127.0 => 127,
             x => x as u8,
         };
 
         // encode and send off to the network bound task
-        match encoder.encode_float(sample_queue.as_mut_slice(), opus_out.as_mut_slice()) {
+        match encoder.encode_float(buf, opus_out.as_mut_slice()) {
             Ok(size) => {
                 let slice = opus_out.as_slice();
                 let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
@@ -75,7 +73,10 @@ pub fn run(args: Args) {
             }
         }
 
-        sample_queue.clear();
-        sample_queue.reserve(num_samples);
+        let remaining = sample_queue.len() - num_samples;
+        let mut buf2 = vec![0_f32; remaining];
+        buf2.reserve(num_samples);
+        buf2.copy_from_slice(&mut sample_queue[num_samples..]);
+        sample_queue = buf2;
     }
 }
