@@ -22,7 +22,7 @@ struct ReceiverTask {
     stream: cpal::Stream,
 }
 
-pub struct SinkTrack {
+pub struct SinkTrackController {
     quit_decoder_task: Arc<AtomicBool>,
     silenced: Arc<AtomicBool>,
     num_channels: usize,
@@ -31,7 +31,7 @@ pub struct SinkTrack {
     receiver_tasks: HashMap<DID, ReceiverTask>,
 }
 
-impl SinkTrack {
+impl SinkTrackController {
     pub fn new(
         num_channels: usize,
         ui_event_ch: broadcast::Sender<BlinkEventKind>,

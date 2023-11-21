@@ -14,7 +14,7 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
 use super::audio;
-use super::audio::sink::SinkTrack;
+use super::audio::sink::SinkTrackController;
 use super::audio::source::SourceTrack;
 
 struct Data {
@@ -23,7 +23,7 @@ struct Data {
     audio_source_channels: usize,
     audio_sink_channels: usize,
     audio_source_track: Option<SourceTrack>,
-    audio_sink_track: Option<SinkTrack>,
+    audio_sink_controller: Option<SinkTrackController>,
     recording: bool,
     muted: bool,
     deafened: bool,
@@ -38,7 +38,7 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
         audio_source_channels: 1,
         audio_sink_channels: 1,
         audio_source_track: None,
-        audio_sink_track: None,
+        audio_sink_controller: None,
         recording: false,
         muted: false,
         deafened: false,
@@ -65,7 +65,7 @@ pub async fn reset() {
     let _lock = LOCK.write().await;
     unsafe {
         DATA.audio_source_track.take();
-        DATA.audio_sink_track.take();
+        DATA.audio_sink_controller.take();
         DATA.recording = false;
         DATA.muted = false;
         DATA.deafened = false;
@@ -140,16 +140,16 @@ pub async fn create_audio_sink_track(
             }
         };
         let (deafened, num_channels) = (DATA.deafened, DATA.audio_sink_channels);
-        if DATA.audio_sink_track.is_none() {
-            DATA.audio_sink_track
-                .replace(SinkTrack::new(num_channels, ui_event_ch)?);
+        if DATA.audio_sink_controller.is_none() {
+            DATA.audio_sink_controller
+                .replace(SinkTrackController::new(num_channels, ui_event_ch)?);
         }
 
-        if let Some(mgr) = DATA.audio_sink_track.as_mut() {
-            mgr.add_track(output_device, peer_id.clone(), track);
+        if let Some(controller) = DATA.audio_sink_controller.as_mut() {
+            controller.add_track(output_device, peer_id.clone(), track);
 
             if !deafened {
-                mgr.play(peer_id)?;
+                controller.play(peer_id)?;
             }
             // todo: manage mp4 logger
         } else {
