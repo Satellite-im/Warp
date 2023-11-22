@@ -80,9 +80,12 @@ pub enum Synchronized {
     PeerRecord {
         record: Vec<u8>,
     },
+    Update {
+        document: IdentityDocument,
+    },
     Store {
         document: IdentityDocument,
-        package: Option<Vec<u8>>,
+        package: Vec<u8>,
     },
     Fetch {
         did: DID,
@@ -92,11 +95,9 @@ pub enum Synchronized {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SynchronizedResponse {
-    Ok {
-        identity: Option<IdentityDocument>,
-        package: Option<Vec<u8>>,
-    },
-    
+    RecordStored,
+    IdentityUpdated,
+    Package(Vec<u8>),
     Error(SynchronizedError),
 }
 

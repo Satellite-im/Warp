@@ -307,17 +307,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    temp_registeration.insert(did.clone(), document);
-                    if let Some(package) = package {
-                        _temp_package.insert(did, package);
-                    }
+                    _temp_package.insert(did, package);
 
                     let _ = resp.send((
                         ch,
-                        Either::Right(Response::SynchronizedResponse(SynchronizedResponse::Ok {
-                            identity: None,
-                            package: None,
-                        })),
+                        Either::Right(Response::SynchronizedResponse(
+                            SynchronizedResponse::IdentityUpdated,
+                        )),
+                    ));
+                    continue;
+                }
+                identity::protocol::Request::Synchronized(Synchronized::Update { document }) => {
+                    if document.verify().is_err() {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::SynchronizedResponse(
+                                SynchronizedResponse::Error(SynchronizedError::Invalid),
+                            )),
+                        ));
+
+                        continue;
+                    }
+                    let did = document.did.clone();
+
+                    if !temp_registeration.contains_key(&did) {
+                        let _ = resp.send((
+                            ch,
+                            Either::Right(Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::NotRegistered,
+                                ),
+                            )),
+                        ));
+
+                        continue;
+                    }
+
+                    temp_registeration.insert(did, document);
+
+                    let _ = resp.send((
+                        ch,
+                        Either::Right(Response::SynchronizedResponse(
+                            SynchronizedResponse::IdentityUpdated,
+                        )),
                     ));
                     continue;
                 }
@@ -374,10 +406,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let _ = resp.send((
                         ch,
-                        Either::Right(Response::SynchronizedResponse(SynchronizedResponse::Ok {
-                            identity: None,
-                            package: None,
-                        })),
+                        Either::Right(Response::SynchronizedResponse(
+                            SynchronizedResponse::RecordStored,
+                        )),
                     ));
                     continue;
                 }
@@ -397,10 +428,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let event = match _temp_package.get(&did) {
                         Some(package) => Either::Right(Response::SynchronizedResponse(
-                            SynchronizedResponse::Ok {
-                                identity: None,
-                                package: Some(package.clone()),
-                            },
+                            SynchronizedResponse::Package(package.clone()),
                         )),
                         None => Either::Right(Response::SynchronizedResponse(
                             identity::protocol::SynchronizedResponse::Error(

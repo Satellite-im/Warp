@@ -51,10 +51,15 @@ pub enum IdentityCommand {
         response:
             futures::channel::oneshot::Sender<Result<Vec<IdentityDocument>, warp::error::Error>>,
     },
-    Synchronized {
+    UpdateIdentity {
         peer_id: PeerId,
         identity: IdentityDocument,
-        package: Option<Vec<u8>>,
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    UpdatePackage {
+        peer_id: PeerId,
+        identity: IdentityDocument,
+        package: Vec<u8>,
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
     },
     Fetch {
@@ -72,10 +77,16 @@ enum IdentityResponse {
         response:
             futures::channel::oneshot::Sender<Result<Vec<IdentityDocument>, warp::error::Error>>,
     },
-    Synchronized {
+    IdentityUpdate {
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
     },
-    SynchronizedFetch {
+    PeerRecordUpdate {
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    Store {
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    Fetch {
         response: futures::channel::oneshot::Sender<Result<Vec<u8>, warp::error::Error>>,
     },
 }
@@ -121,7 +132,7 @@ impl Behaviour {
             let (tx, rx) = oneshot::channel();
 
             self.waiting_on_response
-                .insert(id, IdentityResponse::Synchronized { response: tx });
+                .insert(id, IdentityResponse::PeerRecordUpdate { response: tx });
             self.pending_internal_response.insert(id, rx);
         }
     }
@@ -177,17 +188,20 @@ impl Behaviour {
                 }
             }
             Response::SynchronizedResponse(response) => match response {
-                super::protocol::SynchronizedResponse::Ok { package, .. } => {
-                    match self.waiting_on_response.remove(&id) {
-                        Some(IdentityResponse::Synchronized { response }) => {
-                            let _ = response.send(Ok(()));
-                        }
-                        Some(IdentityResponse::SynchronizedFetch { response }) => {
-                            let package = package.ok_or(warp::error::Error::IdentityDoesntExist);
-                            let _ = response.send(package);
-                        }
-                        _ => {}
-                    };
+                super::protocol::SynchronizedResponse::IdentityUpdated => {
+                    if let Some(IdentityResponse::IdentityUpdate { response }) =
+                        self.waiting_on_response.remove(&id)
+                    {
+                        let _ = response.send(Ok(()));
+                    }
+                }
+                super::protocol::SynchronizedResponse::RecordStored => {}
+                super::protocol::SynchronizedResponse::Package(package) => {
+                    if let Some(IdentityResponse::Fetch { response }) =
+                        self.waiting_on_response.remove(&id)
+                    {
+                        let _ = response.send(Ok(package));
+                    }
                 }
                 super::protocol::SynchronizedResponse::Error(e) => {
                     let e = match e {
@@ -210,14 +224,19 @@ impl Behaviour {
                             warp::error::Error::OtherWithContext(msg)
                         }
                     };
-                    match self.waiting_on_response.remove(&id) {
-                        Some(IdentityResponse::Synchronized { response }) => {
-                            let _ = response.send(Err(e));
+                    let Some(responses) = self.waiting_on_response.remove(&id) else {
+                        return;
+                    };
+
+                    match responses {
+                        IdentityResponse::Register { response } => _ = response.send(Err(e)),
+                        IdentityResponse::Lookup { response } => _ = response.send(Err(e)),
+                        IdentityResponse::IdentityUpdate { response } => _ = response.send(Err(e)),
+                        IdentityResponse::PeerRecordUpdate { response } => {
+                            _ = response.send(Err(e))
                         }
-                        Some(IdentityResponse::SynchronizedFetch { response }) => {
-                            let _ = response.send(Err(e));
-                        }
-                        _ => {}
+                        IdentityResponse::Store { response } => _ = response.send(Err(e)),
+                        IdentityResponse::Fetch { response } => _ = response.send(Err(e)),
                     };
                 }
             },
@@ -349,7 +368,7 @@ impl NetworkBehaviour for Behaviour {
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Lookup { response });
                     }
-                    IdentityCommand::Synchronized {
+                    IdentityCommand::UpdatePackage {
                         peer_id,
                         identity,
                         package,
@@ -364,7 +383,7 @@ impl NetworkBehaviour for Behaviour {
                         );
 
                         self.waiting_on_response
-                            .insert(id, IdentityResponse::Synchronized { response });
+                            .insert(id, IdentityResponse::Store { response });
                     }
                     IdentityCommand::Fetch {
                         peer_id,
@@ -377,7 +396,22 @@ impl NetworkBehaviour for Behaviour {
                         );
 
                         self.waiting_on_response
-                            .insert(id, IdentityResponse::SynchronizedFetch { response });
+                            .insert(id, IdentityResponse::Fetch { response });
+                    }
+                    IdentityCommand::UpdateIdentity {
+                        peer_id,
+                        identity,
+                        response,
+                    } => {
+                        let id = self.inner.send_request(
+                            &peer_id,
+                            Request::Synchronized(super::protocol::Synchronized::Update {
+                                document: identity,
+                            }),
+                        );
+
+                        self.waiting_on_response
+                            .insert(id, IdentityResponse::Store { response });
                     }
                 },
                 Poll::Ready(None) => {
@@ -425,13 +459,19 @@ impl NetworkBehaviour for Behaviour {
                                 let _ =
                                     response.send(Err(warp::error::Error::Boxed(Box::new(error))));
                             }
-                            IdentityResponse::Synchronized { response } => {
+                            IdentityResponse::Store { response } => {
                                 let _ =
                                     response.send(Err(warp::error::Error::Boxed(Box::new(error))));
                             }
-                            IdentityResponse::SynchronizedFetch { response } => {
+                            IdentityResponse::Fetch { response } => {
                                 let _ =
                                     response.send(Err(warp::error::Error::Boxed(Box::new(error))));
+                            }
+                            IdentityResponse::IdentityUpdate { response } => {
+                                _ = response.send(Err(warp::error::Error::Boxed(Box::new(error))))
+                            }
+                            IdentityResponse::PeerRecordUpdate { response } => {
+                                _ = response.send(Err(warp::error::Error::Boxed(Box::new(error))))
                             }
                         }
                     }

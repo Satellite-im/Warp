@@ -1462,10 +1462,10 @@ impl IdentityStore {
                 let _ = self
                     .identity_command
                     .clone()
-                    .send(shuttle::identity::client::IdentityCommand::Synchronized {
+                    .send(shuttle::identity::client::IdentityCommand::UpdatePackage {
                         peer_id,
                         identity: document.clone().into(),
-                        package: Some(package.clone()),
+                        package: package.clone(),
                         response: tx,
                     })
                     .await;
