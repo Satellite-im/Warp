@@ -1,5 +1,4 @@
 use std::{
-    sync::atomic::AtomicBool,
     time::{SystemTime, UNIX_EPOCH},
 };
 

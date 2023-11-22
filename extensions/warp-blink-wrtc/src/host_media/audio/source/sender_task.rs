@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use crate::host_media::{
     audio::utils::{FramerOutput, SpeechDetector},
-    mp4_logger::{self, Mp4LoggerInstance},
+    mp4_logger::{Mp4LoggerInstance},
 };
 
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc::UnboundedReceiver, Notify};
-use warp::{blink::BlinkEventKind, crypto::DID};
+use warp::{blink::BlinkEventKind};
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
     track::track_local::track_local_static_rtp::TrackLocalStaticRTP,

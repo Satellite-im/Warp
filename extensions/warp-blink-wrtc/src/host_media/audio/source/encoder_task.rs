@@ -1,5 +1,4 @@
 use std::{
-    mem::MaybeUninit,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -10,7 +9,7 @@ use std::{
 use crate::host_media::audio::AudioConsumer;
 
 use super::super::utils::{FramerOutput, SpeechDetector};
-use ringbuf::{Consumer, SharedRb};
+
 use tokio::sync::mpsc::UnboundedSender;
 
 pub struct Args {

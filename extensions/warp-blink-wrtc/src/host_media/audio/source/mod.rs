@@ -1,5 +1,4 @@
 use std::{
-    mem::MaybeUninit,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -10,7 +9,7 @@ use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
-use ringbuf::{HeapRb, Producer, SharedRb};
+use ringbuf::{HeapRb};
 use tokio::sync::{broadcast, mpsc, Notify};
 use warp::error::Error;
 use warp::{blink::BlinkEventKind, crypto::DID};
