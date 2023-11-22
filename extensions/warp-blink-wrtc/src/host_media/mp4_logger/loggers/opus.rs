@@ -1,4 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::atomic::AtomicBool,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use bytes::Bytes;
 use mp4::{TfdtBox, TfhdBox, TrafBox, TrunBox};

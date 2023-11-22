@@ -69,25 +69,6 @@ impl BlinkImpl {
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
 
-        let cpal_host = cpal::default_host();
-        if let Some(input_device) = cpal_host.default_input_device() {
-            if let Err(e) =
-                host_media::controller::change_audio_input(input_device, ui_event_ch.clone()).await
-            {
-                log::error!("BlinkImpl failed to set audio input device: {e}");
-            }
-        } else {
-            log::warn!("blink started with no input device");
-        }
-
-        if let Some(output_device) = cpal_host.default_output_device() {
-            if let Err(e) = host_media::controller::change_audio_output(output_device).await {
-                log::error!("BlinkImpl failed to set audio output device: {e}");
-            }
-        } else {
-            log::warn!("blink started with no output device");
-        }
-
         let ipfs = Arc::new(warp::sync::RwLock::new(None));
         let own_id_private = Arc::new(warp::sync::RwLock::new(None));
         let gossipsub_sender = GossipSubSender::new(own_id_private.clone(), ipfs.clone());
@@ -107,7 +88,7 @@ impl BlinkImpl {
 
         let blink_impl = Self {
             own_id: Arc::new(warp::sync::RwLock::new(None)),
-            ui_event_ch,
+            ui_event_ch: ui_event_ch.clone(),
             gossipsub_sender,
             gossipsub_listener,
             blink_controller,
@@ -145,6 +126,30 @@ impl BlinkImpl {
                 own_id.write().replace(public_did.clone());
                 ipfs.write().replace(_ipfs);
 
+                let cpal_host = cpal::default_host();
+                if let Some(input_device) = cpal_host.default_input_device() {
+                    if let Err(e) = host_media::controller::change_audio_input(
+                        &public_did,
+                        input_device,
+                        ui_event_ch.clone(),
+                    )
+                    .await
+                    {
+                        log::error!("BlinkImpl failed to set audio input device: {e}");
+                    }
+                } else {
+                    log::warn!("blink started with no input device");
+                }
+
+                if let Some(output_device) = cpal_host.default_output_device() {
+                    if let Err(e) = host_media::controller::change_audio_output(output_device).await
+                    {
+                        log::error!("BlinkImpl failed to set audio output device: {e}");
+                    }
+                } else {
+                    log::warn!("blink started with no output device");
+                }
+
                 gossipsub_listener.receive_calls(public_did);
                 log::trace!("finished initializing WebRTC");
                 Ok(())
@@ -173,8 +178,14 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        host_media::controller::change_audio_input(device, self.ui_event_ch.clone()).await?;
-        Ok(())
+        match self.own_id.read().as_ref() {
+            Some(id) => {
+                host_media::controller::change_audio_input(id, device, self.ui_event_ch.clone())
+                    .await?;
+                Ok(())
+            }
+            None => Err(Error::BlinkNotInitialized),
+        }
     }
 
     async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {

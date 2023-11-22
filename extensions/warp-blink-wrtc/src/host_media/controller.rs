@@ -84,6 +84,7 @@ pub async fn has_audio_source() -> bool {
 // webrtc should remove the old media source before this is called.
 // use AUDIO_SOURCE_ID
 pub async fn create_audio_source_track(
+    own_id: &DID,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
 ) -> Result<(), Error> {
@@ -94,7 +95,8 @@ pub async fn create_audio_source_track(
     };
 
     let (muted, num_channels) = unsafe { (DATA.muted, DATA.audio_source_channels) };
-    let mut source_track = SourceTrack::new(track, input_device, num_channels, ui_event_ch)?;
+    let mut source_track =
+        SourceTrack::new(own_id, track, input_device, num_channels, ui_event_ch)?;
 
     if !muted {
         source_track.play()?;
@@ -158,6 +160,7 @@ pub async fn create_audio_sink_track(
 }
 
 pub async fn change_audio_input(
+    own_id: &DID,
     device: cpal::Device,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> anyhow::Result<()> {
@@ -175,6 +178,7 @@ pub async fn change_audio_input(
             let track = source.get_track();
             drop(source);
             DATA.audio_source_track.replace(SourceTrack::new(
+                own_id,
                 track,
                 &device,
                 src_channels as _,

@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
-use crate::host_media::audio::utils::{FramerOutput, SpeechDetector};
+use crate::host_media::{
+    audio::utils::{FramerOutput, SpeechDetector},
+    mp4_logger::{self, Mp4LoggerInstance},
+};
 
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc::UnboundedReceiver, Notify};
-use warp::blink::BlinkEventKind;
+use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
     track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
@@ -12,6 +15,7 @@ use webrtc::{
 
 pub struct Args {
     pub track: Arc<TrackLocalStaticRTP>,
+    pub mp4_logger: Box<dyn Mp4LoggerInstance>,
     pub ui_event_ch: broadcast::Sender<BlinkEventKind>,
     pub rx: UnboundedReceiver<FramerOutput>,
     pub notify: Arc<Notify>,
@@ -21,6 +25,7 @@ pub struct Args {
 pub async fn run(args: Args) {
     let Args {
         track,
+        mut mp4_logger,
         ui_event_ch,
         mut rx,
         notify,
@@ -84,6 +89,7 @@ pub async fn run(args: Args) {
         };
 
         for packet in &packets {
+            mp4_logger.log(packet.payload.clone());
             if let Err(e) = track
                 .write_rtp_with_extensions(
                     packet,

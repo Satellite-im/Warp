@@ -328,6 +328,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                         match webrtc_controller.add_media_source(AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
                             Ok(track) => {
                                 match host_media::controller::create_audio_source_track(
+                                    own_id,
                                     ui_event_ch.clone(),
                                     track).await
                                 {
@@ -407,6 +408,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                         match webrtc_controller.add_media_source(AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
                             Ok(track) => {
                                 let r = host_media::controller::create_audio_source_track(
+                                    own_id,
                                     ui_event_ch.clone(),
                                     track).await;
                                 match r {

@@ -12,11 +12,11 @@ use cpal::{
 };
 use ringbuf::{HeapRb, Producer, SharedRb};
 use tokio::sync::{broadcast, mpsc, Notify};
-use warp::blink::BlinkEventKind;
 use warp::error::Error;
+use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
-use crate::host_media::audio::utils::automute;
+use crate::host_media::{audio::utils::automute, mp4_logger};
 
 use super::{utils::FramerOutput, OPUS_SAMPLES};
 
@@ -64,11 +64,11 @@ fn create_stream(
                 .map(|x| x.iter().sum::<f32>() / num_channels as f32)
                 .collect();
             for sample in v.drain(..) {
-                producer.push(sample);
+                let _ = producer.push(sample);
             }
         } else {
             for sample in data {
-                producer.push(*sample);
+                let _ = producer.push(*sample);
             }
         }
     };
@@ -104,6 +104,7 @@ impl SourceTrack {
     // spawn a std::thread to receive bytes from cpal and encode them
     // spawn a task to send the encoded bytes over rtp
     pub fn new(
+        own_id: &DID,
         track: Arc<TrackLocalStaticRTP>,
         source_device: &cpal::Device,
         num_channels: usize,
@@ -118,7 +119,7 @@ impl SourceTrack {
 
         let (encoded_tx, encoded_rx) = mpsc::unbounded_channel::<FramerOutput>();
         let ring = HeapRb::<f32>::new(48000 * 5);
-        let (mut producer, mut consumer) = ring.split();
+        let (producer, consumer) = ring.split();
 
         let stream = create_stream(source_device, num_channels, producer, ui_event_ch.clone())?;
 
@@ -135,12 +136,14 @@ impl SourceTrack {
         });
 
         // spawn the sender task
+        let logger = mp4_logger::get_audio_logger(own_id)?;
         let notify = quit_sender_task.clone();
         let ui_event_ch2 = ui_event_ch.clone();
         let track2 = track.clone();
         tokio::task::spawn(async move {
             sender_task::run(sender_task::Args {
                 track: track2,
+                mp4_logger: logger,
                 ui_event_ch: ui_event_ch2,
                 rx: encoded_rx,
                 notify,
