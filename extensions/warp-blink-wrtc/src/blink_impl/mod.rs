@@ -71,7 +71,9 @@ impl BlinkImpl {
 
         let cpal_host = cpal::default_host();
         if let Some(input_device) = cpal_host.default_input_device() {
-            if let Err(e) = host_media::controller::change_audio_input(input_device).await {
+            if let Err(e) =
+                host_media::controller::change_audio_input(input_device, ui_event_ch.clone()).await
+            {
                 log::error!("BlinkImpl failed to set audio input device: {e}");
             }
         } else {
@@ -171,7 +173,7 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        host_media::controller::change_audio_input(device).await?;
+        host_media::controller::change_audio_input(device, self.ui_event_ch.clone()).await?;
         Ok(())
     }
 
