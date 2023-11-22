@@ -43,7 +43,7 @@ impl Drop for SourceTrack {
 fn create_stream(
     source_device: &cpal::Device,
     num_channels: usize,
-    mut producer: Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
+    mut producer: AudioProducer,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> Result<cpal::Stream, Error> {
     let config = cpal::StreamConfig {

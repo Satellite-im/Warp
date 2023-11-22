@@ -21,6 +21,8 @@ use crate::host_media::mp4_logger;
 
 use self::decoder_task::Cmd;
 
+use super::AudioConsumer;
+
 mod decoder_task;
 mod receiver_task;
 
@@ -54,7 +56,7 @@ fn build_stream(
     sink_device: &cpal::Device,
     num_channels: usize,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
-    mut consumer: Consumer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
+    mut consumer: AudioConsumer,
 ) -> Result<cpal::Stream, Error> {
     // create cpal stream and add to self
     // 10ms at 48KHz

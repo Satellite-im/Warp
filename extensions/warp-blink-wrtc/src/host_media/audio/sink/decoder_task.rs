@@ -14,14 +14,14 @@ use webrtc::media::Sample;
 
 use rayon::prelude::*;
 
-use crate::host_media::audio::OPUS_SAMPLES;
+use crate::host_media::audio::{AudioProducer, OPUS_SAMPLES};
 
 pub enum Cmd {
     AddTrack {
         decoder: opus::Decoder,
         peer_id: DID,
         packet_rx: UnboundedReceiver<Sample>,
-        producer: Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
+        producer: AudioProducer,
     },
     RemoveTrack {
         peer_id: DID,
@@ -34,7 +34,7 @@ pub enum Cmd {
     },
     ReplaceSampleTx {
         peer_id: DID,
-        producer: Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
+        producer: AudioProducer,
     },
 }
 
@@ -42,7 +42,7 @@ struct Entry {
     decoder: opus::Decoder,
     peer_id: DID,
     packet_rx: UnboundedReceiver<Sample>,
-    producer: Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
+    producer: AudioProducer,
     paused: bool,
 }
 

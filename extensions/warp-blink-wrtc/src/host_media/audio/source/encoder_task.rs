@@ -7,13 +7,15 @@ use std::{
     time::Duration,
 };
 
+use crate::host_media::audio::AudioConsumer;
+
 use super::super::utils::{FramerOutput, SpeechDetector};
 use ringbuf::{Consumer, SharedRb};
 use tokio::sync::mpsc::UnboundedSender;
 
 pub struct Args {
     pub encoder: opus::Encoder,
-    pub consumer: Consumer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
+    pub consumer: AudioConsumer,
     pub tx: UnboundedSender<FramerOutput>,
     pub should_quit: Arc<AtomicBool>,
     pub num_samples: usize,
