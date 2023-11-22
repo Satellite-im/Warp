@@ -66,6 +66,9 @@ fn build_stream(
         for entry in data.iter_mut().take(max_to_take) {
             *entry = consumer.pop().unwrap_or_default();
         }
+        for entry in data.iter_mut().skip(max_to_take) {
+            *entry = 0_f32;
+        }
     };
 
     sink_device
