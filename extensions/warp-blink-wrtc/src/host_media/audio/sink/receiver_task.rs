@@ -14,13 +14,17 @@ use webrtc::{
     util::Unmarshal,
 };
 
-use crate::host_media::audio::utils::{
-    automute::{self, AutoMuteCmd},
-    SpeechDetector,
+use crate::host_media::{
+    audio::utils::{
+        automute::{self, AutoMuteCmd},
+        SpeechDetector,
+    },
+    mp4_logger::Mp4LoggerInstance,
 };
 
 pub struct Args {
     pub track: Arc<TrackRemote>,
+    pub mp4_logger: Box<dyn Mp4LoggerInstance>,
     pub peer_id: DID,
     pub should_quit: Arc<Notify>,
     pub silenced: Arc<AtomicBool>,
@@ -31,6 +35,7 @@ pub struct Args {
 pub async fn run(args: Args) {
     let Args {
         track,
+        mut mp4_logger,
         should_quit,
         silenced,
         packet_tx,
@@ -80,6 +85,8 @@ pub async fn run(args: Args) {
                 continue;
             }
         };
+
+        mp4_logger.log(rtp_packet.payload.clone());
 
         // if !muted.load(atomic::Ordering::Relaxed) {
         //     if let Some(writer) = mp4_writer.write().as_mut() {

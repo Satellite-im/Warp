@@ -17,6 +17,8 @@ use warp::error::Error;
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::{media::Sample, track::track_remote::TrackRemote};
 
+use crate::host_media::mp4_logger;
+
 use self::decoder_task::Cmd;
 
 mod decoder_task;
@@ -132,6 +134,7 @@ impl SinkTrackController {
         peer_id: DID,
         track: Arc<TrackRemote>,
     ) -> Result<(), Error> {
+        let logger = mp4_logger::get_audio_logger(&peer_id)?;
         let decoder = opus::Decoder::new(48000, opus::Channels::Mono)
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
 
@@ -139,7 +142,7 @@ impl SinkTrackController {
         let (packet_tx, packet_rx) = mpsc::unbounded_channel::<Sample>();
 
         let ring = HeapRb::<f32>::new(48000 * 5);
-        let (mut producer, mut consumer) = ring.split();
+        let (producer, consumer) = ring.split();
 
         if let Err(e) = self.cmd_tx.send(Cmd::AddTrack {
             decoder,
@@ -174,6 +177,7 @@ impl SinkTrackController {
         tokio::spawn(async move {
             receiver_task::run(receiver_task::Args {
                 track,
+                mp4_logger: logger,
                 peer_id: peer_id2,
                 should_quit,
                 silenced,
@@ -247,7 +251,7 @@ impl SinkTrackController {
             let _ = entry.stream.pause();
 
             let ring = HeapRb::<f32>::new(48000 * 5);
-            let (mut producer, mut consumer) = ring.split();
+            let (producer, consumer) = ring.split();
 
             let stream = build_stream(
                 sink_device,
@@ -268,6 +272,6 @@ impl SinkTrackController {
             });
         }
 
-        todo!()
+        Ok(())
     }
 }
