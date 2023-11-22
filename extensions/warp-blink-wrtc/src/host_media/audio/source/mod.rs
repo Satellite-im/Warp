@@ -1,12 +1,16 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    mem::MaybeUninit,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
+use ringbuf::{HeapRb, Producer, SharedRb};
 use tokio::sync::{broadcast, mpsc, Notify};
 use warp::blink::BlinkEventKind;
 use warp::error::Error;
@@ -28,8 +32,8 @@ pub struct SourceTrack {
     quit_encoder_task: Arc<AtomicBool>,
     quit_sender_task: Arc<Notify>,
     muted: bool,
-    audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
+    track: Arc<TrackLocalStaticRTP>,
 }
 
 impl Drop for SourceTrack {
@@ -42,7 +46,7 @@ impl Drop for SourceTrack {
 fn create_stream(
     source_device: &cpal::Device,
     num_channels: usize,
-    audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
+    producer: Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> Result<cpal::Stream, Error> {
     let config = cpal::StreamConfig {
@@ -58,16 +62,16 @@ fn create_stream(
         }
         // merge channels
         if num_channels != 1 {
-            let v: Vec<f32> = data
+            let mut v: Vec<f32> = data
                 .chunks_exact(num_channels)
                 .map(|x| x.iter().sum::<f32>() / num_channels as f32)
                 .collect();
-            if let Ok(mut buf) = audio_buf.lock() {
-                buf.insert(&v);
+            for sample in v.drain(..) {
+                producer.push(sample);
             }
         } else {
-            if let Ok(mut buf) = audio_buf.lock() {
-                buf.insert(data);
+            for sample in data {
+                producer.push(*sample);
             }
         }
     };
@@ -115,23 +119,18 @@ impl SourceTrack {
         let encoder = opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip)
             .map_err(|e| Error::OtherWithContext(e.to_string()))?;
 
-        let audio_buf = Arc::new(std::sync::Mutex::new(AudioBuf::new(OPUS_SAMPLES)));
         let (encoded_tx, encoded_rx) = mpsc::unbounded_channel::<FramerOutput>();
+        let ring = HeapRb::<f32>::new(48000 * 5);
+        let (mut producer, mut consumer) = ring.split();
 
-        let stream = create_stream(
-            source_device,
-            num_channels,
-            audio_buf.clone(),
-            ui_event_ch.clone(),
-        )?;
+        let stream = create_stream(source_device, num_channels, producer, ui_event_ch.clone())?;
 
         // spawn encoder task
-        let audio_buf2 = audio_buf.clone();
         let should_quit = quit_encoder_task.clone();
         std::thread::spawn(move || {
             encoder_task::run(encoder_task::Args {
                 encoder,
-                audio_buf: audio_buf2,
+                consumer,
                 tx: encoded_tx,
                 should_quit,
                 num_samples: OPUS_SAMPLES,
@@ -141,9 +140,10 @@ impl SourceTrack {
         // spawn the sender task
         let notify = quit_sender_task.clone();
         let ui_event_ch2 = ui_event_ch.clone();
+        let track2 = track.clone();
         tokio::task::spawn(async move {
             sender_task::run(sender_task::Args {
-                track,
+                track: track2,
                 ui_event_ch: ui_event_ch2,
                 rx: encoded_rx,
                 notify,
@@ -153,12 +153,12 @@ impl SourceTrack {
         });
 
         Ok(Self {
+            track,
             stream,
             quit_encoder_task,
             quit_sender_task,
             muted: true,
             ui_event_ch,
-            audio_buf,
         })
     }
 
@@ -178,27 +178,7 @@ impl SourceTrack {
         Ok(())
     }
 
-    // should not require RTP renegotiation
-    pub fn change_input_device(
-        &mut self,
-        source_device: &cpal::Device,
-        num_channels: usize,
-    ) -> Result<(), Error> {
-        self.stream
-            .pause()
-            .map_err(|x| Error::OtherWithContext(x.to_string()))?;
-
-        let stream = create_stream(
-            source_device,
-            num_channels,
-            self.audio_buf.clone(),
-            self.ui_event_ch.clone(),
-        )?;
-
-        self.stream = stream;
-        if !self.muted {
-            self.play()?;
-        }
-        Ok(())
+    pub fn get_track(&self) -> Arc<TrackLocalStaticRTP> {
+        self.track
     }
 }

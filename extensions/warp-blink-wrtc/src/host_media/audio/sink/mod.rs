@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    mem::MaybeUninit,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -10,6 +11,7 @@ use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
+use ringbuf::{Consumer, HeapRb, Producer, SharedRb};
 use tokio::sync::{
     broadcast,
     mpsc::{self, UnboundedReceiver},
@@ -56,7 +58,7 @@ fn build_stream(
     sink_device: &cpal::Device,
     num_channels: usize,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
-    audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
+    mut consumer: Consumer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
 ) -> Result<cpal::Stream, Error> {
     // create cpal stream and add to self
     // 10ms at 48KHz
@@ -66,8 +68,9 @@ fn build_stream(
         buffer_size: cpal::BufferSize::Default,
     };
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-        if let Ok(mut buf) = audio_buf.lock() {
-            buf.copy_to_slice(data);
+        let max_to_take = std::cmp::min(consumer.len(), data.len());
+        for entry in data.iter_mut().take(max_to_take) {
+            *entry = consumer.pop().unwrap_or_default();
         }
     };
 
@@ -138,13 +141,14 @@ impl SinkTrackController {
         // create channel pair to go from receiver task to decoder thread
         let (packet_tx, packet_rx) = mpsc::unbounded_channel::<Sample>();
 
-        let audio_buf = Arc::new(std::sync::Mutex::new(AudioBuf::new(OPUS_SAMPLES)));
+        let ring = HeapRb::<f32>::new(48000 * 5);
+        let (mut producer, mut consumer) = ring.split();
 
         if let Err(e) = self.cmd_tx.send(Cmd::AddTrack {
             decoder,
             peer_id: peer_id.clone(),
             packet_rx,
-            audio_buf: audio_buf.clone(),
+            producer,
         }) {
             return Err(Error::OtherWithContext(format!(
                 "failed to add track for peer {peer_id}: {e}"
@@ -155,7 +159,7 @@ impl SinkTrackController {
             sink_device,
             self.num_channels,
             self.ui_event_ch.clone(),
-            audio_buf,
+            consumer,
         )?;
         stream
             .play()
@@ -245,13 +249,14 @@ impl SinkTrackController {
         for (id, entry) in self.receiver_tasks.iter_mut() {
             let _ = entry.stream.pause();
 
-            let audio_buf = Arc::new(std::sync::Mutex::new(AudioBuf::new(OPUS_SAMPLES)));
+            let ring = HeapRb::<f32>::new(48000 * 5);
+            let (mut producer, mut consumer) = ring.split();
 
             let stream = build_stream(
                 sink_device,
                 self.num_channels,
                 self.ui_event_ch.clone(),
-                audio_buf.clone(),
+                consumer,
             )?;
 
             if !silenced {
@@ -260,7 +265,7 @@ impl SinkTrackController {
 
             let _ = self.cmd_tx.send(Cmd::ReplaceSampleTx {
                 peer_id: id.clone(),
-                audio_buf,
+                producer,
             });
         }
 

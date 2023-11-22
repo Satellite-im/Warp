@@ -1,4 +1,5 @@
 use std::{
+    mem::MaybeUninit,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -6,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use ringbuf::{Consumer, SharedRb};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::host_media::audio_utils::AudioBuf;
@@ -14,7 +16,7 @@ use super::super::utils::{FramerOutput, SpeechDetector};
 
 pub struct Args {
     pub encoder: opus::Encoder,
-    pub audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
+    pub consumer: Consumer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
     pub tx: UnboundedSender<FramerOutput>,
     pub should_quit: Arc<AtomicBool>,
     pub num_samples: usize,
@@ -23,7 +25,7 @@ pub struct Args {
 pub fn run(args: Args) {
     let Args {
         mut encoder,
-        audio_buf,
+        mut consumer,
         tx,
         should_quit,
         num_samples,
@@ -32,22 +34,20 @@ pub fn run(args: Args) {
     // speech_detector should emit at most 1 event per second
     let _speech_detector = SpeechDetector::new(10, 100);
     let mut opus_out = vec![0_u8; num_samples * 4];
+    let mut buf = Vec::new();
+    buf.reserve(480);
 
     while !should_quit.load(Ordering::Relaxed) {
-        let mut buf = match audio_buf.lock() {
-            Ok(mut buf) => match buf.get_frame() {
-                Some(r) => r,
-                None => {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                }
-            },
-            Err(e) => {
-                // should never happen
-                log::error!("encoder task terminated because of audio_buf: {e}");
+        while let Some(sample) = consumer.pop() {
+            buf.push(sample);
+            if buf.len() == 480 {
                 break;
             }
-        };
+        }
+        if buf.len() < 480 {
+            std::thread::sleep(Duration::from_millis(5));
+            continue;
+        }
 
         // calculate rms of frame
         let rms = f32::sqrt(buf.iter().map(|x| x * x).sum::<f32>() / buf.len() as f32);
@@ -68,5 +68,7 @@ pub fn run(args: Args) {
                 log::error!("OpusPacketizer failed to encode: {}", e);
             }
         }
+
+        buf.clear();
     }
 }

@@ -157,7 +157,10 @@ pub async fn create_audio_sink_track(
     Ok(())
 }
 
-pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
+pub async fn change_audio_input(
+    device: cpal::Device,
+    ui_event_ch: broadcast::Sender<BlinkEventKind>,
+) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
     let src_channels = get_min_source_channels(&device)?;
@@ -166,12 +169,19 @@ pub async fn change_audio_input(device: cpal::Device) -> anyhow::Result<()> {
     // no audio_input.
     unsafe {
         DATA.audio_input_device.take();
-    }
 
-    if let Some(source) = unsafe { DATA.audio_source_track.as_mut() } {
-        source.change_input_device(&device, src_channels as _)?;
-    }
-    unsafe {
+        if let Some(mut source) = DATA.audio_source_track.take() {
+            let _ = source.pause();
+            let track = source.get_track();
+            drop(source);
+            DATA.audio_source_track.replace(SourceTrack::new(
+                track,
+                &device,
+                src_channels as _,
+                ui_event_ch,
+            )?);
+        }
+
         DATA.audio_input_device.replace(device);
         DATA.audio_source_channels = src_channels as _;
     }

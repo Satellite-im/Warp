@@ -1,4 +1,5 @@
 use std::{
+    mem::MaybeUninit,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -6,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use ringbuf::{Producer, SharedRb};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use warp::crypto::DID;
 use webrtc::media::Sample;
@@ -19,7 +21,7 @@ pub enum Cmd {
         decoder: opus::Decoder,
         peer_id: DID,
         packet_rx: UnboundedReceiver<Sample>,
-        audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
+        producer: Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
     },
     RemoveTrack {
         peer_id: DID,
@@ -32,7 +34,7 @@ pub enum Cmd {
     },
     ReplaceSampleTx {
         peer_id: DID,
-        audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
+        producer: Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
     },
 }
 
@@ -40,7 +42,7 @@ struct Entry {
     decoder: opus::Decoder,
     peer_id: DID,
     packet_rx: UnboundedReceiver<Sample>,
-    audio_buf: Arc<std::sync::Mutex<AudioBuf>>,
+    producer: Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>,
     paused: bool,
 }
 
@@ -66,7 +68,7 @@ pub fn run(args: Args) {
                     decoder,
                     peer_id,
                     packet_rx,
-                    audio_buf,
+                    producer,
                 } => {
                     connections.retain(|x| x.peer_id != peer_id);
 
@@ -74,7 +76,7 @@ pub fn run(args: Args) {
                         decoder,
                         peer_id,
                         packet_rx,
-                        audio_buf,
+                        producer,
                         paused: false,
                     });
                 }
@@ -87,9 +89,9 @@ pub fn run(args: Args) {
                     }
                     num_channels = new_num_channels;
                 }
-                Cmd::ReplaceSampleTx { peer_id, audio_buf } => {
+                Cmd::ReplaceSampleTx { peer_id, producer } => {
                     if let Some(peer) = connections.iter_mut().find(|x| x.peer_id == peer_id) {
-                        peer.audio_buf = audio_buf;
+                        peer.producer = producer;
                         peer.paused = false;
                     }
                 }
@@ -126,8 +128,9 @@ pub fn run(args: Args) {
                             for (chunk, val) in std::iter::zip(it1, it2) {
                                 chunk.fill(*val);
                             }
-                            if let Ok(mut audio_buf) = entry.audio_buf.lock() {
-                                audio_buf.insert(&buf2);
+
+                            for sample in buf2.drain(..) {
+                                entry.producer.push(sample);
                             }
                         }
                         Err(e) => {
