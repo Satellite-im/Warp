@@ -7,12 +7,9 @@ use std::{
     time::Duration,
 };
 
+use super::super::utils::{FramerOutput, SpeechDetector};
 use ringbuf::{Consumer, SharedRb};
 use tokio::sync::mpsc::UnboundedSender;
-
-use crate::host_media::audio_utils::AudioBuf;
-
-use super::super::utils::{FramerOutput, SpeechDetector};
 
 pub struct Args {
     pub encoder: opus::Encoder,

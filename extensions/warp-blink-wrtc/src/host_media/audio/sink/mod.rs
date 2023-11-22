@@ -11,19 +11,13 @@ use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
-use ringbuf::{Consumer, HeapRb, Producer, SharedRb};
-use tokio::sync::{
-    broadcast,
-    mpsc::{self, UnboundedReceiver},
-    Notify,
-};
+use ringbuf::{Consumer, HeapRb, SharedRb};
+use tokio::sync::{broadcast, mpsc, Notify};
 use warp::error::Error;
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::{media::Sample, track::track_remote::TrackRemote};
 
 use self::decoder_task::Cmd;
-
-use super::{utils::AudioBuf, OPUS_SAMPLES};
 
 mod decoder_task;
 mod receiver_task;

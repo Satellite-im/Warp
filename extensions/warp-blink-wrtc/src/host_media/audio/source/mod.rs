@@ -18,10 +18,7 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
 use crate::host_media::audio::utils::automute;
 
-use super::{
-    utils::{AudioBuf, FramerOutput},
-    OPUS_SAMPLES,
-};
+use super::{utils::FramerOutput, OPUS_SAMPLES};
 
 mod encoder_task;
 mod sender_task;
