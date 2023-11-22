@@ -278,6 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Either::Right(Response::RegisterResponse(RegisterResponse::Ok)),
                     ));
                 }
+                identity::protocol::Request::Mailbox(_) => {}
                 identity::protocol::Request::Synchronized(Synchronized::Store {
                     document,
                     package,

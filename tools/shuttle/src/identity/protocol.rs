@@ -7,6 +7,8 @@ use warp::{crypto::DID, multipass::identity::ShortId};
 
 use crate::PeerIdExt;
 
+use super::{document::IdentityDocument, RequestPayload};
+
 pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/identity/0.0.1");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -152,10 +154,12 @@ impl From<Response> for Message {
         Message::Response(res)
     }
 }
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Request {
     Register(Register),
+    Mailbox(Mailbox),
     Synchronized(Synchronized),
     Lookup(Lookup),
 }
@@ -165,8 +169,38 @@ pub enum Request {
 pub enum Response {
     RegisterResponse(RegisterResponse),
     SynchronizedResponse(SynchronizedResponse),
+    MailboxResponse(MailboxResponse),
     LookupResponse(LookupResponse),
     Error(String),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mailbox {
+    FetchAll { did: DID },
+    FetchFrom { did: DID },
+    Send { request: RequestPayload },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MailboxResponse {
+    Receive {
+        list: Vec<RequestPayload>,
+        remaining: usize,
+    },
+    Removed,
+    Completed,
+    Sent,
+    Error(MailboxError),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MailboxError {
+    NotRegistered,
+    NoRequests,
+    Blocked,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
