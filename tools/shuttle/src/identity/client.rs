@@ -22,9 +22,12 @@ use warp::crypto::DID;
 use super::document::IdentityDocument;
 use super::protocol::{Lookup, LookupResponse, Register, RegisterResponse, Request, Response};
 
+// Note: primary_keypair to be used for `Payload`
+#[allow(dead_code)]
 pub struct Behaviour {
-    inner: request_response::json::Behaviour<Request, Response>,
     keypair: Keypair,
+    primary_keypair: Option<Keypair>,
+    inner: request_response::json::Behaviour<Request, Response>,
     waiting_on_response: HashMap<OutboundRequestId, IdentityResponse>,
     addresses: HashMap<PeerId, HashSet<Multiaddr>>,
     process_command: futures::channel::mpsc::Receiver<IdentityCommand>,
@@ -96,6 +99,7 @@ impl Behaviour {
     #[allow(clippy::type_complexity)]
     pub fn new(
         keypair: &Keypair,
+        primary_keypair: Option<&Keypair>,
         process_command: futures::channel::mpsc::Receiver<IdentityCommand>,
     ) -> Self {
         Self {
@@ -107,6 +111,7 @@ impl Behaviour {
                 Default::default(),
             ),
             keypair: keypair.clone(),
+            primary_keypair: primary_keypair.cloned(),
             process_command,
             addresses: Default::default(),
             waiting_on_response: Default::default(),

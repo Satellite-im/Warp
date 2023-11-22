@@ -1,18 +1,157 @@
-use rust_ipfs::libp2p::StreamProtocol;
+use rust_ipfs::{
+    libp2p::{identity::KeyType, StreamProtocol},
+    Keypair, PeerId,
+};
 use serde::{Deserialize, Serialize};
 use warp::{crypto::DID, multipass::identity::ShortId};
 
-use super::document::IdentityDocument;
+use crate::PeerIdExt;
 
 pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/identity/0.0.1");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+pub struct Payload {
+    /// Sender of the payload
+    pub sender: PeerId,
+    /// Sending request on behalf of another identity
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_behalf: Option<PeerId>,
+    pub message: Message,
+    pub signature: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub co_signature: Option<Vec<u8>>,
+}
+
+impl Payload {
+    pub fn new(keypair: &Keypair, cosigner: Option<&Keypair>, message: impl Into<Message>) -> Result<Self, anyhow::Error> {
+        let message = message.into();
+
+        if keypair.key_type() == KeyType::RSA {
+            anyhow::bail!("RSA keypair is not supported");
+        }
+        let sender = keypair.public().to_peer_id();
+
+        let mut payload = Payload {
+            sender,
+            on_behalf: None,
+            message,
+            signature: Vec::new(),
+            co_signature: None,
+        };
+
+        let bytes = serde_json::to_vec(&payload)?;
+
+        let signature = keypair.sign(&bytes)?;
+
+        payload.signature = signature;
+
+        let payload = match cosigner {
+            Some(kp) => payload.co_sign(kp)?,
+            None => payload
+        };
+
+        Ok(payload)
+    }
+
+    fn co_sign(mut self, keypair: &Keypair) -> Result<Self, anyhow::Error> {
+        if keypair.key_type() == KeyType::RSA {
+            anyhow::bail!("RSA keypair is not supported");
+        }
+
+        let sender = keypair.public().to_peer_id();
+
+        if sender == self.sender {
+            anyhow::bail!("Sender cannot cosign payload");
+        }
+
+        if self.on_behalf.is_some() {
+            anyhow::bail!("Payload already signed on behalf of another identity");
+        }
+
+        self.on_behalf = Some(sender);
+
+        let bytes = serde_json::to_vec(&self)?;
+
+        let signature = keypair.sign(&bytes)?;
+
+        self.co_signature = Some(signature);
+
+        Ok(self)
+    }
+
+    #[inline]
+    pub fn verify(&self) -> Result<(), anyhow::Error> {
+        self.verify_original()?;
+        self.verify_cosign()?;
+        Ok(())
+    }
+
+    fn verify_original(&self) -> Result<(), anyhow::Error> {
+        if self.signature.is_empty() {
+            anyhow::bail!("Payload dont contain a signature");
+        }
+        let mut payload = self.clone();
+        let signature = std::mem::take(&mut payload.signature);
+        payload.on_behalf.take();
+        payload.co_signature.take();
+
+        let bytes = serde_json::to_vec(&payload)?;
+
+        let public_key = self.sender.to_public_key()?;
+
+        if !public_key.verify(&bytes, &signature) {
+            anyhow::bail!("Signature is invalid");
+        }
+
+        Ok(())
+    }
+
+    fn verify_cosign(&self) -> Result<(), anyhow::Error> {
+        if self.on_behalf.is_none() && self.co_signature.is_none() {
+            return Ok(())
+        }
+
+        let Some(co_sender) = self.on_behalf else {
+            anyhow::bail!("Payload doesnt contain a valid cosigner");
+        };
+
+        let Some(co_signature) = self.co_signature.as_ref() else {
+            anyhow::bail!("Payload doesnt contain a valid cosignature");
+        };
+
+        let mut payload = self.clone();
+        payload.co_signature.take();
+
+        let bytes = serde_json::to_vec(&payload)?;
+
+        let public_key = co_sender.to_public_key()?;
+
+        if !public_key.verify(&bytes, co_signature) {
+            anyhow::bail!("Signature is invalid");
+        }
+        
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum Message {
     Request(Request),
     Response(Response),
 }
 
+impl From<Request> for Message {
+    fn from(req: Request) -> Self {
+        Message::Request(req)
+    }
+}
+
+impl From<Response> for Message {
+    fn from(res: Response) -> Self {
+        Message::Response(res)
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Request {
