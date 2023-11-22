@@ -25,7 +25,11 @@ pub struct Payload {
 }
 
 impl Payload {
-    pub fn new(keypair: &Keypair, cosigner: Option<&Keypair>, message: impl Into<Message>) -> Result<Self, anyhow::Error> {
+    pub fn new(
+        keypair: &Keypair,
+        cosigner: Option<&Keypair>,
+        message: impl Into<Message>,
+    ) -> Result<Self, anyhow::Error> {
         let message = message.into();
 
         if keypair.key_type() == KeyType::RSA {
@@ -49,7 +53,7 @@ impl Payload {
 
         let payload = match cosigner {
             Some(kp) => payload.co_sign(kp)?,
-            None => payload
+            None => payload,
         };
 
         Ok(payload)
@@ -84,8 +88,7 @@ impl Payload {
     #[inline]
     pub fn verify(&self) -> Result<(), anyhow::Error> {
         self.verify_original()?;
-        self.verify_cosign()?;
-        Ok(())
+        self.verify_cosign()
     }
 
     fn verify_original(&self) -> Result<(), anyhow::Error> {
@@ -110,7 +113,7 @@ impl Payload {
 
     fn verify_cosign(&self) -> Result<(), anyhow::Error> {
         if self.on_behalf.is_none() && self.co_signature.is_none() {
-            return Ok(())
+            return Ok(());
         }
 
         let Some(co_sender) = self.on_behalf else {
@@ -131,30 +134,18 @@ impl Payload {
         if !public_key.verify(&bytes, co_signature) {
             anyhow::bail!("Signature is invalid");
         }
-        
+
         Ok(())
     }
 }
 
 impl Payload {
     pub fn sender(&self) -> PeerId {
-        self.sender
-    }
-
-    pub fn on_behalf_of(&self) -> Option<PeerId> {
-        self.on_behalf
+        self.on_behalf.unwrap_or(self.sender)
     }
 
     pub fn message(&self) -> &Message {
         &self.message
-    }
-
-    pub fn signature(&self) -> &[u8] {
-        &self.signature
-    }
-
-    pub fn co_signature(&self) -> Option<&[u8]> {
-        self.co_signature.as_deref()
     }
 }
 
