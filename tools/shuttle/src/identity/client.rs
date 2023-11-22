@@ -69,6 +69,7 @@ pub enum IdentityCommand {
     },
 }
 
+#[allow(dead_code)]
 enum IdentityResponse {
     Register {
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
