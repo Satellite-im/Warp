@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-
 use tokio::sync::mpsc::UnboundedReceiver;
 use warp::crypto::DID;
 use webrtc::media::Sample;
@@ -129,7 +128,7 @@ pub fn run(args: Args) {
                             }
 
                             for sample in buf2.drain(..) {
-                                entry.producer.push(sample);
+                                let _ = entry.producer.push(sample);
                             }
                         }
                         Err(e) => {

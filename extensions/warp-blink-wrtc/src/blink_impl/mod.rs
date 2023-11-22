@@ -178,9 +178,9 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        match self.own_id.read().as_ref() {
+        match self.own_id.read().clone() {
             Some(id) => {
-                host_media::controller::change_audio_input(id, device, self.ui_event_ch.clone())
+                host_media::controller::change_audio_input(&id, device, self.ui_event_ch.clone())
                     .await?;
                 Ok(())
             }
