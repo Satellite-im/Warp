@@ -19,15 +19,17 @@ use rust_ipfs::{
 use rust_ipfs::libp2p::request_response;
 use warp::crypto::DID;
 
-use super::document::IdentityDocument;
-use super::protocol::{Lookup, LookupResponse, Register, RegisterResponse, Request, Response};
+use super::protocol::{
+    Lookup, LookupResponse, Message, Register, RegisterResponse, Request, Response,
+};
+use super::{document::IdentityDocument, protocol::Payload};
 
 // Note: primary_keypair to be used for `Payload`
 #[allow(dead_code)]
 pub struct Behaviour {
     keypair: Keypair,
     primary_keypair: Option<Keypair>,
-    inner: request_response::json::Behaviour<Request, Response>,
+    inner: request_response::json::Behaviour<Payload, Payload>,
     waiting_on_response: HashMap<OutboundRequestId, IdentityResponse>,
     addresses: HashMap<PeerId, HashSet<Multiaddr>>,
     process_command: futures::channel::mpsc::Receiver<IdentityCommand>,
@@ -127,13 +129,15 @@ impl Behaviour {
             .into_signed_envelope()
             .into_protobuf_encoding();
 
+        let payload = Payload::new(
+            &self.keypair,
+            self.primary_keypair.as_ref(),
+            Request::Synchronized(super::protocol::Synchronized::PeerRecord { record }),
+        )
+        .expect("Valid construction of payload");
+
         for peer_id in self.addresses.keys() {
-            let id = self.inner.send_request(
-                peer_id,
-                Request::Synchronized(super::protocol::Synchronized::PeerRecord {
-                    record: record.clone(),
-                }),
-            );
+            let id = self.inner.send_request(peer_id, payload.clone());
 
             let (tx, rx) = oneshot::channel();
 
@@ -143,118 +147,133 @@ impl Behaviour {
         }
     }
 
-    fn process_response(&mut self, id: OutboundRequestId, response: Response) {
-        match response {
-            Response::RegisterResponse(response) => {
-                let res = match self.waiting_on_response.remove(&id) {
-                    Some(IdentityResponse::Register { response }) => response,
-                    _ => return,
-                };
-
+    fn process_response(&mut self, id: OutboundRequestId, response: Payload) {
+        match response.message().clone() {
+            Message::Response(response) => {
                 match response {
-                    RegisterResponse::Ok => {
-                        if self.external_addresses.iter().count() > 0 {
-                            self.send_record();
+                    Response::RegisterResponse(response) => {
+                        let res = match self.waiting_on_response.remove(&id) {
+                            Some(IdentityResponse::Register { response }) => response,
+                            _ => return,
+                        };
+
+                        match response {
+                            RegisterResponse::Ok => {
+                                if self.external_addresses.iter().count() > 0 {
+                                    self.send_record();
+                                }
+                                let _ = res.send(Ok(()));
+                            }
+                            RegisterResponse::Error(
+                                super::protocol::RegisterError::IdentityExist,
+                            ) => {
+                                let _ = res.send(Err(warp::error::Error::IdentityExist));
+                            }
+                            RegisterResponse::Error(
+                                super::protocol::RegisterError::IdentityVerificationFailed,
+                            ) => {
+                                let _ = res.send(Err(warp::error::Error::IdentityInvalid));
+                            }
+                            RegisterResponse::Error(
+                                super::protocol::RegisterError::InternalError,
+                            ) => {
+                                let _ = res.send(Err(warp::error::Error::Other));
+                            }
+                            RegisterResponse::Error(super::protocol::RegisterError::None) => {
+                                //TODO?
+                                let _ = res.send(Ok(()));
+                            }
                         }
-                        let _ = res.send(Ok(()));
                     }
-                    RegisterResponse::Error(super::protocol::RegisterError::IdentityExist) => {
-                        let _ = res.send(Err(warp::error::Error::IdentityExist));
+                    Response::LookupResponse(response) => {
+                        let res = match self.waiting_on_response.remove(&id) {
+                            Some(IdentityResponse::Lookup { response }) => response,
+                            _ => return,
+                        };
+
+                        match response {
+                            LookupResponse::Ok { identity } => {
+                                let _ = res.send(Ok(identity));
+                            }
+                            LookupResponse::Error(
+                                super::protocol::LookupError::DoesntExist
+                                | super::protocol::LookupError::RateExceeded,
+                            ) => {
+                                let _ = res.send(Err(warp::error::Error::IdentityDoesntExist));
+                            }
+                        }
                     }
-                    RegisterResponse::Error(
-                        super::protocol::RegisterError::IdentityVerificationFailed,
-                    ) => {
-                        let _ = res.send(Err(warp::error::Error::IdentityInvalid));
-                    }
-                    RegisterResponse::Error(super::protocol::RegisterError::InternalError) => {
-                        let _ = res.send(Err(warp::error::Error::Other));
-                    }
-                    RegisterResponse::Error(super::protocol::RegisterError::None) => {
-                        //TODO?
-                        let _ = res.send(Ok(()));
-                    }
+                    Response::SynchronizedResponse(response) => match response {
+                        super::protocol::SynchronizedResponse::IdentityUpdated => {
+                            if let Some(IdentityResponse::IdentityUpdate { response }) =
+                                self.waiting_on_response.remove(&id)
+                            {
+                                let _ = response.send(Ok(()));
+                            }
+                        }
+                        super::protocol::SynchronizedResponse::RecordStored => {}
+                        super::protocol::SynchronizedResponse::Package(package) => {
+                            if let Some(IdentityResponse::Fetch { response }) =
+                                self.waiting_on_response.remove(&id)
+                            {
+                                let _ = response.send(Ok(package));
+                            }
+                        }
+                        super::protocol::SynchronizedResponse::Error(e) => {
+                            let e = match e {
+                                super::protocol::SynchronizedError::DoesntExist => {
+                                    warp::error::Error::IdentityDoesntExist
+                                }
+                                super::protocol::SynchronizedError::Forbidden => {
+                                    warp::error::Error::IdentityInvalid
+                                }
+                                super::protocol::SynchronizedError::NotRegistered => {
+                                    warp::error::Error::IdentityNotCreated
+                                }
+                                super::protocol::SynchronizedError::Invalid => {
+                                    warp::error::Error::IdentityInvalid
+                                }
+                                super::protocol::SynchronizedError::InvalidPayload { msg } => {
+                                    warp::error::Error::OtherWithContext(msg)
+                                }
+                                super::protocol::SynchronizedError::InvalodRecord { msg } => {
+                                    warp::error::Error::OtherWithContext(msg)
+                                }
+                            };
+                            let Some(responses) = self.waiting_on_response.remove(&id) else {
+                                return;
+                            };
+
+                            match responses {
+                                IdentityResponse::Register { response } => {
+                                    _ = response.send(Err(e))
+                                }
+                                IdentityResponse::Lookup { response } => _ = response.send(Err(e)),
+                                IdentityResponse::IdentityUpdate { response } => {
+                                    _ = response.send(Err(e))
+                                }
+                                IdentityResponse::PeerRecordUpdate { response } => {
+                                    _ = response.send(Err(e))
+                                }
+                                IdentityResponse::Store { response } => _ = response.send(Err(e)),
+                                IdentityResponse::Fetch { response } => _ = response.send(Err(e)),
+                            };
+                        }
+                    },
+                    _ => {}
                 }
             }
-            Response::LookupResponse(response) => {
-                let res = match self.waiting_on_response.remove(&id) {
-                    Some(IdentityResponse::Lookup { response }) => response,
-                    _ => return,
-                };
-
-                match response {
-                    LookupResponse::Ok { identity } => {
-                        let _ = res.send(Ok(identity));
-                    }
-                    LookupResponse::Error(
-                        super::protocol::LookupError::DoesntExist
-                        | super::protocol::LookupError::RateExceeded,
-                    ) => {
-                        let _ = res.send(Err(warp::error::Error::IdentityDoesntExist));
-                    }
-                }
+            _ => {
+                //TODO: Implement request/response for client side, but for now ignore any request
             }
-            Response::SynchronizedResponse(response) => match response {
-                super::protocol::SynchronizedResponse::IdentityUpdated => {
-                    if let Some(IdentityResponse::IdentityUpdate { response }) =
-                        self.waiting_on_response.remove(&id)
-                    {
-                        let _ = response.send(Ok(()));
-                    }
-                }
-                super::protocol::SynchronizedResponse::RecordStored => {}
-                super::protocol::SynchronizedResponse::Package(package) => {
-                    if let Some(IdentityResponse::Fetch { response }) =
-                        self.waiting_on_response.remove(&id)
-                    {
-                        let _ = response.send(Ok(package));
-                    }
-                }
-                super::protocol::SynchronizedResponse::Error(e) => {
-                    let e = match e {
-                        super::protocol::SynchronizedError::DoesntExist => {
-                            warp::error::Error::IdentityDoesntExist
-                        }
-                        super::protocol::SynchronizedError::Forbidden => {
-                            warp::error::Error::IdentityInvalid
-                        }
-                        super::protocol::SynchronizedError::NotRegistered => {
-                            warp::error::Error::IdentityNotCreated
-                        }
-                        super::protocol::SynchronizedError::Invalid => {
-                            warp::error::Error::IdentityInvalid
-                        }
-                        super::protocol::SynchronizedError::InvalidPayload { msg } => {
-                            warp::error::Error::OtherWithContext(msg)
-                        }
-                        super::protocol::SynchronizedError::InvalodRecord { msg } => {
-                            warp::error::Error::OtherWithContext(msg)
-                        }
-                    };
-                    let Some(responses) = self.waiting_on_response.remove(&id) else {
-                        return;
-                    };
-
-                    match responses {
-                        IdentityResponse::Register { response } => _ = response.send(Err(e)),
-                        IdentityResponse::Lookup { response } => _ = response.send(Err(e)),
-                        IdentityResponse::IdentityUpdate { response } => _ = response.send(Err(e)),
-                        IdentityResponse::PeerRecordUpdate { response } => {
-                            _ = response.send(Err(e))
-                        }
-                        IdentityResponse::Store { response } => _ = response.send(Err(e)),
-                        IdentityResponse::Fetch { response } => _ = response.send(Err(e)),
-                    };
-                }
-            },
-            _ => {}
         }
     }
 }
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = <request_response::json::Behaviour<
-        Request,
-        Response,
+        Payload,
+        Payload,
     > as NetworkBehaviour>::ConnectionHandler;
     type ToSwarm = void::Void;
 
@@ -357,10 +376,15 @@ impl NetworkBehaviour for Behaviour {
                         identity,
                         response,
                     } => {
-                        let id = self.inner.send_request(
-                            &peer_id,
+                        let payload = Payload::new(
+                            &self.keypair,
+                            self.primary_keypair.as_ref(),
                             Request::Register(Register { document: identity }),
-                        );
+                        )
+                        .expect("Valid construction of payload");
+
+                        let id = self.inner.send_request(&peer_id, payload);
+
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Register { response });
                     }
@@ -369,7 +393,14 @@ impl NetworkBehaviour for Behaviour {
                         kind,
                         response,
                     } => {
-                        let id = self.inner.send_request(&peer_id, Request::Lookup(kind));
+                        let payload = Payload::new(
+                            &self.keypair,
+                            self.primary_keypair.as_ref(),
+                            Request::Lookup(kind),
+                        )
+                        .expect("Valid construction of payload");
+
+                        let id = self.inner.send_request(&peer_id, payload);
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Lookup { response });
@@ -380,13 +411,17 @@ impl NetworkBehaviour for Behaviour {
                         package,
                         response,
                     } => {
-                        let id = self.inner.send_request(
-                            &peer_id,
+                        let payload = Payload::new(
+                            &self.keypair,
+                            self.primary_keypair.as_ref(),
                             Request::Synchronized(super::protocol::Synchronized::Store {
                                 document: identity,
                                 package,
                             }),
-                        );
+                        )
+                        .expect("Valid construction of payload");
+
+                        let id = self.inner.send_request(&peer_id, payload);
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Store { response });
@@ -396,10 +431,14 @@ impl NetworkBehaviour for Behaviour {
                         did,
                         response,
                     } => {
-                        let id = self.inner.send_request(
-                            &peer_id,
+                        let payload = Payload::new(
+                            &self.keypair,
+                            self.primary_keypair.as_ref(),
                             Request::Synchronized(super::protocol::Synchronized::Fetch { did }),
-                        );
+                        )
+                        .expect("Valid construction of payload");
+
+                        let id = self.inner.send_request(&peer_id, payload);
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Fetch { response });
@@ -409,12 +448,16 @@ impl NetworkBehaviour for Behaviour {
                         identity,
                         response,
                     } => {
-                        let id = self.inner.send_request(
-                            &peer_id,
+                        let payload = Payload::new(
+                            &self.keypair,
+                            self.primary_keypair.as_ref(),
                             Request::Synchronized(super::protocol::Synchronized::Update {
                                 document: identity,
                             }),
-                        );
+                        )
+                        .expect("Valid construction of payload");
+
+                        let id = self.inner.send_request(&peer_id, payload);
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Store { response });

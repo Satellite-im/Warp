@@ -1,13 +1,10 @@
-use either::Either;
-// use libipld::serde::from_ipld;
 use shuttle::{
     identity::{
         self,
         document::IdentityDocument,
-        // document::IdentityDocument,
         protocol::{
-            Lookup, LookupResponse, Register, RegisterResponse, Response, Synchronized,
-            SynchronizedError, SynchronizedResponse,
+            Lookup, LookupResponse, Message, Payload, Register, RegisterResponse, Response,
+            Synchronized, SynchronizedError, SynchronizedResponse,
         },
     },
     subscription_stream::Subscriptions,
@@ -236,47 +233,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut _friends_router: HashMap<DID, ()> = HashMap::new();
 
     let mut subscriptions = Subscriptions::new(&ipfs);
+    let keypair = ipfs.keypair()?;
 
-    while let Some((_id, ch, which, resp)) = id_event_rx.next().await {
-        match which {
-            Either::Left(req) => match req {
+    while let Some((_id, ch, payload, resp)) = id_event_rx.next().await {
+        match payload.message() {
+            Message::Request(req) => match req {
                 identity::protocol::Request::Register(Register { document }) => {
                     if temp_registeration.contains_key(&document.did) {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::RegisterResponse(RegisterResponse::Error(
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
                                 identity::protocol::RegisterError::IdentityExist,
-                            ))),
-                        ));
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
                         continue;
                     }
+
                     if document.verify().is_err() {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::RegisterResponse(RegisterResponse::Error(
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
                                 identity::protocol::RegisterError::IdentityVerificationFailed,
-                            ))),
-                        ));
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
 
                         continue;
                     }
 
                     if let Err(_e) = subscriptions.subscribe(document.did.inbox()).await {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::RegisterResponse(RegisterResponse::Error(
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
                                 identity::protocol::RegisterError::None,
-                            ))),
-                        ));
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
                         continue;
                     }
 
-                    temp_registeration.insert(document.did.clone(), document);
+                    temp_registeration.insert(document.did.clone(), document.clone());
 
-                    let _ = resp.send((
-                        ch,
-                        Either::Right(Response::RegisterResponse(RegisterResponse::Ok)),
-                    ));
+                    let payload = Payload::new(
+                        keypair,
+                        None,
+                        Response::RegisterResponse(RegisterResponse::Ok),
+                    )
+                    .expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                 }
                 identity::protocol::Request::Mailbox(_) => {}
                 identity::protocol::Request::Synchronized(Synchronized::Store {
@@ -284,88 +299,111 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     package,
                 }) => {
                     if document.verify().is_err() {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::SynchronizedResponse(
-                                SynchronizedResponse::Error(SynchronizedError::Invalid),
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(SynchronizedResponse::Error(
+                                SynchronizedError::Invalid,
                             )),
-                        ));
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
 
                         continue;
                     }
                     let did = document.did.clone();
 
                     if !temp_registeration.contains_key(&did) {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::SynchronizedResponse(
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
                                 identity::protocol::SynchronizedResponse::Error(
                                     SynchronizedError::NotRegistered,
                                 ),
-                            )),
-                        ));
+                            ),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
 
                         continue;
                     }
 
-                    _temp_package.insert(did, package);
+                    _temp_package.insert(did, package.clone());
 
-                    let _ = resp.send((
-                        ch,
-                        Either::Right(Response::SynchronizedResponse(
-                            SynchronizedResponse::IdentityUpdated,
-                        )),
-                    ));
+                    let payload = Payload::new(
+                        keypair,
+                        None,
+                        Response::SynchronizedResponse(SynchronizedResponse::IdentityUpdated),
+                    )
+                    .expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                     continue;
                 }
                 identity::protocol::Request::Synchronized(Synchronized::Update { document }) => {
                     if document.verify().is_err() {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::SynchronizedResponse(
-                                SynchronizedResponse::Error(SynchronizedError::Invalid),
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(SynchronizedResponse::Error(
+                                SynchronizedError::Invalid,
                             )),
-                        ));
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
 
                         continue;
                     }
                     let did = document.did.clone();
 
                     if !temp_registeration.contains_key(&did) {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::SynchronizedResponse(
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
                                 identity::protocol::SynchronizedResponse::Error(
                                     SynchronizedError::NotRegistered,
                                 ),
-                            )),
-                        ));
+                            ),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
 
                         continue;
                     }
 
-                    temp_registeration.insert(did, document);
+                    temp_registeration.insert(did, document.clone());
 
-                    let _ = resp.send((
-                        ch,
-                        Either::Right(Response::SynchronizedResponse(
-                            SynchronizedResponse::IdentityUpdated,
-                        )),
-                    ));
+                    let payload = Payload::new(
+                        keypair,
+                        None,
+                        Response::SynchronizedResponse(SynchronizedResponse::IdentityUpdated),
+                    )
+                    .expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                     continue;
                 }
                 identity::protocol::Request::Synchronized(Synchronized::PeerRecord { record }) => {
-                    let signed_envelope = match SignedEnvelope::from_protobuf_encoding(&record) {
+                    let signed_envelope = match SignedEnvelope::from_protobuf_encoding(record) {
                         Ok(signed_envelope) => signed_envelope,
                         Err(e) => {
-                            let _ = resp.send((
-                                ch,
-                                Either::Right(Response::SynchronizedResponse(
+                            let payload = Payload::new(
+                                keypair,
+                                None,
+                                Response::SynchronizedResponse(
                                     identity::protocol::SynchronizedResponse::Error(
                                         SynchronizedError::InvalidPayload { msg: e.to_string() },
                                     ),
-                                )),
-                            ));
+                                ),
+                            )
+                            .expect("Valid payload construction");
+                            let _ = resp.send((ch, payload));
                             continue;
                         }
                     };
@@ -373,14 +411,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let record = match PeerRecord::from_signed_envelope(signed_envelope) {
                         Ok(record) => record,
                         Err(e) => {
-                            let _ = resp.send((
-                                ch,
-                                Either::Right(Response::SynchronizedResponse(
+                            let payload = Payload::new(
+                                keypair,
+                                None,
+                                Response::SynchronizedResponse(
                                     identity::protocol::SynchronizedResponse::Error(
                                         SynchronizedError::InvalodRecord { msg: e.to_string() },
                                     ),
-                                )),
-                            ));
+                                ),
+                            )
+                            .expect("Valid payload construction");
+
+                            let _ = resp.send((ch, payload));
                             continue;
                         }
                     };
@@ -391,69 +433,83 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .map(|did| temp_registeration.contains_key(&did))
                         .unwrap_or_default()
                     {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::SynchronizedResponse(
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
                                 identity::protocol::SynchronizedResponse::Error(
                                     SynchronizedError::NotRegistered,
                                 ),
-                            )),
-                        ));
+                            ),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
 
                         continue;
                     }
 
                     _ = precord_tx.send(record).await;
 
-                    let _ = resp.send((
-                        ch,
-                        Either::Right(Response::SynchronizedResponse(
-                            SynchronizedResponse::RecordStored,
-                        )),
-                    ));
+                    let payload = Payload::new(
+                        keypair,
+                        None,
+                        Response::SynchronizedResponse(SynchronizedResponse::RecordStored),
+                    )
+                    .expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                     continue;
                 }
                 identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
-                    if !temp_registeration.contains_key(&did) {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::SynchronizedResponse(
+                    if !temp_registeration.contains_key(did) {
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
                                 identity::protocol::SynchronizedResponse::Error(
                                     SynchronizedError::NotRegistered,
                                 ),
-                            )),
-                        ));
+                            ),
+                        )
+                        .expect("Valid payload construction");
 
+                        let _ = resp.send((ch, payload));
                         continue;
                     }
 
-                    let event = match _temp_package.get(&did) {
-                        Some(package) => Either::Right(Response::SynchronizedResponse(
+                    let event = match _temp_package.get(did) {
+                        Some(package) => Response::SynchronizedResponse(
                             SynchronizedResponse::Package(package.clone()),
-                        )),
-                        None => Either::Right(Response::SynchronizedResponse(
+                        ),
+                        None => Response::SynchronizedResponse(
                             identity::protocol::SynchronizedResponse::Error(
                                 SynchronizedError::DoesntExist,
                             ),
-                        )),
+                        ),
                     };
 
-                    let _ = resp.send((ch, event));
+                    let payload =
+                        Payload::new(keypair, None, event).expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
+
                     continue;
                 }
                 identity::protocol::Request::Lookup(Lookup::PublicKey { did }) => {
-                    let event = match temp_registeration.get(&did) {
-                        Some(document) => {
-                            Either::Right(Response::LookupResponse(LookupResponse::Ok {
-                                identity: vec![document.clone()],
-                            }))
-                        }
-                        None => Either::Right(Response::LookupResponse(LookupResponse::Error(
+                    let event = match temp_registeration.get(did) {
+                        Some(document) => Response::LookupResponse(LookupResponse::Ok {
+                            identity: vec![document.clone()],
+                        }),
+                        None => Response::LookupResponse(LookupResponse::Error(
                             identity::protocol::LookupError::DoesntExist,
-                        ))),
+                        )),
                     };
 
-                    let _ = resp.send((ch, event));
+                    let payload =
+                        Payload::new(keypair, None, event).expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                 }
                 identity::protocol::Request::Lookup(Lookup::PublicKeys { dids }) => {
                     let list = dids
@@ -463,15 +519,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .collect::<Vec<_>>();
 
                     let event = match list.is_empty() {
-                        false => Either::Right(Response::LookupResponse(LookupResponse::Ok {
-                            identity: list,
-                        })),
-                        true => Either::Right(Response::LookupResponse(LookupResponse::Error(
+                        false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
+                        true => Response::LookupResponse(LookupResponse::Error(
                             identity::protocol::LookupError::DoesntExist,
-                        ))),
+                        )),
                     };
 
-                    let _ = resp.send((ch, event));
+                    let payload =
+                        Payload::new(keypair, None, event).expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                 }
 
                 identity::protocol::Request::Lookup(Lookup::Username { username, .. })
@@ -511,15 +568,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     let event = match list.is_empty() {
-                        false => Either::Right(Response::LookupResponse(LookupResponse::Ok {
-                            identity: list,
-                        })),
-                        true => Either::Right(Response::LookupResponse(LookupResponse::Error(
+                        false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
+                        true => Response::LookupResponse(LookupResponse::Error(
                             identity::protocol::LookupError::DoesntExist,
-                        ))),
+                        )),
                     };
 
-                    let _ = resp.send((ch, event));
+                    let payload =
+                        Payload::new(keypair, None, event).expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                 }
                 identity::protocol::Request::Lookup(Lookup::Username { username, .. }) => {
                     //TODO: Score against invalid username scheme
@@ -535,39 +593,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .collect::<Vec<_>>();
 
                     let event = match list.is_empty() {
-                        false => Either::Right(Response::LookupResponse(LookupResponse::Ok {
-                            identity: list,
-                        })),
-                        true => Either::Right(Response::LookupResponse(LookupResponse::Error(
+                        false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
+                        true => Response::LookupResponse(LookupResponse::Error(
                             identity::protocol::LookupError::DoesntExist,
-                        ))),
+                        )),
                     };
 
-                    let _ = resp.send((ch, event));
+                    let payload =
+                        Payload::new(keypair, None, event).expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                 }
                 identity::protocol::Request::Lookup(Lookup::ShortId { short_id }) => {
                     let Some(document) = temp_registeration
                         .values()
                         .find(|document| document.short_id.eq(short_id.as_ref()))
                     else {
-                        let _ = resp.send((
-                            ch,
-                            Either::Right(Response::LookupResponse(LookupResponse::Error(
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::LookupResponse(LookupResponse::Error(
                                 identity::protocol::LookupError::DoesntExist,
-                            ))),
-                        ));
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
                         continue;
                     };
 
-                    let _ = resp.send((
-                        ch,
-                        Either::Right(Response::LookupResponse(LookupResponse::Ok {
+                    let payload = Payload::new(
+                        keypair,
+                        None,
+                        Response::LookupResponse(LookupResponse::Ok {
                             identity: vec![document.clone()],
-                        })),
-                    ));
+                        }),
+                    )
+                    .expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
                 }
             },
-            Either::Right(_res) => {}
+            Message::Response(_) => {}
         }
     }
 

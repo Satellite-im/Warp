@@ -3,7 +3,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use either::Either;
 use futures::{channel::oneshot::Canceled, FutureExt, StreamExt};
 use rust_ipfs::{
     libp2p::{
@@ -19,32 +18,28 @@ use rust_ipfs::{
 
 use rust_ipfs::libp2p::request_response;
 
-use super::protocol::{self, Request, Response};
+use super::protocol::{self, Payload, Response};
 
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 pub struct Behaviour {
-    inner: request_response::json::Behaviour<protocol::Request, protocol::Response>,
+    inner: request_response::json::Behaviour<protocol::Payload, protocol::Payload>,
 
     keypair: Keypair,
 
     waiting_on_request: HashMap<
         InboundRequestId,
-        futures::channel::oneshot::Receiver<(ResponseChannel<Response>, Either<Request, Response>)>,
+        futures::channel::oneshot::Receiver<(ResponseChannel<Payload>, Payload)>,
     >,
 
     process_event: futures::channel::mpsc::Sender<(
         InboundRequestId,
-        ResponseChannel<Response>,
-        either::Either<Request, Response>,
-        futures::channel::oneshot::Sender<(
-            ResponseChannel<Response>,
-            either::Either<Request, Response>,
-        )>,
+        ResponseChannel<Payload>,
+        Payload,
+        futures::channel::oneshot::Sender<(ResponseChannel<Payload>, Payload)>,
     )>,
 
-    queue_event:
-        HashMap<InboundRequestId, (Option<ResponseChannel<Response>>, Either<Request, Response>)>,
+    queue_event: HashMap<InboundRequestId, (Option<ResponseChannel<Payload>>, Payload)>,
 
     precord_rx: futures::channel::mpsc::Receiver<PeerRecord>,
     peer_records: HashMap<PeerId, PeerRecord>,
@@ -56,12 +51,9 @@ impl Behaviour {
         keypair: &Keypair,
         process_event: futures::channel::mpsc::Sender<(
             InboundRequestId,
-            ResponseChannel<Response>,
-            either::Either<Request, Response>,
-            futures::channel::oneshot::Sender<(
-                ResponseChannel<Response>,
-                either::Either<Request, Response>,
-            )>,
+            ResponseChannel<Payload>,
+            Payload,
+            futures::channel::oneshot::Sender<(ResponseChannel<Payload>, Payload)>,
         )>,
         precord_rx: futures::channel::mpsc::Receiver<PeerRecord>,
     ) -> Self {
@@ -82,18 +74,29 @@ impl Behaviour {
     fn process_request(
         &mut self,
         request_id: InboundRequestId,
-        request: Request,
-        channel: ResponseChannel<Response>,
+        request: Payload,
+        channel: ResponseChannel<Payload>,
     ) {
+        if request.verify().is_err() {
+            //TODO: Score against invalid request
+            let payload = Payload::new(
+                &self.keypair,
+                None,
+                Response::Error("Request is invalid or corrupted".into()),
+            )
+            .expect("Valid construction of payload");
+            _ = self.inner.send_response(channel, payload);
+            return;
+        }
         self.queue_event
-            .insert(request_id, (Some(channel), Either::Left(request)));
+            .insert(request_id, (Some(channel), request));
     }
 }
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = <request_response::json::Behaviour<
-        protocol::Request,
-        protocol::Response,
+        protocol::Payload,
+        protocol::Payload,
     > as NetworkBehaviour>::ConnectionHandler;
     type ToSwarm = void::Void;
 
@@ -237,13 +240,8 @@ impl NetworkBehaviour for Behaviour {
         //
         self.waiting_on_request
             .retain(|_id, receiver| match receiver.poll_unpin(cx) {
-                Poll::Ready(Ok((ch, which))) => {
-                    match which {
-                        Either::Left(_req) => unreachable!(),
-                        Either::Right(res) => {
-                            let _ = self.inner.send_response(ch, res);
-                        }
-                    };
+                Poll::Ready(Ok((ch, res))) => {
+                    let _ = self.inner.send_response(ch, res);
                     false
                 }
                 Poll::Ready(Err(Canceled)) => false,
