@@ -14,14 +14,14 @@ pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/identity/0.0.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Payload {
     /// Sender of the payload
-    pub sender: PeerId,
+    sender: PeerId,
     /// Sending request on behalf of another identity
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_behalf: Option<PeerId>,
-    pub message: Message,
-    pub signature: Vec<u8>,
+    on_behalf: Option<PeerId>,
+    message: Message,
+    signature: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub co_signature: Option<Vec<u8>>,
+    co_signature: Option<Vec<u8>>,
 }
 
 impl Payload {
@@ -133,6 +133,28 @@ impl Payload {
         }
         
         Ok(())
+    }
+}
+
+impl Payload {
+    pub fn sender(&self) -> PeerId {
+        self.sender
+    }
+
+    pub fn on_behalf_of(&self) -> Option<PeerId> {
+        self.on_behalf
+    }
+
+    pub fn message(&self) -> &Message {
+        &self.message
+    }
+
+    pub fn signature(&self) -> &[u8] {
+        &self.signature
+    }
+
+    pub fn co_signature(&self) -> Option<&[u8]> {
+        self.co_signature.as_deref()
     }
 }
 
