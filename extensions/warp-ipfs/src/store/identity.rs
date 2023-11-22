@@ -5,7 +5,7 @@ use crate::{
     config::{self, Discovery as DiscoveryConfig, DiscoveryType, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use futures::{
     channel::oneshot::{self, Canceled},
@@ -30,7 +30,7 @@ use tracing::{
 
 use warp::{
     constellation::file::FileType,
-    crypto::zeroize::Zeroizing,
+    crypto::{did_key::CoreSign, zeroize::Zeroizing},
     multipass::identity::{IdentityImage, Platform},
 };
 use warp::{
@@ -145,8 +145,59 @@ pub enum Event {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
 pub struct RequestResponsePayload {
+    #[serde(default)]
+    pub version: RequestResponsePayloadVersion,
     pub sender: DID,
     pub event: Event,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<Vec<u8>>,
+}
+
+#[derive(Default, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Hash, Eq)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum RequestResponsePayloadVersion {
+    /// Original design. Does not include `version`, `created`, or `signature` fields.
+    /// Note: Use for backwards compatibility, but may be deprecated in the future
+    #[default]
+    V0,
+    V1,
+}
+
+impl RequestResponsePayload {
+    pub fn new(keypair: &DID, event: Event) -> Result<Self, Error> {
+        let request = Self::new_unsigned(keypair, event);
+        request.sign(keypair)
+    }
+
+    pub fn new_unsigned(keypair: &DID, event: Event) -> Self {
+        Self {
+            version: RequestResponsePayloadVersion::V1,
+            sender: keypair.clone(),
+            event,
+            created: None,
+            signature: None,
+        }
+    }
+
+    pub fn sign(mut self, keypair: &DID) -> Result<Self, Error> {
+        self.signature = None;
+        self.created = Some(Utc::now());
+        let bytes = serde_json::to_vec(&self)?;
+        let signature = keypair.sign(&bytes);
+        self.signature = Some(signature);
+        Ok(self)
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        let mut doc = self.clone();
+        let signature = doc.signature.take().ok_or(Error::InvalidSignature)?;
+        let bytes = serde_json::to_vec(&doc)?;
+        doc.sender
+            .verify(&bytes, &signature)
+            .map_err(|_| Error::InvalidSignature)
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -456,6 +507,24 @@ impl IdentityStore {
         data: RequestResponsePayload,
         signal: &mut Option<oneshot::Sender<Result<(), Error>>>,
     ) -> Result<(), Error> {
+        if let Err(e) = data.verify() {
+            match data.version {
+                RequestResponsePayloadVersion::V0 => {
+                    tracing::warn!(
+                        sender = data.sender.to_string(),
+                        "Request received from a old implementation. Unable to verify signature."
+                    );
+                }
+                _ => {
+                    tracing::warn!(
+                        sender = data.sender.to_string(),
+                        "Unable to verify signature {e}. Ignoreing request"
+                    );
+                    return Ok(());
+                }
+            };
+        }
+
         if self
             .list_incoming_request()
             .await
@@ -471,10 +540,7 @@ impl IdentityStore {
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
             log::warn!("Received event from a blocked identity.");
-            let payload = RequestResponsePayload {
-                sender: (*self.did_key).clone(),
-                event: Event::Block,
-            };
+            let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
 
             return self
                 .broadcast_request((&data.sender, &payload), false, true)
@@ -508,10 +574,8 @@ impl IdentityStore {
             Event::Request => {
                 if self.is_friend(&data.sender).await? {
                     log::debug!("Friend already exist. Remitting event");
-                    let payload = RequestResponsePayload {
-                        sender: (*self.did_key).clone(),
-                        event: Event::Accept,
-                    };
+
+                    let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
 
                     return self
                         .broadcast_request((&data.sender, &payload), false, false)
@@ -546,10 +610,8 @@ impl IdentityStore {
 
                     self.emit_event(MultiPassEventKind::FriendRequestReceived { from });
                 }
-                let payload = RequestResponsePayload {
-                    sender: (*self.did_key).clone(),
-                    event: Event::Response,
-                };
+
+                let payload = RequestResponsePayload::new(&self.did_key, Event::Response)?;
 
                 self.broadcast_request((&data.sender, &payload), false, false)
                     .await?;
@@ -2035,10 +2097,7 @@ impl IdentityStore {
             return Err(Error::FriendRequestExist);
         }
 
-        let payload = RequestResponsePayload {
-            sender: local_public_key,
-            event: Event::Request,
-        };
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Request)?;
 
         self.broadcast_request((pubkey, &payload), true, true).await
     }
@@ -2072,10 +2131,7 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let payload = RequestResponsePayload {
-            event: Event::Accept,
-            sender: local_public_key,
-        };
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
 
         self.root_document.remove_request(internal_request).await?;
         self.add_friend(pubkey).await?;
@@ -2104,10 +2160,7 @@ impl IdentityStore {
             .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        let payload = RequestResponsePayload {
-            sender: local_public_key,
-            event: Event::Reject,
-        };
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Reject)?;
 
         self.root_document.remove_request(internal_request).await?;
 
@@ -2119,8 +2172,6 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (*self.did_key).clone();
-
         let list = self.list_all_raw_request().await?;
 
         let internal_request = list
@@ -2128,10 +2179,7 @@ impl IdentityStore {
             .find(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        let payload = RequestResponsePayload {
-            sender: local_public_key,
-            event: Event::Retract,
-        };
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Retract)?;
 
         self.root_document.remove_request(internal_request).await?;
 
@@ -2211,10 +2259,7 @@ impl IdentityStore {
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
-        let payload = RequestResponsePayload {
-            sender: local_public_key,
-            event: Event::Block,
-        };
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
 
         self.broadcast_request((pubkey, &payload), false, true)
             .await
@@ -2239,10 +2284,7 @@ impl IdentityStore {
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
 
-        let payload = RequestResponsePayload {
-            sender: local_public_key,
-            event: Event::Unblock,
-        };
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Unblock)?;
 
         self.broadcast_request((pubkey, &payload), false, true)
             .await
@@ -2311,12 +2353,7 @@ impl IdentityStore {
         }
 
         if broadcast {
-            let local_public_key = (*self.did_key).clone();
-
-            let payload = RequestResponsePayload {
-                sender: local_public_key,
-                event: Event::Remove,
-            };
+            let payload = RequestResponsePayload::new(&self.did_key, Event::Remove)?;
 
             self.broadcast_request((pubkey, &payload), false, true)
                 .await?;
