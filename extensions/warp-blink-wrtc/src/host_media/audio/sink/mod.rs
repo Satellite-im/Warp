@@ -257,6 +257,8 @@ impl SinkTrackController {
                 let _ = stream.play();
             }
 
+            entry.stream = stream;
+
             let _ = self.cmd_tx.send(Cmd::ReplaceSampleTx {
                 peer_id: id.clone(),
                 producer,
