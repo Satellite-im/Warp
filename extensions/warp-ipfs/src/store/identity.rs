@@ -660,7 +660,7 @@ impl IdentityStore {
                     let from = data.sender.clone();
 
                     if self.identity_cache.get(&from).await.is_err() {
-                        self.request(&from, RequestOption::Identity).await?;
+                        _ = self.request(&from, RequestOption::Identity).await;
                     }
 
                     self.emit_event(MultiPassEventKind::FriendRequestReceived { from });
