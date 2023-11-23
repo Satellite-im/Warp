@@ -190,9 +190,9 @@ pub enum Response {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mailbox {
-    FetchAll { did: DID },
+    FetchAll,
     FetchFrom { did: DID },
-    Send { request: RequestPayload },
+    Send { did: DID, request: RequestPayload },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -211,9 +211,11 @@ pub enum MailboxResponse {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MailboxError {
-    NotRegistered,
+    IdentityNotRegistered,
+    UserNotRegistered,
     NoRequests,
     Blocked,
+    InvalidRequest,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -263,19 +265,10 @@ pub enum RegisterError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Synchronized {
-    PeerRecord {
-        record: Vec<u8>,
-    },
-    Update {
-        document: IdentityDocument,
-    },
-    Store {
-        document: IdentityDocument,
-        package: Vec<u8>,
-    },
-    Fetch {
-        did: DID,
-    },
+    PeerRecord { record: Vec<u8> },
+    Update { document: IdentityDocument },
+    Store { package: Vec<u8> },
+    Fetch { did: DID },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

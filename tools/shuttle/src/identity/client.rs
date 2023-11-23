@@ -19,10 +19,11 @@ use rust_ipfs::{
 use rust_ipfs::libp2p::request_response;
 use warp::crypto::DID;
 
-use super::protocol::{
-    Lookup, LookupResponse, Message, Register, RegisterResponse, Request, Response,
-};
 use super::{document::IdentityDocument, protocol::Payload};
+use super::{
+    protocol::{Lookup, LookupResponse, Message, Register, RegisterResponse, Request, Response},
+    RequestPayload,
+};
 
 // Note: primary_keypair to be used for `Payload`
 #[allow(dead_code)]
@@ -63,9 +64,19 @@ pub enum IdentityCommand {
     },
     UpdatePackage {
         peer_id: PeerId,
-        identity: IdentityDocument,
         package: Vec<u8>,
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    SendRequest {
+        peer_id: PeerId,
+        to: DID,
+        request: RequestPayload,
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    FetchAllRequests {
+        peer_id: PeerId,
+        response:
+            futures::channel::oneshot::Sender<Result<Vec<RequestPayload>, warp::error::Error>>,
     },
     Fetch {
         peer_id: PeerId,
@@ -88,6 +99,13 @@ enum IdentityResponse {
     },
     PeerRecordUpdate {
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    RequestSent {
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
+    RequestsReceived {
+        response:
+            futures::channel::oneshot::Sender<Result<Vec<RequestPayload>, warp::error::Error>>,
     },
     Store {
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
@@ -257,6 +275,59 @@ impl Behaviour {
                                 }
                                 IdentityResponse::Store { response } => _ = response.send(Err(e)),
                                 IdentityResponse::Fetch { response } => _ = response.send(Err(e)),
+                                _ => {}
+                            };
+                        }
+                    },
+                    Response::MailboxResponse(response) => match response {
+                        super::protocol::MailboxResponse::Receive { list, remaining: _ } => {
+                            if let Some(IdentityResponse::RequestsReceived { response }) =
+                                self.waiting_on_response.remove(&id)
+                            {
+                                _ = response.send(Ok(list));
+                                //TODO: If there is any remaining requests to fetch them in batches
+                            }
+                        }
+                        super::protocol::MailboxResponse::Removed
+                        | super::protocol::MailboxResponse::Completed
+                        | super::protocol::MailboxResponse::Sent => {
+                            if let Some(IdentityResponse::RequestSent { response }) =
+                                self.waiting_on_response.remove(&id)
+                            {
+                                _ = response.send(Ok(()));
+                            }
+                        }
+                        super::protocol::MailboxResponse::Error(err) => {
+                            let e = match err {
+                                super::protocol::MailboxError::IdentityNotRegistered => {
+                                    warp::error::Error::IdentityNotCreated
+                                }
+                                super::protocol::MailboxError::NoRequests => {
+                                    warp::error::Error::OtherWithContext("No requests available".into())
+                                }
+                                super::protocol::MailboxError::Blocked => {
+                                    warp::error::Error::PublicKeyIsBlocked
+                                }
+                                super::protocol::MailboxError::UserNotRegistered => {
+                                    warp::error::Error::IdentityDoesntExist
+                                }
+                                super::protocol::MailboxError::InvalidRequest => {
+                                    warp::error::Error::OtherWithContext("Request provided was corrupted or invalid".into())
+                                }
+                            };
+
+                            let Some(response) = self.waiting_on_response.remove(&id) else {
+                                return;
+                            };
+
+                            match response {
+                                IdentityResponse::RequestSent { response } => {
+                                    _ = response.send(Err(e))
+                                }
+                                IdentityResponse::RequestsReceived { response } => {
+                                    _ = response.send(Err(e))
+                                }
+                                _ => {}
                             };
                         }
                     },
@@ -407,17 +478,13 @@ impl NetworkBehaviour for Behaviour {
                     }
                     IdentityCommand::UpdatePackage {
                         peer_id,
-                        identity,
                         package,
                         response,
                     } => {
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
-                            Request::Synchronized(super::protocol::Synchronized::Store {
-                                document: identity,
-                                package,
-                            }),
+                            Request::Synchronized(super::protocol::Synchronized::Store { package }),
                         )
                         .expect("Valid construction of payload");
 
@@ -461,6 +528,37 @@ impl NetworkBehaviour for Behaviour {
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Store { response });
+                    }
+                    IdentityCommand::SendRequest {
+                        peer_id,
+                        to,
+                        request,
+                        response,
+                    } => {
+                        let payload = Payload::new(
+                            &self.keypair,
+                            self.primary_keypair.as_ref(),
+                            Request::Mailbox(super::protocol::Mailbox::Send { did: to, request }),
+                        )
+                        .expect("Valid construction of payload");
+
+                        let id = self.inner.send_request(&peer_id, payload);
+
+                        self.waiting_on_response
+                            .insert(id, IdentityResponse::RequestSent { response });
+                    }
+                    IdentityCommand::FetchAllRequests { peer_id, response } => {
+                        let payload = Payload::new(
+                            &self.keypair,
+                            self.primary_keypair.as_ref(),
+                            Request::Mailbox(super::protocol::Mailbox::FetchAll),
+                        )
+                        .expect("Valid construction of payload");
+
+                        let id = self.inner.send_request(&peer_id, payload);
+
+                        self.waiting_on_response
+                            .insert(id, IdentityResponse::RequestsReceived { response });
                     }
                 },
                 Poll::Ready(None) => {
@@ -520,6 +618,12 @@ impl NetworkBehaviour for Behaviour {
                                 _ = response.send(Err(warp::error::Error::Boxed(Box::new(error))))
                             }
                             IdentityResponse::PeerRecordUpdate { response } => {
+                                _ = response.send(Err(warp::error::Error::Boxed(Box::new(error))))
+                            }
+                            IdentityResponse::RequestSent { response } => {
+                                _ = response.send(Err(warp::error::Error::Boxed(Box::new(error))))
+                            }
+                            IdentityResponse::RequestsReceived { response } => {
                                 _ = response.send(Err(warp::error::Error::Boxed(Box::new(error))))
                             }
                         }

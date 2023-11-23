@@ -16,6 +16,7 @@ use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
+use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -153,6 +154,59 @@ pub struct RequestResponsePayload {
     pub created: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<Vec<u8>>,
+}
+
+impl TryFrom<RequestResponsePayload> for RequestPayload {
+    type Error = Error;
+    fn try_from(req: RequestResponsePayload) -> Result<Self, Self::Error> {
+        req.verify()?;
+        let event = match req.event {
+            Event::Request => RequestEvent::Request,
+            Event::Accept => RequestEvent::Accept,
+            Event::Remove => RequestEvent::Remove,
+            Event::Reject => RequestEvent::Reject,
+            Event::Retract => RequestEvent::Retract,
+            Event::Block => RequestEvent::Block,
+            Event::Unblock => RequestEvent::Unblock,
+            Event::Response => return Err(Error::OtherWithContext("Invalid event type".into())),
+        };
+
+        let payload = RequestPayload {
+            sender: req.sender,
+            event,
+            created: req.created.ok_or(Error::InvalidConversion)?,
+            original_signature: req.signature.ok_or(Error::InvalidSignature)?,
+            signature: vec![],
+        };
+
+        Ok(payload)
+    }
+}
+
+impl TryFrom<RequestPayload> for RequestResponsePayload {
+    type Error = Box<dyn std::error::Error>;
+    fn try_from(req: RequestPayload) -> Result<Self, Self::Error> {
+        req.verify()?;
+        let event = match req.event {
+            RequestEvent::Request => Event::Request,
+            RequestEvent::Accept => Event::Accept,
+            RequestEvent::Remove => Event::Remove,
+            RequestEvent::Reject => Event::Reject,
+            RequestEvent::Retract => Event::Retract,
+            RequestEvent::Block => Event::Block,
+            RequestEvent::Unblock => Event::Unblock,
+        };
+
+        let payload = RequestResponsePayload {
+            version: RequestResponsePayloadVersion::V1,
+            sender: req.sender,
+            event,
+            created: Some(req.created),
+            signature: Some(req.original_signature),
+        };
+
+        Ok(payload)
+    }
 }
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Hash, Eq)]
@@ -308,7 +362,7 @@ impl IdentityStore {
 
         let signal = Default::default();
 
-        let store = Self {
+        let mut store = Self {
             ipfs,
             root_document,
             identity_cache,
@@ -326,6 +380,7 @@ impl IdentityStore {
 
         if let Ok(ident) = store.own_identity().await {
             log::info!("Identity loaded with {}", ident.did_key());
+            if let Err(_e) = store.fetch_mailbox().await {}
         }
 
         let did = store.get_keypair_did()?;
@@ -503,7 +558,7 @@ impl IdentityStore {
     #[tracing::instrument(skip(self, data, signal))]
     async fn check_request_message(
         &mut self,
-        did: &DID,
+        _: &DID,
         data: RequestResponsePayload,
         signal: &mut Option<oneshot::Sender<Result<(), Error>>>,
     ) -> Result<(), Error> {
@@ -1507,7 +1562,6 @@ impl IdentityStore {
     }
 
     pub async fn export_identity_document(&mut self) -> Result<(), Error> {
-        let document = self.own_identity_document().await?;
         let package = self.root_document.export_bytes().await?;
 
         if let DiscoveryConfig::Namespace {
@@ -1526,7 +1580,6 @@ impl IdentityStore {
                     .clone()
                     .send(shuttle::identity::client::IdentityCommand::UpdatePackage {
                         peer_id,
-                        identity: document.clone().into(),
                         package: package.clone(),
                         response: tx,
                     })
@@ -1539,6 +1592,116 @@ impl IdentityStore {
                     Ok(Ok(Err(e))) => {
                         log::error!("Error exporting to {peer_id}: {e}");
                         break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        log::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        log::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn fetch_mailbox(&mut self) -> Result<(), Error> {
+        if let DiscoveryConfig::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = self.discovery.discovery_config()
+        {
+            for addr in addresses {
+                let Some(peer_id) = addr.peer_id() else {
+                    continue;
+                };
+
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(
+                        shuttle::identity::client::IdentityCommand::FetchAllRequests {
+                            peer_id,
+                            response: tx,
+                        },
+                    )
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(list))) => {
+                        let list = list
+                            .iter()
+                            .cloned()
+                            .filter_map(|r| RequestResponsePayload::try_from(r).ok())
+                            .collect::<Vec<_>>();
+
+                        for req in list {
+                            let from = req.sender.clone();
+                            if let Err(e) = self.check_request_message(&from, req, &mut None).await
+                            {
+                                tracing::warn!(
+                                    "Error processing request from {from}: {e}. Skipping"
+                                );
+                                continue;
+                            }
+                        }
+
+                        return Ok(());
+                    }
+                    Ok(Ok(Err(e))) => return Err(e),
+                    Ok(Err(Canceled)) => {
+                        log::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        log::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn send_to_mailbox(
+        &mut self,
+        did: &DID,
+        request: RequestResponsePayload,
+    ) -> Result<(), Error> {
+        if let DiscoveryConfig::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = self.discovery.discovery_config()
+        {
+            let request: RequestPayload = request.try_into()?;
+
+            let request = request
+                .sign(&self.did_key)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+            for addr in addresses {
+                let Some(peer_id) = addr.peer_id() else {
+                    continue;
+                };
+
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::SendRequest {
+                        peer_id,
+                        to: did.clone(),
+                        request: request.clone(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(result)) => {
+                        return result;
                     }
                     Ok(Err(Canceled)) => {
                         log::error!("Channel been unexpectedly closed for {peer_id}");
@@ -2494,6 +2657,10 @@ impl IdentityStore {
             self.queue.insert(recipient, payload.clone()).await;
             queued = true;
             self.signal.write().await.remove(recipient);
+        }
+
+        if let Err(e) = self.send_to_mailbox(recipient, payload.clone()).await {
+            tracing::warn!("Unable to send to {recipient} mailbox {e}. ");
         }
 
         if !queued {

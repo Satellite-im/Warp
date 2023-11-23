@@ -6,6 +6,7 @@ use shuttle::{
             Lookup, LookupResponse, Message, Payload, Register, RegisterResponse, Response,
             Synchronized, SynchronizedError, SynchronizedResponse,
         },
+        RequestPayload,
     },
     subscription_stream::Subscriptions,
     PeerIdExt, PeerTopic,
@@ -230,7 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //TODO: Move into ipld once protocol is setup
     let mut temp_registeration: HashMap<DID, IdentityDocument> = HashMap::new();
     let mut _temp_package: HashMap<DID, Vec<u8>> = HashMap::new();
-    let mut _friends_router: HashMap<DID, ()> = HashMap::new();
+    let mut mailbox: HashMap<DID, Vec<RequestPayload>> = HashMap::new();
 
     let mut subscriptions = Subscriptions::new(&ipfs);
     let keypair = ipfs.keypair()?;
@@ -293,17 +294,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let _ = resp.send((ch, payload));
                 }
-                identity::protocol::Request::Mailbox(_) => {}
-                identity::protocol::Request::Synchronized(Synchronized::Store {
-                    document,
-                    package,
-                }) => {
-                    if document.verify().is_err() {
+                identity::protocol::Request::Mailbox(event) => {
+                    let Ok(did) = payload.sender().to_did() else {
                         let payload = Payload::new(
                             keypair,
                             None,
-                            Response::SynchronizedResponse(SynchronizedResponse::Error(
-                                SynchronizedError::Invalid,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
+
+                        continue;
+                    };
+
+                    if !temp_registeration.contains_key(&did) {
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::MailboxResponse(identity::protocol::MailboxResponse::Error(
+                                identity::protocol::MailboxError::IdentityNotRegistered,
                             )),
                         )
                         .expect("Valid payload construction");
@@ -312,7 +324,130 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         continue;
                     }
-                    let did = document.did.clone();
+
+                    match event {
+                        identity::protocol::Mailbox::FetchAll => {
+                            let Some(map) = mailbox.get_mut(&did) else {
+                                let payload = Payload::new(
+                                    keypair,
+                                    None,
+                                    Response::MailboxResponse(
+                                        identity::protocol::MailboxResponse::Error(
+                                            identity::protocol::MailboxError::NoRequests,
+                                        ),
+                                    ),
+                                )
+                                .expect("Valid payload construction");
+
+                                let _ = resp.send((ch, payload));
+                                continue;
+                            };
+
+                            let mut list = vec![];
+
+                            let mut counter = 0;
+
+                            while let Some(req) = map.pop() {
+                                if counter > 50 {
+                                    break;
+                                }
+                                list.push(req);
+                                counter += 1;
+                            }
+
+                            let payload = Payload::new(
+                                keypair,
+                                None,
+                                Response::MailboxResponse(
+                                    identity::protocol::MailboxResponse::Receive {
+                                        list,
+                                        remaining: map.len(),
+                                    },
+                                ),
+                            )
+                            .expect("Valid payload construction");
+
+                            let _ = resp.send((ch, payload));
+                        }
+                        identity::protocol::Mailbox::FetchFrom { .. } => {
+                            //TODO
+                            let payload = Payload::new(
+                                keypair,
+                                None,
+                                Response::MailboxResponse(
+                                    identity::protocol::MailboxResponse::Error(
+                                        identity::protocol::MailboxError::NoRequests,
+                                    ),
+                                ),
+                            )
+                            .expect("Valid payload construction");
+
+                            let _ = resp.send((ch, payload));
+                            continue;
+                        }
+                        identity::protocol::Mailbox::Send { did: to, request } => {
+                            if !temp_registeration.contains_key(to) {
+                                let payload = Payload::new(
+                                    keypair,
+                                    None,
+                                    Response::MailboxResponse(
+                                        identity::protocol::MailboxResponse::Error(
+                                            identity::protocol::MailboxError::UserNotRegistered,
+                                        ),
+                                    ),
+                                )
+                                .expect("Valid payload construction");
+
+                                let _ = resp.send((ch, payload));
+                                continue;
+                            }
+
+                            if request.verify().is_err() {
+                                let payload = Payload::new(
+                                    keypair,
+                                    None,
+                                    Response::MailboxResponse(
+                                        identity::protocol::MailboxResponse::Error(
+                                            identity::protocol::MailboxError::InvalidRequest,
+                                        ),
+                                    ),
+                                )
+                                .expect("Valid payload construction");
+
+                                let _ = resp.send((ch, payload));
+                                continue;
+                            }
+
+                            mailbox.entry(to.clone()).or_default().push(request.clone());
+
+                            let payload = Payload::new(
+                                keypair,
+                                None,
+                                Response::MailboxResponse(
+                                    identity::protocol::MailboxResponse::Sent,
+                                ),
+                            )
+                            .expect("Valid payload construction");
+
+                            let _ = resp.send((ch, payload));
+                        }
+                    }
+                }
+                identity::protocol::Request::Synchronized(Synchronized::Store { package }) => {
+                    let Ok(did) = payload.sender().to_did() else {
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
+
+                        continue;
+                    };
 
                     if !temp_registeration.contains_key(&did) {
                         let payload = Payload::new(

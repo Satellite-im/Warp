@@ -26,16 +26,35 @@ pub enum RequestEvent {
     Unblock,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct RequestPayload {
     pub sender: DID,
     pub event: RequestEvent,
     pub created: DateTime<Utc>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub original_signature: Vec<u8>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub signature: Vec<u8>,
 }
 
+impl std::hash::Hash for RequestPayload {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.sender.hash(state);
+    }
+}
+
 impl RequestPayload {
+    pub fn sign(mut self, keypair: &DID) -> Result<Self, Box<dyn std::error::Error>> {
+        if !self.signature.is_empty() {
+            return Err(Box::new(warp::error::Error::InvalidSignature));
+        }
+        
+        let bytes = serde_json::to_vec(&self)?;
+        let signature = keypair.sign(&bytes);
+        self.signature = signature;
+        Ok(self)
+    }
+
     pub fn verify(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut doc = self.clone();
         let signature = std::mem::take(&mut doc.signature);
