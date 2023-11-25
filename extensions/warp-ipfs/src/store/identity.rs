@@ -1672,14 +1672,9 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.profile_picture {
-            let data = match get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024)).await {
-                Ok(data) => data,
-                Err(_) => {
-                    return Err(Error::InvalidIdentityPicture);
-                }
-            };
-
-            return Ok(data);
+            return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
+                .await
+                .map_err(|_| Error::InvalidIdentityPicture);
         }
 
         if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
@@ -1707,14 +1702,9 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.profile_banner {
-            let data = match get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024)).await {
-                Ok(data) => data,
-                Err(_) => {
-                    return Err(Error::InvalidIdentityPicture);
-                }
-            };
-
-            return Ok(data);
+            return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
+                .await
+                .map_err(|_| Error::InvalidIdentityPicture);
         }
 
         Err(Error::InvalidIdentityBanner)
@@ -1722,46 +1712,12 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
-        let ipfs = self.ipfs.clone();
-
-        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
+        let ipfs = &self.ipfs;
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, true).await?;
         }
-
-        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
-        for s_cid in new_pinned_blocks.iter() {
-            pinned_blocks.remove(s_cid);
-        }
-
-        for cid in pinned_blocks {
-            ipfs.remove_block(cid, false).await?;
-        }
-
+        let blocks = ipfs.remove_block(cid, true).await?;
+        tracing::info!("{} blocks removed.", blocks.len());
         Ok(())
     }
 
