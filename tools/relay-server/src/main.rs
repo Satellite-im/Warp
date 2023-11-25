@@ -130,11 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .fd_limit(FDLimit::Max)
         .set_keypair(keypair)
-        .set_idle_connection_timeout(30)
-        .set_transport_configuration(TransportConfig {
-            enable_quic: true,
-            ..Default::default()
-        })
+        .set_idle_connection_timeout(15)
         .listen_as_external_addr()
         .with_custom_behaviour(ext_behaviour::Behaviour);
 
