@@ -530,7 +530,7 @@ impl IdentityStore {
             let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
 
             return self
-                .broadcast_request((&data.sender, &payload), false, true)
+                .broadcast_request(&data.sender, &payload, false, true)
                 .await;
         }
 
@@ -565,7 +565,7 @@ impl IdentityStore {
                     let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
 
                     return self
-                        .broadcast_request((&data.sender, &payload), false, false)
+                        .broadcast_request(&data.sender, &payload, false, false)
                         .await;
                 }
 
@@ -590,7 +590,10 @@ impl IdentityStore {
                     let from = data.sender.clone();
 
                     if self.identity_cache.get(&from).await.is_err() {
-                        self.request(&from, RequestOption::Identity).await?;
+                        // Attempt to send identity request to peer if identity is not available locally.
+                        if let Err(e) = self.request(&from, RequestOption::Identity).await {
+                            tracing::warn!("Failed to request identity from {from}: {e}.")
+                        }
                     }
 
                     self.emit_event(MultiPassEventKind::FriendRequestReceived { from });
@@ -598,7 +601,7 @@ impl IdentityStore {
 
                 let payload = RequestResponsePayload::new(&self.did_key, Event::Response)?;
 
-                self.broadcast_request((&data.sender, &payload), false, false)
+                self.broadcast_request(&data.sender, &payload, false, false)
                     .await?;
             }
             Event::Reject => {
@@ -639,33 +642,35 @@ impl IdentityStore {
                 });
             }
             Event::Block => {
-                if self.has_request_from(&data.sender).await? {
+                let sender = data.sender;
+
+                if self.has_request_from(&sender).await? {
                     self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
-                        did: data.sender.clone(),
+                        did: sender.clone(),
                     });
-                } else if self.sent_friend_request_to(&data.sender).await? {
+                } else if self.sent_friend_request_to(&sender).await? {
                     self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
-                        did: data.sender.clone(),
+                        did: sender.clone(),
                     });
                 }
 
                 let list = self.list_all_raw_request().await?;
-                for req in list.iter().filter(|req| req.did().eq(&data.sender)) {
+                for req in list.iter().filter(|req| req.did().eq(&sender)) {
                     self.root_document.remove_request(req).await?;
                 }
 
-                if self.is_friend(&data.sender).await? {
-                    self.remove_friend(&data.sender, false).await?;
+                if self.is_friend(&sender).await? {
+                    self.remove_friend(&sender, false).await?;
                 }
 
-                let completed = self.root_document.add_block_by(&data.sender).await.is_ok();
+                let completed = self.root_document.add_block_by(&sender).await.is_ok();
                 if completed {
-                    let sender = data.sender.clone();
+                    let _ = futures::join!(
+                        self.push(&sender),
+                        self.request(&sender, RequestOption::Identity)
+                    );
 
-                    let _ = self.push(&sender).await.ok();
-                    let _ = self.request(&sender, RequestOption::Identity).await.ok();
-
-                    self.emit_event(MultiPassEventKind::BlockedBy { did: data.sender });
+                    self.emit_event(MultiPassEventKind::BlockedBy { did: sender });
                 }
 
                 if let Some(tx) = signal.take() {
@@ -674,19 +679,16 @@ impl IdentityStore {
                 }
             }
             Event::Unblock => {
-                let completed = self
-                    .root_document
-                    .remove_block_by(&data.sender)
-                    .await
-                    .is_ok();
+                let sender = data.sender;
+                let completed = self.root_document.remove_block_by(&sender).await.is_ok();
 
                 if completed {
-                    let sender = data.sender.clone();
+                    let _ = futures::join!(
+                        self.push(&sender),
+                        self.request(&sender, RequestOption::Identity)
+                    );
 
-                    let _ = self.push(&sender).await.ok();
-                    let _ = self.request(&sender, RequestOption::Identity).await.ok();
-
-                    self.emit_event(MultiPassEventKind::UnblockedBy { did: data.sender });
+                    self.emit_event(MultiPassEventKind::UnblockedBy { did: sender });
                 }
             }
             Event::Response => {
@@ -1873,7 +1875,7 @@ impl IdentityStore {
 
         let payload = RequestResponsePayload::new(&self.did_key, Event::Request)?;
 
-        self.broadcast_request((pubkey, &payload), true, true).await
+        self.broadcast_request(pubkey, &payload, true, true).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -1909,7 +1911,7 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
-        self.broadcast_request((pubkey, &payload), false, true)
+        self.broadcast_request(pubkey, &payload, false, true)
             .await
     }
 
@@ -1937,7 +1939,7 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
-        self.broadcast_request((pubkey, &payload), false, true)
+        self.broadcast_request(pubkey, &payload, false, true)
             .await
     }
 
@@ -1965,7 +1967,7 @@ impl IdentityStore {
             }
         }
 
-        self.broadcast_request((pubkey, &payload), false, true)
+        self.broadcast_request(pubkey, &payload, false, true)
             .await
     }
 
@@ -2028,7 +2030,7 @@ impl IdentityStore {
         // self.ipfs.ban_peer(peer_id).await?;
         let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
 
-        self.broadcast_request((pubkey, &payload), false, true)
+        self.broadcast_request(pubkey, &payload, false, true)
             .await
     }
 
@@ -2051,7 +2053,7 @@ impl IdentityStore {
 
         let payload = RequestResponsePayload::new(&self.did_key, Event::Unblock)?;
 
-        self.broadcast_request((pubkey, &payload), false, true)
+        self.broadcast_request(pubkey, &payload, false, true)
             .await
     }
 }
@@ -2117,7 +2119,7 @@ impl IdentityStore {
         if broadcast {
             let payload = RequestResponsePayload::new(&self.did_key, Event::Remove)?;
 
-            self.broadcast_request((pubkey, &payload), false, true)
+            self.broadcast_request(pubkey, &payload, false, true)
                 .await?;
         }
 
@@ -2198,7 +2200,8 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn broadcast_request(
         &mut self,
-        (recipient, payload): (&DID, &RequestResponsePayload),
+        recipient: &DID,
+        payload: &RequestResponsePayload,
         store_request: bool,
         queue_broadcast: bool,
     ) -> Result<(), Error> {
