@@ -366,7 +366,7 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
-        PeerType::DID(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
+        PeerType::DID(did) => did.to_peer_id()?,
         PeerType::PeerId(peer) => peer,
     };
 

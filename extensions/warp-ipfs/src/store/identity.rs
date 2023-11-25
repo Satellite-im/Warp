@@ -60,8 +60,6 @@ pub struct IdentityStore {
 
     identity_cache: IdentityCache,
 
-    online_status: Arc<tokio::sync::RwLock<Option<IdentityStatus>>>,
-
     // keypair
     did_key: Arc<DID>,
 
@@ -279,8 +277,6 @@ impl IdentityStore {
 
         let identity_cache = IdentityCache::new(&ipfs, path.clone()).await;
 
-        let online_status = Arc::default();
-
         let event = tx.clone();
 
         let did_key = Arc::new(did_keypair(&tesseract)?);
@@ -300,7 +296,6 @@ impl IdentityStore {
             ipfs,
             root_document,
             identity_cache,
-            online_status,
             discovery,
             config,
             tesseract,
@@ -780,7 +775,7 @@ impl IdentityStore {
         let platform =
             (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
 
-        let status = self.online_status.read().await.clone().and_then(|status| {
+        let status = identity.status.and_then(|status| {
             (!is_blocked || !is_blocked_by)
                 .then_some(status)
                 .or(Some(IdentityStatus::Offline))
@@ -1556,17 +1551,11 @@ impl IdentityStore {
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     #[tracing::instrument(skip(self))]
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
-        let own_did = self
-            .own_identity()
-            .await
-            .map(|identity| identity.did_key())
-            .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
+        let identity = self.own_identity_document().await?;
 
-        if own_did.eq(did) {
-            return self
-                .online_status
-                .read()
-                .await
+        if identity.did.eq(did) {
+            return identity
+                .status
                 .or(Some(IdentityStatus::Online))
                 .ok_or(Error::MultiPassExtensionUnavailable);
         }
@@ -1605,7 +1594,6 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
         self.root_document.set_status_indicator(status).await?;
-        *self.online_status.write().await = Some(status);
         self.push_to_all().await;
         Ok(())
     }
@@ -1669,7 +1657,6 @@ impl IdentityStore {
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
         let identity = self.own_identity_document().await?;
-        *self.online_status.write().await = identity.status;
         Ok(identity.into())
     }
 
@@ -1911,8 +1898,7 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
-        self.broadcast_request(pubkey, &payload, false, true)
-            .await
+        self.broadcast_request(pubkey, &payload, false, true).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -1939,8 +1925,7 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
-        self.broadcast_request(pubkey, &payload, false, true)
-            .await
+        self.broadcast_request(pubkey, &payload, false, true).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -1967,8 +1952,7 @@ impl IdentityStore {
             }
         }
 
-        self.broadcast_request(pubkey, &payload, false, true)
-            .await
+        self.broadcast_request(pubkey, &payload, false, true).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -2030,8 +2014,7 @@ impl IdentityStore {
         // self.ipfs.ban_peer(peer_id).await?;
         let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
 
-        self.broadcast_request(pubkey, &payload, false, true)
-            .await
+        self.broadcast_request(pubkey, &payload, false, true).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -2053,8 +2036,7 @@ impl IdentityStore {
 
         let payload = RequestResponsePayload::new(&self.did_key, Event::Unblock)?;
 
-        self.broadcast_request(pubkey, &payload, false, true)
-            .await
+        self.broadcast_request(pubkey, &payload, false, true).await
     }
 }
 
