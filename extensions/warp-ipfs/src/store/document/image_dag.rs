@@ -1,6 +1,6 @@
 use futures::{stream::BoxStream, StreamExt};
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath, PeerId};
+use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
 use std::task::Poll;
 use tracing::log;
@@ -97,7 +97,7 @@ pub async fn get_image(
     local: bool,
     limit: Option<usize>,
 ) -> Result<IdentityImage, Error> {
-    let mut dag = ipfs.dag().get_dag(IpfsPath::from(cid));
+    let mut dag = ipfs.get_dag(cid);
 
     if local {
         dag = dag.local();

@@ -224,7 +224,7 @@ impl RootDocument {
                         .iter()
                         .filter_map(|(k, v)| Uuid::from_str(k).map(|k| (k, *v)).ok())
                     {
-                        if let Ok(store) = ipfs.dag().get().path(v).local().deserialized().await {
+                        if let Ok(store) = ipfs.get_dag(v).local().deserialized().await {
                             resolved_map.insert(k, store);
                         }
                     }

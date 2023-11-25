@@ -585,7 +585,7 @@ impl ConversationDocument {
         let (cid, messages): (Cid, BTreeSet<MessageDocument>) = match cid {
             Some(cid) => (
                 cid,
-                ipfs.dag().get().path(cid).local().deserialized().await?,
+                ipfs.get_dag(cid).local().deserialized().await?,
             ),
             None => return Ok(()),
         };
