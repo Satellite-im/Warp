@@ -1,5 +1,5 @@
 use futures::{stream::BoxStream, StreamExt};
-use libipld::{serde::to_ipld, Cid};
+use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, PeerId};
 use serde::{Deserialize, Serialize};
 use std::task::Poll;
@@ -84,13 +84,7 @@ pub async fn store_photo(
         mime: file_type,
     };
 
-    let cid = ipfs
-        .put_dag(to_ipld(dag).map_err(anyhow::Error::from)?)
-        .await?;
-
-    if !ipfs.is_pinned(&cid).await? {
-        ipfs.insert_pin(&cid, true).await?;
-    }
+    let cid = ipfs.dag().put().serialize(dag)?.pin(true).await?;
 
     Ok(cid)
 }
