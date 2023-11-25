@@ -9,7 +9,7 @@ use base64::{
 };
 use clap::Parser;
 use rust_ipfs::{
-    p2p::{RateLimit, RelayConfig, TransportConfig},
+    p2p::{RateLimit, RelayConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
