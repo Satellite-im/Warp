@@ -2,7 +2,6 @@ use std::{collections::HashSet, ffi::OsStr, path::PathBuf, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use futures::{
-    pin_mut,
     stream::{self, BoxStream},
     StreamExt, TryStreamExt,
 };
@@ -571,14 +570,10 @@ impl FileStore {
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs.cat_unixfs(reference.parse::<IpfsPath>()?, None);
-        pin_mut!(stream);
-
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let mut bytes = data.map_err(anyhow::Error::from)?;
-            buffer.append(&mut bytes);
-        }
+        let buffer = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::new)?;
 
         //TODO: Validate file against the hashed reference
         let _ = self
