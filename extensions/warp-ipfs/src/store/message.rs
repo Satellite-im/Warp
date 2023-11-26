@@ -20,8 +20,7 @@ use warp::constellation::{Constellation, ConstellationProgressStream, Progressio
 use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
 use warp::error::Error;
-use warp::logging::tracing::log::{debug, error, info, trace};
-use warp::logging::tracing::warn;
+use warp::logging::tracing::{error, info, trace, warn};
 use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState, Location,
@@ -174,7 +173,7 @@ impl MessageStore {
                             let payload = match Payload::from_bytes(&message.data) {
                                 Ok(payload) => payload,
                                 Err(e) => {
-                                    tracing::log::warn!("Failed to parse payload data: {e}");
+                                    tracing::warn!("Failed to parse payload data: {e}");
                                     continue;
                                 }
                             };
@@ -182,7 +181,7 @@ impl MessageStore {
                             let data = match ecdh_decrypt(&store.did, Some(&payload.sender()), payload.data()) {
                                 Ok(d) => d,
                                 Err(e) => {
-                                    tracing::log::warn!("Failed to decrypt message from {}: {e}", payload.sender());
+                                    tracing::warn!("Failed to decrypt message from {}: {e}", payload.sender());
                                     continue;
                                 }
                             };
@@ -190,7 +189,7 @@ impl MessageStore {
                             let events = match serde_json::from_slice::<ConversationEvents>(&data) {
                                 Ok(ev) => ev,
                                 Err(e) => {
-                                    tracing::log::warn!("Failed to parse message: {e}");
+                                    tracing::warn!("Failed to parse message: {e}");
                                     continue;
                                 }
                             };
@@ -770,7 +769,7 @@ impl MessageStore {
                                         .collect::<Vec<_>>()
                                         .first()
                                         .cloned() else {
-                                            tracing::log::warn!("participant is not in {}", conversation_id);
+                                            tracing::warn!("participant is not in {}", conversation_id);
                                             continue;
                                         };
                                     ecdh_decrypt(own_did, Some(&recipient), data.data())
@@ -779,7 +778,7 @@ impl MessageStore {
                                     let key = match store.conversation_keystore(conversation.id()).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
                                         Ok(key) => key,
                                         Err(e) => {
-                                            tracing::log::warn!("Failed to obtain key for {}: {e}", data.sender());
+                                            tracing::warn!("Failed to obtain key for {}: {e}", data.sender());
                                             continue;
                                         }
                                     };
@@ -791,7 +790,7 @@ impl MessageStore {
                             let bytes = match bytes_results {
                                 Ok(b) => b,
                                 Err(e) => {
-                                    tracing::log::warn!("Failed to decrypt payload from {} in {conversation_id}: {e}", data.sender());
+                                    tracing::warn!("Failed to decrypt payload from {} in {conversation_id}: {e}", data.sender());
                                     continue;
                                 }
                             };
@@ -799,7 +798,7 @@ impl MessageStore {
                             let event = match serde_json::from_slice::<MessagingEvents>(&bytes) {
                                 Ok(e) => e,
                                 Err(e) => {
-                                    tracing::log::warn!("Failed to deserialize message from {} in {conversation_id}: {e}", data.sender());
+                                    tracing::warn!("Failed to deserialize message from {} in {conversation_id}: {e}", data.sender());
                                     continue;
                                 }
                             };
@@ -1466,7 +1465,7 @@ impl MessageStore {
 
                 for recipient in list.iter().filter(|d| did.ne(d)) {
                     if let Err(e) = self.request_key(conversation_id, recipient).await {
-                        tracing::log::warn!("Failed to send exchange request to {recipient}: {e}");
+                        tracing::warn!("Failed to send exchange request to {recipient}: {e}");
                     }
                 }
             }
@@ -1907,7 +1906,7 @@ impl MessageStore {
 
         for recipient in recipient.iter().filter(|d| own_did.ne(d)) {
             if let Err(e) = self.request_key(conversation.id(), recipient).await {
-                tracing::log::warn!("Failed to send exchange request to {recipient}: {e}");
+                tracing::warn!("Failed to send exchange request to {recipient}: {e}");
             }
         }
 
@@ -2546,7 +2545,7 @@ impl MessageStore {
                 .send_single_conversation_event(did, conversation_id, event.clone())
                 .await
             {
-                tracing::log::error!("Error sending conversation event to {did}: {e}");
+                tracing::error!("Error sending conversation event to {did}: {e}");
                 continue;
             }
         }
