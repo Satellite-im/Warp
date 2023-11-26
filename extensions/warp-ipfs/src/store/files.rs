@@ -779,46 +779,16 @@ impl FileStore {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
 
-        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, true).await?;
         }
 
-        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
-        for s_cid in new_pinned_blocks.iter() {
-            pinned_blocks.remove(s_cid);
-        }
-
-        for cid in pinned_blocks {
-            ipfs.remove_block(cid, false).await?;
-        }
-
         directory.remove_item(&item.name())?;
+
         if let Err(_e) = self.export().await {}
+
+        let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
+        tracing::info!(blocks = blocks.len(), "blocks removed");
 
         let _ = self
             .constellation_tx
@@ -884,15 +854,10 @@ impl FileStore {
 
         let reference = file.reference().ok_or(Error::FileNotFound)?;
 
-        let stream = ipfs.cat_unixfs(reference.parse::<IpfsPath>()?, None);
-
-        pin_mut!(stream);
-
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let bytes = data.map_err(anyhow::Error::from)?;
-            buffer.extend(bytes);
-        }
+        let buffer = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::from)?;
 
         let ((width, height), exact) = (
             self.config.thumbnail_size,
