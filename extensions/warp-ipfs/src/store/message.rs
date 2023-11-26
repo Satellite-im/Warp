@@ -807,18 +807,15 @@ impl MessageStore {
                         },
                     };
 
-                    if let Err(e) = store
+                    let result = store
                         .message_event(conversation_id, &event, direction, Default::default())
-                        .await
-                    {
-                        error!("Failure while processing message in {conversation_id}: {e}");
-                        if let Some(ret) = ret {
-                            let _ = ret.send(Err(e)).ok();
-                        }
-                        continue;
-                    }
+                        .await.map_err(|e| {
+                            error!(id=%conversation_id, "Failure while processing message in conversation {e}");
+                            e
+                        });
+
                     if let Some(ret) = ret {
-                        let _ = ret.send(Ok(())).ok();
+                        let _ = ret.send(result).ok();
                     }
                 }
             }
