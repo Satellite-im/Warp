@@ -1412,7 +1412,7 @@ impl MessageStore {
                     }
                 }
 
-                info!("Creating group conversation");
+                info!(%conversation_id, "Creating group conversation");
                 let convo = ConversationDocument::new(
                     did,
                     name,
@@ -1424,11 +1424,8 @@ impl MessageStore {
                     Some(creator),
                     signature,
                 )?;
-                info!(
-                    "{} conversation created: {}",
-                    convo.conversation_type,
-                    convo.id()
-                );
+
+                let conversation_type = convo.conversation_type;
 
                 let mut keystore = Keystore::new(conversation_id);
                 keystore.insert(did, did, warp::crypto::generate::<64>())?;
@@ -1440,18 +1437,14 @@ impl MessageStore {
 
                 self.conversations.set(convo).await?;
 
-                let stream = match self.ipfs.pubsub_subscribe(topic).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        error!("Error subscribing to conversation: {e}");
-                        return Ok(());
-                    }
-                };
+                let stream = self.ipfs.pubsub_subscribe(topic).await.expect("msg");
 
                 self.set_conversation_keystore(conversation_id, keystore)
                     .await?;
 
                 self.start_task(conversation_id, stream).await;
+
+                info!(%conversation_id,"{} conversation created", conversation_type);
 
                 if let Err(e) = self
                     .event

@@ -177,6 +177,8 @@ pub enum Error {
     //Crypto Errors
     #[error("{0}")]
     Ed25519Error(#[from] ed25519_dalek::SignatureError),
+    #[error("Encryption key does not exist")]
+    KeyDoesntExist,
     #[error("Unable to encrypt data")]
     EncryptionError,
     #[error("Unable to decrypt data")]
