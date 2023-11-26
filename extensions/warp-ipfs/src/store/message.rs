@@ -1412,7 +1412,7 @@ impl MessageStore {
                     }
                 }
 
-                info!("Creating conversation");
+                info!("Creating group conversation");
                 let convo = ConversationDocument::new(
                     did,
                     name,
