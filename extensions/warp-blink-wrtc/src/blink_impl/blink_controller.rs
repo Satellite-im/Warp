@@ -549,6 +549,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             let info = data.get_info();
                             match
                             host_media::controller::init_recording(Mp4LoggerConfig {
+                                    own_id: own_id.clone(),
                                     call_id: info.call_id(),
                                     participants: info.participants(),
                                     log_path: output_dir.into(),

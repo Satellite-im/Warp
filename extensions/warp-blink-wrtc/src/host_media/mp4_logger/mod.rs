@@ -50,6 +50,7 @@ struct Mp4Logger {
 
 #[derive(Clone)]
 pub struct Mp4LoggerConfig {
+    pub own_id: DID,
     pub call_id: Uuid,
     pub participants: Vec<DID>,
     // pub video_codec: todo!(),

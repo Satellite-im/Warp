@@ -72,7 +72,7 @@ pub async fn reset() {
         DATA.muted = false;
         DATA.deafened = false;
     }
-    // mp4_logger::deinit().await;
+    mp4_logger::deinit();
 }
 
 pub async fn has_audio_source() -> bool {
@@ -94,6 +94,11 @@ pub async fn create_audio_source_track(
         None => return Err(Error::MicrophoneMissing),
     };
 
+    // drop the source track, causing it to clean itself up.
+    unsafe {
+        DATA.audio_source_track.take();
+    }
+
     let (muted, num_channels) = unsafe { (DATA.muted, DATA.audio_source_channels) };
     let mut source_track =
         SourceTrack::new(own_id, track, input_device, num_channels, ui_event_ch)?;
@@ -103,15 +108,9 @@ pub async fn create_audio_source_track(
     }
 
     unsafe {
-        if let Some(_track) = DATA.audio_source_track.replace(source_track) {
-            // todo: mp4 logger
-        }
-        if DATA.recording {
-            if let Some(_source_track) = DATA.audio_source_track.as_mut() {
-                // todo: mp4 logger
-            }
-        }
+        DATA.audio_source_track.replace(source_track);
     }
+
     Ok(())
 }
 
@@ -284,6 +283,7 @@ pub async fn undeafen() {
 pub async fn init_recording(config: Mp4LoggerConfig) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
+    let own_id = config.own_id.clone();
     unsafe {
         if DATA.recording {
             // this function was called twice for the same call. assume they mean to resume
@@ -294,9 +294,15 @@ pub async fn init_recording(config: Mp4LoggerConfig) -> anyhow::Result<()> {
     }
     mp4_logger::init(config)?;
 
-    // todo: hook up audio tracks
-
     unsafe {
+        if let Some(track) = DATA.audio_source_track.as_ref() {
+            track.attach_logger(&own_id);
+        }
+
+        if let Some(controller) = DATA.audio_sink_controller.as_ref() {
+            controller.attach_logger();
+        }
+
         DATA.recording = true;
     }
 

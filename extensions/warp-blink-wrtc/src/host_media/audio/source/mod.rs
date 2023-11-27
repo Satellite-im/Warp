@@ -180,9 +180,9 @@ impl SourceTrack {
         Ok(())
     }
 
-    pub fn attach_logger(&self, id: DID) {
+    pub fn attach_logger(&self, id: &DID) {
         let _ = self.cmd_ch.send(sender_task::Cmd::SetMp4Logger {
-            logger: mp4_logger::get_audio_logger(&id),
+            logger: mp4_logger::get_audio_logger(id),
         });
     }
 
