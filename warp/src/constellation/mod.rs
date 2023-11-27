@@ -12,8 +12,8 @@ use chrono::{DateTime, Utc};
 
 use directory::Directory;
 use dyn_clone::DynClone;
-use futures::Stream;
 use futures::stream::BoxStream;
+use futures::Stream;
 use item::Item;
 
 use serde::{Deserialize, Serialize};

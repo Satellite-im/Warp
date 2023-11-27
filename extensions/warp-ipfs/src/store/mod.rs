@@ -1,7 +1,7 @@
-pub mod event_subscription;
 pub mod conversation;
 pub mod discovery;
 pub mod document;
+pub mod event_subscription;
 pub mod files;
 pub mod identity;
 pub mod keystore;
