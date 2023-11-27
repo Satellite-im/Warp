@@ -140,7 +140,7 @@ pub fn get_audio_logger(peer_id: &DID) -> Result<Box<dyn Mp4LoggerInstance>> {
             log::debug!("getting audio logger for peer {}", peer_id);
             loggers::get_opus_logger(logger.tx.clone(), *track_id)
         }
-        None => bail!("no mp4 logger instance"),
+        None => Box::new(loggers::DummyLogger {}),
     };
 
     Ok(logger)

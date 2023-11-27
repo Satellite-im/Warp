@@ -2,6 +2,8 @@ use tokio::sync::mpsc::Sender;
 
 use super::{Mp4Fragment, Mp4LoggerInstance};
 
+mod dummy;
+pub use dummy::Logger as DummyLogger;
 mod opus;
 
 pub(crate) fn get_opus_logger(
