@@ -261,6 +261,7 @@ impl WarpIpfs {
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
                 enable_quic: !config.ipfs_setting.disable_quic,
+                quic_max_idle_timeout: Duration::from_secs(5),
                 ..Default::default()
             });
 
