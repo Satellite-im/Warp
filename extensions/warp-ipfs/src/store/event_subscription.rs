@@ -143,3 +143,54 @@ impl<T: Clone + Send + 'static> EventSubscriptionTask<T> {
         self.queue.push_back(event);
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use futures::{FutureExt, StreamExt};
+
+    use crate::store::event_subscription::EventSubscription;
+
+    #[tokio::test]
+    async fn emit_event() -> anyhow::Result<()> {
+        let pubsub = EventSubscription::<String>::new();
+        let mut stream = pubsub.subscribe().await?;
+        pubsub.emit(String::from("Hello, World")).await;
+        pubsub.emit(String::from("World, Hello")).await;
+        let ev = stream
+            .next()
+            .now_or_never()
+            .expect("Stream contains value")
+            .unwrap();
+
+        assert_eq!(ev, "Hello, World");
+        let ev = stream
+            .next()
+            .now_or_never()
+            .expect("Stream contains value")
+            .unwrap();
+
+        assert_eq!(ev, "World, Hello");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn multiple_emit_before_subscription() -> anyhow::Result<()> {
+        let pubsub = EventSubscription::<String>::new();
+        pubsub.emit(String::from("Hello, World")).await;
+        pubsub.emit(String::from("World, Hello")).await;
+
+        let stream = pubsub.subscribe().await?;
+
+        let list = tokio::time::timeout(Duration::from_secs(4), stream.take(2).collect::<Vec<_>>())
+            .await
+            .unwrap();
+
+        assert_eq!(list.len(), 2);
+
+        assert_eq!(list[0], "Hello, World");
+        assert_eq!(list[1], "World, Hello");
+        Ok(())
+    }
+}
