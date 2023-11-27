@@ -133,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_idle_connection_timeout(10)
         .set_transport_configuration(TransportConfig {
             timeout: Duration::from_secs(10),
+            quic_max_idle_timeout: Duration::from_secs(5),
             ..Default::default()
         })
         .listen_as_external_addr()
