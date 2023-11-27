@@ -6,7 +6,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::sync::{broadcast, mpsc::UnboundedSender, Notify};
+use tokio::sync::{
+    broadcast,
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    Notify,
+};
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::{
     media::{io::sample_builder::SampleBuilder, Sample},
@@ -29,7 +33,12 @@ pub struct Args {
     pub should_quit: Arc<Notify>,
     pub silenced: Arc<AtomicBool>,
     pub packet_tx: UnboundedSender<Sample>,
+    pub cmd_ch: UnboundedReceiver<Cmd>,
     pub ui_event_ch: broadcast::Sender<BlinkEventKind>,
+}
+
+pub enum Cmd {
+    SetMp4Logger { logger: Box<dyn Mp4LoggerInstance> },
 }
 
 pub async fn run(args: Args) {
@@ -40,6 +49,7 @@ pub async fn run(args: Args) {
         silenced,
         packet_tx,
         ui_event_ch,
+        mut cmd_ch,
         peer_id,
     } = args;
 
@@ -63,6 +73,18 @@ pub async fn run(args: Args) {
                 Ok(y) => y,
                 Err(e) => {
                     log::debug!("audio receiver task for peer {peer_id} terminated by error: {e}");
+                    break;
+                }
+            },
+            opt = cmd_ch.recv() => match opt {
+                Some(cmd) => match cmd {
+                    Cmd::SetMp4Logger { logger } => {
+                        mp4_logger = logger;
+                        continue;
+                    }
+                },
+                None => {
+                    log::debug!("receiver task terminated: cmd channel closed");
                     break;
                 }
             },

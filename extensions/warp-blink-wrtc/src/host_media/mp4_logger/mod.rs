@@ -129,21 +129,23 @@ pub fn deinit() {
     let _ = MP4_LOGGER.write().take();
 }
 
-pub fn get_audio_logger(peer_id: &DID) -> Result<Box<dyn Mp4LoggerInstance>> {
+pub fn get_audio_logger(peer_id: &DID) -> Box<dyn Mp4LoggerInstance> {
     let logger = match MP4_LOGGER.read().as_ref() {
         Some(logger) => {
-            let track_id = logger
-                .audio_track_ids
-                .get(peer_id)
-                .ok_or(anyhow::anyhow!("no audio track found for peer"))?;
-
+            let track_id = match logger.audio_track_ids.get(peer_id) {
+                Some(x) => x,
+                None => {
+                    log::error!("audio track id not found for peer");
+                    return Box::new(loggers::DummyLogger {});
+                }
+            };
             log::debug!("getting audio logger for peer {}", peer_id);
             loggers::get_opus_logger(logger.tx.clone(), *track_id)
         }
         None => Box::new(loggers::DummyLogger {}),
     };
 
-    Ok(logger)
+    logger
 }
 
 // pub fn get_video_logger(peer_id: DID) -> Option<()> {

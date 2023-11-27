@@ -1,15 +1,14 @@
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
 };
 
 use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
-use ringbuf::{HeapRb};
+use ringbuf::HeapRb;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{broadcast, mpsc, Notify};
 use warp::error::Error;
 use warp::{blink::BlinkEventKind, crypto::DID};
@@ -29,6 +28,7 @@ pub struct SourceTrack {
     quit_sender_task: Arc<Notify>,
     muted: bool,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
+    cmd_ch: UnboundedSender<sender_task::Cmd>,
     track: Arc<TrackLocalStaticRTP>,
 }
 
@@ -116,6 +116,7 @@ impl SourceTrack {
         let encoder = opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip)
             .map_err(|e| Error::OtherWithContext(e.to_string()))?;
 
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<sender_task::Cmd>();
         let (encoded_tx, encoded_rx) = mpsc::unbounded_channel::<FramerOutput>();
         let ring = HeapRb::<f32>::new(48000 * 5);
         let (producer, consumer) = ring.split();
@@ -135,7 +136,7 @@ impl SourceTrack {
         });
 
         // spawn the sender task
-        let logger = mp4_logger::get_audio_logger(own_id)?;
+        let logger = mp4_logger::get_audio_logger(own_id);
         let notify = quit_sender_task.clone();
         let ui_event_ch2 = ui_event_ch.clone();
         let track2 = track.clone();
@@ -144,6 +145,7 @@ impl SourceTrack {
                 track: track2,
                 mp4_logger: logger,
                 ui_event_ch: ui_event_ch2,
+                cmd_ch: cmd_rx,
                 rx: encoded_rx,
                 notify,
                 num_samples: OPUS_SAMPLES,
@@ -158,6 +160,7 @@ impl SourceTrack {
             quit_sender_task,
             muted: true,
             ui_event_ch,
+            cmd_ch: cmd_tx,
         })
     }
 
@@ -175,6 +178,12 @@ impl SourceTrack {
             .map_err(|e| Error::OtherWithContext(e.to_string()))?;
         self.muted = true;
         Ok(())
+    }
+
+    pub fn attach_logger(&self, id: DID) {
+        let _ = self.cmd_ch.send(sender_task::Cmd::SetMp4Logger {
+            logger: mp4_logger::get_audio_logger(&id),
+        });
     }
 
     pub fn get_track(&self) -> Arc<TrackLocalStaticRTP> {

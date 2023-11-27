@@ -10,8 +10,12 @@ use cpal::{
     traits::{DeviceTrait, StreamTrait},
     BuildStreamError,
 };
-use ringbuf::{HeapRb};
-use tokio::sync::{broadcast, mpsc, Notify};
+use ringbuf::HeapRb;
+use tokio::sync::{
+    broadcast,
+    mpsc::{self, UnboundedSender},
+    Notify,
+};
 use warp::error::Error;
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::{media::Sample, track::track_remote::TrackRemote};
@@ -28,6 +32,7 @@ mod receiver_task;
 struct ReceiverTask {
     should_quit: Arc<Notify>,
     stream: cpal::Stream,
+    cmd_ch: UnboundedSender<receiver_task::Cmd>,
 }
 
 impl Drop for ReceiverTask {
@@ -135,10 +140,11 @@ impl SinkTrackController {
         peer_id: DID,
         track: Arc<TrackRemote>,
     ) -> Result<(), Error> {
-        let logger = mp4_logger::get_audio_logger(&peer_id)?;
+        let logger = mp4_logger::get_audio_logger(&peer_id);
         let decoder = opus::Decoder::new(48000, opus::Channels::Mono)
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
 
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<receiver_task::Cmd>();
         // create channel pair to go from receiver task to decoder thread
         let (packet_tx, packet_rx) = mpsc::unbounded_channel::<Sample>();
 
@@ -169,6 +175,7 @@ impl SinkTrackController {
         let receiver_task = ReceiverTask {
             should_quit: Arc::new(Notify::new()),
             stream,
+            cmd_ch: cmd_tx,
         };
 
         let should_quit = receiver_task.should_quit.clone();
@@ -184,6 +191,7 @@ impl SinkTrackController {
                 silenced,
                 packet_tx,
                 ui_event_ch,
+                cmd_ch: cmd_rx,
             })
             .await;
         });
@@ -274,5 +282,13 @@ impl SinkTrackController {
         }
 
         Ok(())
+    }
+
+    pub fn attach_logger(&self) {
+        for (id, task) in self.receiver_tasks.iter() {
+            let _ = task.cmd_ch.send(receiver_task::Cmd::SetMp4Logger {
+                logger: mp4_logger::get_audio_logger(id),
+            });
+        }
     }
 }

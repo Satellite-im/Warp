@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use crate::host_media::{
     audio::utils::{FramerOutput, SpeechDetector},
-    mp4_logger::{Mp4LoggerInstance},
+    mp4_logger::Mp4LoggerInstance,
 };
 
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc::UnboundedReceiver, Notify};
-use warp::{blink::BlinkEventKind};
+use warp::blink::BlinkEventKind;
 use webrtc::{
     rtp::{self, extension::audio_level_extension::AudioLevelExtension, packetizer::Packetizer},
     track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
@@ -18,8 +18,13 @@ pub struct Args {
     pub mp4_logger: Box<dyn Mp4LoggerInstance>,
     pub ui_event_ch: broadcast::Sender<BlinkEventKind>,
     pub rx: UnboundedReceiver<FramerOutput>,
+    pub cmd_ch: UnboundedReceiver<Cmd>,
     pub notify: Arc<Notify>,
     pub num_samples: usize,
+}
+
+pub enum Cmd {
+    SetMp4Logger { logger: Box<dyn Mp4LoggerInstance> },
 }
 
 pub async fn run(args: Args) {
@@ -28,6 +33,7 @@ pub async fn run(args: Args) {
         mut mp4_logger,
         ui_event_ch,
         mut rx,
+        mut cmd_ch,
         notify,
         num_samples,
     } = args;
@@ -58,7 +64,19 @@ pub async fn run(args: Args) {
     let mut speech_detector = SpeechDetector::new(10, 100);
 
     loop {
-        let frame = tokio::select! {
+        let frame: FramerOutput = tokio::select! {
+            opt = cmd_ch.recv() => match opt {
+                Some(cmd) => match cmd {
+                    Cmd::SetMp4Logger { logger } => {
+                        mp4_logger = logger;
+                        continue;
+                    }
+                },
+                None => {
+                    log::debug!("sender task terminated: cmd channel closed");
+                    break;
+                }
+            },
             _ = notify.notified() => {
                 log::debug!("sender task terminated via notify");
                 break;
