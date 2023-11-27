@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use futures::channel::mpsc::{unbounded, UnboundedSender};
+use futures::channel::mpsc::{channel, Sender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::{BoxStream, SelectAll};
 use futures::{SinkExt, Stream, StreamExt};
@@ -45,8 +45,7 @@ use super::identity::IdentityStore;
 use super::keystore::Keystore;
 use super::{verify_serde_sig, ConversationEvents, MessagingEvents};
 
-type ConversationSender =
-    UnboundedSender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
+type ConversationSender = Sender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -731,7 +730,7 @@ impl MessageStore {
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
-        let (tx, mut rx) = unbounded();
+        let (tx, mut rx) = channel(1);
         self.conversation_sender
             .write()
             .await
@@ -1330,7 +1329,7 @@ impl MessageStore {
             info!("Attempting to end task for {conversation_id}");
             task.abort();
             info!("Task for {conversation_id} has ended");
-            if let Some(tx) = self
+            if let Some(mut tx) = self
                 .conversation_sender
                 .write()
                 .await
@@ -1446,17 +1445,17 @@ impl MessageStore {
 
                 info!(%conversation_id,"{} conversation created", conversation_type);
 
+                for recipient in list.iter().filter(|d| did.ne(d)) {
+                    if let Err(e) = self.request_key(conversation_id, recipient).await {
+                        tracing::warn!("Failed to send exchange request to {recipient}: {e}");
+                    }
+                }
+
                 if let Err(e) = self
                     .event
                     .send(RayGunEventKind::ConversationCreated { conversation_id })
                 {
                     error!("Error broadcasting event: {e}");
-                }
-
-                for recipient in list.iter().filter(|d| did.ne(d)) {
-                    if let Err(e) = self.request_key(conversation_id, recipient).await {
-                        tracing::warn!("Failed to send exchange request to {recipient}: {e}");
-                    }
                 }
             }
             ConversationEvents::LeaveConversation {
@@ -1888,16 +1887,16 @@ impl MessageStore {
             }
         }
 
-        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-            conversation_id: conversation.id(),
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
-
         for recipient in recipient.iter().filter(|d| own_did.ne(d)) {
             if let Err(e) = self.request_key(conversation.id(), recipient).await {
                 tracing::warn!("Failed to send exchange request to {recipient}: {e}");
             }
+        }
+
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
         }
 
         Ok(Conversation::from(&conversation))
@@ -2500,11 +2499,9 @@ impl MessageStore {
         self.publish(conversation_id, None, event, true).await?;
 
         if broadcast {
-            let new_event = ConversationEvents::DeleteConversation {
-                conversation_id: conversation.id(),
-            };
+            let new_event = ConversationEvents::DeleteConversation { conversation_id };
 
-            self.send_single_conversation_event(did_key, conversation.id(), new_event)
+            self.send_single_conversation_event(did_key, conversation_id, new_event)
                 .await?;
         }
         Ok(())
