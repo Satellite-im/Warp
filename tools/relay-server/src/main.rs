@@ -130,9 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .fd_limit(FDLimit::Max)
         .set_keypair(keypair)
-        .set_idle_connection_timeout(10)
+        .set_idle_connection_timeout(30)
         .set_transport_configuration(TransportConfig {
-            timeout: Duration::from_secs(10),
             quic_max_idle_timeout: Duration::from_secs(5),
             ..Default::default()
         })
