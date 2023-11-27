@@ -121,7 +121,10 @@ impl<T: Clone + Send + 'static> EventSubscriptionTask<T> {
                 Some(command) = self.rx.next() => {
                     match command {
                         Command::Subscribe { response } => {
-                            _ = response.send(self.subscribe())
+                            _ = response.send(self.subscribe());
+                            if let Some(w) = self.waker.take() {
+                                w.wake();
+                            }
                         },
                         Command::Emit { event } => self.emit(event),
                     }
@@ -138,8 +141,5 @@ impl<T: Clone + Send + 'static> EventSubscriptionTask<T> {
 
     fn emit(&mut self, event: T) {
         self.queue.push_back(event);
-        if let Some(waker) = self.waker.take() {
-            waker.wake();
-        }
     }
 }
