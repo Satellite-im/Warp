@@ -10,7 +10,6 @@ use rust_ipfs::{
     unixfs::{AddOpt, AddOption, UnixfsStatus},
     Ipfs, IpfsPath,
 };
-use tokio::sync::broadcast;
 use tokio_util::io::ReaderStream;
 use warp::{
     constellation::{
@@ -26,7 +25,7 @@ use crate::{
     to_file_type,
 };
 
-use super::{ecdh_decrypt, ecdh_encrypt, get_keypair_did};
+use super::{ecdh_decrypt, ecdh_encrypt, event_subscription::EventSubscription, get_keypair_did};
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -40,7 +39,7 @@ pub struct FileStore {
     location_path: Option<PathBuf>,
 
     ipfs: Ipfs,
-    constellation_tx: broadcast::Sender<ConstellationEventKind>,
+    constellation_tx: EventSubscription<ConstellationEventKind>,
 
     config: config::Config,
 }
@@ -49,7 +48,7 @@ impl FileStore {
     pub async fn new(
         ipfs: Ipfs,
         config: &Config,
-        constellation_tx: broadcast::Sender<ConstellationEventKind>,
+        constellation_tx: EventSubscription<ConstellationEventKind>,
     ) -> Result<Self, Error> {
         let mut index_cid = None;
 
@@ -435,10 +434,10 @@ impl FileStore {
                 total: Some(total_written),
             };
 
-            let _ = fs.constellation_tx.send(ConstellationEventKind::Uploaded {
+            fs.constellation_tx.emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
                 size: Some(total_written)
-            }).ok();
+            }).await;
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
@@ -460,14 +459,14 @@ impl FileStore {
         }
 
         //TODO: Validate file against the hashed reference
-        if let Err(_e) = self
-            .constellation_tx
-            .send(ConstellationEventKind::Downloaded {
+        self.constellation_tx
+            .emit(ConstellationEventKind::Downloaded {
                 filename: file.name(),
                 size: Some(file.size()),
                 location: Some(PathBuf::from(path)),
             })
-        {}
+            .await;
+
         Ok(())
     }
 
@@ -554,13 +553,12 @@ impl FileStore {
         self.current_directory()?.add_item(file)?;
 
         if let Err(_e) = self.export().await {}
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Uploaded {
+        self.constellation_tx
+            .emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
                 size: Some(total_written),
             })
-            .ok();
+            .await;
         Ok(())
     }
 
@@ -576,14 +574,14 @@ impl FileStore {
             .map_err(anyhow::Error::new)?;
 
         //TODO: Validate file against the hashed reference
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Downloaded {
+        self.constellation_tx
+            .emit(ConstellationEventKind::Downloaded {
                 filename: file.name(),
                 size: Some(file.size()),
                 location: None,
             })
-            .ok();
+            .await;
+
         Ok(buffer)
     }
 
@@ -710,10 +708,10 @@ impl FileStore {
                 total: Some(total_written),
             };
 
-            let _ = fs.constellation_tx.send(ConstellationEventKind::Uploaded {
+            fs.constellation_tx.emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
                 size: Some(total_written)
-            }).ok();
+            }).await;
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
@@ -747,7 +745,7 @@ impl FileStore {
                 }
             }
 
-            let _ = tx.send(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).ok();
+            let _ = tx.emit(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).await;
         };
 
         //TODO: Validate file against the hashed reference
@@ -785,12 +783,11 @@ impl FileStore {
         let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
         tracing::info!(blocks = blocks.len(), "blocks removed");
 
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Deleted {
+        self.constellation_tx
+            .emit(ConstellationEventKind::Deleted {
                 item_name: name.to_string(),
             })
-            .ok();
+            .await;
 
         Ok(())
     }
@@ -808,13 +805,12 @@ impl FileStore {
 
         directory.rename_item(current, new)?;
         if let Err(_e) = self.export().await {}
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Renamed {
+        self.constellation_tx
+            .emit(ConstellationEventKind::Renamed {
                 old_item_name: current.to_string(),
                 new_item_name: new.to_string(),
             })
-            .ok();
+            .await;
         Ok(())
     }
 

@@ -1,3 +1,4 @@
+pub mod event_subscription;
 pub mod conversation;
 pub mod discovery;
 pub mod document;
