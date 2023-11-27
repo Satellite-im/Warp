@@ -2,7 +2,6 @@ use std::{collections::HashSet, ffi::OsStr, path::PathBuf, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use futures::{
-    pin_mut,
     stream::{self, BoxStream},
     StreamExt, TryStreamExt,
 };
@@ -571,14 +570,10 @@ impl FileStore {
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs.cat_unixfs(reference.parse::<IpfsPath>()?, None);
-        pin_mut!(stream);
-
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let mut bytes = data.map_err(anyhow::Error::from)?;
-            buffer.append(&mut bytes);
-        }
+        let buffer = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::new)?;
 
         //TODO: Validate file against the hashed reference
         let _ = self
@@ -779,46 +774,16 @@ impl FileStore {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
 
-        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, true).await?;
         }
 
-        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
-        for s_cid in new_pinned_blocks.iter() {
-            pinned_blocks.remove(s_cid);
-        }
-
-        for cid in pinned_blocks {
-            ipfs.remove_block(cid, false).await?;
-        }
-
         directory.remove_item(&item.name())?;
+
         if let Err(_e) = self.export().await {}
+
+        let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
+        tracing::info!(blocks = blocks.len(), "blocks removed");
 
         let _ = self
             .constellation_tx
@@ -884,15 +849,10 @@ impl FileStore {
 
         let reference = file.reference().ok_or(Error::FileNotFound)?;
 
-        let stream = ipfs.cat_unixfs(reference.parse::<IpfsPath>()?, None);
-
-        pin_mut!(stream);
-
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let bytes = data.map_err(anyhow::Error::from)?;
-            buffer.extend(bytes);
-        }
+        let buffer = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::from)?;
 
         let ((width, height), exact) = (
             self.config.thumbnail_size,
