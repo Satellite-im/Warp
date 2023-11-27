@@ -331,7 +331,7 @@ impl WarpIpfs {
 
         let ipfs = uninitialized.start().await?;
 
-        let mut relay_peers = vec![];
+        let mut relay_peers = HashSet::new();
 
         for mut addr in config
             .ipfs_setting
@@ -360,7 +360,7 @@ impl WarpIpfs {
                 continue;
             }
 
-            relay_peers.push(peer_id);
+            relay_peers.insert(peer_id);
         }
 
         if relay_peers.is_empty() {
