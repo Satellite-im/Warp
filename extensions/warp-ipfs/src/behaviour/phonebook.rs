@@ -1,3 +1,5 @@
+mod handler;
+
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
@@ -12,6 +14,7 @@ use rust_ipfs::libp2p::{
     Multiaddr, PeerId,
 };
 use rust_ipfs::NetworkBehaviour;
+use void::Void;
 use warp::multipass::MultiPassEventKind;
 
 use crate::store::{event_subscription::EventSubscription, PeerIdExt};
@@ -19,6 +22,8 @@ use crate::store::{event_subscription::EventSubscription, PeerIdExt};
 use futures::{channel::oneshot::Sender as OneshotSender, StreamExt};
 
 use warp::error::Error;
+
+use self::handler::In;
 
 pub enum PhoneBookCommand {
     AddEntry {
@@ -120,8 +125,8 @@ impl Behaviour {
 }
 
 impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
-    type ToSwarm = void::Void;
+    type ConnectionHandler = handler::Handler;
+    type ToSwarm = Void;
 
     fn handle_pending_inbound_connection(
         &mut self,
@@ -145,21 +150,21 @@ impl NetworkBehaviour for Behaviour {
     fn handle_established_inbound_connection(
         &mut self,
         _: ConnectionId,
-        _: PeerId,
+        peer_id: PeerId,
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+        Ok(handler::Handler::new(self.entry.contains(&peer_id)))
     }
 
     fn handle_established_outbound_connection(
         &mut self,
         _: ConnectionId,
-        _: PeerId,
+        peer_id: PeerId,
         _: &Multiaddr,
         _: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+        Ok(handler::Handler::new(self.entry.contains(&peer_id)))
     }
 
     fn on_connection_handler_event(
@@ -194,6 +199,14 @@ impl NetworkBehaviour for Behaviour {
                     tracing::info!("{peer_id} has connected");
                     self.send_online_event(peer_id);
                 }
+
+                if self.entry.contains(&peer_id) {
+                    self.events.push_back(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: rust_ipfs::libp2p::swarm::NotifyHandler::One(connection_id),
+                        event: In::Reserve,
+                    })
+                }
             }
             FromSwarm::ConnectionClosed(ConnectionClosed {
                 peer_id,
@@ -208,6 +221,7 @@ impl NetworkBehaviour for Behaviour {
                         entry.remove();
                     }
                 }
+
                 if remaining_established == 0 && self.entry.contains(&peer_id) {
                     tracing::info!("{peer_id} has disconnected");
                     self.send_offline_event(peer_id);
@@ -231,6 +245,15 @@ impl NetworkBehaviour for Behaviour {
                     }
 
                     self.send_online_event(peer_id);
+
+                    if self.connections.contains_key(&peer_id) {
+                        self.events.push_back(ToSwarm::NotifyHandler {
+                            peer_id,
+                            handler: rust_ipfs::libp2p::swarm::NotifyHandler::Any,
+                            event: In::Reserve,
+                        })
+                    }
+
                     let _ = response.send(Ok(()));
                 }
                 Poll::Ready(Some(PhoneBookCommand::RemoveEntry { peer_id, response })) => {
@@ -240,6 +263,15 @@ impl NetworkBehaviour for Behaviour {
                     }
 
                     self.send_offline_event(peer_id);
+
+                    if self.connections.contains_key(&peer_id) {
+                        self.events.push_back(ToSwarm::NotifyHandler {
+                            peer_id,
+                            handler: rust_ipfs::libp2p::swarm::NotifyHandler::Any,
+                            event: In::Release,
+                        })
+                    }
+
                     let _ = response.send(Ok(()));
                 }
                 Poll::Ready(None) => unreachable!("Channels are owned"),
