@@ -16,7 +16,6 @@ use ipfs::libp2p::core::upgrade::Version;
 use ipfs::libp2p::Transport;
 use ipfs::p2p::{
     IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
-    UpdateMode,
 };
 
 use rust_ipfs as ipfs;
@@ -259,7 +258,6 @@ impl WarpIpfs {
             .set_keypair(keypair)
             .with_rendezvous_client()
             .set_transport_configuration(TransportConfig {
-                yamux_update_mode: UpdateMode::Read,
                 enable_quic: !config.ipfs_setting.disable_quic,
                 ..Default::default()
             });
