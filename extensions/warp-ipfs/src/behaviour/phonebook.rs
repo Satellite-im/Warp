@@ -14,7 +14,7 @@ use rust_ipfs::libp2p::{
 use rust_ipfs::NetworkBehaviour;
 use warp::multipass::MultiPassEventKind;
 
-use crate::store::PeerIdExt;
+use crate::store::{PeerIdExt, event_subscription::EventSubscription};
 
 use futures::{channel::oneshot::Sender as OneshotSender, StreamExt};
 
@@ -41,14 +41,14 @@ pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, Vec<ConnectionId>>,
     entry: HashSet<PeerId>,
-    event: tokio::sync::broadcast::Sender<MultiPassEventKind>,
+    event: EventSubscription<MultiPassEventKind>,
     command: futures::channel::mpsc::Receiver<PhoneBookCommand>,
     entry_state: HashMap<PeerId, PhoneBookState>,
 }
 
 impl Behaviour {
     pub fn new(
-        event: tokio::sync::broadcast::Sender<MultiPassEventKind>,
+        event: EventSubscription<MultiPassEventKind>,
         command: futures::channel::mpsc::Receiver<PhoneBookCommand>,
     ) -> Self {
         Behaviour {
@@ -89,7 +89,7 @@ impl Behaviour {
 
         let event = self.event.clone();
 
-        let _ = event.send(MultiPassEventKind::IdentityOnline { did });
+        event.try_emit(MultiPassEventKind::IdentityOnline { did });
     }
 
     #[tracing::instrument(skip(self))]
@@ -115,7 +115,7 @@ impl Behaviour {
 
         let event = self.event.clone();
 
-        let _ = event.send(MultiPassEventKind::IdentityOffline { did });
+        event.try_emit(MultiPassEventKind::IdentityOffline { did });
     }
 }
 

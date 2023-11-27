@@ -26,10 +26,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::document::ExtractedRootDocument;
+use store::event_subscription::EventSubscription;
 use store::files::FileStore;
 use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
-use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::log::{error, info, warn};
 use tracing::{debug, trace};
@@ -83,9 +83,9 @@ pub struct WarpIpfs {
 
     initialized: Arc<AtomicBool>,
 
-    multipass_tx: broadcast::Sender<MultiPassEventKind>,
-    raygun_tx: broadcast::Sender<RayGunEventKind>,
-    constellation_tx: broadcast::Sender<ConstellationEventKind>,
+    multipass_tx: EventSubscription<MultiPassEventKind>,
+    raygun_tx: EventSubscription<RayGunEventKind>,
+    constellation_tx: EventSubscription<ConstellationEventKind>,
 }
 
 #[derive(Default)]
@@ -138,9 +138,9 @@ impl WarpIpfsBuilder {
 
 impl WarpIpfs {
     pub async fn new(config: Config, tesseract: Tesseract) -> anyhow::Result<WarpIpfs> {
-        let (multipass_tx, _) = broadcast::channel(1024);
-        let (raygun_tx, _) = tokio::sync::broadcast::channel(1024);
-        let (constellation_tx, _) = tokio::sync::broadcast::channel(1024);
+        let multipass_tx = EventSubscription::new();
+        let raygun_tx = EventSubscription::new();
+        let constellation_tx = EventSubscription::new();
 
         let identity = WarpIpfs {
             config,
@@ -1179,7 +1179,7 @@ impl Friends for WarpIpfs {
 impl FriendsEvent for WarpIpfs {
     async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let store = self.identity_store(true).await?;
-        Ok(MultiPassEventStream(store.subscribe()))
+        store.subscribe().await.map(MultiPassEventStream)
     }
 }
 
@@ -1445,19 +1445,8 @@ impl RayGunGroupConversation for WarpIpfs {
 #[async_trait::async_trait]
 impl RayGunStream for WarpIpfs {
     async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
-        let mut rx = self.raygun_tx.subscribe();
-
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-
-        Ok(RayGunEventStream(Box::pin(stream)))
+        let rx = self.raygun_tx.subscribe().await?;
+        Ok(RayGunEventStream(rx))
     }
     async fn get_conversation_stream(
         &mut self,
@@ -1581,19 +1570,8 @@ impl Constellation for WarpIpfs {
 #[async_trait::async_trait]
 impl ConstellationEvent for WarpIpfs {
     async fn subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
-        let mut rx = self.constellation_tx.subscribe();
-
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-
-        Ok(ConstellationEventStream(stream.boxed()))
+        let rx = self.constellation_tx.subscribe().await?;
+        Ok(ConstellationEventStream(rx))
     }
 }
 

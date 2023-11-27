@@ -41,6 +41,7 @@ use crate::store::{
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::discovery::Discovery;
 use super::document::conversation::Conversations;
+use super::event_subscription::EventSubscription;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
 use super::{verify_serde_sig, ConversationEvents, MessagingEvents};
@@ -82,7 +83,7 @@ pub struct MessageStore {
     did: Arc<DID>,
 
     // Event
-    event: BroadcastSender<RayGunEventKind>,
+    event: EventSubscription<RayGunEventKind>,
 
     spam_filter: Arc<Option<SpamFilter>>,
 
@@ -100,7 +101,7 @@ impl MessageStore {
         filesystem: Option<Box<dyn Constellation>>,
         _: bool,
         interval_ms: u64,
-        event: BroadcastSender<RayGunEventKind>,
+        event: EventSubscription<RayGunEventKind>,
         (check_spam, with_friends): (bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
@@ -164,7 +165,11 @@ impl MessageStore {
 
                 let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
 
-                let mut identity_stream = store.identity.subscribe();
+                let mut identity_stream = store
+                    .identity
+                    .subscribe()
+                    .await
+                    .expect("Channel isnt dropped");
 
                 loop {
                     tokio::select! {
@@ -1384,11 +1389,11 @@ impl MessageStore {
 
                 self.start_task(convo.id(), stream).await;
 
-                if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                    conversation_id: convo.id(),
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.event
+                    .emit(RayGunEventKind::ConversationCreated {
+                        conversation_id: convo.id(),
+                    })
+                    .await;
             }
             ConversationEvents::NewGroupConversation {
                 creator,
@@ -1451,12 +1456,9 @@ impl MessageStore {
                     }
                 }
 
-                if let Err(e) = self
-                    .event
-                    .send(RayGunEventKind::ConversationCreated { conversation_id })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.event
+                    .emit(RayGunEventKind::ConversationCreated { conversation_id })
+                    .await;
             }
             ConversationEvents::LeaveConversation {
                 conversation_id,
@@ -1576,12 +1578,9 @@ impl MessageStore {
                     warn!("topic should have been unsubscribed after dropping conversation.");
                 }
 
-                if let Err(e) = self
-                    .event
-                    .send(RayGunEventKind::ConversationDeleted { conversation_id })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.event
+                    .emit(RayGunEventKind::ConversationDeleted { conversation_id })
+                    .await;
             }
         }
         Ok(())
@@ -1754,11 +1753,11 @@ impl MessageStore {
             }
         }
 
-        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-            conversation_id: convo_id,
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
+        self.event
+            .emit(RayGunEventKind::ConversationCreated {
+                conversation_id: convo_id,
+            })
+            .await;
 
         Ok(Conversation::from(&conversation))
     }
@@ -1893,11 +1892,11 @@ impl MessageStore {
             }
         }
 
-        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-            conversation_id: conversation.id(),
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
+        self.event
+            .emit(RayGunEventKind::ConversationCreated {
+                conversation_id: conversation.id(),
+            })
+            .await;
 
         Ok(Conversation::from(&conversation))
     }
@@ -2020,12 +2019,10 @@ impl MessageStore {
             }
         });
 
-        if let Err(e) = self
-            .event
-            .send(RayGunEventKind::ConversationDeleted { conversation_id })
-        {
-            error!("Error broadcasting event: {e}");
-        }
+        self.event
+            .emit(RayGunEventKind::ConversationDeleted { conversation_id })
+            .await;
+
         Ok(())
     }
 

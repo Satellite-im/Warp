@@ -63,6 +63,10 @@ impl<T: Clone + Send + 'static> EventSubscription<T> {
     pub async fn emit(&self, event: T) {
         let _ = self.tx.clone().send(Command::Emit { event }).await;
     }
+
+    pub fn try_emit(&self, event: T) {
+        let _ = self.tx.clone().try_send(Command::Emit { event });
+    }
 }
 
 impl<T: Clone + Send + 'static> Drop for EventSubscription<T> {
@@ -73,7 +77,7 @@ impl<T: Clone + Send + 'static> Drop for EventSubscription<T> {
     }
 }
 
-pub struct EventSubscriptionTask<T: Clone + Send + 'static> {
+struct EventSubscriptionTask<T: Clone + Send + 'static> {
     senders: Vec<Sender<T>>,
     queue: VecDeque<T>,
     rx: Receiver<Command<T>>,

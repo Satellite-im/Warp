@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::RwLock;
 use tracing::{
     log::{self, error},
     warn,
@@ -47,6 +47,7 @@ use super::{
         root::RootDocumentMap, ExtractedRootDocument, RootDocument,
     },
     ecdh_decrypt, ecdh_encrypt,
+    event_subscription::EventSubscription,
     phonebook::PhoneBook,
     queue::Queue,
 };
@@ -76,7 +77,7 @@ pub struct IdentityStore {
 
     tesseract: Tesseract,
 
-    event: broadcast::Sender<MultiPassEventKind>,
+    event: EventSubscription<MultiPassEventKind>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,7 +264,7 @@ impl IdentityStore {
         ipfs: Ipfs,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        tx: broadcast::Sender<MultiPassEventKind>,
+        tx: EventSubscription<MultiPassEventKind>,
         phonebook: PhoneBook,
         config: &config::Config,
         discovery: Discovery,
@@ -591,7 +592,8 @@ impl IdentityStore {
                         }
                     }
 
-                    self.emit_event(MultiPassEventKind::FriendRequestReceived { from });
+                    self.emit_event(MultiPassEventKind::FriendRequestReceived { from })
+                        .await;
                 }
 
                 let payload = RequestResponsePayload::new(&self.did_key, Event::Response)?;
@@ -613,7 +615,8 @@ impl IdentityStore {
 
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
                     did: data.sender,
-                });
+                })
+                .await;
             }
             Event::Remove => {
                 if self.is_friend(&data.sender).await? {
@@ -634,7 +637,8 @@ impl IdentityStore {
 
                 self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
                     did: data.sender,
-                });
+                })
+                .await;
             }
             Event::Block => {
                 let sender = data.sender;
@@ -642,11 +646,13 @@ impl IdentityStore {
                 if self.has_request_from(&sender).await? {
                     self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
                         did: sender.clone(),
-                    });
+                    })
+                    .await;
                 } else if self.sent_friend_request_to(&sender).await? {
                     self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
                         did: sender.clone(),
-                    });
+                    })
+                    .await;
                 }
 
                 let list = self.list_all_raw_request().await?;
@@ -665,7 +671,8 @@ impl IdentityStore {
                         self.request(&sender, RequestOption::Identity)
                     );
 
-                    self.emit_event(MultiPassEventKind::BlockedBy { did: sender });
+                    self.emit_event(MultiPassEventKind::BlockedBy { did: sender })
+                        .await;
                 }
 
                 if let Some(tx) = signal.take() {
@@ -683,7 +690,8 @@ impl IdentityStore {
                         self.request(&sender, RequestOption::Identity)
                     );
 
-                    self.emit_event(MultiPassEventKind::UnblockedBy { did: sender });
+                    self.emit_event(MultiPassEventKind::UnblockedBy { did: sender })
+                        .await;
                 }
             }
             Event::Response => {
@@ -1070,9 +1078,11 @@ impl IdentityStore {
                                             log::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
 
                                             if emit {
-                                                store.emit_event(
-                                                    MultiPassEventKind::IdentityUpdate { did },
-                                                );
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate { did },
+                                                    )
+                                                    .await;
                                             }
 
                                             Ok::<_, anyhow::Error>(())
@@ -1127,9 +1137,11 @@ impl IdentityStore {
                                             log::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
                                             if emit {
-                                                store.emit_event(
-                                                    MultiPassEventKind::IdentityUpdate { did },
-                                                );
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate { did },
+                                                    )
+                                                    .await;
                                             }
 
                                             Ok::<_, anyhow::Error>(())
@@ -1142,7 +1154,8 @@ impl IdentityStore {
                                 log::trace!("Emitting identity update event");
                                 self.emit_event(MultiPassEventKind::IdentityUpdate {
                                     did: document.did.clone(),
-                                });
+                                })
+                                .await;
                             }
                         }
                     }
@@ -1156,7 +1169,8 @@ impl IdentityStore {
                             UpdateEvents::Enabled
                         ) {
                             let did = document_did.clone();
-                            self.emit_event(MultiPassEventKind::IdentityUpdate { did });
+                            self.emit_event(MultiPassEventKind::IdentityUpdate { did })
+                                .await;
                         }
 
                         let mut emit = false;
@@ -1214,9 +1228,11 @@ impl IdentityStore {
 
                                                 log::trace!("Image pointed to {picture} for {did} downloaded");
 
-                                                store.emit_event(
-                                                    MultiPassEventKind::IdentityUpdate { did },
-                                                );
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate { did },
+                                                    )
+                                                    .await;
 
                                                 Ok::<_, anyhow::Error>(())
                                             }
@@ -1247,9 +1263,11 @@ impl IdentityStore {
 
                                                 log::trace!("Image pointed to {banner} for {did} downloaded");
 
-                                                store.emit_event(
-                                                    MultiPassEventKind::IdentityUpdate { did },
-                                                );
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate { did },
+                                                    )
+                                                    .await;
 
                                                 Ok::<_, anyhow::Error>(())
                                             }
@@ -1281,7 +1299,9 @@ impl IdentityStore {
                             .await?;
 
                             debug_assert_eq!(added_cid, cid);
-                            store.emit_event(MultiPassEventKind::IdentityUpdate { did });
+                            store
+                                .emit_event(MultiPassEventKind::IdentityUpdate { did })
+                                .await;
                             Ok::<_, Error>(())
                         }
                     });
@@ -1776,8 +1796,8 @@ impl IdentityStore {
 
     pub fn clear_internal_cache(&mut self) {}
 
-    pub fn emit_event(&self, event: MultiPassEventKind) {
-        let _ = self.event.send(event);
+    pub async fn emit_event(&self, event: MultiPassEventKind) {
+        self.event.emit(event).await;
     }
 }
 
@@ -1902,7 +1922,8 @@ impl IdentityStore {
                 self.queue.remove(pubkey).await;
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
                     did: pubkey.clone(),
-                });
+                })
+                .await;
 
                 return Ok(());
             }
@@ -2035,7 +2056,8 @@ impl IdentityStore {
 
         self.emit_event(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -2063,7 +2085,8 @@ impl IdentityStore {
 
         self.emit_event(MultiPassEventKind::FriendRemoved {
             did: pubkey.clone(),
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -2074,20 +2097,10 @@ impl IdentityStore {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn subscribe(&self) -> futures::stream::BoxStream<'static, MultiPassEventKind> {
-        let mut rx = self.event.subscribe();
-
-        let stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        };
-
-        stream.boxed()
+    pub async fn subscribe(
+        &self,
+    ) -> Result<futures::stream::BoxStream<'static, MultiPassEventKind>, Error> {
+        self.event.subscribe().await
     }
 }
 
@@ -2220,24 +2233,28 @@ impl IdentityStore {
             Event::Request => {
                 self.emit_event(MultiPassEventKind::FriendRequestSent {
                     to: recipient.clone(),
-                });
+                })
+                .await;
             }
             Event::Retract => {
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
                     did: recipient.clone(),
-                });
+                })
+                .await;
             }
             Event::Reject => {
                 self.emit_event(MultiPassEventKind::IncomingFriendRequestRejected {
                     did: recipient.clone(),
-                });
+                })
+                .await;
             }
             Event::Block => {
                 let _ = self.push(recipient).await;
                 let _ = self.request(recipient, RequestOption::Identity).await;
                 self.emit_event(MultiPassEventKind::Blocked {
                     did: recipient.clone(),
-                });
+                })
+                .await;
             }
             Event::Unblock => {
                 let _ = self.push(recipient).await;
@@ -2245,7 +2262,8 @@ impl IdentityStore {
 
                 self.emit_event(MultiPassEventKind::Unblocked {
                     did: recipient.clone(),
-                });
+                })
+                .await;
             }
             _ => {}
         };
