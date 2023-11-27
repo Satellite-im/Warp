@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use futures::{StreamExt, TryStreamExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, PeerId};
 use serde::{Deserialize, Serialize};
@@ -203,18 +202,11 @@ pub async fn unixfs_fetch(
     local: bool,
     limit: Option<usize>,
 ) -> Result<Vec<u8>, Error> {
-    let timeout = timeout.or(Some(std::time::Duration::from_secs(15)));
-
-    let mut stream = ipfs
+    let data = ipfs
         .unixfs()
         .cat(IpfsPath::from(cid), None, peers, local, timeout)
-        .boxed();
-
-    let mut data = vec![];
-
-    while let Some(stream) = stream.try_next().await.map_err(anyhow::Error::from)? {
-        data.extend(stream);
-    }
+        .await
+        .map_err(anyhow::Error::from)?;
 
     if let Some(limit) = limit {
         if data.len() > limit {

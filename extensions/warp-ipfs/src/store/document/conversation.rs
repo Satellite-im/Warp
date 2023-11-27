@@ -386,8 +386,6 @@ impl ConversationTask {
             }
         }
 
-        self.cid = Some(cid);
-
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             if let Err(e) = tokio::fs::write(path.join(".message_id"), cid).await {
