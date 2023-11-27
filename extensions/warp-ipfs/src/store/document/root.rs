@@ -467,15 +467,7 @@ impl RootDocumentTask {
 impl RootDocumentTask {
     async fn get_root_document(&self) -> Result<RootDocument, Error> {
         let document: RootDocument = match self.cid {
-            Some(cid) => {
-                self.ipfs
-                    .dag()
-                    .get()
-                    .path(cid)
-                    .local()
-                    .deserialized()
-                    .await?
-            }
+            Some(cid) => self.ipfs.get_dag(cid).local().deserialized().await?,
             None => return Err(Error::Other),
         };
 
@@ -486,34 +478,35 @@ impl RootDocumentTask {
 
     async fn identity(&self) -> Result<IdentityDocument, Error> {
         let root = self.get_root_document().await?;
-        let path = IpfsPath::from(root.identity);
-        let document: IdentityDocument =
-            self.ipfs.dag().get_dag(path).local().deserialized().await?;
+        let document: IdentityDocument = self
+            .ipfs
+            .get_dag(root.identity)
+            .local()
+            .deserialized()
+            .await?;
         document.verify()?;
 
         Ok(document)
     }
 
     async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
-        let old_cid = self.cid;
-
         let document = document.sign(&self.keypair)?;
 
         //Precautionary check
         document.verify(&self.ipfs).await?;
 
-        let root_cid = self.ipfs.dag().put().serialize(document)?.await?;
+        let root_cid = self.ipfs.dag().put().serialize(document)?.pin(true).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await? {
-            self.ipfs.insert_pin(&root_cid, true).await?;
-        }
+        let old_cid = self.cid.replace(root_cid);
 
         if let Some(old_cid) = old_cid {
             if old_cid != root_cid {
-                if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.remove_pin(&old_cid, true).await?;
+                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                    if let Err(e) = self.ipfs.remove_pin(&old_cid, true).await {
+                        tracing::warn!(cid =? old_cid, "Failed to unpin root document: {e}");
+                    }
                 }
-                self.ipfs.remove_block(old_cid, false).await?;
+                _ = self.ipfs.remove_block(old_cid, false).await;
             }
         }
 
@@ -524,7 +517,6 @@ impl RootDocumentTask {
             }
         }
 
-        self.cid = Some(root_cid);
         Ok(())
     }
 
@@ -548,9 +540,7 @@ impl RootDocumentTask {
         let path = IpfsPath::from(cid).sub_path("request")?;
         let list: Vec<Request> = self
             .ipfs
-            .dag()
-            .get()
-            .path(path)
+            .get_dag(path)
             .local()
             .deserialized()
             .await
@@ -564,9 +554,7 @@ impl RootDocumentTask {
         let mut list: Vec<Request> = match document.request {
             Some(cid) => self
                 .ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -598,9 +586,7 @@ impl RootDocumentTask {
         let mut list: Vec<Request> = match document.request {
             Some(cid) => self
                 .ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -634,9 +620,7 @@ impl RootDocumentTask {
         let path = IpfsPath::from(cid).sub_path("friends")?;
         let list: Vec<DID> = self
             .ipfs
-            .dag()
-            .get()
-            .path(path)
+            .get_dag(path)
             .local()
             .deserialized()
             .await
@@ -650,9 +634,7 @@ impl RootDocumentTask {
         let mut list: Vec<DID> = match document.friends {
             Some(cid) => self
                 .ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -684,9 +666,7 @@ impl RootDocumentTask {
         let mut list: Vec<DID> = match document.friends {
             Some(cid) => self
                 .ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -720,9 +700,7 @@ impl RootDocumentTask {
         let path = IpfsPath::from(cid).sub_path("blocks")?;
         let list: Vec<DID> = self
             .ipfs
-            .dag()
-            .get()
-            .path(path)
+            .get_dag(path)
             .local()
             .deserialized()
             .await
@@ -736,9 +714,7 @@ impl RootDocumentTask {
         let mut list: Vec<DID> = match document.blocks {
             Some(cid) => self
                 .ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -769,9 +745,7 @@ impl RootDocumentTask {
         let mut list: Vec<DID> = match document.blocks {
             Some(cid) => self
                 .ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -804,9 +778,7 @@ impl RootDocumentTask {
         let path = IpfsPath::from(cid).sub_path("block_by")?;
         let list: Vec<DID> = self
             .ipfs
-            .dag()
-            .get()
-            .path(path)
+            .get_dag(path)
             .local()
             .deserialized()
             .await
@@ -820,9 +792,7 @@ impl RootDocumentTask {
         let mut list: Vec<DID> = match document.block_by {
             Some(cid) => self
                 .ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -853,9 +823,7 @@ impl RootDocumentTask {
         let mut list: Vec<DID> = match document.block_by {
             Some(cid) => self
                 .ipfs
-                .dag()
-                .get()
-                .path(cid)
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -895,9 +863,7 @@ impl RootDocumentTask {
         };
 
         self.ipfs
-            .dag()
-            .get()
-            .path(cid)
+            .get_dag(cid)
             .local()
             .deserialized()
             .await
@@ -914,9 +880,7 @@ impl RootDocumentTask {
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
         self.ipfs
-            .dag()
-            .get()
-            .path(path)
+            .get_dag(path)
             .local()
             .deserialized()
             .await

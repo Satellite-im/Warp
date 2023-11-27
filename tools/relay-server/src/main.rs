@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 RateLimit::PerPeer {
                     limit: 256.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(60),
+                    interval: Duration::from_secs(30),
                 },
             ],
             max_reservations_per_peer: 512,
@@ -120,19 +120,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             reservation_rate_limiters: vec![
                 RateLimit::PerIp {
                     limit: 256.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(60),
+                    interval: Duration::from_secs(30),
                 },
                 RateLimit::PerPeer {
                     limit: 256.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(60),
+                    interval: Duration::from_secs(30),
                 },
             ],
         }))
         .fd_limit(FDLimit::Max)
         .set_keypair(keypair)
-        .set_idle_connection_timeout(30)
+        .set_idle_connection_timeout(10)
         .set_transport_configuration(TransportConfig {
-            enable_quic: true,
+            timeout: Duration::from_secs(10),
+            quic_max_idle_timeout: Duration::from_secs(5),
             ..Default::default()
         })
         .listen_as_external_addr()
