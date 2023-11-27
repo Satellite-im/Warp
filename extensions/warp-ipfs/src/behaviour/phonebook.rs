@@ -3,8 +3,10 @@ mod handler;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
+    time::Duration,
 };
 
+use futures_timer::Delay;
 use rust_ipfs::libp2p::{
     core::Endpoint,
     swarm::{
@@ -19,7 +21,7 @@ use warp::multipass::MultiPassEventKind;
 
 use crate::store::{event_subscription::EventSubscription, PeerIdExt};
 
-use futures::{channel::oneshot::Sender as OneshotSender, StreamExt};
+use futures::{channel::oneshot::Sender as OneshotSender, FutureExt, StreamExt};
 
 use warp::error::Error;
 
@@ -49,6 +51,7 @@ pub struct Behaviour {
     event: EventSubscription<MultiPassEventKind>,
     command: futures::channel::mpsc::Receiver<PhoneBookCommand>,
     entry_state: HashMap<PeerId, PhoneBookState>,
+    backoff: HashMap<PeerId, Delay>,
 }
 
 impl Behaviour {
@@ -61,6 +64,7 @@ impl Behaviour {
             connections: Default::default(),
             entry: Default::default(),
             entry_state: Default::default(),
+            backoff: Default::default(),
             event,
             command,
         }
@@ -223,8 +227,9 @@ impl NetworkBehaviour for Behaviour {
                 }
 
                 if remaining_established == 0 && self.entry.contains(&peer_id) {
-                    tracing::info!("{peer_id} has disconnected");
-                    self.send_offline_event(peer_id);
+                    //In case peer disconnects due to keep-alive, we should wait before emitting an event for the client to reestablish connection
+                    self.backoff
+                        .insert(peer_id, Delay::new(Duration::from_secs(2)));
                 }
             }
             _ => {}
@@ -278,6 +283,44 @@ impl NetworkBehaviour for Behaviour {
                 Poll::Pending => break,
             }
         }
+
+        self.backoff.retain(|peer_id, timer| {
+            if timer.poll_unpin(cx).is_pending() {
+                return true;
+            }  
+
+            if self.connections.contains_key(peer_id) {
+                return false;
+            }
+
+            // We copy the function logic here due to being unable to mutability borrow twice. 
+            // We could get around it, but may not be worth doing
+            tracing::info!("{peer_id} has disconnected");
+            if let Some(PhoneBookState::Offline) = self.entry_state.get(peer_id) {
+                return false;
+            }
+    
+            let did = match peer_id.to_did() {
+                Ok(did) => did,
+                Err(_) => {
+                    //Note: If we get the error, we should probably blacklist the entry
+                    return false;
+                }
+            };
+    
+            tracing::trace!("Emitting offline event for {did}");
+    
+            self.entry_state
+                .entry(*peer_id)
+                .and_modify(|state| *state = PhoneBookState::Offline)
+                .or_insert(PhoneBookState::Offline);
+    
+            let event = self.event.clone();
+    
+            event.try_emit(MultiPassEventKind::IdentityOffline { did });
+            false
+        });
+
         Poll::Pending
     }
 }
