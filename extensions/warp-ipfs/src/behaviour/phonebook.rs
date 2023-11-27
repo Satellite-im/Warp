@@ -14,7 +14,7 @@ use rust_ipfs::libp2p::{
 use rust_ipfs::NetworkBehaviour;
 use warp::multipass::MultiPassEventKind;
 
-use crate::store::{PeerIdExt, event_subscription::EventSubscription};
+use crate::store::{event_subscription::EventSubscription, PeerIdExt};
 
 use futures::{channel::oneshot::Sender as OneshotSender, StreamExt};
 
