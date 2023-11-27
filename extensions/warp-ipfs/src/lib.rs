@@ -333,7 +333,7 @@ impl WarpIpfs {
 
         let ipfs = uninitialized.start().await?;
 
-        let mut relay_peers = vec![];
+        let mut relay_peers = HashSet::new();
 
         for mut addr in config
             .ipfs_setting
@@ -362,15 +362,16 @@ impl WarpIpfs {
                 continue;
             }
 
-            relay_peers.push(peer_id);
+            relay_peers.insert(peer_id);
         }
 
         if relay_peers.is_empty() {
             warn!("No relays available");
         }
 
+        // Use the selected relays
         for relay_peer in relay_peers {
-            match tokio::time::timeout(Duration::from_secs(15), ipfs.enable_relay(Some(relay_peer)))
+            match tokio::time::timeout(Duration::from_secs(5), ipfs.enable_relay(Some(relay_peer)))
                 .await
             {
                 Ok(Ok(_)) => {}
@@ -392,7 +393,6 @@ impl WarpIpfs {
             {
                 info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
             }
-            break;
         }
 
         if config.ipfs_setting.dht_client
