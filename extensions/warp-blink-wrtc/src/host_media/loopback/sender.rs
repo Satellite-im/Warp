@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use tokio::sync::{mpsc, Notify};
+use tokio::{sync::{mpsc, Notify}, time::Instant};
 use webrtc::{
     media::Sample,
     track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
@@ -26,11 +26,19 @@ pub async fn run(args: Args) {
 
     let mut source_track: Option<Arc<TrackLocalStaticRTP>> = None;
 
+    let mut timer = tokio::time::interval_at(
+        Instant::now() + Duration::from_millis(1000),
+        Duration::from_millis(100),
+    );
+
     loop {
         tokio::select! {
             _ = should_quit.notified() => {
                 log::debug!("loopback sender terminated by notify");
                 break;
+            },
+            _ = timer.tick() => { 
+                tokio::time::sleep(Duration::from_millis(2000)).await;
             },
             opt = cmd_rx.recv() => match opt {
                 Some(cmd) => match cmd {
