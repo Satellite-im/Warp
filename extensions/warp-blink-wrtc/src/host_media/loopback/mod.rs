@@ -85,4 +85,8 @@ impl LoopbackController {
             .sender_cmd_ch
             .send(sender::Cmd::SetSourceTrack { track });
     }
+
+    pub fn remove_audio_source_track(&self) {
+        let _ = self.sender_cmd_ch.send(sender::Cmd::RemoveSourceTrack);
+    }
 }

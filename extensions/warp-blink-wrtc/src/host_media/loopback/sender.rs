@@ -8,6 +8,7 @@ use webrtc::{
 
 pub enum Cmd {
     SetSourceTrack { track: Arc<TrackLocalStaticRTP> },
+    RemoveSourceTrack,
 }
 
 pub struct Args {
@@ -35,6 +36,9 @@ pub async fn run(args: Args) {
                 Some(cmd) => match cmd {
                     Cmd::SetSourceTrack { track } => {
                         source_track.replace(track);
+                    },
+                    Cmd::RemoveSourceTrack => {
+                        source_track.take();
                     }
                 }
                 None => {
