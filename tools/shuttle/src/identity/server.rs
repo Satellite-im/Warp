@@ -186,18 +186,20 @@ impl NetworkBehaviour for Behaviour {
                     continue;
                 }
                 ToSwarm::GenerateEvent(request_response::Event::InboundFailure {
-                    peer: _,
+                    peer,
                     request_id,
-                    error: _,
+                    error,
                 }) => {
+                    tracing::warn!(%peer, %request_id, %error, "Failed to send response to a incoming request");
                     self.queue_event.remove(&request_id);
                     self.waiting_on_request.remove(&request_id);
                     continue;
                 }
                 ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
-                    peer: _,
-                    request_id: _,
+                    peer,
+                    request_id,
                 }) => {
+                    tracing::info!(%peer, %request_id, "Response sent");
                     continue;
                 }
                 other @ (ToSwarm::ExternalAddrConfirmed(_)
