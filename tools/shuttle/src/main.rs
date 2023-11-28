@@ -11,6 +11,9 @@ use shuttle::{
     subscription_stream::Subscriptions,
     PeerIdExt, PeerTopic,
 };
+
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
 use warp::crypto::DID;
 
 use std::{collections::HashMap, path::PathBuf, str::FromStr, time::Duration};
@@ -110,10 +113,21 @@ struct Opt {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt().init();
-
     dotenv::dotenv().ok();
     let opts = Opt::parse();
+
+    let file_appender = match &opts.path {
+        Some(path) => tracing_appender::rolling::hourly(path, "shuttle.log"),
+        None => tracing_appender::rolling::hourly(".", "shuttle.log"),
+    };
+
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    tracing_subscriber::registry()
+        .with(fmt::layer().pretty())
+        .with(fmt::layer().with_writer(non_blocking))
+        .with(EnvFilter::from_default_env())
+        .init();
 
     // let keypair_str = std::env::var("KEYPAIR").ok().map(PathBuf::from);
     // let path = std::env::var("PATH").ok().map(PathBuf::from);
@@ -240,7 +254,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match payload.message() {
             Message::Request(req) => match req {
                 identity::protocol::Request::Register(Register { document }) => {
+                    tracing::info!(%document.did, "Receive register request");
                     if temp_registeration.contains_key(&document.did) {
+                        tracing::warn!(%document.did, "Identity is already registered");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -255,6 +271,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     if document.verify().is_err() {
+                        tracing::warn!(%document.did, "Identity cannot be verified");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -269,7 +286,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    if let Err(_e) = subscriptions.subscribe(document.did.inbox()).await {
+                    if let Err(e) = subscriptions.subscribe(document.did.inbox()).await {
+                        tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -285,6 +303,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     temp_registeration.insert(document.did.clone(), document.clone());
 
+                    tracing::info!(%document.did, "identity registered");
                     let payload = Payload::new(
                         keypair,
                         None,
@@ -295,7 +314,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = resp.send((ch, payload));
                 }
                 identity::protocol::Request::Mailbox(event) => {
-                    let Ok(did) = payload.sender().to_did() else {
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -311,6 +332,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     if !temp_registeration.contains_key(&did) {
+                        tracing::warn!(%did, "Identity is not registered");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -328,6 +350,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match event {
                         identity::protocol::Mailbox::FetchAll => {
                             let Some(map) = mailbox.get_mut(&did) else {
+                                tracing::warn!(%did, "mailbox does not contain contents");
                                 let payload = Payload::new(
                                     keypair,
                                     None,
@@ -355,6 +378,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 counter += 1;
                             }
 
+                            tracing::info!(%did, request = list.len());
+
                             let payload = Payload::new(
                                 keypair,
                                 None,
@@ -370,6 +395,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let _ = resp.send((ch, payload));
                         }
                         identity::protocol::Mailbox::FetchFrom { .. } => {
+                            tracing::warn!(%did, "accessed to unimplemented request");
                             //TODO
                             let payload = Payload::new(
                                 keypair,
@@ -387,6 +413,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         identity::protocol::Mailbox::Send { did: to, request } => {
                             if !temp_registeration.contains_key(to) {
+                                tracing::warn!(%did, to = %to, "receiving identity is not registered");
                                 let payload = Payload::new(
                                     keypair,
                                     None,
@@ -403,6 +430,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
 
                             if request.verify().is_err() {
+                                tracing::warn!(%did, to = %to, "request could not be vertified");
                                 let payload = Payload::new(
                                     keypair,
                                     None,
@@ -420,6 +448,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             mailbox.entry(to.clone()).or_default().push(request.clone());
 
+                            tracing::warn!(%did, to = %to, "request has been stored");
+
                             let payload = Payload::new(
                                 keypair,
                                 None,
@@ -434,7 +464,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 identity::protocol::Request::Synchronized(Synchronized::Store { package }) => {
-                    let Ok(did) = payload.sender().to_did() else {
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -450,6 +482,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     if !temp_registeration.contains_key(&did) {
+                        tracing::warn!(%did, "Identity is not registered");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -466,7 +499,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    _temp_package.insert(did, package.clone());
+                    if package.is_empty() {
+                        tracing::warn!(%did, "package supplied is zero. Will skip");
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::InvalidPayload {
+                                        msg: "package cannot be empty".into(),
+                                    },
+                                ),
+                            ),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
+
+                        continue;
+                    }
+
+                    tracing::info!(%did, package_size=package.len());
+
+                    _temp_package.insert(did.clone(), package.clone());
+
+                    tracing::info!(%did, package_size=package.len(), "package is stored");
 
                     let payload = Payload::new(
                         keypair,
@@ -479,7 +536,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
                 identity::protocol::Request::Synchronized(Synchronized::Update { document }) => {
+                    tracing::info!(%document.did, "Receive identity update");
                     if document.verify().is_err() {
+                        tracing::warn!(%document.did, "identity is not valid or corrupted");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -496,6 +555,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let did = document.did.clone();
 
                     if !temp_registeration.contains_key(&did) {
+                        tracing::warn!(%did, "Identity is not registered");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -512,7 +572,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    temp_registeration.insert(did, document.clone());
+                    temp_registeration.insert(did.clone(), document.clone());
+
+                    tracing::info!(%did, "Identity updated");
 
                     let payload = Payload::new(
                         keypair,
@@ -597,7 +659,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
                 identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
+                    tracing::info!(%did, "Fetching document");
                     if !temp_registeration.contains_key(did) {
+                        tracing::warn!(%did, "Identity is not registered");
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -613,15 +677,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
+                    tracing::info!(%did, "looking for package");
                     let event = match _temp_package.get(did) {
-                        Some(package) => Response::SynchronizedResponse(
-                            SynchronizedResponse::Package(package.clone()),
-                        ),
-                        None => Response::SynchronizedResponse(
-                            identity::protocol::SynchronizedResponse::Error(
-                                SynchronizedError::DoesntExist,
-                            ),
-                        ),
+                        Some(package) => {
+                            tracing::info!(%did, package_size = package.len(), "package found");
+                            Response::SynchronizedResponse(SynchronizedResponse::Package(
+                                package.clone(),
+                            ))
+                        }
+                        None => {
+                            tracing::warn!(%did, "package not found");
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::DoesntExist,
+                                ),
+                            )
+                        }
                     };
 
                     let payload =
@@ -633,12 +704,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 identity::protocol::Request::Lookup(Lookup::PublicKey { did }) => {
                     let event = match temp_registeration.get(did) {
-                        Some(document) => Response::LookupResponse(LookupResponse::Ok {
-                            identity: vec![document.clone()],
-                        }),
-                        None => Response::LookupResponse(LookupResponse::Error(
-                            identity::protocol::LookupError::DoesntExist,
-                        )),
+                        Some(document) => {
+                            tracing::info!(%did, "identity found");
+                            Response::LookupResponse(LookupResponse::Ok {
+                                identity: vec![document.clone()],
+                            })
+                        }
+                        None => {
+                            tracing::warn!(%did, "identity not found");
+                            Response::LookupResponse(LookupResponse::Error(
+                                identity::protocol::LookupError::DoesntExist,
+                            ))
+                        }
                     };
 
                     let payload =
@@ -647,11 +724,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = resp.send((ch, payload));
                 }
                 identity::protocol::Request::Lookup(Lookup::PublicKeys { dids }) => {
+                    tracing::trace!(list_size = dids.len());
+
                     let list = dids
                         .iter()
                         .filter_map(|did| temp_registeration.get(did))
                         .cloned()
                         .collect::<Vec<_>>();
+
+                    tracing::info!(list_size = list.len(), "Found");
 
                     let event = match list.is_empty() {
                         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
@@ -702,6 +783,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
 
+                    tracing::info!(list_size = list.len(), "Found identities");
+
                     let event = match list.is_empty() {
                         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
                         true => Response::LookupResponse(LookupResponse::Error(
@@ -726,6 +809,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         })
                         .cloned()
                         .collect::<Vec<_>>();
+
+                    tracing::info!(list_size = list.len(), "Found identities");
 
                     let event = match list.is_empty() {
                         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),

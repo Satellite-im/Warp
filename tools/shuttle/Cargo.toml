@@ -27,6 +27,8 @@ serde_json.workspace = true
 either = { workspace = true, features = ["serde"] }
 
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 chrono = { workspace = true, features = ["serde"] }
 
@@ -38,5 +40,3 @@ dotenv = "0.15"
 base64 = "0.21"
 
 bs58 = "0.4"
-
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }

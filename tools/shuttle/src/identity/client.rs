@@ -142,6 +142,11 @@ impl Behaviour {
 
     fn send_record(&mut self) {
         let addrs = self.external_addresses.iter().cloned().collect::<Vec<_>>();
+
+        tracing::debug!("External Addrs: {}", addrs.len());
+
+        debug_assert!(!addrs.is_empty());
+
         let record = PeerRecord::new(&self.keypair, addrs)
             .expect("Valid signature")
             .into_signed_envelope()
@@ -166,8 +171,10 @@ impl Behaviour {
     }
 
     fn process_response(&mut self, id: OutboundRequestId, response: Payload) {
+        let sender = response.sender();
         match response.message().clone() {
             Message::Response(response) => {
+                tracing::debug!(?response, id = ?id, sender = %sender, "Received response");
                 match response {
                     Response::RegisterResponse(response) => {
                         let res = match self.waiting_on_response.remove(&id) {
@@ -303,7 +310,9 @@ impl Behaviour {
                                     warp::error::Error::IdentityNotCreated
                                 }
                                 super::protocol::MailboxError::NoRequests => {
-                                    warp::error::Error::OtherWithContext("No requests available".into())
+                                    warp::error::Error::OtherWithContext(
+                                        "No requests available".into(),
+                                    )
                                 }
                                 super::protocol::MailboxError::Blocked => {
                                     warp::error::Error::PublicKeyIsBlocked
@@ -312,7 +321,9 @@ impl Behaviour {
                                     warp::error::Error::IdentityDoesntExist
                                 }
                                 super::protocol::MailboxError::InvalidRequest => {
-                                    warp::error::Error::OtherWithContext("Request provided was corrupted or invalid".into())
+                                    warp::error::Error::OtherWithContext(
+                                        "Request provided was corrupted or invalid".into(),
+                                    )
                                 }
                             };
 
@@ -427,6 +438,7 @@ impl NetworkBehaviour for Behaviour {
                         address,
                         response,
                     } => {
+                        tracing::info!("Adding {peer_id} with {address}");
                         if !(self
                             .addresses
                             .entry(peer_id)
@@ -447,6 +459,7 @@ impl NetworkBehaviour for Behaviour {
                         identity,
                         response,
                     } => {
+                        tracing::info!("Registering to {peer_id}");
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
@@ -456,6 +469,8 @@ impl NetworkBehaviour for Behaviour {
 
                         let id = self.inner.send_request(&peer_id, payload);
 
+                        tracing::debug!(?id, "Request sent");
+
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Register { response });
                     }
@@ -464,6 +479,7 @@ impl NetworkBehaviour for Behaviour {
                         kind,
                         response,
                     } => {
+                        tracing::info!("Sending lookup request to {peer_id}");
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
@@ -472,6 +488,7 @@ impl NetworkBehaviour for Behaviour {
                         .expect("Valid construction of payload");
 
                         let id = self.inner.send_request(&peer_id, payload);
+                        tracing::debug!(?id, "Request sent");
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Lookup { response });
@@ -481,6 +498,10 @@ impl NetworkBehaviour for Behaviour {
                         package,
                         response,
                     } => {
+                        tracing::info!(
+                            package_size = package.len(),
+                            "Sending package to {peer_id}"
+                        );
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
@@ -489,6 +510,7 @@ impl NetworkBehaviour for Behaviour {
                         .expect("Valid construction of payload");
 
                         let id = self.inner.send_request(&peer_id, payload);
+                        tracing::debug!(?id, "Request sent");
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Store { response });
@@ -498,6 +520,7 @@ impl NetworkBehaviour for Behaviour {
                         did,
                         response,
                     } => {
+                        tracing::info!(%did, "Fetching package");
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
@@ -506,6 +529,7 @@ impl NetworkBehaviour for Behaviour {
                         .expect("Valid construction of payload");
 
                         let id = self.inner.send_request(&peer_id, payload);
+                        tracing::debug!(?id, "Request sent");
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Fetch { response });
@@ -515,6 +539,7 @@ impl NetworkBehaviour for Behaviour {
                         identity,
                         response,
                     } => {
+                        tracing::info!(?identity, "Updating identity");
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
@@ -525,6 +550,7 @@ impl NetworkBehaviour for Behaviour {
                         .expect("Valid construction of payload");
 
                         let id = self.inner.send_request(&peer_id, payload);
+                        tracing::debug!(?id, "Request sent");
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Store { response });
@@ -535,6 +561,7 @@ impl NetworkBehaviour for Behaviour {
                         request,
                         response,
                     } => {
+                        tracing::info!(to = %to, request = ?request.event, "Sending request");
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
@@ -543,11 +570,13 @@ impl NetworkBehaviour for Behaviour {
                         .expect("Valid construction of payload");
 
                         let id = self.inner.send_request(&peer_id, payload);
+                        tracing::debug!(?id, "Request sent");
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::RequestSent { response });
                     }
                     IdentityCommand::FetchAllRequests { peer_id, response } => {
+                        tracing::info!("Fetching mailbox from {peer_id}");
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
@@ -556,6 +585,7 @@ impl NetworkBehaviour for Behaviour {
                         .expect("Valid construction of payload");
 
                         let id = self.inner.send_request(&peer_id, payload);
+                        tracing::debug!(?id, "Request sent");
 
                         self.waiting_on_response
                             .insert(id, IdentityResponse::RequestsReceived { response });
@@ -592,10 +622,11 @@ impl NetworkBehaviour for Behaviour {
                     continue;
                 }
                 ToSwarm::GenerateEvent(request_response::Event::OutboundFailure {
-                    peer: _,
+                    peer,
                     request_id,
                     error,
                 }) => {
+                    tracing::error!(peer_id = %peer, ?request_id, ?error, "failed to send request");
                     if let Some(ch) = self.waiting_on_response.remove(&request_id) {
                         match ch {
                             IdentityResponse::Register { response } => {
