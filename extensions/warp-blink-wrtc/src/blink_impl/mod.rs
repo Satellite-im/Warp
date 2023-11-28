@@ -1,6 +1,5 @@
-mod data;
-
 mod blink_controller;
+mod data;
 mod gossipsub_listener;
 mod gossipsub_sender;
 mod signaling;
@@ -65,7 +64,6 @@ impl BlinkImpl {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Box<Self>> {
         log::trace!("initializing WebRTC");
 
-        // todo: ensure rx doesn't get dropped
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
 

@@ -1,10 +1,16 @@
+use super::{
+    data::CallDataMap,
+    gossipsub_listener::GossipSubListener,
+    gossipsub_sender::GossipSubSender,
+    signaling::{self, ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal},
+};
+use crate::{
+    host_media::{self, Mp4LoggerConfig, AUDIO_SOURCE_ID},
+    notify_wrapper::NotifyWrapper,
+    simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
+};
 use futures::channel::oneshot;
 use futures::StreamExt;
-
-use super::signaling::{
-    self, ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal,
-};
-
 use std::{cmp, sync::Arc, time::Duration};
 use tokio::{
     sync::{
@@ -23,17 +29,6 @@ use webrtc::{
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
     track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
 };
-
-use crate::{
-    host_media::{self, Mp4LoggerConfig, AUDIO_SOURCE_ID},
-    simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
-};
-
-use super::{
-    data::CallDataMap, gossipsub_listener::GossipSubListener, gossipsub_sender::GossipSubSender,
-};
-
-use crate::notify_wrapper::NotifyWrapper;
 
 #[derive(Debug)]
 enum Cmd {
