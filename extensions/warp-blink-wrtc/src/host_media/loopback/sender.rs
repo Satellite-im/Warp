@@ -50,7 +50,6 @@ pub async fn run(args: Args) {
             opt = sample_rx.recv() => match opt {
                 Some(sample) => {
                     if let Some(track) = source_track.as_mut() {
-                        log::debug!("writing sample");
                         let _ = track.write(&sample.data).await;
                     }
                 }
