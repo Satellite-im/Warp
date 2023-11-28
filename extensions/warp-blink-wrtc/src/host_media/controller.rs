@@ -148,7 +148,6 @@ pub async fn create_audio_sink_track(
             if !deafened {
                 controller.play(peer_id)?;
             }
-            // todo: manage mp4 logger
         } else {
             // unreachable
             debug_assert!(false);
@@ -319,14 +318,14 @@ pub async fn resume_recording() {
     mp4_logger::resume();
 }
 
-pub async fn set_peer_audio_gain(_peer_id: DID, _multiplier: f32) -> anyhow::Result<()> {
+pub async fn set_peer_audio_gain(peer_id: DID, audio_multiplier: f32) -> anyhow::Result<()> {
     let _lock = LOCK.write().await;
 
-    //    if let Some(track) = unsafe { DATA.audio_sink_tracks.get_mut(&peer_id) } {
-    //        track.set_audio_multiplier(multiplier)?;
-    //    } else {
-    //        bail!("peer not found in call");
-    //    }
+    unsafe {
+        if let Some(controller) = DATA.audio_sink_controller.as_ref() {
+            controller.set_audio_multiplier(peer_id, audio_multiplier);
+        }
+    }
 
     Ok(())
 }

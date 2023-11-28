@@ -291,4 +291,11 @@ impl SinkTrackController {
             });
         }
     }
+
+    pub fn set_audio_multiplier(&self, peer_id: DID, audio_multiplier: f32) {
+        let _ = self.cmd_tx.send(Cmd::SetAudioMultiplier {
+            peer_id,
+            audio_multiplier,
+        });
+    }
 }

@@ -34,11 +34,16 @@ pub enum Cmd {
         peer_id: DID,
         producer: AudioProducer,
     },
+    SetAudioMultiplier {
+        peer_id: DID,
+        audio_multiplier: f32,
+    },
 }
 
 struct Entry {
     decoder: opus::Decoder,
     peer_id: DID,
+    audio_multiplier: f32,
     packet_rx: UnboundedReceiver<Sample>,
     producer: AudioProducer,
     paused: bool,
@@ -76,6 +81,7 @@ pub fn run(args: Args) {
                         packet_rx,
                         producer,
                         paused: false,
+                        audio_multiplier: 1.0_f32,
                     });
                 }
                 Cmd::RemoveTrack { peer_id } => {
@@ -91,6 +97,14 @@ pub fn run(args: Args) {
                     if let Some(peer) = connections.iter_mut().find(|x| x.peer_id == peer_id) {
                         peer.producer = producer;
                         peer.paused = false;
+                    }
+                }
+                Cmd::SetAudioMultiplier {
+                    peer_id,
+                    audio_multiplier,
+                } => {
+                    if let Some(entry) = connections.iter_mut().find(|x| x.peer_id == peer_id) {
+                        entry.audio_multiplier = audio_multiplier;
                     }
                 }
             }
@@ -119,12 +133,11 @@ pub fn run(args: Args) {
                         false,
                     ) {
                         Ok(size) => {
-                            // todo: mp4 logger
                             let mut buf2 = vec![0_f32; size * num_channels];
                             let it1 = buf2.chunks_exact_mut(num_channels);
                             let it2 = decoder_output_buf.iter().take(size);
                             for (chunk, val) in std::iter::zip(it1, it2) {
-                                chunk.fill(*val);
+                                chunk.fill(*val * entry.audio_multiplier);
                             }
 
                             for sample in buf2.drain(..) {
