@@ -27,7 +27,7 @@ pub async fn run(args: Args) {
     let mut source_track: Option<Arc<TrackLocalStaticRTP>> = None;
 
     let mut timer = tokio::time::interval_at(
-        Instant::now() + Duration::from_millis(1000),
+        Instant::now() + Duration::from_millis(4000),
         Duration::from_millis(100),
     );
 
