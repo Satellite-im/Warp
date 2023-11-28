@@ -6,12 +6,13 @@ use futures::{
     stream::BoxStream,
     SinkExt, StreamExt,
 };
+use std::fmt::Debug;
 use std::task::{Poll, Waker};
 use std::{collections::VecDeque, sync::Arc};
 use warp::error::Error;
 
 #[allow(clippy::large_enum_variant)]
-enum Command<T: Clone + Send + 'static> {
+enum Command<T: Clone + Debug + Send + 'static> {
     Subscribe {
         response: oneshot::Sender<Receiver<T>>,
     },
@@ -21,12 +22,12 @@ enum Command<T: Clone + Send + 'static> {
 }
 
 #[derive(Clone, Debug)]
-pub struct EventSubscription<T: Clone + Send + 'static> {
+pub struct EventSubscription<T: Clone + Debug + Send + 'static> {
     tx: Sender<Command<T>>,
     task: Arc<tokio::task::JoinHandle<()>>,
 }
 
-impl<T: Clone + Send + 'static> EventSubscription<T> {
+impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(0);
@@ -69,7 +70,7 @@ impl<T: Clone + Send + 'static> EventSubscription<T> {
     }
 }
 
-impl<T: Clone + Send + 'static> Drop for EventSubscription<T> {
+impl<T: Clone + Debug + Send + 'static> Drop for EventSubscription<T> {
     fn drop(&mut self) {
         if Arc::strong_count(&self.task) == 1 && !self.task.is_finished() {
             self.task.abort();
@@ -77,18 +78,19 @@ impl<T: Clone + Send + 'static> Drop for EventSubscription<T> {
     }
 }
 
-struct EventSubscriptionTask<T: Clone + Send + 'static> {
+struct EventSubscriptionTask<T: Clone + Send + Debug + 'static> {
     senders: Vec<Sender<T>>,
     queue: VecDeque<T>,
     rx: Receiver<Command<T>>,
     waker: Option<Waker>,
 }
 
-impl<T: Clone + Send + 'static> EventSubscriptionTask<T> {
+impl<T: Clone + Send + 'static + Debug> EventSubscriptionTask<T> {
     pub async fn start(&mut self) {
         loop {
             tokio::select! {
                 _ = futures::future::poll_fn(|cx|  -> Poll<T>{
+
                     if let Some(event) = self.queue.pop_front() {
                         let mut count = 0;
                         self.senders.retain_mut(|sender| {
@@ -98,8 +100,13 @@ impl<T: Clone + Send + 'static> EventSubscriptionTask<T> {
 
                             match sender.poll_ready(cx) {
                                 Ready(Ok(_)) => {
-                                    _ = sender.start_send(event.clone());
-                                    count += 1;
+                                    if let Err(e) = sender.start_send(event.clone()) {
+                                        if e.is_disconnected() {
+                                            return false;
+                                        }
+                                    } else {
+                                        count += 1;
+                                    }
                                 }
                                 Ready(Err(e)) => {
                                     if e.is_disconnected() {
