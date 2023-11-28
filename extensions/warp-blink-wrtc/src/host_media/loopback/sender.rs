@@ -35,6 +35,7 @@ pub async fn run(args: Args) {
             opt = cmd_rx.recv() => match opt {
                 Some(cmd) => match cmd {
                     Cmd::SetSourceTrack { track } => {
+                        log::debug!("Cmd::SetSourceTrack");
                         source_track.replace(track);
                     },
                     Cmd::RemoveSourceTrack => {

@@ -58,6 +58,7 @@ impl LoopbackController {
     }
 
     pub fn add_track(&mut self, peer_id: DID, track: Arc<TrackRemote>) {
+        log::debug!("adding sink track");
         let should_quit = Arc::new(Notify::new());
         let ch = self.sample_tx.clone();
 
