@@ -116,7 +116,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
     let opts = Opt::parse();
 
-    let file_appender = match &opts.path {
+    let path = opts.path;
+
+    if let Some(path) = path.as_ref() {
+        tokio::fs::create_dir_all(path).await?;
+    }
+
+    let file_appender = match &path {
         Some(path) => tracing_appender::rolling::hourly(path, "shuttle.log"),
         None => tracing_appender::rolling::hourly(".", "shuttle.log"),
     };
@@ -129,14 +135,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(EnvFilter::from_default_env())
         .init();
 
-    // let keypair_str = std::env::var("KEYPAIR").ok().map(PathBuf::from);
-    // let path = std::env::var("PATH").ok().map(PathBuf::from);
-    // let listen_addr = std::env::var("LISTEN_ADDR").ok();
-    let path = opts.path;
-
-    if let Some(path) = path.as_ref() {
-        tokio::fs::create_dir_all(path).await?;
-    }
 
     let keypair = match opts
         .keyfile
