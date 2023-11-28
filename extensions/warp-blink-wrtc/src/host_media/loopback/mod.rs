@@ -35,6 +35,7 @@ impl Drop for LoopbackController {
 
 impl LoopbackController {
     pub fn new() -> Self {
+        log::debug!("adding source track");
         let quit_sender_task = Arc::new(Notify::new());
         let (sample_tx, sample_rx) = mpsc::unbounded_channel();
         let (sender_tx, sender_rx) = mpsc::unbounded_channel();
