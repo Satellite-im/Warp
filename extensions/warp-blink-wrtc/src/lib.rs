@@ -12,6 +12,7 @@
 // mod rtp_logger;
 mod blink_impl;
 mod host_media;
+mod loopback_webrtc;
 mod notify_wrapper;
 mod simple_webrtc;
 
