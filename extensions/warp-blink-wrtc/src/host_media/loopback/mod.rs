@@ -57,9 +57,28 @@ impl LoopbackController {
         }
     }
 
-    pub fn add_track(&mut self, peer_id: DID, track: Arc<TrackRemote>) {}
+    pub fn add_track(&mut self, peer_id: DID, track: Arc<TrackRemote>) {
+        let should_quit = Arc::new(Notify::new());
+        let ch = self.sample_tx.clone();
 
-    pub fn remove_track(&mut self, peer_id: DID) {}
+        let task = ReceiverTask {
+            should_quit: should_quit.clone(),
+        };
+        self.receiver_tasks.insert(peer_id, task);
+
+        tokio::spawn(async {
+            receiver::run(receiver::Args {
+                should_quit,
+                track,
+                ch,
+            })
+            .await;
+        });
+    }
+
+    pub fn remove_track(&mut self, peer_id: DID) {
+        self.receiver_tasks.remove(&peer_id);
+    }
 
     pub fn set_source_track(&self, track: Arc<TrackLocalStaticRTP>) {
         let _ = self
