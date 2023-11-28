@@ -47,6 +47,7 @@ impl LoopbackController {
                 sample_rx,
             })
             .await;
+            log::debug!("quitting source track");
         });
 
         Self {
@@ -65,15 +66,16 @@ impl LoopbackController {
         let task = ReceiverTask {
             should_quit: should_quit.clone(),
         };
-        self.receiver_tasks.insert(peer_id, task);
+        self.receiver_tasks.insert(peer_id.clone(), task);
 
-        tokio::spawn(async {
+        tokio::spawn(async move {
             receiver::run(receiver::Args {
                 should_quit,
                 track,
                 ch,
             })
             .await;
+            log::debug!("quitting sink track for peer_id {}", peer_id);
         });
     }
 
