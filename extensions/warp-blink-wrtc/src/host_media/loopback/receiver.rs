@@ -65,8 +65,8 @@ pub async fn run(args: Args) {
         }
 
         // 10ms * 1000 = 10 seconds
-        if sample_queue.len() >= 1000 {
-            log::debug!("collected 10 seconds of voice. replaying it now");
+        if sample_queue.len() >= 2000 {
+            log::debug!("collected 20 seconds of voice. replaying it now");
             for sample in sample_queue.drain(..) {
                 let _ = ch.send(sample);
             }
