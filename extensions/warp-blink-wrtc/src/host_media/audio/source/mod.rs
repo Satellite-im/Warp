@@ -53,9 +53,9 @@ fn create_stream(
 
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         // don't send if muted
-        if automute::SHOULD_MUTE.load(Ordering::Relaxed) {
-            return;
-        }
+        // if automute::SHOULD_MUTE.load(Ordering::Relaxed) {
+        //     return;
+        // }
         // merge channels
         if num_channels != 1 {
             let mut v: Vec<f32> = data

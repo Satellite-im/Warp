@@ -93,10 +93,6 @@ pub async fn run(args: Args) {
         if speech_detector.should_emit_event(frame.loudness) {
             let _ = ui_event_ch.send(BlinkEventKind::SelfSpeaking);
         }
-        // don't send silent packets
-        if !speech_detector.is_speaking() {
-            continue;
-        }
 
         let packets = match packetizer.packetize(&frame.bytes, num_samples as _).await {
             Ok(r) => r,
