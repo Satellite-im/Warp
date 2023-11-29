@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, Notify};
 use warp::crypto::DID;
 use webrtc::{
     media::Sample,
-    track::{track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote},
+    track::{track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote}, rtp::packet::Packet,
 };
 
 mod receiver;
@@ -22,7 +22,7 @@ impl Drop for ReceiverTask {
 
 pub struct LoopbackController {
     quit_sender_task: Arc<Notify>,
-    sample_tx: mpsc::UnboundedSender<Sample>,
+    sample_tx: mpsc::UnboundedSender<Packet>,
     sender_cmd_ch: mpsc::UnboundedSender<sender::Cmd>,
     receiver_tasks: HashMap<DID, ReceiverTask>,
 }
