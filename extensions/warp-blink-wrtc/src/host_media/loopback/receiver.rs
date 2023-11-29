@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
+use rand::Rng;
 use tokio::sync::{mpsc, Notify};
 use webrtc::{
     media::{io::sample_builder::SampleBuilder, Sample},
     track::track_remote::TrackRemote,
-    util::Unmarshal,
+    util::Unmarshal, rtp::{self, packet::Packet, packetizer::Packetizer},
 };
 
 pub struct Args {
     pub should_quit: Arc<Notify>,
     pub track: Arc<TrackRemote>,
-    pub ch: mpsc::UnboundedSender<Sample>,
+    pub ch: mpsc::UnboundedSender<(u8, Packet)>,
 }
 
 pub async fn run(args: Args) {
@@ -28,7 +29,30 @@ pub async fn run(args: Args) {
     };
     let mut log_decode_error_once = false;
 
-    let mut sample_queue = Vec::new();
+    let mut packetizer = {
+        // create the ssrc for the RTP packets. ssrc serves to uniquely identify the sender
+        let mut rng = rand::thread_rng();
+        let ssrc: u32 = rng.gen();
+        let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
+        let seq = Box::new(rtp::sequence::new_random_sequencer());
+        rtp::packetizer::new_packetizer(
+            // frame size is number of samples
+            // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
+            (1024) + 12,
+            // payload type means nothing
+            // https://en.wikipedia.org/wiki/RTP_payload_formats
+            // todo: use an enum for this
+            98,
+            // randomly generated and uniquely identifies the source
+            ssrc,
+            opus,
+            seq,
+            48000,
+        )
+    };
+
+    let mut packet_queue = Vec::new();
+    let mut loudness = None;
 
     loop {
         let (siz, _attr) = tokio::select! {
@@ -59,17 +83,36 @@ pub async fn run(args: Args) {
             }
         };
 
-        sample_builder.push(rtp_packet);
-        while let Some(sample) = sample_builder.pop() {
-            sample_queue.push(sample);
+        if loudness.is_none() {
+            if let Some(extension) = rtp_packet.header.extensions.first() {
+                loudness.replace(extension.payload.first().map(|x| x & 0x7f).unwrap_or(0_u8));
+            }
         }
 
-        // 10ms * 1000 = 10 seconds
-        if sample_queue.len() >= 2000 {
-            log::debug!("collected 20 seconds of voice. replaying it now");
-            for sample in sample_queue.drain(..) {
-                let _ = ch.send(sample);
+        sample_builder.push(rtp_packet);
+        while let Some(sample) = sample_builder.pop() {
+            let mut packets = match packetizer.packetize(&sample.data, 480).await {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("failed to packetize: {e}");
+                    continue;
+                }
+                };
+            for packet in packets.drain(..) {
+                packet_queue.push(packet);
             }
+        }
+
+        
+
+        // 10ms * 1000 = 10 seconds
+        if packet_queue.len() >= 1000 {
+            log::debug!("collected 10 seconds of voice. replaying it now");
+            for packet in packet_queue.drain(..) {
+                let _ = ch.send((loudness.unwrap_or_default(), packet));
+            }
+
+            loudness.take();
         }
     }
 }
