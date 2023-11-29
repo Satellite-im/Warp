@@ -22,7 +22,7 @@ impl Drop for ReceiverTask {
 
 pub struct LoopbackController {
     quit_sender_task: Arc<Notify>,
-    sample_tx: mpsc::UnboundedSender<Packet>,
+    sample_tx: mpsc::UnboundedSender<(u8, Packet)>,
     sender_cmd_ch: mpsc::UnboundedSender<sender::Cmd>,
     receiver_tasks: HashMap<DID, ReceiverTask>,
 }

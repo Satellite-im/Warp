@@ -16,7 +16,7 @@ pub enum Cmd {
 pub struct Args {
     pub should_quit: Arc<Notify>,
     pub cmd_rx: mpsc::UnboundedReceiver<Cmd>,
-    pub sample_rx: mpsc::UnboundedReceiver<Packet>,
+    pub sample_rx: mpsc::UnboundedReceiver<(u8, Packet)>,
 }
 
 pub async fn run(args: Args) {
@@ -27,8 +27,6 @@ pub async fn run(args: Args) {
     } = args;
 
     let mut source_track: Option<Arc<TrackLocalStaticRTP>> = None;
-
-    
 
     loop {
         tokio::select! {
@@ -52,13 +50,13 @@ pub async fn run(args: Args) {
                 }
             },
             opt = sample_rx.recv() => match opt {
-                Some(packet) => {
+                Some((loudness, packet)) => {
                     if let Some(track) = source_track.as_mut() {
                         let _ = track .write_rtp_with_extensions(
                             &packet,
                             &[rtp::extension::HeaderExtension::AudioLevel(
                                 AudioLevelExtension {
-                                    level: 127,
+                                    level: loudness,
                                     voice: false,
                                 },
                             )],

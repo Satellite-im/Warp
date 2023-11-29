@@ -11,7 +11,7 @@ use webrtc::{
 pub struct Args {
     pub should_quit: Arc<Notify>,
     pub track: Arc<TrackRemote>,
-    pub ch: mpsc::UnboundedSender<Packet>,
+    pub ch: mpsc::UnboundedSender<(u8, Packet)>,
 }
 
 pub async fn run(args: Args) {
@@ -52,6 +52,7 @@ pub async fn run(args: Args) {
     };
 
     let mut packet_queue = Vec::new();
+    let mut loudness = None;
 
     loop {
         let (siz, _attr) = tokio::select! {
@@ -82,6 +83,12 @@ pub async fn run(args: Args) {
             }
         };
 
+        if loudness.is_none() {
+            if let Some(extension) = rtp_packet.header.extensions.first() {
+                loudness.replace(extension.payload.first().map(|x| x & 0x7f).unwrap_or(0_u8));
+            }
+        }
+
         sample_builder.push(rtp_packet);
         while let Some(sample) = sample_builder.pop() {
             let mut packets = match packetizer.packetize(&sample.data, 480).await {
@@ -102,8 +109,10 @@ pub async fn run(args: Args) {
         if packet_queue.len() >= 1000 {
             log::debug!("collected 10 seconds of voice. replaying it now");
             for packet in packet_queue.drain(..) {
-                let _ = ch.send(packet);
+                let _ = ch.send((loudness.unwrap_or_default(), packet));
             }
+
+            loudness.take();
         }
     }
 }
