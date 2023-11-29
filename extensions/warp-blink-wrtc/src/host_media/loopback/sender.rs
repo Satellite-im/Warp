@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, Notify};
 use webrtc::{
     media::Sample,
     rtp::{self, packetizer::Packetizer, extension::audio_level_extension::AudioLevelExtension},
-    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
+    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP},
 };
 
 pub enum Cmd {
@@ -86,7 +86,7 @@ pub async fn run(args: Args) {
                                 &packet,
                                 &[rtp::extension::HeaderExtension::AudioLevel(
                                     AudioLevelExtension {
-                                        level: 128,
+                                        level: 127,
                                         voice: false,
                                     },
                                 )],

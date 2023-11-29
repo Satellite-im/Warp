@@ -28,6 +28,8 @@ pub async fn run(args: Args) {
     };
     let mut log_decode_error_once = false;
 
+    let mut sample_queue = Vec::new();
+
     loop {
         let (siz, _attr) = tokio::select! {
             _ = should_quit.notified() => {
@@ -59,7 +61,15 @@ pub async fn run(args: Args) {
 
         sample_builder.push(rtp_packet);
         while let Some(sample) = sample_builder.pop() {
-            let _ = ch.send(sample);
+            sample_queue.push(sample);
+        }
+
+        // 10ms * 1000 = 10 seconds
+        if sample_queue.len() >= 1000 {
+            log::debug!("collected 10 seconds of voice. replaying it now");
+            for sample in sample_queue.drain(..) {
+                let _ = ch.send(sample);
+            }
         }
     }
 }
