@@ -135,7 +135,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(EnvFilter::from_default_env())
         .init();
 
-
     let keypair = match opts
         .keyfile
         .map(|kp| path.as_ref().map(|p| p.join(kp.clone())).unwrap_or(kp))
@@ -237,6 +236,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     uninitialized = uninitialized.set_listening_addrs(addrs);
 
     let ipfs = uninitialized.start().await?;
+
+    let root = shuttle::store::root::RootStorage::new(&ipfs).await;
+    let identity = shuttle::store::identity::IdentityStorage::new(&ipfs, &root).await;
+
 
     initialize_document(&ipfs, local_peer_id).await?;
 

@@ -2,11 +2,12 @@
 use std::fmt::Display;
 
 use rust_ipfs::{PeerId, PublicKey};
-use warp::crypto::{DID, KeyMaterial, DIDKey, Ed25519KeyPair};
+use warp::crypto::{DIDKey, Ed25519KeyPair, KeyMaterial, DID};
 
 pub mod document;
 pub mod gateway;
 pub mod identity;
+pub mod store;
 pub mod subscription_stream;
 
 pub trait PeerTopic: Display {
@@ -28,7 +29,6 @@ pub trait PeerIdExt {
     fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
     fn to_did(&self) -> Result<DID, anyhow::Error>;
 }
-
 
 pub trait DidExt {
     fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
@@ -61,8 +61,9 @@ impl PeerIdExt for PeerId {
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<rust_ipfs::libp2p::identity::PublicKey> {
-    let pub_key =
-    rust_ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(&public_key.public_key_bytes())?;
+    let pub_key = rust_ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(
+        &public_key.public_key_bytes(),
+    )?;
     Ok(rust_ipfs::libp2p::identity::PublicKey::from(pub_key))
 }
 
