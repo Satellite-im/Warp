@@ -8,10 +8,14 @@ repository.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["redb_store"]
+redb_store = ["rust-ipfs/redb_data_store"]
+
 [dependencies]
 warp.workspace = true
 
-rust-ipfs = { workspace = true, features = ["redb_data_store"] }
+rust-ipfs = { workspace = true }
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 tokio = { workspace = true, features = ["full"] }

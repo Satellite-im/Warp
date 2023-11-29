@@ -276,7 +276,13 @@ impl WarpIpfs {
             uninitialized = uninitialized.set_path(path);
         }
 
-        if config.store_setting.discovery != config::Discovery::None {
+        if matches!(
+            config.store_setting.discovery,
+            config::Discovery::Namespace {
+                discovery_type: DiscoveryType::DHT,
+                ..
+            }
+        ) {
             uninitialized = uninitialized.with_kademlia(
                 Some(either::Either::Left(KadConfig {
                     query_timeout: std::time::Duration::from_secs(60),
@@ -396,13 +402,24 @@ impl WarpIpfs {
         }
 
         if config.ipfs_setting.dht_client
-            && config.store_setting.discovery != config::Discovery::None
+            && matches!(
+                config.store_setting.discovery,
+                config::Discovery::Namespace {
+                    discovery_type: DiscoveryType::DHT,
+                    ..
+                }
+            )
         {
             ipfs.dht_mode(DhtMode::Client).await?;
         }
 
-        if config.store_setting.discovery != config::Discovery::None
-            && config.ipfs_setting.bootstrap
+        if matches!(
+            config.store_setting.discovery,
+            config::Discovery::Namespace {
+                discovery_type: DiscoveryType::DHT,
+                ..
+            }
+        ) && config.ipfs_setting.bootstrap
             && !empty_bootstrap
         {
             tokio::spawn({
