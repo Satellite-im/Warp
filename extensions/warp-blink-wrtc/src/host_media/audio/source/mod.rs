@@ -118,7 +118,7 @@ impl SourceTrack {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<sender_task::Cmd>();
         let (encoded_tx, encoded_rx) = mpsc::unbounded_channel::<FramerOutput>();
-        let ring = HeapRb::<f32>::new(48000 * 5);
+        let ring = HeapRb::<f32>::new(48000 * 20);
         let (producer, consumer) = ring.split();
 
         let stream = create_stream(source_device, num_channels, producer, ui_event_ch.clone())?;
