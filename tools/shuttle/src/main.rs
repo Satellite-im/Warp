@@ -1,12 +1,10 @@
 use shuttle::{
     identity::{
         self,
-        document::IdentityDocument,
         protocol::{
-            Lookup, LookupResponse, Message, Payload, Register, RegisterResponse, Response,
-            Synchronized, SynchronizedError, SynchronizedResponse,
+            LookupResponse, Message, Payload, Register, RegisterResponse, Response, Synchronized,
+            SynchronizedError, SynchronizedResponse,
         },
-        RequestPayload,
     },
     subscription_stream::Subscriptions,
     PeerIdExt, PeerTopic,
@@ -15,6 +13,8 @@ use shuttle::{
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use warp::crypto::DID;
+
+use warp::error::Error as WarpError;
 
 use std::{collections::HashMap, path::PathBuf, str::FromStr, time::Duration};
 
@@ -25,18 +25,15 @@ use base64::{
 };
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
+use rust_ipfs::libp2p::{
+    self,
+    core::{PeerRecord, SignedEnvelope},
+};
 use rust_ipfs::{
     libp2p::swarm::NetworkBehaviour,
     p2p::{IdentifyConfiguration, RateLimit, RelayConfig, TransportConfig},
     repo::{GCConfig, GCTrigger},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
-};
-use rust_ipfs::{
-    libp2p::{
-        self,
-        core::{PeerRecord, SignedEnvelope},
-    },
-    Ipfs, IpfsPath, PeerId,
 };
 
 use zeroize::Zeroizing;
@@ -175,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_pubsub(None)
         .with_custom_behaviour(Behaviour {
             identity: identity::server::Behaviour::new(&keypair, id_event_tx, precord_rx),
-            dummy: ext_behaviour::Behaviour,
+            dummy: ext_behaviour::Behaviour::new(local_peer_id),
         })
         .set_keypair(keypair)
         .with_relay_server(Some(RelayConfig {
@@ -240,13 +237,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = shuttle::store::root::RootStorage::new(&ipfs).await;
     let identity = shuttle::store::identity::IdentityStorage::new(&ipfs, &root).await;
 
-
-    initialize_document(&ipfs, local_peer_id).await?;
-
     //TODO: Move into ipld once protocol is setup
-    let mut temp_registeration: HashMap<DID, IdentityDocument> = HashMap::new();
     let mut _temp_package: HashMap<DID, Vec<u8>> = HashMap::new();
-    let mut mailbox: HashMap<DID, Vec<RequestPayload>> = HashMap::new();
 
     let mut subscriptions = Subscriptions::new(&ipfs);
     let keypair = ipfs.keypair()?;
@@ -256,7 +248,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Message::Request(req) => match req {
                 identity::protocol::Request::Register(Register { document }) => {
                     tracing::info!(%document.did, "Receive register request");
-                    if temp_registeration.contains_key(&document.did) {
+                    if identity.contains(&document.did).await.unwrap_or_default() {
                         tracing::warn!(%document.did, "Identity is already registered");
                         let payload = Payload::new(
                             keypair,
@@ -287,22 +279,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    if let Err(e) = subscriptions.subscribe(document.did.inbox()).await {
-                        tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}");
-                        let payload = Payload::new(
-                            keypair,
-                            None,
-                            Response::RegisterResponse(RegisterResponse::Error(
+                    if let Err(e) = identity.register(document.clone()).await {
+                        tracing::warn!(%document.did, "Unable to register identity");
+                        let res_error = match e {
+                            WarpError::IdentityExist => {
+                                Response::RegisterResponse(RegisterResponse::Error(
+                                    identity::protocol::RegisterError::IdentityExist,
+                                ))
+                            }
+                            _ => Response::RegisterResponse(RegisterResponse::Error(
                                 identity::protocol::RegisterError::None,
                             )),
-                        )
-                        .expect("Valid payload construction");
+                        };
+
+                        let payload = Payload::new(keypair, None, res_error)
+                            .expect("Valid payload construction");
 
                         let _ = resp.send((ch, payload));
                         continue;
                     }
 
-                    temp_registeration.insert(document.did.clone(), document.clone());
+                    if let Err(e) = subscriptions.subscribe(document.did.inbox()).await {
+                        tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
+                        // Although we arent able to subscribe, we can still process the request while leaving this as a warning
+                    }
 
                     tracing::info!(%document.did, "identity registered");
                     let payload = Payload::new(
@@ -332,7 +332,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     };
 
-                    if !temp_registeration.contains_key(&did) {
+                    if !identity.contains(&did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
                         let payload = Payload::new(
                             keypair,
@@ -350,44 +350,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     match event {
                         identity::protocol::Mailbox::FetchAll => {
-                            let Some(map) = mailbox.get_mut(&did) else {
-                                tracing::warn!(%did, "mailbox does not contain contents");
-                                let payload = Payload::new(
-                                    keypair,
-                                    None,
-                                    Response::MailboxResponse(
-                                        identity::protocol::MailboxResponse::Error(
-                                            identity::protocol::MailboxError::NoRequests,
-                                        ),
-                                    ),
-                                )
-                                .expect("Valid payload construction");
+                            let (reqs, remaining) = identity
+                                .fetch_mailbox(did.clone())
+                                .await
+                                .unwrap_or_default();
 
-                                let _ = resp.send((ch, payload));
-                                continue;
-                            };
-
-                            let mut list = vec![];
-
-                            let mut counter = 0;
-
-                            while let Some(req) = map.pop() {
-                                if counter > 50 {
-                                    break;
-                                }
-                                list.push(req);
-                                counter += 1;
-                            }
-
-                            tracing::info!(%did, request = list.len());
+                            tracing::info!(%did, request = reqs.len(), remaining = remaining);
 
                             let payload = Payload::new(
                                 keypair,
                                 None,
                                 Response::MailboxResponse(
                                     identity::protocol::MailboxResponse::Receive {
-                                        list,
-                                        remaining: map.len(),
+                                        list: reqs,
+                                        remaining,
                                     },
                                 ),
                             )
@@ -413,20 +389,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             continue;
                         }
                         identity::protocol::Mailbox::Send { did: to, request } => {
-                            if !temp_registeration.contains_key(to) {
-                                tracing::warn!(%did, to = %to, "receiving identity is not registered");
+                            if !identity.contains(to).await.unwrap_or_default() {
+                                tracing::warn!(%did, "Identity is not registered");
                                 let payload = Payload::new(
                                     keypair,
                                     None,
                                     Response::MailboxResponse(
                                         identity::protocol::MailboxResponse::Error(
-                                            identity::protocol::MailboxError::UserNotRegistered,
+                                            identity::protocol::MailboxError::IdentityNotRegistered,
                                         ),
                                     ),
                                 )
                                 .expect("Valid payload construction");
 
                                 let _ = resp.send((ch, payload));
+
                                 continue;
                             }
 
@@ -447,9 +424,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 continue;
                             }
 
-                            mailbox.entry(to.clone()).or_default().push(request.clone());
+                            if let Err(e) = identity.deliver_request(to, request).await {
+                                match e {
+                                    WarpError::InvalidSignature => {
+                                        tracing::warn!(%did, to = %to, "request could not be vertified");
+                                        let payload = Payload::new(
+                                            keypair,
+                                            None,
+                                            Response::MailboxResponse(
+                                                identity::protocol::MailboxResponse::Error(
+                                                    identity::protocol::MailboxError::InvalidRequest,
+                                                ),
+                                            ),
+                                        )
+                                        .expect("Valid payload construction");
 
-                            tracing::warn!(%did, to = %to, "request has been stored");
+                                        let _ = resp.send((ch, payload));
+                                    }
+                                    e => {
+                                        tracing::warn!(%did, to = %to, "could not deliver request");
+                                        let payload = Payload::new(
+                                            keypair,
+                                            None,
+                                            Response::MailboxResponse(
+                                                identity::protocol::MailboxResponse::Error(
+                                                    identity::protocol::MailboxError::Other(
+                                                        e.to_string(),
+                                                    ),
+                                                ),
+                                            ),
+                                        )
+                                        .expect("Valid payload construction");
+
+                                        let _ = resp.send((ch, payload));
+                                    }
+                                }
+                                continue;
+                            }
+
+                            tracing::info!(%did, to = %to, "request has been stored");
 
                             let payload = Payload::new(
                                 keypair,
@@ -482,7 +495,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     };
 
-                    if !temp_registeration.contains_key(&did) {
+                    if !identity.contains(&did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
                         let payload = Payload::new(
                             keypair,
@@ -555,16 +568,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     let did = document.did.clone();
 
-                    if !temp_registeration.contains_key(&did) {
+                    if !identity.contains(&did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
                         let payload = Payload::new(
                             keypair,
                             None,
-                            Response::SynchronizedResponse(
-                                identity::protocol::SynchronizedResponse::Error(
-                                    SynchronizedError::NotRegistered,
-                                ),
-                            ),
+                            Response::SynchronizedResponse(SynchronizedResponse::Error(
+                                SynchronizedError::NotRegistered,
+                            )),
                         )
                         .expect("Valid payload construction");
 
@@ -573,7 +584,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    temp_registeration.insert(did.clone(), document.clone());
+                    if let Err(e) = identity.update(document).await {
+                        let payload = match e {
+                            WarpError::InvalidSignature => {
+                                tracing::warn!(%did, "Identity is not registered");
+                                Payload::new(
+                                    keypair,
+                                    None,
+                                    Response::SynchronizedResponse(SynchronizedResponse::Error(
+                                        SynchronizedError::Invalid,
+                                    )),
+                                )
+                                .expect("Valid payload construction")
+                            }
+                            _ => Payload::new(
+                                keypair,
+                                None,
+                                Response::SynchronizedResponse(SynchronizedResponse::Error(
+                                    SynchronizedError::Invalid,
+                                )),
+                            )
+                            .expect("Valid payload construction"),
+                        };
+
+                        let _ = resp.send((ch, payload));
+                        continue;
+                    }
 
                     tracing::info!(%did, "Identity updated");
 
@@ -625,12 +661,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
 
-                    if !record
-                        .peer_id()
-                        .to_did()
-                        .map(|did| temp_registeration.contains_key(&did))
-                        .unwrap_or_default()
-                    {
+                    let peer_id = record.peer_id();
+
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::Invalid,
+                                ),
+                            ),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
+
+                        continue;
+                    };
+
+                    if !identity.contains(&did).await.unwrap_or_default() {
                         let payload = Payload::new(
                             keypair,
                             None,
@@ -643,7 +694,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .expect("Valid payload construction");
 
                         let _ = resp.send((ch, payload));
-
                         continue;
                     }
 
@@ -661,7 +711,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
                     tracing::info!(%did, "Fetching document");
-                    if !temp_registeration.contains_key(did) {
+                    if !identity.contains(did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
                         let payload = Payload::new(
                             keypair,
@@ -703,187 +753,151 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     continue;
                 }
-                identity::protocol::Request::Lookup(Lookup::PublicKey { did }) => {
-                    let event = match temp_registeration.get(did) {
-                        Some(document) => {
-                            tracing::info!(%did, "identity found");
-                            Response::LookupResponse(LookupResponse::Ok {
-                                identity: vec![document.clone()],
-                            })
-                        }
-                        None => {
-                            tracing::warn!(%did, "identity not found");
-                            Response::LookupResponse(LookupResponse::Error(
-                                identity::protocol::LookupError::DoesntExist,
-                            ))
-                        }
-                    };
+                identity::protocol::Request::Lookup(kind) => {
+                    let identity = identity.lookup(kind.clone()).await.unwrap_or_default();
+
+                    let event = Response::LookupResponse(LookupResponse::Ok { identity });
 
                     let payload =
                         Payload::new(keypair, None, event).expect("Valid payload construction");
 
                     let _ = resp.send((ch, payload));
-                }
-                identity::protocol::Request::Lookup(Lookup::PublicKeys { dids }) => {
-                    tracing::trace!(list_size = dids.len());
+                } // identity::protocol::Request::Lookup(Lookup::PublicKeys { dids }) => {
+                  //     tracing::trace!(list_size = dids.len());
 
-                    let list = dids
-                        .iter()
-                        .filter_map(|did| temp_registeration.get(did))
-                        .cloned()
-                        .collect::<Vec<_>>();
+                  //     let list = dids
+                  //         .iter()
+                  //         .filter_map(|did| temp_registeration.get(did))
+                  //         .cloned()
+                  //         .collect::<Vec<_>>();
 
-                    tracing::info!(list_size = list.len(), "Found");
+                  //     tracing::info!(list_size = list.len(), "Found");
 
-                    let event = match list.is_empty() {
-                        false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
-                        true => Response::LookupResponse(LookupResponse::Error(
-                            identity::protocol::LookupError::DoesntExist,
-                        )),
-                    };
+                  //     let event = match list.is_empty() {
+                  //         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
+                  //         true => Response::LookupResponse(LookupResponse::Error(
+                  //             identity::protocol::LookupError::DoesntExist,
+                  //         )),
+                  //     };
 
-                    let payload =
-                        Payload::new(keypair, None, event).expect("Valid payload construction");
+                  //     let payload =
+                  //         Payload::new(keypair, None, event).expect("Valid payload construction");
 
-                    let _ = resp.send((ch, payload));
-                }
+                  //     let _ = resp.send((ch, payload));
+                  // }
 
-                identity::protocol::Request::Lookup(Lookup::Username { username, .. })
-                    if username.contains('#') =>
-                {
-                    //TODO: Score against invalid username scheme
-                    let split_data = username.split('#').collect::<Vec<&str>>();
+                  // identity::protocol::Request::Lookup(Lookup::Username { username, .. })
+                  //     if username.contains('#') =>
+                  // {
+                  //     //TODO: Score against invalid username scheme
+                  //     let split_data = username.split('#').collect::<Vec<&str>>();
 
-                    let list = if split_data.len() != 2 {
-                        temp_registeration
-                            .values()
-                            .filter(|document| {
-                                document
-                                    .username
-                                    .to_lowercase()
-                                    .eq(&username.to_lowercase())
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    } else {
-                        match (
-                            split_data.first().map(|s| s.to_lowercase()),
-                            split_data.last().map(|s| s.to_lowercase()),
-                        ) {
-                            (Some(name), Some(code)) => temp_registeration
-                                .values()
-                                .filter(|ident| {
-                                    ident.username.to_lowercase().eq(&name)
-                                        && String::from_utf8_lossy(&ident.short_id)
-                                            .to_lowercase()
-                                            .eq(&code)
-                                })
-                                .cloned()
-                                .collect::<Vec<_>>(),
-                            _ => vec![],
-                        }
-                    };
+                  //     let list = if split_data.len() != 2 {
+                  //         temp_registeration
+                  //             .values()
+                  //             .filter(|document| {
+                  //                 document
+                  //                     .username
+                  //                     .to_lowercase()
+                  //                     .eq(&username.to_lowercase())
+                  //             })
+                  //             .cloned()
+                  //             .collect::<Vec<_>>()
+                  //     } else {
+                  //         match (
+                  //             split_data.first().map(|s| s.to_lowercase()),
+                  //             split_data.last().map(|s| s.to_lowercase()),
+                  //         ) {
+                  //             (Some(name), Some(code)) => temp_registeration
+                  //                 .values()
+                  //                 .filter(|ident| {
+                  //                     ident.username.to_lowercase().eq(&name)
+                  //                         && String::from_utf8_lossy(&ident.short_id)
+                  //                             .to_lowercase()
+                  //                             .eq(&code)
+                  //                 })
+                  //                 .cloned()
+                  //                 .collect::<Vec<_>>(),
+                  //             _ => vec![],
+                  //         }
+                  //     };
 
-                    tracing::info!(list_size = list.len(), "Found identities");
+                  //     tracing::info!(list_size = list.len(), "Found identities");
 
-                    let event = match list.is_empty() {
-                        false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
-                        true => Response::LookupResponse(LookupResponse::Error(
-                            identity::protocol::LookupError::DoesntExist,
-                        )),
-                    };
+                  //     let event = match list.is_empty() {
+                  //         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
+                  //         true => Response::LookupResponse(LookupResponse::Error(
+                  //             identity::protocol::LookupError::DoesntExist,
+                  //         )),
+                  //     };
 
-                    let payload =
-                        Payload::new(keypair, None, event).expect("Valid payload construction");
+                  //     let payload =
+                  //         Payload::new(keypair, None, event).expect("Valid payload construction");
 
-                    let _ = resp.send((ch, payload));
-                }
-                identity::protocol::Request::Lookup(Lookup::Username { username, .. }) => {
-                    //TODO: Score against invalid username scheme
-                    let list = temp_registeration
-                        .values()
-                        .filter(|document| {
-                            document
-                                .username
-                                .to_lowercase()
-                                .contains(&username.to_lowercase())
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>();
+                  //     let _ = resp.send((ch, payload));
+                  // }
+                  // identity::protocol::Request::Lookup(Lookup::Username { username, .. }) => {
+                  //     //TODO: Score against invalid username scheme
+                  //     let list = temp_registeration
+                  //         .values()
+                  //         .filter(|document| {
+                  //             document
+                  //                 .username
+                  //                 .to_lowercase()
+                  //                 .contains(&username.to_lowercase())
+                  //         })
+                  //         .cloned()
+                  //         .collect::<Vec<_>>();
 
-                    tracing::info!(list_size = list.len(), "Found identities");
+                  //     tracing::info!(list_size = list.len(), "Found identities");
 
-                    let event = match list.is_empty() {
-                        false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
-                        true => Response::LookupResponse(LookupResponse::Error(
-                            identity::protocol::LookupError::DoesntExist,
-                        )),
-                    };
+                  //     let event = match list.is_empty() {
+                  //         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
+                  //         true => Response::LookupResponse(LookupResponse::Error(
+                  //             identity::protocol::LookupError::DoesntExist,
+                  //         )),
+                  //     };
 
-                    let payload =
-                        Payload::new(keypair, None, event).expect("Valid payload construction");
+                  //     let payload =
+                  //         Payload::new(keypair, None, event).expect("Valid payload construction");
 
-                    let _ = resp.send((ch, payload));
-                }
-                identity::protocol::Request::Lookup(Lookup::ShortId { short_id }) => {
-                    let Some(document) = temp_registeration
-                        .values()
-                        .find(|document| document.short_id.eq(short_id.as_ref()))
-                    else {
-                        let payload = Payload::new(
-                            keypair,
-                            None,
-                            Response::LookupResponse(LookupResponse::Error(
-                                identity::protocol::LookupError::DoesntExist,
-                            )),
-                        )
-                        .expect("Valid payload construction");
+                  //     let _ = resp.send((ch, payload));
+                  // }
+                  // identity::protocol::Request::Lookup(Lookup::ShortId { short_id }) => {
+                  //     let Some(document) = temp_registeration
+                  //         .values()
+                  //         .find(|document| document.short_id.eq(short_id.as_ref()))
+                  //     else {
+                  //         let payload = Payload::new(
+                  //             keypair,
+                  //             None,
+                  //             Response::LookupResponse(LookupResponse::Error(
+                  //                 identity::protocol::LookupError::DoesntExist,
+                  //             )),
+                  //         )
+                  //         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
-                        continue;
-                    };
+                  //         let _ = resp.send((ch, payload));
+                  //         continue;
+                  //     };
 
-                    let payload = Payload::new(
-                        keypair,
-                        None,
-                        Response::LookupResponse(LookupResponse::Ok {
-                            identity: vec![document.clone()],
-                        }),
-                    )
-                    .expect("Valid payload construction");
+                  //     let payload = Payload::new(
+                  //         keypair,
+                  //         None,
+                  //         Response::LookupResponse(LookupResponse::Ok {
+                  //             identity: vec![document.clone()],
+                  //         }),
+                  //     )
+                  //     .expect("Valid payload construction");
 
-                    let _ = resp.send((ch, payload));
-                }
+                  //     let _ = resp.send((ch, payload));
+                  // }
             },
             Message::Response(_) => {}
         }
     }
 
     tokio::signal::ctrl_c().await?;
-
-    Ok(())
-}
-
-async fn initialize_document(
-    ipfs: &Ipfs,
-    local_id: PeerId,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if ipfs.get_dag(IpfsPath::from(local_id)).await.is_ok() {
-        return Ok(());
-    }
-
-    // let document = libipld::ipld!({
-    //     "registered": libipld::ipld!({}),
-    //     "identities": libipld::ipld!({}),
-    // });
-
-    // let cid = ipfs.put_dag(document).await?;
-
-    // if ipfs.is_pinned(&cid).await? {
-    //     return Ok(());
-    // }
-
-    // ipfs.insert_pin(&cid, true).await?;
 
     Ok(())
 }
@@ -901,8 +915,16 @@ mod ext_behaviour {
     };
     use rust_ipfs::NetworkBehaviour;
 
-    #[derive(Default, Debug)]
-    pub struct Behaviour;
+    #[derive(Debug)]
+    pub struct Behaviour {
+        local_id: PeerId,
+    }
+
+    impl Behaviour {
+        pub fn new(local_id: PeerId) -> Self {
+            Self { local_id }
+        }
+    }
 
     impl NetworkBehaviour for Behaviour {
         type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
@@ -957,7 +979,10 @@ mod ext_behaviour {
 
         fn on_swarm_event(&mut self, event: FromSwarm) {
             if let FromSwarm::NewListenAddr(NewListenAddr { addr, .. }) = event {
-                println!("Listening on {addr}");
+                println!(
+                    "Listening on {}",
+                    addr.clone().with(rust_ipfs::Protocol::P2p(self.local_id))
+                );
             }
         }
 

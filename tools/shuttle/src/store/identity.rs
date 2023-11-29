@@ -16,7 +16,7 @@ use warp::{crypto::DID, error::Error};
 
 use crate::identity::{document::IdentityDocument, protocol::Lookup, RequestPayload};
 
-use super::root::RootStorage;
+use super::root::{Root, RootStorage};
 
 #[allow(clippy::large_enum_variant)]
 enum IdentityStorageCommand {
@@ -64,17 +64,20 @@ impl Drop for IdentityStorage {
 impl IdentityStorage {
     pub async fn new(ipfs: &Ipfs, root: &RootStorage) -> Self {
         let peer_id = ipfs.keypair().expect("Valid").public().to_peer_id();
-        let path = IpfsPath::from(peer_id)
-            .sub_path("identities")
-            .expect("Valid sub path");
 
-        let list = ipfs.get_dag(path).local().deserialized::<Cid>().await.ok();
+        let root_dag = ipfs
+            .get_dag(peer_id)
+            .local()
+            .deserialized::<Root>()
+            .await
+            .map_err(|e| {
+                tracing::error!("Unable to load local record: {e}.");
+                e
+            })
+            .unwrap_or_default();
 
-        let path = IpfsPath::from(peer_id)
-            .sub_path("mailbox")
-            .expect("Valid sub path");
-
-        let mailbox = ipfs.get_dag(path).local().deserialized::<Cid>().await.ok();
+        let list = root_dag.identities;
+        let mailbox = root_dag.mailbox;
 
         let (tx, rx) = futures::channel::mpsc::channel(0);
 
@@ -165,15 +168,15 @@ impl IdentityStorage {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn deliver_request(&self, to: DID, request: RequestPayload) -> Result<(), Error> {
+    pub async fn deliver_request(&self, to: &DID, request: &RequestPayload) -> Result<(), Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
         let _ = self
             .tx
             .clone()
             .send(IdentityStorageCommand::DeliverRequest {
-                to,
-                request,
+                to: to.clone(),
+                request: request.clone(),
                 response: tx,
             })
             .await;
@@ -514,6 +517,11 @@ impl IdentityStorageTask {
     }
 
     async fn deliver_request(&mut self, to: DID, request: RequestPayload) -> Result<(), Error> {
+        if !self.contains(to.clone()).await {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        request.verify().map_err(|_| Error::InvalidSignature)?;
         let key_str = to.to_string();
         let mut list: HashMap<String, Cid> = match self.mailbox {
             Some(cid) => self

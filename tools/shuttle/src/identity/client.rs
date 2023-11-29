@@ -320,6 +320,9 @@ impl Behaviour {
                                 super::protocol::MailboxError::UserNotRegistered => {
                                     warp::error::Error::IdentityDoesntExist
                                 }
+                                super::protocol::MailboxError::Other(e) => {
+                                    warp::error::Error::OtherWithContext(e)
+                                }
                                 super::protocol::MailboxError::InvalidRequest => {
                                     warp::error::Error::OtherWithContext(
                                         "Request provided was corrupted or invalid".into(),

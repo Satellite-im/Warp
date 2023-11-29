@@ -55,6 +55,10 @@ impl RootStorage {
             .local()
             .deserialized::<Root>()
             .await
+            .map_err(|e| {
+                tracing::error!("Unable to load local record: {e}.");
+                e
+            })
             .unwrap_or_default();
 
         let mut task = RootStorageTask {

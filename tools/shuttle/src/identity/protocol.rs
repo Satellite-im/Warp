@@ -216,6 +216,7 @@ pub enum MailboxError {
     NoRequests,
     Blocked,
     InvalidRequest,
+    Other(String),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
