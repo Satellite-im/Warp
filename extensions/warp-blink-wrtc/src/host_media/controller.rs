@@ -3,7 +3,7 @@
 //! is `unsafe`. However, it should not be dangerous due to the RwLock.
 //!
 
-use cpal::traits::{DeviceTrait};
+use cpal::traits::DeviceTrait;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
@@ -12,8 +12,6 @@ use warp::crypto::DID;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
-
-
 
 use super::audio::utils::AudioDeviceConfigImpl;
 use super::mp4_logger::Mp4LoggerConfig;
