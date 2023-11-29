@@ -42,3 +42,4 @@ cbindgen = "0.23"
 
 [features]
 build-header = []
+loopback = []
