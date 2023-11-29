@@ -146,7 +146,7 @@ impl SinkTrackController {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<receiver_task::Cmd>();
         // create channel pair to go from receiver task to decoder thread
-        let (packet_tx, packet_rx) = mpsc::unbounded_channel::<Sample>();
+        let (packet_tx, packet_rx) = mpsc::unbounded_channel();
 
         let ring = HeapRb::<f32>::new(48000 * 5);
         let (producer, consumer) = ring.split();

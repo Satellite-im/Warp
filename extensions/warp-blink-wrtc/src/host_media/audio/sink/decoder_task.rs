@@ -6,11 +6,9 @@ use std::{
     time::Duration,
 };
 
+use rayon::prelude::*;
 use tokio::sync::mpsc::UnboundedReceiver;
 use warp::crypto::DID;
-use webrtc::media::Sample;
-
-use rayon::prelude::*;
 
 use crate::host_media::audio::{AudioProducer, OPUS_SAMPLES};
 
@@ -18,7 +16,7 @@ pub enum Cmd {
     AddTrack {
         decoder: opus::Decoder,
         peer_id: DID,
-        packet_rx: UnboundedReceiver<Sample>,
+        packet_rx: UnboundedReceiver<Vec<u8>>,
         producer: AudioProducer,
     },
     RemoveTrack {
@@ -44,7 +42,7 @@ struct Entry {
     decoder: opus::Decoder,
     peer_id: DID,
     audio_multiplier: f32,
-    packet_rx: UnboundedReceiver<Sample>,
+    packet_rx: UnboundedReceiver<Vec<u8>>,
     producer: AudioProducer,
     paused: bool,
 }
@@ -127,11 +125,10 @@ pub fn run(args: Args) {
 
                     // 10ms
                     let mut decoder_output_buf = vec![0_f32; OPUS_SAMPLES];
-                    match entry.decoder.decode_float(
-                        sample.data.as_ref(),
-                        &mut decoder_output_buf,
-                        false,
-                    ) {
+                    match entry
+                        .decoder
+                        .decode_float(&sample, &mut decoder_output_buf, false)
+                    {
                         Ok(size) => {
                             let mut buf2 = vec![0_f32; size * num_channels];
                             let it1 = buf2.chunks_exact_mut(num_channels);

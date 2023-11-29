@@ -32,7 +32,7 @@ pub struct Args {
     pub peer_id: DID,
     pub should_quit: Arc<Notify>,
     pub silenced: Arc<AtomicBool>,
-    pub packet_tx: UnboundedSender<Sample>,
+    pub packet_tx: UnboundedSender<Vec<u8>>,
     pub cmd_ch: UnboundedReceiver<Cmd>,
     pub ui_event_ch: broadcast::Sender<BlinkEventKind>,
 }
@@ -151,7 +151,9 @@ pub async fn run(args: Args) {
         }
 
         while let Some(media_sample) = sample_builder.pop() {
-            let _ = packet_tx.send(media_sample);
+            let mut v = vec![0_u8; media_sample.data.len()];
+            v.copy_from_slice(&media_sample.data);
+            let _ = packet_tx.send(v);
             //sample_created = true;
         }
 
