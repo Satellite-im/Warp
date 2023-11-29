@@ -11,7 +11,7 @@ clap = { version = "4.0", features = ["derive"] }
 cpal = "0.15.0"
 log = { version = "0.4.17", features = ["std"]}
 warp = { path = "../../warp" }
-warp-blink-wrtc = { path = "../../extensions/warp-blink-wrtc" }
+warp-blink-wrtc = { path = "../../extensions/warp-blink-wrtc", features = ["loopback"] }
 warp-ipfs = { path = "../../extensions/warp-ipfs" }
 
 uuid = { workspace = true, features = ["serde", "v4"] }
