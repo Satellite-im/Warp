@@ -583,10 +583,7 @@ impl ConversationDocument {
     pub async fn delete_all_message(&mut self, ipfs: Ipfs) -> Result<(), Error> {
         let cid = std::mem::take(&mut self.messages);
         let (cid, messages): (Cid, BTreeSet<MessageDocument>) = match cid {
-            Some(cid) => (
-                cid,
-                ipfs.get_dag(cid).local().deserialized().await?,
-            ),
+            Some(cid) => (cid, ipfs.get_dag(cid).local().deserialized().await?),
             None => return Ok(()),
         };
 
