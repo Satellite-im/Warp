@@ -26,10 +26,7 @@ use warp::{
 
 use crate::{
     blink_impl::blink_controller::BlinkController,
-    host_media::{
-        self,
-        audio_utils::automute::{AutoMuteCmd, AUDIO_CMD_CH},
-    },
+    host_media::{self},
     simple_webrtc::{self},
 };
 
@@ -53,7 +50,7 @@ pub struct BlinkImpl {
 struct DropHandler {}
 impl Drop for DropHandler {
     fn drop(&mut self) {
-        host_media::audio_utils::automute::stop();
+        // host_media::audio_utils::automute::stop();
         tokio::spawn(async {
             host_media::controller::reset().await;
         });
@@ -159,7 +156,7 @@ impl BlinkImpl {
             }
         });
 
-        host_media::audio_utils::automute::start();
+        // host_media::audio_utils::automute::start();
         Ok(Box::new(blink_impl))
     }
 
@@ -355,14 +352,16 @@ impl Blink for BlinkImpl {
     }
 
     fn enable_automute(&mut self) -> Result<(), Error> {
-        let tx = AUDIO_CMD_CH.tx.clone();
-        tx.send(AutoMuteCmd::Enable)
-            .map_err(|e| Error::OtherWithContext(format!("failed to enable automute: {e}")))
+        // let tx = AUDIO_CMD_CH.tx.clone();
+        // tx.send(AutoMuteCmd::Enable)
+        //     .map_err(|e| Error::OtherWithContext(format!("failed to enable automute: {e}")))
+        Ok(())
     }
     fn disable_automute(&mut self) -> Result<(), Error> {
-        let tx = AUDIO_CMD_CH.tx.clone();
-        tx.send(AutoMuteCmd::Disable)
-            .map_err(|e| Error::OtherWithContext(format!("failed to disable automute: {e}")))
+        // let tx = AUDIO_CMD_CH.tx.clone();
+        // tx.send(AutoMuteCmd::Disable)
+        //     .map_err(|e| Error::OtherWithContext(format!("failed to disable automute: {e}")))
+        Ok(())
     }
 
     async fn set_peer_audio_gain(&mut self, _peer_id: DID, _multiplier: f32) -> Result<(), Error> {

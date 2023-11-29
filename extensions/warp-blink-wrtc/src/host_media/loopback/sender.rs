@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use rand::Rng;
 use tokio::sync::{mpsc, Notify};
 use webrtc::{
-    media::Sample,
-    rtp::{self, packetizer::Packetizer, extension::audio_level_extension::AudioLevelExtension, packet::Packet},
-    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP},
+    rtp::{self, extension::audio_level_extension::AudioLevelExtension, packet::Packet},
+    track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
 };
 
 pub enum Cmd {

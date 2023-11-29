@@ -3,9 +3,10 @@ use std::sync::Arc;
 use rand::Rng;
 use tokio::sync::{mpsc, Notify};
 use webrtc::{
-    media::{io::sample_builder::SampleBuilder, Sample},
+    media::io::sample_builder::SampleBuilder,
+    rtp::{self, packet::Packet, packetizer::Packetizer},
     track::track_remote::TrackRemote,
-    util::Unmarshal, rtp::{self, packet::Packet, packetizer::Packetizer},
+    util::Unmarshal,
 };
 
 pub struct Args {
@@ -97,13 +98,11 @@ pub async fn run(args: Args) {
                     log::error!("failed to packetize: {e}");
                     continue;
                 }
-                };
+            };
             for packet in packets.drain(..) {
                 packet_queue.push(packet);
             }
         }
-
-        
 
         // 10ms * 1000 = 10 seconds
         if packet_queue.len() >= 1000 {

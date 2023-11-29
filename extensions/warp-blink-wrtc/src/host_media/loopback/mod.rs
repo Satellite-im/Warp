@@ -3,8 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc, Notify};
 use warp::crypto::DID;
 use webrtc::{
-    media::Sample,
-    track::{track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote}, rtp::packet::Packet,
+    rtp::packet::Packet,
+    track::{track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote},
 };
 
 mod receiver;

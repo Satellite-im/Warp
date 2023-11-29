@@ -14,7 +14,7 @@ use warp::error::Error;
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
-use crate::host_media::{audio::utils::automute, mp4_logger};
+use crate::host_media::mp4_logger;
 
 use super::{utils::FramerOutput, AudioProducer, OPUS_SAMPLES};
 
@@ -26,7 +26,7 @@ pub struct SourceTrack {
     stream: cpal::Stream,
     quit_encoder_task: Arc<AtomicBool>,
     quit_sender_task: Arc<Notify>,
-    muted: bool,
+    muted: Arc<AtomicBool>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     cmd_ch: UnboundedSender<sender_task::Cmd>,
     track: Arc<TrackLocalStaticRTP>,
@@ -42,6 +42,7 @@ impl Drop for SourceTrack {
 fn create_stream(
     source_device: &cpal::Device,
     num_channels: usize,
+    muted: Arc<AtomicBool>,
     mut producer: AudioProducer,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> Result<cpal::Stream, Error> {
@@ -53,7 +54,7 @@ fn create_stream(
 
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         // don't send if muted
-        if automute::SHOULD_MUTE.load(Ordering::Relaxed) {
+        if muted.load(Ordering::Relaxed) {
             return;
         }
         // merge channels
@@ -111,6 +112,7 @@ impl SourceTrack {
     ) -> Result<Self, Error> {
         let quit_encoder_task = Arc::new(AtomicBool::new(false));
         let quit_sender_task = Arc::new(Notify::new());
+        let muted = Arc::new(AtomicBool::new(false));
 
         // fail fast if the opus encoder can't be created. needed by the encoder task
         let encoder = opus::Encoder::new(48000, opus::Channels::Mono, opus::Application::Voip)
@@ -121,7 +123,13 @@ impl SourceTrack {
         let ring = HeapRb::<f32>::new(48000 * 20);
         let (producer, consumer) = ring.split();
 
-        let stream = create_stream(source_device, num_channels, producer, ui_event_ch.clone())?;
+        let stream = create_stream(
+            source_device,
+            num_channels,
+            muted.clone(),
+            producer,
+            ui_event_ch.clone(),
+        )?;
 
         // spawn encoder task
         let should_quit = quit_encoder_task.clone();
@@ -158,25 +166,25 @@ impl SourceTrack {
             stream,
             quit_encoder_task,
             quit_sender_task,
-            muted: true,
+            muted,
             ui_event_ch,
             cmd_ch: cmd_tx,
         })
     }
 
     pub fn play(&mut self) -> Result<(), Error> {
+        self.muted.store(false, Ordering::Relaxed);
         self.stream
             .play()
             .map_err(|e| Error::OtherWithContext(e.to_string()))?;
-        self.muted = false;
         Ok(())
     }
 
     pub fn pause(&mut self) -> Result<(), Error> {
+        self.muted.store(true, Ordering::Relaxed);
         self.stream
             .pause()
             .map_err(|e| Error::OtherWithContext(e.to_string()))?;
-        self.muted = true;
         Ok(())
     }
 

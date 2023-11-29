@@ -1,9 +1,6 @@
-use std::{
-    sync::{
-        atomic::{self, AtomicBool, Ordering},
-        Arc,
-    },
-    time::{Duration, Instant},
+use std::sync::{
+    atomic::{self, AtomicBool, Ordering},
+    Arc,
 };
 
 use tokio::sync::{
@@ -18,13 +15,7 @@ use webrtc::{
     util::Unmarshal,
 };
 
-use crate::host_media::{
-    audio::utils::{
-        automute::{self, AutoMuteCmd},
-        SpeechDetector,
-    },
-    mp4_logger::Mp4LoggerInstance,
-};
+use crate::host_media::{audio::utils::SpeechDetector, mp4_logger::Mp4LoggerInstance};
 
 pub struct Args {
     pub track: Arc<TrackRemote>,
@@ -53,8 +44,6 @@ pub async fn run(args: Args) {
         peer_id,
     } = args;
 
-    let automute_cmd_tx = automute::AUDIO_CMD_CH.tx.clone();
-
     let mut b = [0u8; 2880 * 4];
     let mut speech_detector = SpeechDetector::new(10, 100);
     let mut log_decode_error_once = false;
@@ -65,7 +54,9 @@ pub async fn run(args: Args) {
         SampleBuilder::new(max_late, depacketizer, 48000)
     };
 
-    let mut last_mute_time: Option<Instant> = None;
+    // this codepath (for automute) is saved for future use. for now automute is disabled because it
+    // was making things worse.
+    // let mut last_mute_time: Option<Instant> = None;
 
     loop {
         let (siz, _attr) = tokio::select! {
@@ -116,7 +107,9 @@ pub async fn run(args: Args) {
         //     logger.log(rtp_packet.header.clone(), task_start_time.elapsed().as_millis());
         // }
 
-        let mut peer_speaking = false;
+        // automute code path
+        // let mut peer_speaking = false;
+
         if let Some(extension) = rtp_packet.header.extensions.first() {
             // don't yet have the MediaEngine exposed. for now since there's only one extension being used, this way seems to be good enough
             // copies extension::audio_level_extension::AudioLevelExtension from the webrtc-rs crate
@@ -128,7 +121,7 @@ pub async fn run(args: Args) {
             // followed by this: header.get_extension(extension_id)
             let audio_level = extension.payload.first().map(|x| x & 0x7F).unwrap_or(0);
             if speech_detector.should_emit_event(audio_level) {
-                peer_speaking = true;
+                //peer_speaking = true;
                 let _ = ui_event_ch
                     .send(BlinkEventKind::ParticipantSpeaking {
                         peer_id: peer_id.clone(),
@@ -137,7 +130,9 @@ pub async fn run(args: Args) {
             }
         }
 
-        let mut sample_created = false;
+        // saved for later. automute codepath
+        // let mut sample_created = false;
+
         // turn RTP packets into samples via SampleBuilder.push
         sample_builder.push(rtp_packet);
 
@@ -149,18 +144,18 @@ pub async fn run(args: Args) {
 
         while let Some(media_sample) = sample_builder.pop() {
             let _ = packet_tx.send(media_sample);
-            sample_created = true;
+            // sample_created = true;
         }
 
-        if sample_created && peer_speaking {
-            let now = Instant::now();
-            if last_mute_time
-                .map(|x| x + Duration::from_millis(100) <= now)
-                .unwrap_or(true)
-            {
-                let _ = automute_cmd_tx.send(AutoMuteCmd::MuteAt(now));
-                last_mute_time.replace(now);
-            }
-        }
+        // if sample_created && peer_speaking {
+        //     let now = Instant::now();
+        //     if last_mute_time
+        //         .map(|x| x + Duration::from_millis(100) <= now)
+        //         .unwrap_or(true)
+        //     {
+        //         let _ = automute_cmd_tx.send(AutoMuteCmd::MuteAt(now));
+        //         last_mute_time.replace(now);
+        //     }
+        // }
     }
 }
