@@ -4,7 +4,7 @@ use rand::Rng;
 use tokio::sync::{mpsc, Notify};
 use webrtc::{
     media::Sample,
-    rtp::{self, packetizer::Packetizer},
+    rtp::{self, packetizer::Packetizer, extension::audio_level_extension::AudioLevelExtension},
     track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
@@ -82,8 +82,18 @@ pub async fn run(args: Args) {
                         }
                         };
                         for packet in packets {
-                            let _ = track.write_rtp(&packet);
+                            let _ = track .write_rtp_with_extensions(
+                                &packet,
+                                &[rtp::extension::HeaderExtension::AudioLevel(
+                                    AudioLevelExtension {
+                                        level: 128,
+                                        voice: false,
+                                    },
+                                )],
+                            ).await;
                         }
+                    } else {
+                        log::warn!("source track missing");
                     }
                 }
                 None => {
