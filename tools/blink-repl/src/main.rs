@@ -1,7 +1,7 @@
 use anyhow::bail;
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait};
-use futures::StreamExt;
+use futures::{channel::oneshot, StreamExt};
 
 use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
@@ -194,12 +194,16 @@ async fn handle_command(
         Repl::TestMicrophone { device_name } => {
             let mut config = blink.get_audio_device_config().await?;
             config.set_microphone(&device_name);
-            config.test_microphone()?;
+            let (tx, rx) = oneshot::channel();
+            config.test_microphone(tx)?;
+            let _ = rx.await;
         }
         Repl::TestSpeaker { device_name } => {
             let mut config = blink.get_audio_device_config().await?;
             config.set_speaker(&device_name);
-            config.test_speaker()?;
+            let (tx, rx) = oneshot::channel();
+            config.test_speaker(tx)?;
+            let _ = rx.await;
         }
         Repl::SupportedInputConfigs => {
             let host = cpal::default_host();

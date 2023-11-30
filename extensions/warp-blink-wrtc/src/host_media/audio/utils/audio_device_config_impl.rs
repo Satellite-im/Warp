@@ -1,6 +1,7 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
+use futures::channel::oneshot::Sender;
 use tokio::sync::broadcast;
 use warp::blink::AudioDeviceConfig;
 
@@ -86,9 +87,8 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
             .collect())
     }
 
-    // todo: make this async
     // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/beep.rs
-    fn test_speaker(&self) -> Result<()> {
+    fn test_speaker(&self, done: Sender<()>) -> Result<()> {
         let host = cpal::default_host();
         let device = self.selected_speaker.clone().unwrap_or_default();
         let device = if device == "default" {
@@ -142,15 +142,14 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
             None,
         )?;
         stream.play()?;
-        // todo: if test_speaker becomes async, change this to tokio::time::sleep
         std::thread::sleep(std::time::Duration::from_millis(1000));
         stream.pause()?;
+        let _ = done.send(());
         Ok(())
     }
 
-    // todo: make this async and perhaps return loudness
     // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/feedback.rs
-    fn test_microphone(&self) -> Result<()> {
+    fn test_microphone(&self, done: Sender<()>) -> Result<()> {
         let latency_ms = 500.0;
         let host = cpal::default_host();
         let output_device = self.selected_speaker.clone().unwrap_or_default();
@@ -297,6 +296,7 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
         std::thread::sleep(std::time::Duration::from_millis(3000 + latency_ms as u64));
         let _ = input_stream.pause();
         let _ = output_stream.pause();
+        let _ = done.send(());
         log::debug!("Done!");
         Ok(())
     }
