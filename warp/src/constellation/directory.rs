@@ -55,6 +55,9 @@ pub struct Directory {
     /// Path of directory
     #[serde(default)]
     path: Arc<String>,
+
+    #[serde(skip)]
+    signal: Arc<RwLock<Option<futures::channel::mpsc::UnboundedSender<()>>>>,
 }
 
 impl std::fmt::Debug for Directory {
@@ -67,6 +70,7 @@ impl std::fmt::Debug for Directory {
             .field("modified", &self.modified())
             .field("items", &self.items)
             .field("path", &self.path())
+            .field("signal", &self.signal)
             .finish()
     }
 }
@@ -100,6 +104,7 @@ impl Default for Directory {
             directory_type: Default::default(),
             items: Default::default(),
             path: Arc::new("/".into()),
+            signal: Arc::default(),
         }
     }
 }
@@ -522,11 +527,13 @@ impl Directory {
         if name.len() > 256 {
             name = &name[..256];
         }
-        *self.name.write() = name.to_string()
+        *self.name.write() = name.to_string();
+        self.signal();
     }
 
     pub fn set_thumbnail_format(&self, format: FormatType) {
         *self.thumbnail_format.write() = format;
+        self.signal();
     }
 
     pub fn thumbnail_format(&self) -> FormatType {
@@ -534,7 +541,8 @@ impl Directory {
     }
 
     pub fn set_thumbnail(&self, desc: &[u8]) {
-        *self.thumbnail.write() = desc.to_vec()
+        *self.thumbnail.write() = desc.to_vec();
+        self.signal();
     }
 
     pub fn thumbnail(&self) -> Vec<u8> {
@@ -544,6 +552,7 @@ impl Directory {
     pub fn set_favorite(&self, fav: bool) {
         *self.favorite.write() = fav;
         self.set_modified();
+        self.signal();
     }
 
     pub fn favorite(&self) -> bool {
@@ -555,7 +564,8 @@ impl Directory {
     }
 
     pub fn set_description(&self, desc: &str) {
-        *self.description.write() = desc.to_string()
+        *self.description.write() = desc.to_string();
+        self.signal();
     }
 
     pub fn size(&self) -> usize {
@@ -578,21 +588,37 @@ impl Directory {
         let path = Arc::make_mut(&mut self.path);
         *path = new_path.to_string();
     }
+
+    fn set_signal(&mut self, signal: Option<futures::channel::mpsc::UnboundedSender<()>>) {
+        *self.signal.write() = signal;
+    }
+
+    fn signal(&self) {
+        let Some(signal) = self.signal.read().clone() else {
+            return;
+        };
+
+        let _ = signal.unbounded_send(());
+    }
 }
 
 impl Directory {
     /// Rebuilds the items path after an update
-    pub fn rebuild_paths(&mut self) {
+    pub fn rebuild_paths(&mut self, signal: &Option<futures::channel::mpsc::UnboundedSender<()>>) {
         let items = &mut *self.items.write();
         for item in items {
             match item {
                 Item::Directory(directory) => {
+                    directory.set_signal(signal.clone());
                     let mut path = self.path().to_string();
                     path.push_str(&directory.name());
                     directory.set_path(&path);
-                    directory.rebuild_paths();
+                    directory.rebuild_paths(signal);
                 }
-                Item::File(file) => file.set_path(self.path()),
+                Item::File(file) => {
+                    file.set_signal(signal.clone());
+                    file.set_path(self.path())
+                }
             }
         }
     }
