@@ -5,13 +5,16 @@ use rust_ipfs::libp2p::gossipsub::Message;
 use rust_ipfs::Ipfs;
 use tokio_stream::StreamMap;
 
+use crate::store::identity::IdentityStorage;
+use crate::PeerTopic;
+
 #[derive(Clone)]
 pub struct Subscriptions {
     tx: futures::channel::mpsc::Sender<SubscriptionCommand>,
 }
 
 impl Subscriptions {
-    pub fn new(ipfs: &Ipfs) -> Self {
+    pub fn new(ipfs: &Ipfs, identity: &IdentityStorage) -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(1);
 
         let mut task = SubscriptionTask {
@@ -23,8 +26,18 @@ impl Subscriptions {
         task.select_stream
             .insert("pending".into(), futures::stream::pending().boxed());
 
+        let identity = identity.clone();
         tokio::spawn(async move {
-            task.run().await;
+            {
+                let list = identity.list().await.unwrap_or_default();
+
+                for id in list {
+                    _ = task.subscribe(id.did.inbox()).await;
+                    _ = task.subscribe(id.did.messaging()).await;
+                }
+            }
+
+            task.run().await
         });
 
         Self { tx }

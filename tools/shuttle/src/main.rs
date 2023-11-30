@@ -235,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = shuttle::store::root::RootStorage::new(&ipfs).await;
     let identity = shuttle::store::identity::IdentityStorage::new(&ipfs, &root).await;
 
-    let mut subscriptions = Subscriptions::new(&ipfs);
+    let mut subscriptions = Subscriptions::new(&ipfs, &identity);
     let keypair = ipfs.keypair()?;
 
     while let Some((_id, ch, payload, resp)) = id_event_rx.next().await {

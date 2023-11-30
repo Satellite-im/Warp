@@ -54,6 +54,9 @@ enum IdentityStorageCommand {
         did: DID,
         response: OneshotSender<Result<Vec<u8>, Error>>,
     },
+    List {
+        response: OneshotSender<Result<Vec<IdentityDocument>, Error>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -226,6 +229,21 @@ impl IdentityStorage {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+
+    pub async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+
+        let _ = self
+            .tx
+            .clone()
+            .send(IdentityStorageCommand::List {
+                response: tx,
+            })
+            .await;
+
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     // pub async fn remove(&self, did: &DID) -> Result<(), Error> {
     //     let (tx, rx) = futures::channel::oneshot::channel();
 
@@ -293,6 +311,7 @@ impl IdentityStorageTask {
                 IdentityStorageCommand::GetPackage { did, response } => {
                     _ = response.send(self.get_package(did).await)
                 }
+                IdentityStorageCommand::List { response } => _ = response.send(self.list().await),
             }
         }
     }
@@ -459,6 +478,23 @@ impl IdentityStorageTask {
         Ok(())
     }
 
+    async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
+        let list: Vec<IdentityDocument> = match self.list {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+
+        Ok(list)
+    }
+
+    //TODO: Use a map instead with the key linked to the content pointer
+    //      and resolve within a stream while matching conditions
     async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
         let list: HashSet<IdentityDocument> = match self.list {
             Some(cid) => self
