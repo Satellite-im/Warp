@@ -577,7 +577,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     tracing::info!(%did, package_size=package.len());
 
-                    _temp_package.insert(did.clone(), package.clone());
+                    if let Err(e) = identity.store_package(&did, package.clone()).await {
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::InvalidPayload {
+                                        msg: e.to_string(),
+                                    },
+                                ),
+                            ),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
+                        continue;
+                    }
 
                     tracing::info!(%did, package_size=package.len(), "package is stored");
 
@@ -771,14 +787,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     tracing::info!(%did, "looking for package");
-                    let event = match _temp_package.get(did) {
-                        Some(package) => {
+                    let event = match identity.get_package(&did).await {
+                        Ok(package) => {
                             tracing::info!(%did, package_size = package.len(), "package found");
                             Response::SynchronizedResponse(SynchronizedResponse::Package(
                                 package.clone(),
                             ))
                         }
-                        None => {
+                        Err(_) => {
                             tracing::warn!(%did, "package not found");
                             Response::SynchronizedResponse(
                                 identity::protocol::SynchronizedResponse::Error(

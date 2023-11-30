@@ -17,12 +17,19 @@ pub struct Root {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identities: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub packages: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mailbox: Option<Cid>,
 }
 
 #[allow(clippy::large_enum_variant)]
+#[allow(clippy::enum_variant_names)]
 enum RootCommand {
     SetIdentityList {
+        link: Cid,
+        response: OneshotSender<Result<(), Error>>,
+    },
+    SetPackages {
         link: Cid,
         response: OneshotSender<Result<(), Error>>,
     },
@@ -92,6 +99,21 @@ impl RootStorage {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn set_package(&self, cid: Cid) -> Result<(), Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+
+        let _ = self
+            .tx
+            .clone()
+            .send(RootCommand::SetPackages {
+                link: cid,
+                response: tx,
+            })
+            .await;
+
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn set_mailbox(&self, cid: Cid) -> Result<(), Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
@@ -124,12 +146,34 @@ impl RootStorageTask {
                 RootCommand::SetMailBox { link, response } => {
                     _ = response.send(self.set_mailbox(link).await)
                 }
+                RootCommand::SetPackages { link, response } => {
+                    _ = response.send(self.set_packages(link).await)
+                }
             }
         }
     }
 
     async fn set_identity_list(&mut self, cid: Cid) -> Result<(), Error> {
         self.root.identities.replace(cid);
+        let cid = self
+            .ipfs
+            .dag()
+            .put()
+            .serialize(self.root)?
+            .pin(false)
+            .await?;
+
+        self.ipfs
+            .ipns()
+            .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
+            .await?;
+
+        //TODO: Broadcast root document to nodes
+        Ok(())
+    }
+
+    async fn set_packages(&mut self, cid: Cid) -> Result<(), Error> {
+        self.root.packages.replace(cid);
         let cid = self
             .ipfs
             .dag()
