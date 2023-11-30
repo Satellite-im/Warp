@@ -104,6 +104,9 @@ struct Opt {
     /// Path to the ipfs instance
     #[clap(long)]
     path: Option<PathBuf>,
+
+    #[clap(long)]
+    enable_relay_server: bool,
 }
 
 #[tokio::main]
@@ -173,7 +176,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             dummy: ext_behaviour::Behaviour::new(local_peer_id),
         })
         .set_keypair(keypair)
-        .with_relay_server(Some(RelayConfig {
+        .fd_limit(FDLimit::Max)
+        .with_rendezvous_server()
+        .set_idle_connection_timeout(120)
+        .default_record_key_validator()
+        .set_transport_configuration(TransportConfig {
+            ..Default::default()
+        })
+        .with_gc(GCConfig {
+            duration: Duration::from_secs(60 * 60),
+            trigger: GCTrigger::None,
+        })
+        .set_temp_pin_duration(Duration::from_secs(60 * 30))
+        .listen_as_external_addr();
+
+    if opts.enable_relay_server {
+        uninitialized = uninitialized.with_relay_server(Some(RelayConfig {
             max_circuits: 8198,
             max_circuits_per_peer: 8198,
             max_circuit_duration: Duration::from_secs(2 * 60),
@@ -201,20 +219,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     interval: Duration::from_secs(60),
                 },
             ],
-        }))
-        .fd_limit(FDLimit::Max)
-        .with_rendezvous_server()
-        .set_idle_connection_timeout(120)
-        .default_record_key_validator()
-        .set_transport_configuration(TransportConfig {
-            ..Default::default()
-        })
-        .with_gc(GCConfig {
-            duration: Duration::from_secs(60 * 60),
-            trigger: GCTrigger::None,
-        })
-        .set_temp_pin_duration(Duration::from_secs(60 * 30))
-        .listen_as_external_addr();
+        }));
+    }
 
     let addrs = match opts.listen_addr.as_slice() {
         [] => vec![
