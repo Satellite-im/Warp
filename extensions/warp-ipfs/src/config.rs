@@ -53,7 +53,10 @@ pub enum Bootstrap {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
-    /// Uses DHT PROVIDER to find and connect to peers using the same context
+    External {
+        addresses: Vec<Multiaddr>,
+    },
+    /// Uses to find and connect to peers using the same namespace
     Namespace {
         namespace: Option<String>,
         discovery_type: DiscoveryType,

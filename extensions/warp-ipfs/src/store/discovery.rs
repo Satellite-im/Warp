@@ -7,11 +7,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use rust_ipfs::{
-    libp2p::swarm::dial_opts::{DialOpts, PeerCondition},
-    p2p::MultiaddrExt,
-    Ipfs, Multiaddr, PeerId,
-};
+use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, p2p::MultiaddrExt, Ipfs, Multiaddr, PeerId};
 use tokio::{
     sync::{broadcast, RwLock},
     task::JoinHandle,
@@ -401,9 +397,7 @@ impl DiscoveryEntry {
                                 discovery_type: DiscoveryType::RzPoint { .. },
                                 ..
                             } => {
-                                let opts = DialOpts::peer_id(peer_id)
-                                    .condition(PeerCondition::Disconnected)
-                                    .build();
+                                let opts = DialOpts::peer_id(peer_id).build();
 
                                 log::debug!("Dialing {peer_id}");
 
@@ -422,10 +416,10 @@ impl DiscoveryEntry {
                                     _ = async {} => {}
                                 }
                             }
-                            config::Discovery::None => {
+                            //TODO: Split external type into its own branch to detech for peer connectivity
+                            DiscoveryConfig::External { .. } | config::Discovery::None => {
                                 let opts = DialOpts::peer_id(peer_id)
                                     .addresses(entry.relays.clone())
-                                    .condition(PeerCondition::Disconnected)
                                     .build();
 
                                 log::debug!("Dialing {peer_id}");
