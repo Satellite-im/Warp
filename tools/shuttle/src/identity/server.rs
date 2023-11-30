@@ -222,7 +222,7 @@ impl NetworkBehaviour for Behaviour {
             let peer_id = record.peer_id();
             self.peer_records.insert(peer_id, record);
         }
-
+        
         self.queue_event.retain(
             |id, (channel, req_res)| match self.process_event.poll_ready(cx) {
                 Poll::Ready(Ok(_)) => {

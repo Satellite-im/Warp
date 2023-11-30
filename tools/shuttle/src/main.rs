@@ -12,11 +12,9 @@ use shuttle::{
 
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use warp::crypto::DID;
-
 use warp::error::Error as WarpError;
 
-use std::{collections::HashMap, path::PathBuf, str::FromStr, time::Duration};
+use std::{path::PathBuf, str::FromStr, time::Duration};
 
 use base64::{
     alphabet::STANDARD,
@@ -236,9 +234,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let root = shuttle::store::root::RootStorage::new(&ipfs).await;
     let identity = shuttle::store::identity::IdentityStorage::new(&ipfs, &root).await;
-
-    //TODO: Move into ipld once protocol is setup
-    let mut _temp_package: HashMap<DID, Vec<u8>> = HashMap::new();
 
     let mut subscriptions = Subscriptions::new(&ipfs);
     let keypair = ipfs.keypair()?;
@@ -583,9 +578,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             None,
                             Response::SynchronizedResponse(
                                 identity::protocol::SynchronizedResponse::Error(
-                                    SynchronizedError::InvalidPayload {
-                                        msg: e.to_string(),
-                                    },
+                                    SynchronizedError::InvalidPayload { msg: e.to_string() },
                                 ),
                             ),
                         )
@@ -787,7 +780,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     tracing::info!(%did, "looking for package");
-                    let event = match identity.get_package(&did).await {
+                    let event = match identity.get_package(did).await {
                         Ok(package) => {
                             tracing::info!(%did, package_size = package.len(), "package found");
                             Response::SynchronizedResponse(SynchronizedResponse::Package(
@@ -955,7 +948,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    tokio::signal::ctrl_c().await?;
+    // tokio::signal::ctrl_c().await?;
 
     Ok(())
 }
