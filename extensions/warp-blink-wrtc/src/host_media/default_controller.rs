@@ -305,7 +305,7 @@ pub async fn resume_recording() {
     mp4_logger::resume();
 }
 
-pub async fn set_peer_audio_gain(peer_id: DID, audio_multiplier: f32) -> anyhow::Result<()> {
+pub async fn set_peer_audio_gain(peer_id: DID, audio_multiplier: f32) {
     let _lock = LOCK.write().await;
 
     unsafe {
@@ -313,8 +313,6 @@ pub async fn set_peer_audio_gain(peer_id: DID, audio_multiplier: f32) -> anyhow:
             controller.set_audio_multiplier(peer_id, audio_multiplier);
         }
     }
-
-    Ok(())
 }
 
 fn get_min_source_channels(input_device: &cpal::Device) -> anyhow::Result<u16> {

@@ -362,8 +362,8 @@ impl Blink for BlinkImpl {
             .map_err(|e| Error::OtherWithContext(format!("failed to disable automute: {e}")))
     }
 
-    async fn set_peer_audio_gain(&mut self, _peer_id: DID, _multiplier: f32) -> Result<(), Error> {
-        // host_media::controller::set_peer_audio_gain(peer_id, multiplier).await
+    async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error> {
+        host_media::controller::set_peer_audio_gain(peer_id, multiplier).await;
         Ok(())
     }
 
