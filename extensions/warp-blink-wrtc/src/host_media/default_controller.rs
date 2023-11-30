@@ -99,13 +99,8 @@ pub async fn create_audio_source_track(
         DATA.audio_source_track.take();
     }
 
-    let (muted, num_channels) = unsafe { (DATA.muted, DATA.audio_source_channels) };
-    let mut source_track =
-        SourceTrack::new(own_id, track, input_device, num_channels, ui_event_ch)?;
-
-    if !muted {
-        source_track.play()?;
-    }
+    let num_channels = unsafe { DATA.audio_source_channels };
+    let source_track = SourceTrack::new(own_id, track, input_device, num_channels, ui_event_ch)?;
 
     unsafe {
         DATA.audio_source_track.replace(source_track);
@@ -136,18 +131,16 @@ pub async fn create_audio_sink_track(
                 bail!("no audio output device selected");
             }
         };
-        let (deafened, num_channels) = (DATA.deafened, DATA.audio_sink_channels);
+
         if DATA.audio_sink_controller.is_none() {
-            DATA.audio_sink_controller
-                .replace(SinkTrackController::new(num_channels, ui_event_ch)?);
+            DATA.audio_sink_controller.replace(SinkTrackController::new(
+                DATA.audio_sink_channels,
+                ui_event_ch,
+            )?);
         }
 
         if let Some(controller) = DATA.audio_sink_controller.as_mut() {
             controller.add_track(output_device, peer_id.clone(), track)?;
-
-            if !deafened {
-                controller.play(peer_id)?;
-            }
         } else {
             // unreachable
             debug_assert!(false);
@@ -172,7 +165,7 @@ pub async fn change_audio_input(
         DATA.audio_input_device.take();
 
         if let Some(mut source) = DATA.audio_source_track.take() {
-            let _ = source.pause();
+            source.mute();
             let track = source.get_track();
             drop(source);
             DATA.audio_source_track.replace(SourceTrack::new(
@@ -234,7 +227,7 @@ pub async fn mute_self() {
         DATA.muted = true;
     }
     if let Some(track) = unsafe { DATA.audio_source_track.as_mut() } {
-        let _ = track.pause();
+        track.mute();
     }
 }
 
@@ -244,7 +237,7 @@ pub async fn unmute_self() {
         DATA.muted = false;
     }
     if let Some(track) = unsafe { DATA.audio_source_track.as_mut() } {
-        let _ = track.play();
+        track.unmute();
     }
 }
 

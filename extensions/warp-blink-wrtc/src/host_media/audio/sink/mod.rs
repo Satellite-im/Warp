@@ -208,38 +208,11 @@ impl SinkTrackController {
         }
     }
 
-    pub fn play(&self, peer_id: DID) -> Result<(), Error> {
-        if let Some(entry) = self.receiver_tasks.get(&peer_id) {
-            entry
-                .stream
-                .play()
-                .map_err(|e| Error::OtherWithContext(e.to_string()))?;
-        }
-        Ok(())
-    }
-
-    pub fn pause(&self, peer_id: DID) -> Result<(), Error> {
-        if let Some(entry) = self.receiver_tasks.get(&peer_id) {
-            entry
-                .stream
-                .pause()
-                .map_err(|e| Error::OtherWithContext(e.to_string()))?;
-        }
-        Ok(())
-    }
-
     pub fn silence_call(&mut self) {
         self.silenced.store(true, Ordering::Relaxed);
-        for (_id, entry) in self.receiver_tasks.iter_mut() {
-            let _ = entry.stream.pause();
-        }
     }
 
     pub fn unsilence_call(&mut self) {
-        for (_id, entry) in self.receiver_tasks.iter_mut() {
-            let _ = entry.stream.play();
-        }
-
         self.silenced.store(false, Ordering::Relaxed);
     }
 
@@ -254,8 +227,6 @@ impl SinkTrackController {
             new_num_channels: num_channels,
         });
 
-        let silenced = self.silenced.load(Ordering::Relaxed);
-
         for (id, entry) in self.receiver_tasks.iter_mut() {
             let _ = entry.stream.pause();
 
@@ -269,9 +240,7 @@ impl SinkTrackController {
                 consumer,
             )?;
 
-            if !silenced {
-                let _ = stream.play();
-            }
+            let _ = stream.play();
 
             entry.stream = stream;
 

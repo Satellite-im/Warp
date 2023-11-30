@@ -134,6 +134,10 @@ impl SourceTrack {
             ui_event_ch.clone(),
         )?;
 
+        stream
+            .play()
+            .map_err(|e| Error::OtherWithContext(e.to_string()))?;
+
         // spawn encoder task
         let should_quit = quit_encoder_task.clone();
         std::thread::spawn(move || {
@@ -175,20 +179,12 @@ impl SourceTrack {
         })
     }
 
-    pub fn play(&mut self) -> Result<(), Error> {
+    pub fn unmute(&mut self) {
         self.muted.store(false, Ordering::Relaxed);
-        self.stream
-            .play()
-            .map_err(|e| Error::OtherWithContext(e.to_string()))?;
-        Ok(())
     }
 
-    pub fn pause(&mut self) -> Result<(), Error> {
+    pub fn mute(&mut self) {
         self.muted.store(true, Ordering::Relaxed);
-        self.stream
-            .pause()
-            .map_err(|e| Error::OtherWithContext(e.to_string()))?;
-        Ok(())
     }
 
     pub fn attach_logger(&self, id: &DID) {
