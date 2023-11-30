@@ -243,8 +243,10 @@ pub enum LookupResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Register {
-    pub document: IdentityDocument,
+#[serde(rename_all = "snake_case")]
+pub enum Register {
+    IsRegistered,
+    RegisterIdentity { document: IdentityDocument },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -260,6 +262,7 @@ pub enum RegisterError {
     InternalError,
     IdentityExist,
     IdentityVerificationFailed,
+    NotRegistered,
     None,
 }
 

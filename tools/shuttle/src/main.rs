@@ -246,7 +246,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some((_id, ch, payload, resp)) = id_event_rx.next().await {
         match payload.message() {
             Message::Request(req) => match req {
-                identity::protocol::Request::Register(Register { document }) => {
+                identity::protocol::Request::Register(Register::IsRegistered) => {
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
+
+                        continue;
+                    };
+
+                    if !identity.contains(&did).await.unwrap_or_default() {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = Payload::new(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityExist,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let _ = resp.send((ch, payload));
+                        continue;
+                    }
+
+                    let payload = Payload::new(
+                        keypair,
+                        None,
+                        Response::RegisterResponse(RegisterResponse::Ok),
+                    )
+                    .expect("Valid payload construction");
+
+                    let _ = resp.send((ch, payload));
+                }
+                identity::protocol::Request::Register(Register::RegisterIdentity { document }) => {
                     tracing::info!(%document.did, "Receive register request");
                     if identity.contains(&document.did).await.unwrap_or_default() {
                         tracing::warn!(%document.did, "Identity is already registered");

@@ -86,7 +86,6 @@ pub struct IdentityStore {
     identity_command: futures::channel::mpsc::Sender<shuttle::identity::client::IdentityCommand>,
 
     event: EventSubscription<MultiPassEventKind>,
-
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -377,7 +376,19 @@ impl IdentityStore {
 
         if let Ok(ident) = store.own_identity().await {
             log::info!("Identity loaded with {}", ident.did_key());
-            if let Err(_e) = store.fetch_mailbox().await {}
+            //TODO: Push into background task
+            match store.is_registered().await.is_ok() {
+                true => {
+                    //TODO: Determine if this is an imported account and await until identity has been loaded
+                    if let Err(_e) = store.fetch_mailbox().await {}
+                }
+                false => {
+                    let id = store.own_identity_document().await.expect("Valid identity");
+                    if let Err(e) = store.register(&id).await {
+                        tracing::warn!(%id.did, "Unable to register identity: {e}");
+                    }
+                }
+            }
         }
 
         let did = store.get_keypair_did()?;
@@ -1490,45 +1501,8 @@ impl IdentityStore {
         self.root_document.set(root_document).await?;
         let identity = self.root_document.identity().await?;
 
-        if let DiscoveryConfig::Namespace {
-            discovery_type: DiscoveryType::RzPoint { addresses },
-            ..
-        } = self.discovery.discovery_config()
-        {
-            for addr in addresses {
-                let Some(peer_id) = addr.peer_id() else {
-                    continue;
-                };
-
-                let (tx, rx) = futures::channel::oneshot::channel();
-                let _ = self
-                    .identity_command
-                    .clone()
-                    .send(shuttle::identity::client::IdentityCommand::Register {
-                        peer_id,
-                        identity: identity.clone().into(),
-                        response: tx,
-                    })
-                    .await;
-
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
-                    Ok(Ok(Ok(_))) => {
-                        break;
-                    }
-                    Ok(Ok(Err(e))) => {
-                        log::error!("Error registering identity to {peer_id}: {e}");
-                        break;
-                    }
-                    Ok(Err(Canceled)) => {
-                        log::error!("Channel been unexpectedly closed for {peer_id}");
-                        continue;
-                    }
-                    Err(_) => {
-                        log::error!("Request timeout for {peer_id}");
-                        continue;
-                    }
-                }
-            }
+        if let Err(e) = self.register(&identity).await {
+            tracing::warn!(%identity.did, "Unable to register to external node: {e}. Identity will not be discoverable offline");
         }
 
         let identity = identity.resolve()?;
@@ -1623,6 +1597,95 @@ impl IdentityStore {
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn is_registered(&self) -> Result<(), Error> {
+        if let DiscoveryConfig::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = self.discovery.discovery_config()
+        {
+            for addr in addresses {
+                let Some(peer_id) = addr.peer_id() else {
+                    continue;
+                };
+
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::IsRegistered {
+                        peer_id,
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        log::error!("Identity is not registered: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        log::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        log::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn register(&self, identity: &IdentityDocument) -> Result<(), Error> {
+        if let DiscoveryConfig::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = self.discovery.discovery_config()
+        {
+            for addr in addresses {
+                let Some(peer_id) = addr.peer_id() else {
+                    continue;
+                };
+
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::Register {
+                        peer_id,
+                        identity: identity.clone().into(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        log::error!("Error registering identity to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        log::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        log::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 

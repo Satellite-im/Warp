@@ -46,6 +46,10 @@ pub enum IdentityCommand {
         address: Multiaddr,
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
     },
+    IsRegistered {
+        peer_id: PeerId,
+        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+    },
     Register {
         peer_id: PeerId,
         identity: IdentityDocument,
@@ -198,6 +202,11 @@ impl Behaviour {
                                 super::protocol::RegisterError::IdentityVerificationFailed,
                             ) => {
                                 let _ = res.send(Err(warp::error::Error::IdentityInvalid));
+                            }
+                            RegisterResponse::Error(
+                                super::protocol::RegisterError::NotRegistered,
+                            ) => {
+                                let _ = res.send(Err(warp::error::Error::IdentityDoesntExist));
                             }
                             RegisterResponse::Error(
                                 super::protocol::RegisterError::InternalError,
@@ -466,7 +475,23 @@ impl NetworkBehaviour for Behaviour {
                         let payload = Payload::new(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
-                            Request::Register(Register { document: identity }),
+                            Request::Register(Register::RegisterIdentity { document: identity }),
+                        )
+                        .expect("Valid construction of payload");
+
+                        let id = self.inner.send_request(&peer_id, payload);
+
+                        tracing::debug!(?id, "Request sent");
+
+                        self.waiting_on_response
+                            .insert(id, IdentityResponse::Register { response });
+                    }
+                    IdentityCommand::IsRegistered { peer_id, response } => {
+                        tracing::info!("Registering to {peer_id}");
+                        let payload = Payload::new(
+                            &self.keypair,
+                            self.primary_keypair.as_ref(),
+                            Request::Register(Register::IsRegistered),
                         )
                         .expect("Valid construction of payload");
 
