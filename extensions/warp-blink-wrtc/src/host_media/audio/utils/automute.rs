@@ -49,7 +49,6 @@ pub fn stop() {
 
 async fn run() -> Result<()> {
     log::debug!("starting automute");
-    let mut enabled = true;
     let rx = AUDIO_CMD_CH.rx.clone();
     let mut rx = match rx.try_lock() {
         Ok(r) => r,
@@ -57,7 +56,6 @@ async fn run() -> Result<()> {
     };
 
     let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel::<Instant>();
-
     tokio::spawn(async move {
         log::debug!("starting automute helper");
         let mut unmute_time: Option<Instant> = None;
@@ -80,7 +78,7 @@ async fn run() -> Result<()> {
                 res = rx2.recv() => match res {
                     Some(instant) => {
                         let now = Instant::now();
-                        if now >= instant + Duration::from_millis(1000) {
+                        if  now >= instant + Duration::from_millis(1000) {
                             continue;
                         }
                         let future = instant + Duration::from_millis(1000);
@@ -103,6 +101,7 @@ async fn run() -> Result<()> {
         log::debug!("terminating automute helper");
     });
 
+    let mut enabled = true;
     while let Some(cmd) = rx.recv().await {
         match cmd {
             Cmd::Quit => {
@@ -117,6 +116,7 @@ async fn run() -> Result<()> {
                 let _ = tx2.send(instant);
             }
             Cmd::Disable => {
+                SHOULD_MUTE.store(false, Ordering::Relaxed);
                 enabled = false;
             }
             Cmd::Enable => enabled = true,

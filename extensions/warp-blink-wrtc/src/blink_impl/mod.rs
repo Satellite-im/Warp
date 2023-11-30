@@ -26,7 +26,7 @@ use warp::{
 
 use crate::{
     blink_impl::blink_controller::BlinkController,
-    host_media::{self},
+    host_media::{self, audio_utils::automute},
     simple_webrtc::{self},
 };
 
@@ -352,16 +352,14 @@ impl Blink for BlinkImpl {
     }
 
     fn enable_automute(&mut self) -> Result<(), Error> {
-        // let tx = AUDIO_CMD_CH.tx.clone();
-        // tx.send(AutoMuteCmd::Enable)
-        //     .map_err(|e| Error::OtherWithContext(format!("failed to enable automute: {e}")))
-        Ok(())
+        let tx = automute::AUDIO_CMD_CH.tx.clone();
+        tx.send(automute::Cmd::Enable)
+            .map_err(|e| Error::OtherWithContext(format!("failed to enable automute: {e}")))
     }
     fn disable_automute(&mut self) -> Result<(), Error> {
-        // let tx = AUDIO_CMD_CH.tx.clone();
-        // tx.send(AutoMuteCmd::Disable)
-        //     .map_err(|e| Error::OtherWithContext(format!("failed to disable automute: {e}")))
-        Ok(())
+        let tx = automute::AUDIO_CMD_CH.tx.clone();
+        tx.send(automute::Cmd::Disable)
+            .map_err(|e| Error::OtherWithContext(format!("failed to disable automute: {e}")))
     }
 
     async fn set_peer_audio_gain(&mut self, _peer_id: DID, _multiplier: f32) -> Result<(), Error> {
