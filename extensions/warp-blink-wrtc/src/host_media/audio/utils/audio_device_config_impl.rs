@@ -86,6 +86,7 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
             .collect())
     }
 
+    // todo: make this async
     // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/beep.rs
     fn test_speaker(&self) -> Result<()> {
         let host = cpal::default_host();
@@ -141,11 +142,13 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
             None,
         )?;
         stream.play()?;
+        // todo: if test_speaker becomes async, change this to tokio::time::sleep
         std::thread::sleep(std::time::Duration::from_millis(1000));
         stream.pause()?;
         Ok(())
     }
 
+    // todo: make this async and perhaps return loudness
     // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/feedback.rs
     fn test_microphone(&self) -> Result<()> {
         let latency_ms = 500.0;
