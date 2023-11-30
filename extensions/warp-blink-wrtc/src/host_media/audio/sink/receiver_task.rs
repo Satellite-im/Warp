@@ -1,9 +1,6 @@
-use std::{
-    sync::{
-        atomic::{self, AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
+use std::sync::{
+    atomic::{self, AtomicBool, Ordering},
+    Arc,
 };
 
 use tokio::{
@@ -62,7 +59,6 @@ pub async fn run(args: Args) {
         SampleBuilder::new(max_late, depacketizer, 48000)
     };
 
-    let mut last_mute_time: Option<Instant> = None;
     let automute_tx = automute::AUDIO_CMD_CH.tx.clone();
 
     loop {
@@ -129,14 +125,7 @@ pub async fn run(args: Args) {
                     peer_id: peer_id.clone(),
                 });
 
-                let now = Instant::now();
-                if last_mute_time
-                    .map(|x| x + Duration::from_millis(100) <= now)
-                    .unwrap_or(true)
-                {
-                    let _ = automute_tx.send(automute::Cmd::MuteAt(now));
-                    last_mute_time.replace(now);
-                }
+                let _ = automute_tx.send(automute::Cmd::MuteAt(Instant::now()));
             }
         }
 
