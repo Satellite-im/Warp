@@ -1,11 +1,23 @@
 use chrono::{DateTime, Utc};
+use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use warp::crypto::{did_key::CoreSign, DID};
+
+use self::document::IdentityDocument;
 
 pub mod client;
 pub mod document;
 pub mod protocol;
 pub mod server;
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IdentityDag {
+    pub identity: IdentityDocument,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mailbox: Option<Cid>,
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Hash, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -48,7 +60,7 @@ impl RequestPayload {
         if !self.signature.is_empty() {
             return Err(Box::new(warp::error::Error::InvalidSignature));
         }
-        
+
         let bytes = serde_json::to_vec(&self)?;
         let signature = keypair.sign(&bytes);
         self.signature = signature;
