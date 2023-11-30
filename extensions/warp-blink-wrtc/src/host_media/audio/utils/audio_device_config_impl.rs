@@ -141,8 +141,8 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
             None,
         )?;
         stream.play()?;
-
         std::thread::sleep(std::time::Duration::from_millis(1000));
+        stream.pause()?;
         Ok(())
     }
 
