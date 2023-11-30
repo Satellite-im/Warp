@@ -50,7 +50,7 @@ pub struct BlinkImpl {
 struct DropHandler {}
 impl Drop for DropHandler {
     fn drop(&mut self) {
-        // host_media::audio_utils::automute::stop();
+        host_media::audio_utils::automute::stop();
         tokio::spawn(async {
             host_media::controller::reset().await;
         });
@@ -156,7 +156,7 @@ impl BlinkImpl {
             }
         });
 
-        // host_media::audio_utils::automute::start();
+        host_media::audio_utils::automute::start();
         Ok(Box::new(blink_impl))
     }
 
