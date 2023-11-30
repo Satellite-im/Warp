@@ -1,7 +1,9 @@
 use anyhow::Result;
 use futures::channel::oneshot::Sender;
 pub trait AudioDeviceConfig: Send + Sync {
+    /// warning: be sure to use tokio::task::spawn_blocking for this function
     fn test_speaker(&self, done: Sender<()>) -> Result<()>;
+    /// warning: be sure to use tokio::task::spawn_blocking for this function
     fn test_microphone(&self, done: Sender<()>) -> Result<()>;
 
     fn set_speaker(&mut self, device_name: &str);

@@ -195,14 +195,22 @@ async fn handle_command(
             let mut config = blink.get_audio_device_config().await?;
             config.set_microphone(&device_name);
             let (tx, rx) = oneshot::channel();
-            config.test_microphone(tx)?;
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = config.test_microphone(tx) {
+                    log::error!("{e}");
+                }
+            });
             let _ = rx.await;
         }
         Repl::TestSpeaker { device_name } => {
             let mut config = blink.get_audio_device_config().await?;
             config.set_speaker(&device_name);
             let (tx, rx) = oneshot::channel();
-            config.test_speaker(tx)?;
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = config.test_speaker(tx) {
+                    log::error!("{e}");
+                }
+            });
             let _ = rx.await;
         }
         Repl::SupportedInputConfigs => {
