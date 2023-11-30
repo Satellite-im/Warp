@@ -1,6 +1,7 @@
 use anyhow::Result;
+use dyn_clone::DynClone;
 use futures::channel::oneshot::Sender;
-pub trait AudioDeviceConfig: Send + Sync {
+pub trait AudioDeviceConfig: DynClone + Send + Sync {
     /// warning: be sure to use tokio::task::spawn_blocking for this function
     fn test_speaker(&self, done: Sender<()>) -> Result<()>;
     /// warning: be sure to use tokio::task::spawn_blocking for this function
