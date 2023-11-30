@@ -1,7 +1,8 @@
+use futures::stream::BoxStream;
 use futures::SinkExt;
 use futures::StreamExt;
+use rust_ipfs::libp2p::gossipsub::Message;
 use rust_ipfs::Ipfs;
-use rust_ipfs::SubscriptionStream;
 use tokio_stream::StreamMap;
 
 #[derive(Clone)]
@@ -18,6 +19,9 @@ impl Subscriptions {
             select_stream: StreamMap::default(),
             rx,
         };
+
+        task.select_stream
+            .insert("pending".into(), futures::stream::pending().boxed());
 
         tokio::spawn(async move {
             task.run().await;
@@ -57,7 +61,7 @@ impl Subscriptions {
 
 struct SubscriptionTask {
     ipfs: Ipfs,
-    select_stream: StreamMap<String, SubscriptionStream>,
+    select_stream: StreamMap<String, BoxStream<'static, Message>>,
     rx: futures::channel::mpsc::Receiver<SubscriptionCommand>,
 }
 
@@ -84,7 +88,7 @@ impl SubscriptionTask {
 
     async fn subscribe(&mut self, topic: String) -> Result<(), anyhow::Error> {
         let stream = self.ipfs.pubsub_subscribe(topic.clone()).await?;
-        self.select_stream.insert(topic, stream);
+        self.select_stream.insert(topic, stream.boxed());
         Ok(())
     }
 
