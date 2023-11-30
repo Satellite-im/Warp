@@ -5,14 +5,17 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
-use tokio::sync::mpsc::{self, error::TryRecvError};
+use tokio::{
+    sync::mpsc::{self},
+    time::Instant,
+};
 
 // tells the automute module how much longer to delay before unmuting
 pub struct AudioMuteChannels {
-    pub tx: mpsc::UnboundedSender<AutoMuteCmd>,
-    pub rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<AutoMuteCmd>>>,
+    pub tx: mpsc::UnboundedSender<Cmd>,
+    pub rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Cmd>>>,
 }
 pub static AUDIO_CMD_CH: Lazy<AudioMuteChannels> = Lazy::new(|| {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -24,7 +27,7 @@ pub static AUDIO_CMD_CH: Lazy<AudioMuteChannels> = Lazy::new(|| {
 
 pub static SHOULD_MUTE: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
-pub enum AutoMuteCmd {
+pub enum Cmd {
     Quit,
     MuteAt(Instant),
     Disable,
@@ -41,7 +44,7 @@ pub fn start() {
 
 pub fn stop() {
     let tx = AUDIO_CMD_CH.tx.clone();
-    let _ = tx.send(AutoMuteCmd::Quit);
+    let _ = tx.send(Cmd::Quit);
 }
 
 async fn run() -> Result<()> {
@@ -58,34 +61,42 @@ async fn run() -> Result<()> {
     tokio::spawn(async move {
         log::debug!("starting automute helper");
         let mut unmute_time: Option<Instant> = None;
-        'OUTER_LOOP: loop {
-            'FAKE_WHILE: loop {
-                match rx2.try_recv() {
-                    Ok(instant) => {
-                        let future = instant + Duration::from_millis(110);
+        let mut timer = tokio::time::interval_at(
+            Instant::now() + Duration::from_millis(100),
+            Duration::from_millis(100),
+        );
+        loop {
+            tokio::select! {
+                _ = timer.tick() => {
+                    if SHOULD_MUTE.load(Ordering::Relaxed)
+                    && unmute_time
+                        .as_ref()
+                        .map(|x| Instant::now() > *x)
+                        .unwrap_or_default()
+                    {
+                        SHOULD_MUTE.store(false, Ordering::Relaxed);
+                    }
+                },
+                res = rx2.recv() => match res {
+                    Some(instant) => {
+                        let now = Instant::now();
+                        if now >= instant + Duration::from_millis(1000) {
+                            continue;
+                        }
+                        let future = instant + Duration::from_millis(1000);
                         if unmute_time.map(|x| future > x).unwrap_or(true) {
                             unmute_time.replace(future);
                             if !SHOULD_MUTE.load(Ordering::Relaxed) {
                                 SHOULD_MUTE.store(true, Ordering::Relaxed);
                             }
                         }
-                    }
-                    Err(TryRecvError::Disconnected) => {
+                    },
+                   None => {
                         SHOULD_MUTE.store(false, Ordering::Relaxed);
-                        break 'OUTER_LOOP;
+                        log::debug!("automute task terminated - cmd channel closed");
+                        break;
                     }
-                    _ => break 'FAKE_WHILE,
                 }
-            }
-
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            if SHOULD_MUTE.load(Ordering::Relaxed)
-                && unmute_time
-                    .as_ref()
-                    .map(|x| Instant::now() > *x)
-                    .unwrap_or_default()
-            {
-                SHOULD_MUTE.store(false, Ordering::Relaxed);
             }
         }
 
@@ -94,21 +105,21 @@ async fn run() -> Result<()> {
 
     while let Some(cmd) = rx.recv().await {
         match cmd {
-            AutoMuteCmd::Quit => {
+            Cmd::Quit => {
                 log::debug!("quitting automute");
                 SHOULD_MUTE.store(false, Ordering::Relaxed);
                 break;
             }
-            AutoMuteCmd::MuteAt(instant) => {
+            Cmd::MuteAt(instant) => {
                 if !enabled {
                     continue;
                 }
                 let _ = tx2.send(instant);
             }
-            AutoMuteCmd::Disable => {
+            Cmd::Disable => {
                 enabled = false;
             }
-            AutoMuteCmd::Enable => enabled = true,
+            Cmd::Enable => enabled = true,
         }
     }
     Ok(())

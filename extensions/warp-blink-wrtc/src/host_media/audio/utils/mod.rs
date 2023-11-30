@@ -1,6 +1,6 @@
 mod audio_buf;
 mod audio_device_config_impl;
-// pub mod automute;
+pub mod automute;
 mod codec_config;
 mod framer_output;
 mod loudness;

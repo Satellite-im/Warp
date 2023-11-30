@@ -228,30 +228,24 @@ pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn mute_self() -> anyhow::Result<()> {
+pub async fn mute_self() {
     let _lock = LOCK.write().await;
     unsafe {
         DATA.muted = true;
     }
     if let Some(track) = unsafe { DATA.audio_source_track.as_mut() } {
-        track
-            .pause()
-            .map_err(|e| anyhow::anyhow!("failed to pause (mute) track: {e}"))?;
+        let _ = track.pause();
     }
-    Ok(())
 }
 
-pub async fn unmute_self() -> anyhow::Result<()> {
+pub async fn unmute_self() {
     let _lock = LOCK.write().await;
     unsafe {
         DATA.muted = false;
     }
     if let Some(track) = unsafe { DATA.audio_source_track.as_mut() } {
-        track
-            .play()
-            .map_err(|e| anyhow::anyhow!("failed to play (unmute) track: {e}"))?;
+        let _ = track.play();
     }
-    Ok(())
 }
 
 pub async fn deafen() {
