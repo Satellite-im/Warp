@@ -91,14 +91,13 @@ async fn run() -> Result<()> {
                         }
                     },
                    None => {
-                        SHOULD_MUTE.store(false, Ordering::Relaxed);
                         log::debug!("automute task terminated - cmd channel closed");
                         break;
                     }
                 }
             }
         }
-
+        SHOULD_MUTE.store(false, Ordering::Relaxed);
         log::debug!("terminating automute helper");
     });
 
@@ -111,13 +110,11 @@ async fn run() -> Result<()> {
                 break;
             }
             Cmd::MuteAt(instant) => {
-                if !enabled {
-                    continue;
+                if enabled {
+                    let _ = tx2.send(instant);
                 }
-                let _ = tx2.send(instant);
             }
             Cmd::Disable => {
-                SHOULD_MUTE.store(false, Ordering::Relaxed);
                 enabled = false;
             }
             Cmd::Enable => enabled = true,
