@@ -78,10 +78,11 @@ async fn run() -> Result<()> {
                 res = rx2.recv() => match res {
                     Some(instant) => {
                         let now = Instant::now();
-                        if  now >= instant + Duration::from_millis(1000) {
+                        let future = instant + Duration::from_millis(1000);
+                        if  now >= future {
                             continue;
                         }
-                        let future = instant + Duration::from_millis(1000);
+
                         if unmute_time.map(|x| future > x).unwrap_or(true) {
                             unmute_time.replace(future);
                             if !SHOULD_MUTE.load(Ordering::Relaxed) {

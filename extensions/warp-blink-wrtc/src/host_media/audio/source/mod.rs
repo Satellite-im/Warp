@@ -16,7 +16,10 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
 use crate::host_media::mp4_logger;
 
-use super::{utils::FramerOutput, AudioProducer, OPUS_SAMPLES};
+use super::{
+    utils::{automute, FramerOutput},
+    AudioProducer, OPUS_SAMPLES,
+};
 
 mod encoder_task;
 mod sender_task;
@@ -54,7 +57,7 @@ fn create_stream(
 
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         // don't send if muted
-        if muted.load(Ordering::Relaxed) {
+        if muted.load(Ordering::Relaxed) || automute::SHOULD_MUTE.load(Ordering::Relaxed) {
             return;
         }
         // merge channels
