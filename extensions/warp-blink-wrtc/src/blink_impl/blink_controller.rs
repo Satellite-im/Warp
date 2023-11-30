@@ -474,6 +474,9 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                     },
                     Cmd::MuteSelf => {
                         if let Some(data) = call_data_map.get_active_mut() {
+                            if let Err(e) = host_media::controller::mute_self().await {
+                                log::error!("{e}");
+                            }
                             let call_id = data.info.call_id();
                             data.state.set_self_muted(true);
                             let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
@@ -488,6 +491,9 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                     }
                     Cmd::UnmuteSelf => {
                         if let Some(data) = call_data_map.get_active_mut() {
+                            if let Err(e) = host_media::controller::unmute_self().await {
+                                log::error!("{e}");
+                            }
                             let call_id = data.info.call_id();
                             data.state.set_self_muted(false);
                             let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
