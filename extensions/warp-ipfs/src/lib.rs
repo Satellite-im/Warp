@@ -370,7 +370,9 @@ impl WarpIpfs {
         // Use the selected relays
         let relay_connection_task = {
             let ipfs = ipfs.clone();
+            let quorum = config.ipfs_setting.relay_client.quorum;
             async move {
+                let mut counter = 0;
                 for relay_peer in relay_peers {
                     match tokio::time::timeout(
                         Duration::from_secs(5),
@@ -389,14 +391,22 @@ impl WarpIpfs {
                         }
                     };
 
-                    let list = ipfs.list_relays(true).await.unwrap_or_default();
-                    for addr in list
-                        .iter()
-                        .filter(|(peer_id, _)| *peer_id == relay_peer)
-                        .flat_map(|(_, addrs)| addrs)
-                    {
-                        info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
+                    match quorum {
+                        config::RelayQuorum::First => break,
+                        config::RelayQuorum::N(n) => {
+                            if counter < n {
+                                counter += 1;
+                                continue;
+                            }
+                            break;
+                        }
+                        config::RelayQuorum::All => continue,
                     }
+                }
+
+                let list = ipfs.list_relays(true).await.unwrap_or_default();
+                for addr in list.iter().flat_map(|(_, addrs)| addrs) {
+                    tracing::info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
                 }
             }
         };
