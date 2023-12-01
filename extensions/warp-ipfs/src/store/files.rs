@@ -753,9 +753,6 @@ impl FileStore {
     }
 
     pub async fn rename(&mut self, current: &str, new: &str) -> Result<(), Error> {
-        //Used as guard in the event its not available but will be used in the future
-        let _ipfs = self.ipfs.clone();
-
         //Note: This will only support renaming the file or directory in the index
         let directory = self.current_directory()?;
 
@@ -775,9 +772,6 @@ impl FileStore {
     }
 
     pub async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
-        //Used as guard in the event its not available but will be used in the future
-        let _ipfs = self.ipfs.clone();
-
         let directory = self.current_directory()?;
 
         //Prevent creating recursive/nested directorieis if `recursive` isnt true
@@ -789,8 +783,7 @@ impl FileStore {
             return Err(Error::DirectoryExist);
         }
 
-        self.current_directory()?
-            .add_directory(Directory::new(name))?;
+        directory.add_directory(Directory::new(name))?;
 
         Ok(())
     }
