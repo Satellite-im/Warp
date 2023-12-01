@@ -368,29 +368,53 @@ impl WarpIpfs {
         }
 
         // Use the selected relays
-        for relay_peer in relay_peers {
-            match tokio::time::timeout(Duration::from_secs(5), ipfs.enable_relay(Some(relay_peer)))
-                .await
-            {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => {
-                    error!("Failed to use {relay_peer} as a relay: {e}");
-                    continue;
-                }
-                Err(_) => {
-                    error!("Relay connection timed out");
-                    continue;
-                }
-            };
+        let relay_connection_task = {
+            let ipfs = ipfs.clone();
+            let quorum = config.ipfs_setting.relay_client.quorum;
+            async move {
+                let mut counter = 0;
+                for relay_peer in relay_peers {
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        ipfs.enable_relay(Some(relay_peer)),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            error!("Failed to use {relay_peer} as a relay: {e}");
+                            continue;
+                        }
+                        Err(_) => {
+                            error!("Relay connection timed out");
+                            continue;
+                        }
+                    };
 
-            let list = ipfs.list_relays(true).await.unwrap_or_default();
-            for addr in list
-                .iter()
-                .filter(|(peer_id, _)| *peer_id == relay_peer)
-                .flat_map(|(_, addrs)| addrs)
-            {
-                info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
+                    match quorum {
+                        config::RelayQuorum::First => break,
+                        config::RelayQuorum::N(n) => {
+                            if counter < n {
+                                counter += 1;
+                                continue;
+                            }
+                            break;
+                        }
+                        config::RelayQuorum::All => continue,
+                    }
+                }
+
+                let list = ipfs.list_relays(true).await.unwrap_or_default();
+                for addr in list.iter().flat_map(|(_, addrs)| addrs) {
+                    tracing::info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
+                }
             }
+        };
+
+        if config.ipfs_setting.relay_client.background {
+            tokio::spawn(relay_connection_task);
+        } else {
+            relay_connection_task.await;
         }
 
         if config.ipfs_setting.dht_client
