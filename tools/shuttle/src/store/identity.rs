@@ -229,16 +229,13 @@ impl IdentityStorage {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-
     pub async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
         let _ = self
             .tx
             .clone()
-            .send(IdentityStorageCommand::List {
-                response: tx,
-            })
+            .send(IdentityStorageCommand::List { response: tx })
             .await;
 
         rx.await.map_err(anyhow::Error::from)?
@@ -633,6 +630,8 @@ impl IdentityStorageTask {
             return Ok((Vec::new(), 0));
         }
 
+        mailbox.sort();
+
         let mut requests = vec![];
 
         let mut counter = 0;
@@ -695,11 +694,12 @@ impl IdentityStorageTask {
             None => Vec::new(),
         };
 
-        if let Some(index) = mailbox
+        if mailbox
             .iter()
-            .position(|req| req.sender.eq(&request.sender))
+            .any(|req| req.sender.eq(&request.sender) && req.event.eq(&request.event))
         {
-            mailbox.remove(index);
+            //TODO: Request exist
+            return Err(Error::FriendRequestExist);
         }
 
         mailbox.push(request);

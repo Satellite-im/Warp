@@ -55,6 +55,18 @@ impl std::hash::Hash for RequestPayload {
     }
 }
 
+impl PartialOrd for RequestPayload {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for RequestPayload {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.created.cmp(&other.created)
+    }
+}
+
 impl RequestPayload {
     pub fn sign(mut self, keypair: &DID) -> Result<Self, Box<dyn std::error::Error>> {
         if !self.signature.is_empty() {
