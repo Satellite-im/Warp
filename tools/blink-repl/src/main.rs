@@ -8,7 +8,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warp::{
-    blink::{Blink, BlinkEventKind, BlinkEventStream},
+    blink::{AudioTestEvent, Blink, BlinkEventKind, BlinkEventStream},
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
 
@@ -200,7 +200,24 @@ async fn handle_command(
                     log::error!("{e}");
                 }
             });
-            let _ = rx.await;
+            let mut ch = match rx.await {
+                Ok(r) => r,
+                Err(_e) => {
+                    bail!("audio test cancelled - channel closed");
+                }
+            };
+
+            while let Some(evt) = ch.recv().await {
+                match evt {
+                    AudioTestEvent::Done => {
+                        log::debug!("received done event");
+                        break;
+                    }
+                    x => {
+                        log::debug!("{x:?}");
+                    }
+                }
+            }
         }
         Repl::TestSpeaker { device_name } => {
             let mut config = blink.get_audio_device_config().await?;
@@ -211,7 +228,24 @@ async fn handle_command(
                     log::error!("{e}");
                 }
             });
-            let _ = rx.await;
+            let mut ch = match rx.await {
+                Ok(r) => r,
+                Err(_e) => {
+                    bail!("audio test cancelled - channel closed");
+                }
+            };
+
+            while let Some(evt) = ch.recv().await {
+                match evt {
+                    AudioTestEvent::Done => {
+                        log::debug!("received done event");
+                        break;
+                    }
+                    x => {
+                        log::debug!("{x:?}");
+                    }
+                }
+            }
         }
         Repl::SupportedInputConfigs => {
             let host = cpal::default_host();

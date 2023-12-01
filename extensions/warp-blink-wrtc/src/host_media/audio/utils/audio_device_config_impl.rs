@@ -1,9 +1,9 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
-use futures::channel::oneshot::Sender;
-use tokio::sync::broadcast;
-use warp::blink::AudioDeviceConfig;
+use futures::channel::oneshot;
+use tokio::sync::mpsc;
+use warp::blink::{AudioDeviceConfig, AudioTestEvent};
 
 use crate::host_media::audio::utils::{loudness, speech};
 
@@ -17,13 +17,6 @@ pub struct AudioDeviceConfigImpl {
     // defaults to the default device or None
     // if no devices are connected
     selected_microphone: Option<String>,
-    event_ch: broadcast::Sender<AudioTestEvent>,
-}
-
-#[derive(Clone)]
-pub enum AudioTestEvent {
-    MicrophoneInput,
-    SpeakerOutput,
 }
 
 impl AudioDeviceConfigImpl {
@@ -43,16 +36,10 @@ impl AudioDeviceConfigImpl {
         ))
     }
     pub fn new(selected_speaker: Option<String>, selected_microphone: Option<String>) -> Self {
-        let (tx, _) = broadcast::channel(128);
         Self {
             selected_speaker,
             selected_microphone,
-            event_ch: tx,
         }
-    }
-
-    pub fn subscribe(&mut self) -> broadcast::Receiver<AudioTestEvent> {
-        self.event_ch.subscribe()
     }
 }
 
@@ -88,7 +75,16 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
     }
 
     // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/beep.rs
-    fn test_speaker(&self, done: Sender<()>) -> Result<()> {
+    fn test_speaker(
+        &self,
+        rsp: oneshot::Sender<mpsc::UnboundedReceiver<AudioTestEvent>>,
+    ) -> Result<()> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let speaker_tx = tx.clone();
+
+        // this must be sent before the audio test.
+        let _ = rsp.send(rx);
+
         let host = cpal::default_host();
         let device = self.selected_speaker.clone().unwrap_or_default();
         let device = if device == "default" {
@@ -112,9 +108,6 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
             buffer_size: cpal::BufferSize::Default,
         };
 
-        let event_interval = (sample_rate / 2.0) as usize;
-        let mut remaining_samples = event_interval;
-
         // Produce a sinusoid of maximum amplitude.
         let mut sample_clock = 0f32;
         let mut next_value = move || {
@@ -122,19 +115,27 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
             (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin()
         };
         let err_fn = |err| log::error!("an error occurred on stream: {}", err);
-        let ch = self.event_ch.clone();
+
+        let mut speaker_loudness_calculator = loudness::Calculator::new(480);
+        let mut speaker_speech_detector =
+            speech::Detector::new(10, (sample_rate as f32 / 5.0) as _);
         let stream = device.build_output_stream(
             &cpal_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 for frame in data.chunks_mut(channels) {
                     let value: f32 = f32::from_sample(next_value());
-                    remaining_samples = remaining_samples.saturating_sub(1);
-                    if remaining_samples == 0 {
-                        remaining_samples = event_interval;
-                        let _ = ch.send(AudioTestEvent::SpeakerOutput);
-                    }
+
                     for sample in frame.iter_mut() {
                         *sample = value;
+                    }
+
+                    speaker_loudness_calculator.insert(value);
+                    let loudness = match speaker_loudness_calculator.get_rms() * 1000.0 {
+                        x if x >= 127.0 => 127,
+                        x => x as u8,
+                    };
+                    if speaker_speech_detector.should_emit_event(loudness) {
+                        let _ = speaker_tx.send(AudioTestEvent::Output { loudness });
                     }
                 }
             },
@@ -144,12 +145,22 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
         stream.play()?;
         std::thread::sleep(std::time::Duration::from_millis(1000));
         stream.pause()?;
-        let _ = done.send(());
+        let _ = tx.send(AudioTestEvent::Done);
         Ok(())
     }
 
     // stolen from here: https://github.com/RustAudio/cpal/blob/master/examples/feedback.rs
-    fn test_microphone(&self, done: Sender<()>) -> Result<()> {
+    fn test_microphone(
+        &self,
+        rsp: oneshot::Sender<mpsc::UnboundedReceiver<AudioTestEvent>>,
+    ) -> Result<()> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let microphone_tx = tx.clone();
+        let speaker_tx = tx.clone();
+
+        // this must be sent before the audio test.
+        let _ = rsp.send(rx);
+
         let latency_ms = 500.0;
         let host = cpal::default_host();
         let output_device = self.selected_speaker.clone().unwrap_or_default();
@@ -208,7 +219,6 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
         let mut speaker_speech_detector =
             speech::Detector::new(10, (output_config.sample_rate.0 as f32 / 5.0) as _);
 
-        let input_ch = self.event_ch.clone();
         let mut disp_input_err_once = false;
         let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
             let mut input_fell_behind = false;
@@ -223,7 +233,7 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
                     x => x as u8,
                 };
                 if microphone_speech_detector.should_emit_event(loudness) {
-                    let _ = input_ch.send(AudioTestEvent::MicrophoneInput);
+                    let _ = microphone_tx.send(AudioTestEvent::Input { loudness });
                 }
 
                 if producer.push(avg).is_err() {
@@ -236,7 +246,6 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
             }
         };
 
-        let output_ch = self.event_ch.clone();
         let mut disp_output_err_once = false;
         let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut output_fell_behind = false;
@@ -246,14 +255,13 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
                 }
                 let value = consumer.pop().unwrap_or_default();
 
-                // this block is copied from OpusSource.
                 speaker_loudness_calculator.insert(value);
                 let loudness = match speaker_loudness_calculator.get_rms() * 1000.0 {
                     x if x >= 127.0 => 127,
                     x => x as u8,
                 };
                 if speaker_speech_detector.should_emit_event(loudness) {
-                    let _ = output_ch.send(AudioTestEvent::SpeakerOutput);
+                    let _ = speaker_tx.send(AudioTestEvent::Output { loudness });
                 }
 
                 for sample in frame.iter_mut() {
@@ -296,7 +304,7 @@ impl AudioDeviceConfig for AudioDeviceConfigImpl {
         std::thread::sleep(std::time::Duration::from_millis(3000 + latency_ms as u64));
         let _ = input_stream.pause();
         let _ = output_stream.pause();
-        let _ = done.send(());
+        let _ = tx.send(AudioTestEvent::Done);
         log::debug!("Done!");
         Ok(())
     }
