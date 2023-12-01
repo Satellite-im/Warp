@@ -523,6 +523,7 @@ impl WarpIpfs {
             id_sh_tx,
         )
         .await?;
+
         info!("Identity initialized");
 
         *self.identity_store.write() = Some(identity_store.clone());

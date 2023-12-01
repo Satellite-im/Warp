@@ -222,7 +222,7 @@ impl NetworkBehaviour for Behaviour {
             let peer_id = record.peer_id();
             self.peer_records.insert(peer_id, record);
         }
-        
+
         self.queue_event.retain(
             |id, (channel, req_res)| match self.process_event.poll_ready(cx) {
                 Poll::Ready(Ok(_)) => {
@@ -259,46 +259,3 @@ impl NetworkBehaviour for Behaviour {
         Poll::Pending
     }
 }
-
-// fn construct_payload(
-//     id: Option<Uuid>,
-//     keypair: &Keypair,
-//     event: WireEvent,
-// ) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
-//     let id = id.unwrap_or_else(Uuid::new_v4);
-//     let mut payload = Payload {
-//         id,
-//         event,
-//         signature: vec![],
-//     };
-
-//     let bytes = serde_json::to_vec(&payload)?;
-
-//     let signature = keypair.sign(&bytes)?;
-
-//     payload.signature = signature;
-
-//     Ok(payload)
-// }
-
-// fn validate_payload(
-//     peer_id: PeerId,
-//     payload: Payload,
-// ) -> Result<Option<WireEvent>, Box<dyn std::error::Error + Send + Sync>> {
-//     let mut payload = payload.clone();
-//     let public_key = peer_id.to_public_key()?;
-
-//     let signature = std::mem::take(&mut payload.signature);
-
-//     if signature.is_empty() {
-//         return Ok(None);
-//     }
-
-//     let bytes = serde_json::to_vec(&payload)?;
-
-//     if !public_key.verify(&bytes, &signature) {
-//         return Ok(None);
-//     }
-
-//     Ok(Some(payload.event))
-// }
