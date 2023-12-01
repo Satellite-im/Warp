@@ -108,6 +108,16 @@ pub struct RelayClient {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// List of relays to use
     pub relay_address: Vec<Multiaddr>,
+    pub background: bool,
+    pub quorum: RelayQuorum,
+}
+
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum RelayQuorum {
+    First,
+    N(u8),
+    #[default]
+    All,
 }
 
 impl Default for RelayClient {
@@ -123,7 +133,9 @@ impl Default for RelayClient {
                 //NYC-1-EXP
                 "/ip4/24.199.86.91/udp/46315/quic-v1/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
                 "/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
-            ]
+            ],
+            background: true,
+            quorum: Default::default()
         }
     }
 }
