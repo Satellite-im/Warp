@@ -197,7 +197,7 @@ async fn handle_command(
             let (tx, rx) = oneshot::channel();
             tokio::task::spawn_blocking(move || {
                 if let Err(e) = config.test_microphone(tx) {
-                    log::error!("{e}");
+                    println!("{e}");
                 }
             });
             let mut ch = match rx.await {
@@ -210,11 +210,11 @@ async fn handle_command(
             while let Some(evt) = ch.recv().await {
                 match evt {
                     AudioTestEvent::Done => {
-                        log::debug!("received done event");
+                        println!("received done event");
                         break;
                     }
                     x => {
-                        log::debug!("{x:?}");
+                        println!("{x:?}");
                     }
                 }
             }
@@ -225,7 +225,7 @@ async fn handle_command(
             let (tx, rx) = oneshot::channel();
             tokio::task::spawn_blocking(move || {
                 if let Err(e) = config.test_speaker(tx) {
-                    log::error!("{e}");
+                    println!("{e}");
                 }
             });
             let mut ch = match rx.await {
@@ -238,11 +238,11 @@ async fn handle_command(
             while let Some(evt) = ch.recv().await {
                 match evt {
                     AudioTestEvent::Done => {
-                        log::debug!("received done event");
+                        println!("received done event");
                         break;
                     }
                     x => {
-                        log::debug!("{x:?}");
+                        println!("{x:?}");
                     }
                 }
             }
