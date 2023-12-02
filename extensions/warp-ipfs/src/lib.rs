@@ -1165,7 +1165,7 @@ impl MultiPassImportExport for WarpIpfs {
     }
 
     async fn export_identity<'a>(&mut self, location: ImportLocation<'a>) -> Result<(), Error> {
-        let mut store = self.identity_store(true).await?;
+        let store = self.identity_store(true).await?;
 
         match location {
             ImportLocation::Local { path } => {
@@ -1178,7 +1178,7 @@ impl MultiPassImportExport for WarpIpfs {
                 Ok(())
             }
             ImportLocation::Remote => {
-                store.export_identity_document().await?;
+                store.export_root_document().await?;
                 Ok(())
             }
         }
