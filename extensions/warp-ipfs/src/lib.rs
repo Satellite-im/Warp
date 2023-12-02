@@ -231,8 +231,17 @@ impl WarpIpfs {
         let (pb_tx, pb_rx) = channel(50);
         let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
 
+        let (enable, nodes) = match &config.store_setting.discovery {
+            config::Discovery::Shuttle { addresses } => (true, addresses.clone()),
+            _ => Default::default(),
+        };
+
         let behaviour = behaviour::Behaviour {
-            shuttle_identity: shuttle::identity::client::Behaviour::new(&keypair, None, id_sh_rx),
+            shuttle_identity: enable
+                .then_some(shuttle::identity::client::Behaviour::new(
+                    &keypair, None, id_sh_rx, nodes,
+                ))
+                .into(),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
 

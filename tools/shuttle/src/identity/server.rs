@@ -90,6 +90,19 @@ impl Behaviour {
             _ = self.inner.send_response(channel, payload);
             return;
         }
+        // if let Message::Request(Request::Lookup(Lookup::Locate { peer_id, kind })) =
+        //     request.message()
+        // {
+        //     match kind {
+        //         protocol::LocateKind::Record => {
+        //             if !self.inner.is_connected(peer_id) {
+        //                //TODO:
+        //             }
+        //         }
+        //         protocol::LocateKind::Connect => todo!(),
+        //     }
+        //     return;
+        // }
         self.queue_event
             .insert(request_id, (Some(channel), request));
     }

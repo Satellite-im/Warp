@@ -1,8 +1,10 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
+use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::Multiaddr;
 use rustyline_async::Readline;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -34,6 +36,8 @@ struct Opt {
     no_discovery: bool,
     #[clap(long)]
     discovery_point: Option<Multiaddr>,
+    #[clap(long)]
+    shuttle_point: Option<Multiaddr>,
     #[clap(long)]
     mdns: bool,
     #[clap(long)]
@@ -71,19 +75,31 @@ async fn account(
     };
 
     if !opt.direct || !opt.no_discovery {
-        let discovery_type = match &opt.discovery_point {
-            Some(addr) => {
+        let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
+            (Some(addr), None) => {
                 config.ipfs_setting.bootstrap = false;
                 DiscoveryType::RzPoint {
                     addresses: vec![addr.clone()],
                 }
             }
-            None => DiscoveryType::DHT,
+            (Some(_), Some(_)) => unimplemented!(),
+            _ => DiscoveryType::DHT,
         };
-        config.store_setting.discovery = Discovery::Namespace {
-            namespace: opt.context.clone(),
-            discovery_type,
+
+        let dis_ty = match &opt.shuttle_point {
+            Some(addr) => Discovery::Shuttle {
+                addresses: {
+                    let mut addr = addr.clone();
+                    let peer_id = addr.extract_peer_id().expect("Peer Id");
+                    HashMap::from([(peer_id, HashSet::from_iter(vec![addr]))])
+                },
+            },
+            None => Discovery::Namespace {
+                namespace: opt.context.clone(),
+                discovery_type,
+            },
         };
+        config.store_setting.discovery = dis_ty;
     }
     if opt.disable_relay {
         config.enable_relay = false;

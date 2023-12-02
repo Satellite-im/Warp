@@ -1,7 +1,8 @@
-use ipfs::Multiaddr;
+use ipfs::{Multiaddr, PeerId};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
@@ -53,8 +54,8 @@ pub enum Bootstrap {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
-    External {
-        addresses: Vec<Multiaddr>,
+    Shuttle {
+        addresses: HashMap<PeerId, HashSet<Multiaddr>>,
     },
     /// Uses to find and connect to peers using the same namespace
     Namespace {

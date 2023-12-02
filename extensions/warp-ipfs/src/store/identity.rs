@@ -2,7 +2,7 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::{self, Discovery as DiscoveryConfig, DiscoveryType, UpdateEvents},
+    config::{self, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
 };
 use chrono::{DateTime, Utc};
@@ -11,7 +11,7 @@ use futures::{
     channel::oneshot::{self, Canceled},
     SinkExt, StreamExt,
 };
-use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
+use ipfs::{Ipfs, Keypair};
 
 use libipld::Cid;
 use rust_ipfs as ipfs;
@@ -1511,16 +1511,8 @@ impl IdentityStore {
     }
 
     pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
-        if let DiscoveryConfig::Namespace {
-            discovery_type: DiscoveryType::RzPoint { addresses },
-            ..
-        } = self.discovery.discovery_config()
-        {
-            for addr in addresses {
-                let Some(peer_id) = addr.peer_id() else {
-                    continue;
-                };
-
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1557,16 +1549,8 @@ impl IdentityStore {
     pub async fn export_identity_document(&self) -> Result<(), Error> {
         let identity = self.own_identity_document().await?;
 
-        if let DiscoveryConfig::Namespace {
-            discovery_type: DiscoveryType::RzPoint { addresses },
-            ..
-        } = self.discovery.discovery_config()
-        {
-            for addr in addresses {
-                let Some(peer_id) = addr.peer_id() else {
-                    continue;
-                };
-
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1603,16 +1587,8 @@ impl IdentityStore {
     pub async fn export_root_document(&self) -> Result<(), Error> {
         let package = self.root_document.export_bytes().await?;
 
-        if let DiscoveryConfig::Namespace {
-            discovery_type: DiscoveryType::RzPoint { addresses },
-            ..
-        } = self.discovery.discovery_config()
-        {
-            for addr in addresses {
-                let Some(peer_id) = addr.peer_id() else {
-                    continue;
-                };
-
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1647,16 +1623,8 @@ impl IdentityStore {
     }
 
     async fn is_registered(&self) -> Result<(), Error> {
-        if let DiscoveryConfig::Namespace {
-            discovery_type: DiscoveryType::RzPoint { addresses },
-            ..
-        } = self.discovery.discovery_config()
-        {
-            for addr in addresses {
-                let Some(peer_id) = addr.peer_id() else {
-                    continue;
-                };
-
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1691,16 +1659,8 @@ impl IdentityStore {
     }
 
     async fn register(&self, identity: &IdentityDocument) -> Result<(), Error> {
-        if let DiscoveryConfig::Namespace {
-            discovery_type: DiscoveryType::RzPoint { addresses },
-            ..
-        } = self.discovery.discovery_config()
-        {
-            for addr in addresses {
-                let Some(peer_id) = addr.peer_id() else {
-                    continue;
-                };
-
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1736,16 +1696,8 @@ impl IdentityStore {
     }
 
     async fn fetch_mailbox(&mut self) -> Result<(), Error> {
-        if let DiscoveryConfig::Namespace {
-            discovery_type: DiscoveryType::RzPoint { addresses },
-            ..
-        } = self.discovery.discovery_config()
-        {
-            for addr in addresses {
-                let Some(peer_id) = addr.peer_id() else {
-                    continue;
-                };
-
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1799,22 +1751,14 @@ impl IdentityStore {
         did: &DID,
         request: RequestResponsePayload,
     ) -> Result<(), Error> {
-        if let DiscoveryConfig::Namespace {
-            discovery_type: DiscoveryType::RzPoint { addresses },
-            ..
-        } = self.discovery.discovery_config()
-        {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
             let request: RequestPayload = request.try_into()?;
 
             let request = request
                 .sign(&self.did_key)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-            for addr in addresses {
-                let Some(peer_id) = addr.peer_id() else {
-                    continue;
-                };
-
+            for peer_id in addresses.keys().copied() {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1980,16 +1924,8 @@ impl IdentityStore {
                     short_id: short_id.try_into()?,
                 },
             };
-            if let DiscoveryConfig::Namespace {
-                discovery_type: DiscoveryType::RzPoint { addresses },
-                ..
-            } = self.discovery.discovery_config()
-            {
-                for addr in addresses {
-                    let Some(peer_id) = addr.peer_id() else {
-                        continue;
-                    };
-
+            if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.keys().copied() {
                     let (tx, rx) = futures::channel::oneshot::channel();
                     let _ = self
                         .identity_command

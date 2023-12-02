@@ -16,7 +16,7 @@ use tokio::{
 use tracing::log;
 use warp::{crypto::DID, error::Error};
 
-use crate::config::{self, Discovery as DiscoveryConfig, DiscoveryType};
+use crate::config::{Discovery as DiscoveryConfig, DiscoveryType};
 
 use super::{did_to_libp2p_pub, DidExt, PeerIdExt, PeerType};
 
@@ -126,7 +126,7 @@ impl Discovery {
                         .rendezvous_register_namespace(namespace.clone(), None, *peer_id)
                         .await
                     {
-                        log::error!("Error registering to namespace: {e}");
+                        println!("Error registering to namespace: {e}");
                         continue;
                     }
 
@@ -221,6 +221,7 @@ impl Discovery {
 
                 *self.task.write().await = Some(task);
             }
+            DiscoveryConfig::Shuttle { addresses: _ } => {}
             _ => {}
         }
         Ok(())
@@ -416,8 +417,7 @@ impl DiscoveryEntry {
                                     _ = async {} => {}
                                 }
                             }
-                            //TODO: Split external type into its own branch to detech for peer connectivity
-                            DiscoveryConfig::External { .. } | config::Discovery::None => {
+                            DiscoveryConfig::Shuttle { .. } | DiscoveryConfig::None => {
                                 let opts = DialOpts::peer_id(peer_id)
                                     .addresses(entry.relays.clone())
                                     .build();

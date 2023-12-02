@@ -222,11 +222,19 @@ pub enum MailboxError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Lookup {
+    // Locate { peer_id: PeerId, kind: LocateKind },
     Username { username: String, count: u8 },
     ShortId { short_id: ShortId },
     PublicKey { did: DID },
     PublicKeys { dids: Vec<DID> },
 }
+
+// #[derive(Clone, Debug, Serialize, Deserialize)]
+// #[serde(rename_all = "snake_case")]
+// pub enum LocateKind {
+//     Record,
+//     Connect,
+// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
