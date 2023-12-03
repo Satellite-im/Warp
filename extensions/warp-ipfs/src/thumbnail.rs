@@ -16,7 +16,7 @@ use image::io::Reader as ImageReader;
 use image::ImageFormat;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use warp::{constellation::file::FileType, error::Error, logging::tracing::log};
+use warp::{constellation::file::FileType, error::Error};
 
 use crate::utils::ExtensionType;
 

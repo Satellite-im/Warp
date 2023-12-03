@@ -3,7 +3,6 @@ use libipld::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
 use std::task::Poll;
-use tracing::log;
 use warp::{constellation::file::FileType, error::Error, multipass::identity::IdentityImage};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -39,7 +38,7 @@ pub async fn store_photo(
                         }));
                     }
                 }
-                log::trace!("{written} bytes written");
+                tracing::trace!("{written} bytes written");
             }
             Poll::Ready(Some(rust_ipfs::unixfs::UnixfsStatus::CompletedStatus {
                 path,
@@ -47,7 +46,7 @@ pub async fn store_photo(
                 ..
             })) => {
                 size = written;
-                log::debug!("Image is written with {written} bytes - stored at {path}");
+                tracing::debug!("Image is written with {written} bytes - stored at {path}");
                 return Poll::Ready(path.root().cid().copied().ok_or(Error::Other));
             }
             Poll::Ready(Some(rust_ipfs::unixfs::UnixfsStatus::FailedStatus {
@@ -57,13 +56,13 @@ pub async fn store_photo(
             })) => {
                 let err = match error {
                     Some(e) => {
-                        log::error!(
+                        tracing::error!(
                             "Error uploading picture with {written} bytes written with error: {e}"
                         );
                         e.into()
                     }
                     None => {
-                        log::error!("Error uploading picture with {written} bytes written");
+                        tracing::error!("Error uploading picture with {written} bytes written");
                         Error::OtherWithContext("Error uploading photo".into())
                     }
                 };
