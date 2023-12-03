@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath, PeerId};
 use serde::{Deserialize, Serialize};
-use std::{hash::Hash, time::Duration};
+use std::hash::Hash;
 use warp::{
     crypto::{did_key::CoreSign, Fingerprint, DID},
     error::Error,
@@ -228,32 +227,4 @@ impl IdentityDocument {
             .map_err(|_| Error::InvalidSignature)?;
         Ok(())
     }
-}
-
-pub async fn unixfs_fetch(
-    ipfs: &Ipfs,
-    cid: Cid,
-    timeout: Option<Duration>,
-    peers: &[PeerId],
-    local: bool,
-    limit: Option<usize>,
-) -> Result<Vec<u8>, Error> {
-    let data = ipfs
-        .unixfs()
-        .cat(IpfsPath::from(cid), None, peers, local, timeout)
-        .await
-        .map_err(anyhow::Error::from)?;
-
-    if let Some(limit) = limit {
-        if data.len() > limit {
-            return Err(Error::InvalidLength {
-                context: "data".into(),
-                current: data.len(),
-                minimum: None,
-                maximum: Some(limit),
-            });
-        }
-    }
-
-    Ok(data)
 }

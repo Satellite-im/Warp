@@ -118,11 +118,7 @@ impl FileStore {
 
         let cid = (*self.index_cid.read()).ok_or(Error::Other)?;
 
-        let mut index_stream = self
-            .ipfs
-            .unixfs()
-            .cat(IpfsPath::from(cid), None, &[], true, None)
-            .boxed();
+        let mut index_stream = self.ipfs.unixfs().cat(cid, None, &[], true, None).boxed();
 
         let mut data = vec![];
 
