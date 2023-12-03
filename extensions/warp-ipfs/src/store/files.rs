@@ -7,7 +7,7 @@ use futures::{
 };
 use libipld::Cid;
 use rust_ipfs::{
-    unixfs::{AddOpt, AddOption, UnixfsStatus},
+    unixfs::{AddOption, UnixfsStatus},
     Ipfs, IpfsPath,
 };
 use tokio_util::io::ReaderStream;
@@ -157,8 +157,10 @@ impl FileStore {
     }
 
     async fn export(&self) -> Result<(), Error> {
+        let mut index = self.index.clone();
         let signal = Some(self.signal.clone());
-        self.index.clone().rebuild_paths(&signal);
+
+        index.rebuild_paths(&signal);
 
         let index = serde_json::to_string(&self.index)?;
 
@@ -171,7 +173,7 @@ impl FileStore {
             .ipfs
             .unixfs()
             .add(
-                AddOpt::Stream(data_stream),
+                data_stream,
                 Some(AddOption {
                     pin: true,
                     ..Default::default()
@@ -184,9 +186,7 @@ impl FileStore {
             .cid()
             .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
 
-        let last_cid = { *self.index_cid.read() };
-
-        *self.index_cid.write() = Some(*cid);
+        let last_cid = self.index_cid.write().replace(*cid);
 
         if let Some(last_cid) = last_cid {
             if *cid != last_cid {
@@ -567,9 +567,6 @@ impl FileStore {
         }
 
         let ipfs = self.ipfs.clone();
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let current_directory = self.current_directory()?;
 
@@ -685,9 +682,6 @@ impl FileStore {
         name: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
         let ipfs = self.ipfs.clone();
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
