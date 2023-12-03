@@ -374,7 +374,7 @@ impl ConversationTask {
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             if let Err(e) = tokio::fs::write(path.join(".message_id"), cid).await {
-                tracing::log::error!("Error writing to '.message_id': {e}.")
+                tracing::error!("Error writing to '.message_id': {e}.")
             }
         }
 
