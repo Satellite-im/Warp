@@ -596,8 +596,7 @@ impl IdentityStorageTask {
                 };
 
                 vec![document]
-            }
-            // Lookup::Locate { .. } => unreachable!(),
+            } // Lookup::Locate { .. } => unreachable!(),
         };
 
         Ok(list)
