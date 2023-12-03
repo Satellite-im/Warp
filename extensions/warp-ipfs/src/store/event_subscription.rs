@@ -142,7 +142,7 @@ impl<T: Clone + Send + 'static + Debug> EventSubscriptionTask<T> {
     }
 
     fn subscribe(&mut self) -> Receiver<T> {
-        let (tx, rx) = channel(1);
+        let (tx, rx) = channel(128);
         self.senders.push(tx);
         rx
     }

@@ -8,7 +8,7 @@ use std::{
 use futures::{channel::mpsc, StreamExt};
 use rust_ipfs::Ipfs;
 use tokio::{sync::RwLock, task::JoinHandle};
-use tracing::{error};
+use tracing::error;
 use warp::{
     crypto::{
         cipher::Cipher,

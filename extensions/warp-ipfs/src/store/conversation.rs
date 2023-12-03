@@ -13,7 +13,7 @@ use uuid::Uuid;
 use warp::{
     crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
-    logging::tracing::log::info,
+    logging::tracing::info,
     raygun::{
         Conversation, ConversationType, Message, MessageOptions, MessagePage, MessageReference,
         Messages, MessagesType,
