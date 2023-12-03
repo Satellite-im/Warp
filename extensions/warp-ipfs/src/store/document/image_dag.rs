@@ -6,8 +6,6 @@ use std::task::Poll;
 use tracing::log;
 use warp::{constellation::file::FileType, error::Error, multipass::identity::IdentityImage};
 
-use super::identity::unixfs_fetch;
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ImageDag {
     pub link: Cid,
@@ -118,7 +116,11 @@ pub async fn get_image(
         None => {}
     }
 
-    let image = unixfs_fetch(ipfs, dag.link, None, peers, local, limit).await?;
+    let image = ipfs
+        .unixfs()
+        .cat(dag.link, None, peers, local, None)
+        .await
+        .map_err(anyhow::Error::from)?;
 
     let mut id_img = IdentityImage::default();
 

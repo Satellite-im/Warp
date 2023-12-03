@@ -173,7 +173,7 @@ impl IdentityCacheTask {
         let mut list: HashSet<IdentityDocument> = match self.list {
             Some(cid) => self
                 .ipfs
-                .get_dag(IpfsPath::from(cid))
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -194,17 +194,19 @@ impl IdentityCacheTask {
 
                 list.replace(document);
 
-                let cid = self.ipfs.dag().put().serialize(list)?.await?;
+                let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
                 let old_cid = self.list.take();
 
                 let remove_pin_and_block = async {
                     if let Some(old_cid) = old_cid {
-                        if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid, false).await?;
+                        if old_cid != cid {
+                            if self.ipfs.is_pinned(&old_cid).await? {
+                                self.ipfs.remove_pin(&old_cid, false).await?;
+                            }
+                            // Do we want to remove the old block?
+                            self.ipfs.remove_block(old_cid, false).await?;
                         }
-                        // Do we want to remove the old block?
-                        self.ipfs.remove_block(old_cid, false).await?;
                     }
                     Ok::<_, Error>(())
                 };
@@ -225,9 +227,7 @@ impl IdentityCacheTask {
             None => {
                 list.insert(document);
 
-                let cid = self.ipfs.dag().put().serialize(list)?.await?;
-
-                self.ipfs.insert_pin(&cid, false).await?;
+                let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
                 if let Some(path) = self.path.as_ref() {
                     let cid = cid.to_string();
@@ -247,7 +247,7 @@ impl IdentityCacheTask {
         let list: HashSet<IdentityDocument> = match self.list {
             Some(cid) => self
                 .ipfs
-                .get_dag(IpfsPath::from(cid))
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -268,7 +268,7 @@ impl IdentityCacheTask {
         let mut list: HashSet<IdentityDocument> = match self.list {
             Some(cid) => self
                 .ipfs
-                .get_dag(IpfsPath::from(cid))
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -290,16 +290,18 @@ impl IdentityCacheTask {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let cid = self.ipfs.dag().put().serialize(list)?.await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
         let old_cid = self.list.take();
 
         if let Some(old_cid) = old_cid {
-            if self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid, false).await?;
+            if cid != old_cid {
+                if self.ipfs.is_pinned(&old_cid).await? {
+                    self.ipfs.remove_pin(&old_cid, false).await?;
+                }
+                // Do we want to remove the old block?
+                self.ipfs.remove_block(old_cid, false).await?;
             }
-            // Do we want to remove the old block?
-            self.ipfs.remove_block(old_cid, false).await?;
         }
 
         if let Some(path) = self.path.as_ref() {
@@ -318,7 +320,7 @@ impl IdentityCacheTask {
         let list: HashSet<IdentityDocument> = match self.list {
             Some(cid) => self
                 .ipfs
-                .get_dag(IpfsPath::from(cid))
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await

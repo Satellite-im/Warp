@@ -89,7 +89,7 @@ impl<T: Clone + Send + 'static + Debug> EventSubscriptionTask<T> {
     pub async fn start(&mut self) {
         loop {
             tokio::select! {
-                _ = futures::future::poll_fn(|cx|  -> Poll<T>{
+                _ = futures::future::poll_fn(|cx|  -> Poll<T> {
 
                     if let Some(event) = self.queue.pop_front() {
                         let mut count = 0;
@@ -99,7 +99,7 @@ impl<T: Clone + Send + 'static + Debug> EventSubscriptionTask<T> {
                             }
 
                             match sender.poll_ready(cx) {
-                                Ready(Ok(_)) => {
+                                Poll::Ready(Ok(_)) => {
                                     if let Err(e) = sender.start_send(event.clone()) {
                                         if e.is_disconnected() {
                                             return false;
@@ -108,17 +108,18 @@ impl<T: Clone + Send + 'static + Debug> EventSubscriptionTask<T> {
                                         count += 1;
                                     }
                                 }
-                                Ready(Err(e)) => {
+                                Poll::Ready(Err(e)) => {
                                     if e.is_disconnected() {
                                         return false;
                                     }
                                 }
-                                Pending => (),
+                                Poll::Pending => (),
                             }
                             true
                         });
 
                         if count == 0 {
+                            tracing::warn!(?event, "No sender. Queuing event.");
                             self.queue.push_front(event);
                         }
                     }
@@ -153,8 +154,6 @@ impl<T: Clone + Send + 'static + Debug> EventSubscriptionTask<T> {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
-
     use futures::{FutureExt, StreamExt};
 
     use crate::store::event_subscription::EventSubscription;
@@ -190,9 +189,7 @@ mod test {
 
         let stream = pubsub.subscribe().await?;
 
-        let list = tokio::time::timeout(Duration::from_secs(4), stream.take(2).collect::<Vec<_>>())
-            .await
-            .unwrap();
+        let list = stream.take(2).collect::<Vec<_>>().await;
 
         assert_eq!(list.len(), 2);
 

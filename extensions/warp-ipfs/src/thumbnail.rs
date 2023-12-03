@@ -111,7 +111,7 @@ impl ThumbnailGenerator {
 
             let stop = instance.elapsed();
 
-            log::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
+            tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
             result
         });
 
@@ -181,7 +181,7 @@ impl ThumbnailGenerator {
 
             let stop = instance.elapsed();
 
-            log::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
+            tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
             result
         });
 

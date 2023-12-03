@@ -142,7 +142,7 @@ impl FileStore {
         let data = self
             .ipfs
             .unixfs()
-            .cat(IpfsPath::from(cid), None, &[], true, None)
+            .cat(cid, None, &[], true, None)
             .await
             .map_err(anyhow::Error::from)?;
 
