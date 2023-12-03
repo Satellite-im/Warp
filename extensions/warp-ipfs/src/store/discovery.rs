@@ -7,17 +7,12 @@ use std::{
 };
 
 use futures::StreamExt;
-use rust_ipfs::{
-    libp2p::swarm::dial_opts::{DialOpts, PeerCondition},
-    p2p::MultiaddrExt,
-    Ipfs, Multiaddr, PeerId,
-};
+use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, p2p::MultiaddrExt, Ipfs, Multiaddr, PeerId};
 use tokio::{
     sync::{broadcast, RwLock},
     task::JoinHandle,
     time::Instant,
 };
-use tracing::log;
 use warp::{crypto::DID, error::Error};
 
 use crate::config::{self, Discovery as DiscoveryConfig, DiscoveryType};
@@ -70,7 +65,7 @@ impl Discovery {
 
                         if let Err(e) = discovery.ipfs.provide(cid).await {
                             //Maybe panic?
-                            log::error!("Error providing key: {e}");
+                            tracing::error!("Error providing key: {e}");
                             return;
                         }
 
@@ -119,7 +114,7 @@ impl Discovery {
                     };
 
                     if let Err(e) = self.ipfs.add_peer(peer_id, addr).await {
-                        log::error!("Error adding peer to address book {e}");
+                        tracing::error!("Error adding peer to address book {e}");
                         continue;
                     }
 
@@ -135,7 +130,7 @@ impl Discovery {
                         .rendezvous_register_namespace(namespace.clone(), None, *peer_id)
                         .await
                     {
-                        log::error!("Error registering to namespace: {e}");
+                        tracing::error!("Error registering to namespace: {e}");
                         continue;
                     }
 
@@ -170,7 +165,7 @@ impl Discovery {
                                             .rendezvous_register_namespace(namespace.clone(), None, *peer_id)
                                             .await
                                         {
-                                            log::error!("Error registering to namespace: {e}");
+                                            tracing::error!("Error registering to namespace: {e}");
                                             continue;
                                         }
                                     }
@@ -218,7 +213,7 @@ impl Discovery {
                                                 }
                                             }
                                             Err(e) => {
-                                                log::error!("Error performing discovery over {namespace}: {e}");
+                                                tracing::error!("Error performing discovery over {namespace}: {e}");
                                             }
                                         }
                                     }
@@ -406,14 +401,12 @@ impl DiscoveryEntry {
                                 discovery_type: DiscoveryType::RzPoint { .. },
                                 ..
                             } => {
-                                let opts = DialOpts::peer_id(peer_id)
-                                    .condition(PeerCondition::Disconnected)
-                                    .build();
+                                let opts = DialOpts::peer_id(peer_id).build();
 
-                                log::debug!("Dialing {peer_id}");
+                                tracing::debug!("Dialing {peer_id}");
 
                                 if let Err(_e) = ipfs.connect(opts).await {
-                                    log::error!("Error connecting to {peer_id}: {_e}");
+                                    tracing::error!("Error connecting to {peer_id}: {_e}");
                                     tokio::time::sleep(Duration::from_secs(10)).await;
                                     continue;
                                 }
@@ -430,13 +423,12 @@ impl DiscoveryEntry {
                             config::Discovery::None => {
                                 let opts = DialOpts::peer_id(peer_id)
                                     .addresses(entry.relays.clone())
-                                    .condition(PeerCondition::Disconnected)
                                     .build();
 
-                                log::debug!("Dialing {peer_id}");
+                                tracing::debug!("Dialing {peer_id}");
 
                                 if let Err(_e) = ipfs.connect(opts).await {
-                                    log::error!("Error connecting to {peer_id}: {_e}");
+                                    tracing::error!("Error connecting to {peer_id}: {_e}");
                                     tokio::time::sleep(Duration::from_secs(10)).await;
                                     continue;
                                 }
@@ -449,7 +441,7 @@ impl DiscoveryEntry {
                     {
                         if let Ok(did) = peer_id.to_did() {
                             tokio::time::sleep(Duration::from_millis(500)).await;
-                            log::info!("Connected to {did}. Emitting initial event");
+                            tracing::info!("Connected to {did}. Emitting initial event");
                             let topic = format!("/peer/{did}/events");
                             let subscribed = ipfs
                                 .pubsub_peers(Some(topic))

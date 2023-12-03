@@ -19,10 +19,7 @@ use std::{
 };
 
 use tokio::sync::RwLock;
-use tracing::{
-    log::{self, error},
-    warn,
-};
+use tracing::{error, warn};
 
 use warp::{
     constellation::file::FileType,
@@ -308,7 +305,7 @@ impl IdentityStore {
         };
 
         if let Ok(ident) = store.own_identity().await {
-            log::info!("Identity loaded with {}", ident.did_key());
+            tracing::info!("Identity loaded with {}", ident.did_key());
         }
 
         let did = store.get_keypair_did()?;
@@ -323,11 +320,11 @@ impl IdentityStore {
 
         let mut discovery_rx = store.discovery.events();
 
-        log::info!("Loading queue");
+        tracing::info!("Loading queue");
         if let Err(_e) = store.queue.load().await {}
 
         let phonebook = &store.phonebook;
-        log::info!("Loading friends list into phonebook");
+        tracing::info!("Loading friends list into phonebook");
         if let Ok(friends) = store.friends_list().await {
             if let Err(_e) = phonebook.add_friend_list(friends).await {
                 error!("Error adding friends in phonebook: {_e}");
@@ -393,7 +390,7 @@ impl IdentityStore {
                                 continue;
                             };
 
-                            log::info!("Received event from {in_did}");
+                            tracing::info!("Received event from {in_did}");
 
                             let event = match ecdh_decrypt(&store.did_key, Some(&in_did), &message.data).and_then(|bytes| {
                                 serde_json::from_slice::<IdentityEvent>(&bytes).map_err(Error::from)
@@ -405,7 +402,7 @@ impl IdentityStore {
                                 }
                             };
 
-                            log::debug!("Event: {event:?}");
+                            tracing::debug!("Event: {event:?}");
 
                             if let Err(e) = store.process_message(&in_did, event).await {
                                 error!("Failed to process identity message from {in_did}: {e}");
@@ -428,9 +425,9 @@ impl IdentityStore {
 
                             let mut signal = store.signal.write().await.remove(&did);
 
-                            log::trace!("received payload size: {} bytes", event.data.len());
+                            tracing::trace!("received payload size: {} bytes", event.data.len());
 
-                            log::info!("Received event from {did}");
+                            tracing::info!("Received event from {did}");
 
                             let data = match ecdh_decrypt(&store.did_key, Some(&did), &event.data).and_then(|bytes| {
                                 serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
@@ -444,7 +441,7 @@ impl IdentityStore {
                                 }
                             };
 
-                            log::debug!("Event from {did}: {:?}", data.event);
+                            tracing::debug!("Event from {did}: {:?}", data.event);
 
                             let result = store.check_request_message(&did, data, &mut signal).await.map_err(|e| {
                                 error!("Error processing message: {e}");
@@ -522,7 +519,7 @@ impl IdentityStore {
         // Before we validate the request, we should check to see if the key is blocked
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
-            log::warn!("Received event from a blocked identity.");
+            tracing::warn!("Received event from a blocked identity.");
             let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
 
             return self
@@ -556,7 +553,7 @@ impl IdentityStore {
             }
             Event::Request => {
                 if self.is_friend(&data.sender).await? {
-                    log::debug!("Friend already exist. Remitting event");
+                    tracing::debug!("Friend already exist. Remitting event");
 
                     let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
 
@@ -676,7 +673,7 @@ impl IdentityStore {
                 }
 
                 if let Some(tx) = signal.take() {
-                    log::debug!("Signaling broadcast of response...");
+                    tracing::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Err(Error::BlockedByUser));
                 }
             }
@@ -696,7 +693,7 @@ impl IdentityStore {
             }
             Event::Response => {
                 if let Some(tx) = signal.take() {
-                    log::debug!("Signaling broadcast of response...");
+                    tracing::debug!("Signaling broadcast of response...");
                     let _ = tx.send(Ok(()));
                 }
             }
@@ -708,7 +705,7 @@ impl IdentityStore {
     async fn push_iter<I: IntoIterator<Item = DID>>(&self, list: I) {
         for did in list {
             if let Err(e) = self.push(&did).await {
-                log::error!("Error pushing identity to {did}: {e}");
+                tracing::error!("Error pushing identity to {did}: {e}");
             }
         }
     }
@@ -740,9 +737,9 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        log::trace!("Payload size: {} bytes", bytes.len());
+        tracing::trace!("Payload size: {} bytes", bytes.len());
 
-        log::info!("Sending event to {out_did}");
+        tracing::info!("Sending event to {out_did}");
 
         if self
             .ipfs
@@ -753,8 +750,8 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            log::info!("Event sent to {out_did}");
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!("Event sent to {out_did}");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -801,7 +798,7 @@ impl IdentityStore {
         ) && is_friend)
             && (!is_blocked && !is_blocked_by);
 
-        log::trace!("Including cid in push: {include_pictures}");
+        tracing::trace!("Including cid in push: {include_pictures}");
 
         identity.profile_picture =
             profile_picture.and_then(|picture| include_pictures.then_some(picture));
@@ -823,9 +820,9 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        log::trace!("Payload size: {} bytes", bytes.len());
+        tracing::trace!("Payload size: {} bytes", bytes.len());
 
-        log::info!("Sending event to {out_did}");
+        tracing::info!("Sending event to {out_did}");
 
         if self
             .ipfs
@@ -836,8 +833,8 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            log::info!("Event sent to {out_did}");
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!("Event sent to {out_did}");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -860,7 +857,7 @@ impl IdentityStore {
         };
 
         if cid != picture_cid {
-            log::debug!("Requested profile picture does not match current picture.");
+            tracing::debug!("Requested profile picture does not match current picture.");
             return Ok(());
         }
 
@@ -885,9 +882,9 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        log::trace!("Payload size: {} bytes", bytes.len());
+        tracing::trace!("Payload size: {} bytes", bytes.len());
 
-        log::info!("Sending event to {out_did}");
+        tracing::info!("Sending event to {out_did}");
 
         if self
             .ipfs
@@ -898,8 +895,8 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            log::info!("Event sent to {out_did}");
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!("Event sent to {out_did}");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -946,9 +943,9 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        log::trace!("Payload size: {} bytes", bytes.len());
+        tracing::trace!("Payload size: {} bytes", bytes.len());
 
-        log::info!("Sending event to {out_did}");
+        tracing::info!("Sending event to {out_did}");
 
         if self
             .ipfs
@@ -959,8 +956,8 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            log::info!("Event sent to {out_did}");
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!("Event sent to {out_did}");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -1002,7 +999,7 @@ impl IdentityStore {
 
                 if !self.discovery.contains(identity.did.clone()).await {
                     if let Err(e) = self.discovery.insert(identity.did.clone()).await {
-                        log::warn!("Error inserting into discovery service: {e}");
+                        tracing::warn!("Error inserting into discovery service: {e}");
                     }
                 }
 
@@ -1013,7 +1010,7 @@ impl IdentityStore {
                 match previous_identity {
                     Some(document) => {
                         if document.different(&identity) {
-                            log::info!("Updating local cache of {}", identity.did);
+                            tracing::info!("Updating local cache of {}", identity.did);
 
                             let document_did = identity.did.clone();
 
@@ -1035,7 +1032,7 @@ impl IdentityStore {
                             if document.profile_picture != identity.profile_picture
                                 && identity.profile_picture.is_some()
                             {
-                                log::info!("Requesting profile picture from {}", identity.did);
+                                tracing::info!("Requesting profile picture from {}", identity.did);
 
                                 if !self.config.store_setting.fetch_over_bitswap {
                                     if let Err(e) = self
@@ -1071,11 +1068,13 @@ impl IdentityStore {
                                             )
                                             .await
                                             .map_err(|e| {
-                                                log::error!("Error fetching image from {did}: {e}");
+                                                tracing::error!(
+                                                    "Error fetching image from {did}: {e}"
+                                                );
                                                 e
                                             })?;
 
-                                            log::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
+                                            tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
 
                                             if emit {
                                                 store
@@ -1093,7 +1092,7 @@ impl IdentityStore {
                             if document.profile_banner != identity.profile_banner
                                 && identity.profile_banner.is_some()
                             {
-                                log::info!("Requesting profile banner from {}", identity.did);
+                                tracing::info!("Requesting profile banner from {}", identity.did);
 
                                 if !self.config.store_setting.fetch_over_bitswap {
                                     if let Err(e) = self
@@ -1130,11 +1129,13 @@ impl IdentityStore {
                                             )
                                             .await
                                             .map_err(|e| {
-                                                log::error!("Error fetching image from {did}: {e}");
+                                                tracing::error!(
+                                                    "Error fetching image from {did}: {e}"
+                                                );
                                                 e
                                             })?;
 
-                                            log::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
+                                            tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
                                             if emit {
                                                 store
@@ -1151,7 +1152,7 @@ impl IdentityStore {
                             }
 
                             if emit {
-                                log::trace!("Emitting identity update event");
+                                tracing::trace!("Emitting identity update event");
                                 self.emit_event(MultiPassEventKind::IdentityUpdate {
                                     did: document.did.clone(),
                                 })
@@ -1160,7 +1161,7 @@ impl IdentityStore {
                         }
                     }
                     None => {
-                        log::info!("{} identity document cached", identity.did);
+                        tracing::info!("{} identity document cached", identity.did);
 
                         let document_did = identity.did.clone();
 
@@ -1220,13 +1221,13 @@ impl IdentityStore {
                                                 )
                                                 .await
                                                 .map_err(|e| {
-                                                    log::error!(
+                                                    tracing::error!(
                                                         "Error fetching image from {did}: {e}"
                                                     );
                                                     e
                                                 })?;
 
-                                                log::trace!("Image pointed to {picture} for {did} downloaded");
+                                                tracing::trace!("Image pointed to {picture} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
@@ -1255,13 +1256,13 @@ impl IdentityStore {
                                                 )
                                                 .await
                                                 .map_err(|e| {
-                                                    log::error!(
+                                                    tracing::error!(
                                                         "Error fetching image from {did}: {e}"
                                                     );
                                                     e
                                                 })?;
 
-                                                log::trace!("Image pointed to {banner} for {did} downloaded");
+                                                tracing::trace!("Image pointed to {banner} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
@@ -1350,7 +1351,7 @@ impl IdentityStore {
 
         self.root_document.set(document).await?;
 
-        log::info!("Loading friends list into phonebook");
+        tracing::info!("Loading friends list into phonebook");
         if let Ok(friends) = self.friends_list().await {
             let phonebook = self.phonebook();
 
@@ -1461,7 +1462,7 @@ impl IdentityStore {
                 for pubkey in list {
                     if !pubkey.eq(&own_did) && !self.discovery.contains(pubkey).await {
                         if let Err(e) = self.discovery.insert(pubkey).await {
-                            log::error!("Error inserting {pubkey} into discovery: {e}")
+                            tracing::error!("Error inserting {pubkey} into discovery: {e}")
                         }
                     }
                 }
@@ -1553,7 +1554,7 @@ impl IdentityStore {
 
         let identity = identity.sign(&kp)?;
 
-        log::debug!("Updating document");
+        tracing::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
         let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
         root_document.identity = ident_cid;
@@ -1561,9 +1562,9 @@ impl IdentityStore {
         self.root_document
             .set(root_document)
             .await
-            .map(|_| log::debug!("Root document updated"))
+            .map(|_| tracing::debug!("Root document updated"))
             .map_err(|e| {
-                log::error!("Updating root document failed: {e}");
+                tracing::error!("Updating root document failed: {e}");
                 e
             })
     }
@@ -2176,9 +2177,9 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
 
-        log::trace!("Request Payload size: {} bytes", bytes.len());
+        tracing::trace!("Request Payload size: {} bytes", bytes.len());
 
-        log::info!("Sending event to {recipient}");
+        tracing::info!("Sending event to {recipient}");
 
         let peers = self.ipfs.pubsub_peers(Some(recipient.inbox())).await?;
 
@@ -2213,7 +2214,7 @@ impl IdentityStore {
 
         if !queued {
             let end = start.elapsed();
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
         if !queued && matches!(payload.event, Event::Request) {
@@ -2222,7 +2223,7 @@ impl IdentityStore {
                     let start = Instant::now();
                     if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
                         let end = start.elapsed();
-                        log::trace!("Took {}ms to receive a response", end.as_millis());
+                        tracing::trace!("Took {}ms to receive a response", end.as_millis());
                         res?
                     }
                 }

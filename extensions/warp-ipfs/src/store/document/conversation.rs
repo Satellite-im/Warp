@@ -291,12 +291,8 @@ impl ConversationTask {
             None => return Err(Error::InvalidConversation),
         };
 
-        let mut conversation_map: BTreeMap<String, Cid> = self
-            .ipfs
-            .get_dag(IpfsPath::from(cid))
-            .local()
-            .deserialized()
-            .await?;
+        let mut conversation_map: BTreeMap<String, Cid> =
+            self.ipfs.get_dag(cid).local().deserialized().await?;
 
         let document_cid = match conversation_map.remove(&id.to_string()) {
             Some(cid) => cid,
@@ -315,7 +311,7 @@ impl ConversationTask {
 
         let document: ConversationDocument = self
             .ipfs
-            .get_dag(IpfsPath::from(document_cid))
+            .get_dag(document_cid)
             .local()
             .deserialized()
             .await?;
@@ -328,20 +324,14 @@ impl ConversationTask {
             None => return Ok(Vec::new()),
         };
 
-        let conversation_map: BTreeMap<String, Cid> = self
-            .ipfs
-            .get_dag(IpfsPath::from(cid))
-            .local()
-            .deserialized()
-            .await?;
+        let conversation_map: BTreeMap<String, Cid> =
+            self.ipfs.get_dag(cid).local().deserialized().await?;
 
-        let list = FuturesUnordered::from_iter(conversation_map.values().map(|cid| {
-            self.ipfs
-                .get_dag(IpfsPath::from(*cid))
-                .local()
-                .deserialized()
-                .into_future()
-        }))
+        let list = FuturesUnordered::from_iter(
+            conversation_map
+                .values()
+                .map(|cid| self.ipfs.get_dag(*cid).local().deserialized().into_future()),
+        )
         .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
         .collect::<Vec<_>>()
         .await;
@@ -355,16 +345,11 @@ impl ConversationTask {
             None => return false,
         };
 
-        let conversation_map: BTreeMap<String, Cid> = match self
-            .ipfs
-            .get_dag(IpfsPath::from(cid))
-            .local()
-            .deserialized()
-            .await
-        {
-            Ok(document) => document,
-            Err(_) => return false,
-        };
+        let conversation_map: BTreeMap<String, Cid> =
+            match self.ipfs.get_dag(cid).local().deserialized().await {
+                Ok(document) => document,
+                Err(_) => return false,
+            };
 
         conversation_map.contains_key(&id.to_string())
     }
@@ -381,7 +366,7 @@ impl ConversationTask {
         self.ipfs.insert_pin(&cid, true).await?;
 
         if let Some(old_cid) = old_map_cid {
-            if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 self.ipfs.remove_pin(&old_cid, true).await?;
             }
         }
@@ -408,13 +393,7 @@ impl ConversationTask {
         document.verify()?;
 
         let mut map = match self.cid {
-            Some(cid) => {
-                self.ipfs
-                    .get_dag(IpfsPath::from(cid))
-                    .local()
-                    .deserialized()
-                    .await?
-            }
+            Some(cid) => self.ipfs.get_dag(cid).local().deserialized().await?,
             None => BTreeMap::new(),
         };
 
