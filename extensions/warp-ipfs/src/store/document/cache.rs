@@ -8,7 +8,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath};
+use rust_ipfs::Ipfs;
 use warp::{crypto::DID, error::Error};
 
 use super::identity::IdentityDocument;
@@ -216,7 +216,7 @@ impl IdentityCacheTask {
                 if let Some(path) = self.path.as_ref() {
                     let cid = cid.to_string();
                     if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
-                        tracing::log::error!("Error writing cid to file: {e}");
+                        tracing::error!("Error writing cid to file: {e}");
                     }
                 }
 
@@ -232,7 +232,7 @@ impl IdentityCacheTask {
                 if let Some(path) = self.path.as_ref() {
                     let cid = cid.to_string();
                     if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
-                        tracing::log::error!("Error writing cid to file: {e}");
+                        tracing::error!("Error writing cid to file: {e}");
                     }
                 }
 
@@ -307,7 +307,7 @@ impl IdentityCacheTask {
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
-                tracing::log::error!("Error writing cid to file: {e}");
+                tracing::error!("Error writing cid to file: {e}");
             }
         }
 
