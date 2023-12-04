@@ -269,6 +269,8 @@ impl IdentityStorage {
     // }
 }
 
+
+//Note: Maybe migrate to using a map where the public key points to the cid of the identity document instead
 struct IdentityStorageTask {
     ipfs: Ipfs,
     list: Option<Cid>,
