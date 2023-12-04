@@ -64,7 +64,7 @@ pub async fn get_output_device_name() -> Option<String> {
 }
 
 pub async fn reset() {
-    let _lock: tokio::sync::MutexGuard<'_, ()> = LOCK.lock().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.audio_source_track.take();
         DATA.audio_sink_controller.take();
