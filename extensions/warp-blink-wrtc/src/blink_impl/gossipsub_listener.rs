@@ -20,7 +20,8 @@ use super::{
     store::PeerIdExt,
 };
 
-use super::{data::NotifyWrapper, gossipsub_sender::GossipSubSender};
+use super::gossipsub_sender::GossipSubSender;
+use crate::notify_wrapper::NotifyWrapper;
 
 enum GossipSubCmd {
     // unsubscribe from the call and close any webrtc connections

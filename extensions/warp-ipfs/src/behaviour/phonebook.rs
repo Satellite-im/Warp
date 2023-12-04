@@ -287,19 +287,19 @@ impl NetworkBehaviour for Behaviour {
         self.backoff.retain(|peer_id, timer| {
             if timer.poll_unpin(cx).is_pending() {
                 return true;
-            }  
+            }
 
             if self.connections.contains_key(peer_id) {
                 return false;
             }
 
-            // We copy the function logic here due to being unable to mutability borrow twice. 
+            // We copy the function logic here due to being unable to mutability borrow twice.
             // We could get around it, but may not be worth doing
             tracing::info!("{peer_id} has disconnected");
             if let Some(PhoneBookState::Offline) = self.entry_state.get(peer_id) {
                 return false;
             }
-    
+
             let did = match peer_id.to_did() {
                 Ok(did) => did,
                 Err(_) => {
@@ -307,16 +307,16 @@ impl NetworkBehaviour for Behaviour {
                     return false;
                 }
             };
-    
+
             tracing::trace!("Emitting offline event for {did}");
-    
+
             self.entry_state
                 .entry(*peer_id)
                 .and_modify(|state| *state = PhoneBookState::Offline)
                 .or_insert(PhoneBookState::Offline);
-    
+
             let event = self.event.clone();
-    
+
             event.try_emit(MultiPassEventKind::IdentityOffline { did });
             false
         });

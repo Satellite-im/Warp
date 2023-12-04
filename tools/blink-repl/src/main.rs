@@ -1,14 +1,14 @@
 use anyhow::bail;
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait};
-use futures::StreamExt;
+use futures::{channel::oneshot, StreamExt};
 
 use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warp::{
-    blink::{Blink, BlinkEventKind, BlinkEventStream},
+    blink::{AudioTestEvent, Blink, BlinkEventKind, BlinkEventStream},
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
 
@@ -170,36 +170,82 @@ async fn handle_command(
             blink.disable_automute()?;
         }
         Repl::ShowSelectedDevices => {
-            let config = blink.get_audio_device_config().await;
+            let config = blink.get_audio_device_config().await?;
             println!("microphone: {:?}", config.microphone_device_name());
             println!("speaker: {:?}", config.speaker_device_name());
         }
         Repl::ShowAvailableDevices => {
-            let config = blink.get_audio_device_config().await;
+            let config = blink.get_audio_device_config().await?;
             let microphones = config.get_available_microphones();
             let speakers = config.get_available_speakers();
             println!("available microphones: {microphones:#?}");
             println!("available speakers: {speakers:#?}");
         }
         Repl::ConnectMicrophone { device_name } => {
-            let mut config = blink.get_audio_device_config().await;
+            let mut config = blink.get_audio_device_config().await?;
             config.set_microphone(&device_name);
             blink.set_audio_device_config(config).await?;
         }
         Repl::ConnectSpeaker { device_name } => {
-            let mut config = blink.get_audio_device_config().await;
+            let mut config = blink.get_audio_device_config().await?;
             config.set_speaker(&device_name);
             blink.set_audio_device_config(config).await?;
         }
         Repl::TestMicrophone { device_name } => {
-            let mut config = blink.get_audio_device_config().await;
+            let mut config = blink.get_audio_device_config().await?;
             config.set_microphone(&device_name);
-            config.test_microphone()?;
+            let (tx, rx) = oneshot::channel();
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = config.test_microphone(tx) {
+                    println!("{e}");
+                }
+            });
+            let mut ch = match rx.await {
+                Ok(r) => r,
+                Err(_e) => {
+                    bail!("audio test cancelled - channel closed");
+                }
+            };
+
+            while let Some(evt) = ch.recv().await {
+                match evt {
+                    AudioTestEvent::Done => {
+                        println!("received done event");
+                        break;
+                    }
+                    x => {
+                        println!("{x:?}");
+                    }
+                }
+            }
         }
         Repl::TestSpeaker { device_name } => {
-            let mut config = blink.get_audio_device_config().await;
+            let mut config = blink.get_audio_device_config().await?;
             config.set_speaker(&device_name);
-            config.test_speaker()?;
+            let (tx, rx) = oneshot::channel();
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = config.test_speaker(tx) {
+                    println!("{e}");
+                }
+            });
+            let mut ch = match rx.await {
+                Ok(r) => r,
+                Err(_e) => {
+                    bail!("audio test cancelled - channel closed");
+                }
+            };
+
+            while let Some(evt) = ch.recv().await {
+                match evt {
+                    AudioTestEvent::Done => {
+                        println!("received done event");
+                        break;
+                    }
+                    x => {
+                        println!("{x:?}");
+                    }
+                }
+            }
         }
         Repl::SupportedInputConfigs => {
             let host = cpal::default_host();
