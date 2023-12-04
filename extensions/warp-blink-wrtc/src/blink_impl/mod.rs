@@ -1,6 +1,5 @@
-mod data;
-
 mod blink_controller;
+mod data;
 mod gossipsub_listener;
 mod gossipsub_sender;
 mod signaling;
@@ -27,10 +26,7 @@ use warp::{
 
 use crate::{
     blink_impl::blink_controller::BlinkController,
-    host_media::{
-        self,
-        audio::automute::{AutoMuteCmd, AUDIO_CMD_CH},
-    },
+    host_media::{self, audio_utils::automute},
     simple_webrtc::{self},
 };
 
@@ -54,10 +50,9 @@ pub struct BlinkImpl {
 struct DropHandler {}
 impl Drop for DropHandler {
     fn drop(&mut self) {
-        tokio::spawn(async move {
-            host_media::audio::automute::stop();
-            host_media::reset().await;
-            log::debug!("blink drop handler finished");
+        host_media::audio_utils::automute::stop();
+        tokio::spawn(async {
+            host_media::controller::reset().await;
         });
     }
 }
@@ -66,20 +61,6 @@ impl BlinkImpl {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Box<Self>> {
         log::trace!("initializing WebRTC");
 
-        let cpal_host = cpal::default_host();
-        if let Some(input_device) = cpal_host.default_input_device() {
-            host_media::change_audio_input(input_device).await?;
-        } else {
-            log::warn!("blink started with no input device");
-        }
-
-        if let Some(output_device) = cpal_host.default_output_device() {
-            host_media::change_audio_output(output_device).await?;
-        } else {
-            log::warn!("blink started with no output device");
-        }
-
-        // todo: ensure rx doesn't get dropped
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
 
@@ -102,7 +83,7 @@ impl BlinkImpl {
 
         let blink_impl = Self {
             own_id: Arc::new(warp::sync::RwLock::new(None)),
-            ui_event_ch,
+            ui_event_ch: ui_event_ch.clone(),
             gossipsub_sender,
             gossipsub_listener,
             blink_controller,
@@ -140,6 +121,30 @@ impl BlinkImpl {
                 own_id.write().replace(public_did.clone());
                 ipfs.write().replace(_ipfs);
 
+                let cpal_host = cpal::default_host();
+                if let Some(input_device) = cpal_host.default_input_device() {
+                    if let Err(e) = host_media::controller::change_audio_input(
+                        &public_did,
+                        input_device,
+                        ui_event_ch.clone(),
+                    )
+                    .await
+                    {
+                        log::error!("BlinkImpl failed to set audio input device: {e}");
+                    }
+                } else {
+                    log::warn!("blink started with no input device");
+                }
+
+                if let Some(output_device) = cpal_host.default_output_device() {
+                    if let Err(e) = host_media::controller::change_audio_output(output_device).await
+                    {
+                        log::error!("BlinkImpl failed to set audio output device: {e}");
+                    }
+                } else {
+                    log::warn!("blink started with no output device");
+                }
+
                 gossipsub_listener.receive_calls(public_did);
                 log::trace!("finished initializing WebRTC");
                 Ok(())
@@ -151,7 +156,7 @@ impl BlinkImpl {
             }
         });
 
-        host_media::audio::automute::start();
+        host_media::audio_utils::automute::start();
         Ok(Box::new(blink_impl))
     }
 
@@ -168,8 +173,15 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        host_media::change_audio_input(device).await?;
-        Ok(())
+        let opt = self.own_id.read().clone();
+        match opt {
+            Some(id) => {
+                host_media::controller::change_audio_input(&id, device, self.ui_event_ch.clone())
+                    .await?;
+                Ok(())
+            }
+            None => Err(Error::BlinkNotInitialized),
+        }
     }
 
     async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error> {
@@ -185,7 +197,7 @@ impl BlinkImpl {
             r.ok_or(Error::AudioDeviceNotFound)?
         };
 
-        host_media::change_audio_output(device).await?;
+        host_media::controller::change_audio_output(device).await?;
         Ok(())
     }
 }
@@ -276,8 +288,10 @@ impl Blink for BlinkImpl {
 
     // ------ Select input/output devices ------
 
-    async fn get_audio_device_config(&self) -> Box<dyn AudioDeviceConfig> {
-        Box::new(host_media::get_audio_device_config().await)
+    async fn get_audio_device_config(&self) -> Result<Box<dyn AudioDeviceConfig>, Error> {
+        Ok(Box::new(
+            host_media::controller::get_audio_device_config().await,
+        ))
     }
 
     async fn set_audio_device_config(
@@ -338,18 +352,18 @@ impl Blink for BlinkImpl {
     }
 
     fn enable_automute(&mut self) -> Result<(), Error> {
-        let tx = AUDIO_CMD_CH.tx.clone();
-        tx.send(AutoMuteCmd::Enable)
+        let tx = automute::AUDIO_CMD_CH.tx.clone();
+        tx.send(automute::Cmd::Enable)
             .map_err(|e| Error::OtherWithContext(format!("failed to enable automute: {e}")))
     }
     fn disable_automute(&mut self) -> Result<(), Error> {
-        let tx = AUDIO_CMD_CH.tx.clone();
-        tx.send(AutoMuteCmd::Disable)
+        let tx = automute::AUDIO_CMD_CH.tx.clone();
+        tx.send(automute::Cmd::Disable)
             .map_err(|e| Error::OtherWithContext(format!("failed to disable automute: {e}")))
     }
 
     async fn set_peer_audio_gain(&mut self, peer_id: DID, multiplier: f32) -> Result<(), Error> {
-        host_media::set_peer_audio_gain(peer_id, multiplier).await?;
+        host_media::controller::set_peer_audio_gain(peer_id, multiplier).await;
         Ok(())
     }
 

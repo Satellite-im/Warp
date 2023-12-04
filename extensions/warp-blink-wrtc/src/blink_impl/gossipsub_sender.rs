@@ -22,7 +22,7 @@ use warp::{
 
 use super::store::{ecdh_decrypt, ecdh_encrypt};
 
-use super::data::NotifyWrapper;
+use crate::notify_wrapper::NotifyWrapper;
 
 enum GossipSubCmd {
     SendAes {

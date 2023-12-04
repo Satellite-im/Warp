@@ -1,10 +1,16 @@
+use super::{
+    data::CallDataMap,
+    gossipsub_listener::GossipSubListener,
+    gossipsub_sender::GossipSubSender,
+    signaling::{self, ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal},
+};
+use crate::{
+    host_media::{self, Mp4LoggerConfig, AUDIO_SOURCE_ID},
+    notify_wrapper::NotifyWrapper,
+    simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
+};
 use futures::channel::oneshot;
 use futures::StreamExt;
-
-use super::signaling::{
-    self, ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal,
-};
-
 use std::{cmp, sync::Arc, time::Duration};
 use tokio::{
     sync::{
@@ -16,23 +22,12 @@ use tokio::{
 };
 use uuid::Uuid;
 use warp::{
-    blink::{BlinkEventKind, CallInfo, CallState},
+    blink::{BlinkEventKind, CallInfo, CallState, MimeType},
     error::Error,
 };
 use webrtc::{
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
     track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
-};
-
-use crate::{
-    host_media::{self, audio::AudioCodec, mp4_logger::Mp4LoggerConfig},
-    simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
-};
-
-use super::{
-    data::{CallDataMap, NotifyWrapper},
-    gossipsub_listener::GossipSubListener,
-    gossipsub_sender::GossipSubSender,
 };
 
 #[derive(Debug)]
@@ -99,30 +94,11 @@ pub struct Args {
 
 impl BlinkController {
     pub fn new(args: Args) -> Self {
-        let Args {
-            webrtc_controller,
-            webrtc_event_stream,
-            gossipsub_sender,
-            gossipsub_listener,
-            signal_rx,
-            ui_event_ch,
-        } = args;
-
         let (tx, cmd_rx) = mpsc::unbounded_channel();
         let notify = Arc::new(Notify::new());
         let notify2 = notify.clone();
         tokio::spawn(async move {
-            run(
-                webrtc_controller,
-                webrtc_event_stream,
-                gossipsub_sender,
-                gossipsub_listener,
-                signal_rx,
-                ui_event_ch,
-                cmd_rx,
-                notify2,
-            )
-            .await;
+            run(args, cmd_rx, notify2).await;
         });
         Self {
             ch: tx,
@@ -240,16 +216,16 @@ impl BlinkController {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run(
-    mut webrtc_controller: simple_webrtc::Controller,
-    mut webrtc_event_stream: WebRtcEventStream,
-    gossipsub_sender: GossipSubSender,
-    gossipsub_listener: GossipSubListener,
-    mut signal_rx: UnboundedReceiver<GossipSubSignal>,
-    ui_event_ch: broadcast::Sender<BlinkEventKind>,
-    mut cmd_rx: UnboundedReceiver<Cmd>,
-    notify: Arc<Notify>,
-) {
+async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>) {
+    let Args {
+        mut webrtc_controller,
+        mut webrtc_event_stream,
+        gossipsub_sender,
+        gossipsub_listener,
+        mut signal_rx,
+        ui_event_ch,
+    } = args;
+
     let own_id = match gossipsub_sender.get_own_id().await {
         Ok(r) => r,
         Err(e) => {
@@ -331,27 +307,25 @@ async fn run(
                             let call_id = data.info.call_id();
                             let _ = ui_event_ch.send(BlinkEventKind::CallTerminated { call_id});
                             let _ = webrtc_controller.deinit().await;
-                            host_media::reset().await;
+                            host_media::controller::reset().await;
                         }
                         let call_id = call_info.call_id();
                         call_data_map.add_call(call_info.clone(), own_id);
                         call_data_map.set_active(call_id);
 
                         // automatically add an audio track
-                        let webrtc_codec = AudioCodec::default();
                         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-                            mime_type: webrtc_codec.mime_type(),
-                            clock_rate: webrtc_codec.sample_rate(),
+                            mime_type: MimeType::OPUS.to_string(),
+                            clock_rate: 48000,
                             channels: 1,
                             ..Default::default()
                         };
-                        match webrtc_controller.add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
+                        match webrtc_controller.add_media_source(AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
                             Ok(track) => {
-                                match host_media::create_audio_source_track(
-                                    own_id.clone(),
+                                match host_media::controller::create_audio_source_track(
+                                    own_id,
                                     ui_event_ch.clone(),
-                                    track,
-                                    webrtc_codec).await
+                                    track).await
                                 {
                                     Ok(_) => {
                                         log::debug!("sending offer signal");
@@ -385,7 +359,7 @@ async fn run(
                                         let _ = rsp.send(Ok(()));
                                     }
                                     Err(e) => {
-                                        let _ = webrtc_controller.remove_media_source(host_media::AUDIO_SOURCE_ID.into()).await;
+                                        let _ = webrtc_controller.remove_media_source(AUDIO_SOURCE_ID.into()).await;
                                         let _ = rsp.send(Err(e));
                                     }
                                 }
@@ -414,26 +388,24 @@ async fn run(
                             data.state.reset_self();
                             let _ = ui_event_ch.send(BlinkEventKind::CallTerminated { call_id: data.info.call_id() });
                             let _ = webrtc_controller.deinit().await;
-                            host_media::reset().await;
+                            host_media::controller::reset().await;
                         }
 
                         call_data_map.set_active(call_id);
 
                         // automatically add an audio track
-                        let webrtc_codec = AudioCodec::default();
                         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-                            mime_type: webrtc_codec.mime_type(),
-                            clock_rate: webrtc_codec.sample_rate(),
+                            mime_type: MimeType::OPUS.to_string(),
+                            clock_rate: 48000,
                             channels: 1,
                             ..Default::default()
                         };
-                        match webrtc_controller.add_media_source(host_media::AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
+                        match webrtc_controller.add_media_source(AUDIO_SOURCE_ID.into(), rtc_rtp_codec).await {
                             Ok(track) => {
-                                let r = host_media::create_audio_source_track(
-                                    own_id.clone(),
+                                let r = host_media::controller::create_audio_source_track(
+                                    own_id,
                                     ui_event_ch.clone(),
-                                    track,
-                                    webrtc_codec).await;
+                                    track).await;
                                 match r {
                                     Ok(_) => {
                                         log::debug!("answering call");
@@ -452,7 +424,7 @@ async fn run(
                                         }
                                     }
                                     Err(e) => {
-                                        let _ = webrtc_controller.remove_media_source(host_media::AUDIO_SOURCE_ID.into()).await;
+                                        let _ = webrtc_controller.remove_media_source(AUDIO_SOURCE_ID.into()).await;
                                         let _ = rsp.send(Err(e));
                                     }
                                 }
@@ -478,7 +450,7 @@ async fn run(
                             call_data_map.leave_call(call_id);
                             let _ = gossipsub_sender.empty_queue();
                             let _ = webrtc_controller.deinit().await;
-                            host_media::reset().await;
+                            host_media::controller::reset().await;
                             if let Err(e) = ui_event_ch.send(BlinkEventKind::CallTerminated { call_id }) {
                                 log::error!("failed to send CallTerminated Event: {e}");
                             }
@@ -502,6 +474,7 @@ async fn run(
                     },
                     Cmd::MuteSelf => {
                         if let Some(data) = call_data_map.get_active_mut() {
+                            host_media::controller::mute_self().await;
                             let call_id = data.info.call_id();
                             data.state.set_self_muted(true);
                             let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
@@ -516,6 +489,7 @@ async fn run(
                     }
                     Cmd::UnmuteSelf => {
                         if let Some(data) = call_data_map.get_active_mut() {
+                            host_media::controller::unmute_self().await;
                             let call_id = data.info.call_id();
                             data.state.set_self_muted(false);
                             let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
@@ -531,9 +505,7 @@ async fn run(
                     Cmd::SilenceCall => {
                         if let Some(data) = call_data_map.get_active_mut() {
                             let call_id = data.info.call_id();
-                            if let Err(e) = host_media::deafen().await {
-                                log::error!("{e}");
-                            }
+                            host_media::controller::deafen().await;
                             data.state.set_deafened(own_id, true);
                             let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
@@ -548,9 +520,7 @@ async fn run(
                     Cmd::UnsilenceCall => {
                         if let Some(data) = call_data_map.get_active_mut() {
                             let call_id = data.info.call_id();
-                            if let Err(e) = host_media::undeafen().await {
-                                log::error!("{e}");
-                            }
+                            host_media::controller::undeafen().await;
                             data.state.set_deafened(own_id, false);
                             let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
@@ -575,10 +545,10 @@ async fn run(
                         if let Some(data) = call_data_map.get_active_mut() {
                             let info = data.get_info();
                             match
-                                 host_media::init_recording(Mp4LoggerConfig {
+                            host_media::controller::init_recording(Mp4LoggerConfig {
+                                    own_id: own_id.clone(),
                                     call_id: info.call_id(),
                                     participants: info.participants(),
-                                    audio_codec: AudioCodec::default(),
                                     log_path: output_dir.into(),
                                 })
                                 .await
@@ -605,26 +575,17 @@ async fn run(
                     }
                     Cmd::StopRecording { rsp } => {
                         if let Some(data) = call_data_map.get_active_mut() {
-                            match
-                                 host_media::pause_recording()
-                                .await
+                            host_media::controller::pause_recording().await;
+                            data.state.set_self_recording(false);
+                            let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
+                            let topic = ipfs_routes::call_signal_route(&data.info.call_id());
+                            let signal = CallSignal::Announce { participant_state: own_state };
+                            if let Err(e) =
+                                gossipsub_sender.announce(data.info.group_key(), signal, topic)
                             {
-                                Ok(_) => {
-                                    data.state.set_self_recording(false);
-                                    let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
-                                    let topic = ipfs_routes::call_signal_route(&data.info.call_id());
-                                    let signal = CallSignal::Announce { participant_state: own_state };
-                                    if let Err(e) =
-                                        gossipsub_sender.announce(data.info.group_key(), signal, topic)
-                                    {
-                                        log::error!("failed to send announce signal: {e}");
-                                    }
-                                    let _ = rsp.send(Ok(()));
-                                }
-                                Err(e) => {
-                                    let _ = rsp.send(Err(Error::OtherWithContext(e.to_string())));
-                                }
+                                log::error!("failed to send announce signal: {e}");
                             }
+                            let _ = rsp.send(Ok(()));
                         } else {
                             let _ = rsp.send(Err(Error::CallNotInProgress));
                         }
@@ -752,8 +713,8 @@ async fn run(
                         log::debug!("webrtc: closed, disconnected or connection failed");
 
                         webrtc_controller.hang_up(&peer).await;
-                        if let Err(e) = host_media::remove_sink_track(peer.clone()).await {
-                            log::error!("failed to send media_track command: {e}");
+                        if let Err(e) = host_media::controller::remove_sink_track(peer.clone()).await {
+                            log::error!("failed to remove sink track for peer {peer}: {e}");
                         }
 
                         if let Some(data) = call_data_map.get_active_mut() {
@@ -767,7 +728,7 @@ async fn run(
                                     log::error!("webrtc deinit failed: {e}");
                                 }
                                 //rtp_logger::deinit().await;
-                                host_media::reset().await;
+                                host_media::controller::reset().await;
                                 let event = BlinkEventKind::CallTerminated { call_id };
                                 let _ = ui_event_ch.send(event);
 
@@ -801,10 +762,13 @@ async fn run(
                         }
                     },
                     simple_webrtc::events::EmittedEvents::TrackAdded { peer, track } => {
-                        if let Err(e) =   host_media::create_audio_sink_track(peer.clone(), ui_event_ch.clone(), track, AudioCodec::default()).await {
+                        if let Err(e) =   host_media::controller::create_audio_sink_track(peer.clone(), ui_event_ch.clone(), track).await {
                             log::error!("failed to send media_track command: {e}");
                         }
                     },
+                    simple_webrtc::events::EmittedEvents::DataChannelCreated { .. } => {},
+                    simple_webrtc::events::EmittedEvents::DataChannelOpened { .. } => {}
+                    simple_webrtc::events::EmittedEvents::DataChannelClosed { .. } => {}
                 }
             }
         }

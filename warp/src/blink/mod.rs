@@ -65,7 +65,7 @@ pub trait Blink: Sync + Send + SingleHandle + DynClone {
 
     /// returns an AudioDeviceConfig which can be used to view, test, and select
     /// a speaker and microphone
-    async fn get_audio_device_config(&self) -> Box<dyn AudioDeviceConfig>;
+    async fn get_audio_device_config(&self) -> Result<Box<dyn AudioDeviceConfig>, Error>;
     /// Tell Blink to use the given AudioDeviceConfig for calling
     async fn set_audio_device_config(
         &mut self,
