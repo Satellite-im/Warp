@@ -361,6 +361,7 @@ impl Directory {
                 return Err(e);
             }
         }
+        self.signal();
         Ok(())
     }
 }
@@ -392,6 +393,7 @@ impl Directory {
             return Err(Error::DuplicateName);
         }
         self.items.write().push(item);
+        self.signal();
         Ok(())
     }
 
@@ -605,11 +607,11 @@ impl Directory {
 impl Directory {
     /// Rebuilds the items path after an update
     pub fn rebuild_paths(&mut self, signal: &Option<futures::channel::mpsc::UnboundedSender<()>>) {
+        self.set_signal(signal.clone());
         let items = &mut *self.items.write();
         for item in items {
             match item {
                 Item::Directory(directory) => {
-                    directory.set_signal(signal.clone());
                     let mut path = self.path().to_string();
                     path.push_str(&directory.name());
                     directory.set_path(&path);
