@@ -6,7 +6,7 @@
 use cpal::traits::DeviceTrait;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, Mutex};
 use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
 use warp::error::Error;
@@ -21,7 +21,7 @@ struct Data {
     controller: loopback::LoopbackController,
 }
 
-static LOCK: Lazy<RwLock<()>> = Lazy::new(|| RwLock::new(()));
+static LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static mut DATA: Lazy<Data> = Lazy::new(|| Data {
     controller: loopback::LoopbackController::new(),
 });
@@ -37,7 +37,7 @@ pub async fn get_output_device_name() -> Option<String> {
 }
 
 pub async fn reset() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.controller = loopback::LoopbackController::new();
     }
@@ -45,7 +45,7 @@ pub async fn reset() {
 }
 
 pub async fn has_audio_source() -> bool {
-    let _lock = LOCK.read().await;
+    let _lock = LOCK.lock().await;
     false
 }
 
@@ -57,7 +57,7 @@ pub async fn create_audio_source_track(
     _ui_event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
 ) -> Result<(), Error> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     unsafe { DATA.controller.set_source_track(track) }
 
@@ -65,7 +65,7 @@ pub async fn create_audio_source_track(
 }
 
 pub async fn remove_audio_source_track() -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.controller.remove_audio_source_track();
     }
@@ -77,7 +77,7 @@ pub async fn create_audio_sink_track(
     _ui_event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackRemote>,
 ) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     unsafe {
         DATA.controller.add_track(peer_id, track);
@@ -91,24 +91,24 @@ pub async fn change_audio_input(
     _device: cpal::Device,
     _ui_event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     Ok(())
 }
 
 pub async fn change_audio_output(_device: cpal::Device) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     Ok(())
 }
 
 pub async fn get_audio_device_config() -> AudioDeviceConfigImpl {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     AudioDeviceConfigImpl::new(None, None)
 }
 
 pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.controller.remove_track(peer_id);
     }
@@ -116,23 +116,23 @@ pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
 }
 
 pub async fn mute_self() -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     Ok(())
 }
 
 pub async fn unmute_self() -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     Ok(())
 }
 
 pub async fn deafen() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 }
 
 pub async fn undeafen() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 }
 
 // the source and sink tracks will use mp4_logger::get_instance() regardless of whether init_recording is called.
@@ -140,20 +140,20 @@ pub async fn undeafen() {
 // when the user issues the command to begin recording, mp4_logger needs to be initialized and
 // the source and sink tracks need to be told to get a new instance of mp4_logger.
 pub async fn init_recording(_config: Mp4LoggerConfig) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     Ok(())
 }
 
 pub async fn pause_recording() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 }
 
 pub async fn resume_recording() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 }
 
 pub async fn set_peer_audio_gain(_peer_id: DID, _audio_multiplier: f32) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     Ok(())
 }

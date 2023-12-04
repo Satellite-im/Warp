@@ -6,7 +6,7 @@ use anyhow::bail;
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, Mutex};
 use warp::blink::BlinkEventKind;
 use warp::crypto::DID;
 use warp::error::Error;
@@ -31,7 +31,7 @@ struct Data {
     deafened: bool,
 }
 
-static LOCK: Lazy<RwLock<()>> = Lazy::new(|| RwLock::new(()));
+static LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static mut DATA: Lazy<Data> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
     Data {
@@ -50,12 +50,12 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
 pub const AUDIO_SOURCE_ID: &str = "audio-input";
 
 pub async fn get_input_device_name() -> Option<String> {
-    let _lock = LOCK.read().await;
+    let _lock = LOCK.lock().await;
     unsafe { DATA.audio_input_device.as_ref().and_then(|x| x.name().ok()) }
 }
 
 pub async fn get_output_device_name() -> Option<String> {
-    let _lock = LOCK.read().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.audio_output_device
             .as_ref()
@@ -64,7 +64,7 @@ pub async fn get_output_device_name() -> Option<String> {
 }
 
 pub async fn reset() {
-    let _lock = LOCK.write().await;
+    let _lock: tokio::sync::MutexGuard<'_, ()> = LOCK.lock().await;
     unsafe {
         DATA.audio_source_track.take();
         DATA.audio_sink_controller.take();
@@ -76,7 +76,7 @@ pub async fn reset() {
 }
 
 pub async fn has_audio_source() -> bool {
-    let _lock = LOCK.read().await;
+    let _lock = LOCK.lock().await;
     unsafe { DATA.audio_input_device.is_some() }
 }
 
@@ -88,7 +88,7 @@ pub async fn create_audio_source_track(
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
 ) -> Result<(), Error> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     let input_device = match unsafe { DATA.audio_input_device.as_ref() } {
         Some(d) => d,
         None => return Err(Error::MicrophoneMissing),
@@ -110,7 +110,7 @@ pub async fn create_audio_source_track(
 }
 
 pub async fn remove_audio_source_track() -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.audio_source_track.take();
     }
@@ -122,7 +122,7 @@ pub async fn create_audio_sink_track(
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackRemote>,
 ) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     unsafe {
         let output_device = match DATA.audio_output_device.as_ref() {
@@ -155,7 +155,7 @@ pub async fn change_audio_input(
     device: cpal::Device,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 ) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     let src_channels = get_min_source_channels(&device)?;
 
@@ -184,7 +184,7 @@ pub async fn change_audio_input(
 }
 
 pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     let sink_channels = get_min_sink_channels(&device)?;
     unsafe {
@@ -198,7 +198,7 @@ pub async fn change_audio_output(device: cpal::Device) -> anyhow::Result<()> {
 }
 
 pub async fn get_audio_device_config() -> AudioDeviceConfigImpl {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         AudioDeviceConfigImpl::new(
             DATA.audio_input_device
@@ -212,7 +212,7 @@ pub async fn get_audio_device_config() -> AudioDeviceConfigImpl {
 }
 
 pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         if let Some(controller) = DATA.audio_sink_controller.as_mut() {
             controller.remove_track(peer_id);
@@ -222,7 +222,7 @@ pub async fn remove_sink_track(peer_id: DID) -> anyhow::Result<()> {
 }
 
 pub async fn mute_self() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.muted = true;
     }
@@ -232,7 +232,7 @@ pub async fn mute_self() {
 }
 
 pub async fn unmute_self() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.muted = false;
     }
@@ -242,7 +242,7 @@ pub async fn unmute_self() {
 }
 
 pub async fn deafen() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     unsafe {
         DATA.deafened = true;
@@ -253,7 +253,7 @@ pub async fn deafen() {
 }
 
 pub async fn undeafen() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     unsafe {
         DATA.deafened = false;
         if let Some(controller) = DATA.audio_sink_controller.as_mut() {
@@ -267,7 +267,7 @@ pub async fn undeafen() {
 // when the user issues the command to begin recording, mp4_logger needs to be initialized and
 // the source and sink tracks need to be told to get a new instance of mp4_logger.
 pub async fn init_recording(config: Mp4LoggerConfig) -> anyhow::Result<()> {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     let own_id = config.own_id.clone();
     unsafe {
@@ -296,17 +296,17 @@ pub async fn init_recording(config: Mp4LoggerConfig) -> anyhow::Result<()> {
 }
 
 pub async fn pause_recording() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     mp4_logger::pause();
 }
 
 pub async fn resume_recording() {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
     mp4_logger::resume();
 }
 
 pub async fn set_peer_audio_gain(peer_id: DID, audio_multiplier: f32) {
-    let _lock = LOCK.write().await;
+    let _lock = LOCK.lock().await;
 
     unsafe {
         if let Some(controller) = DATA.audio_sink_controller.as_ref() {

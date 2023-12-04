@@ -428,7 +428,7 @@ impl Controller {
                     }
                 }
 
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             },
         ));
 
@@ -444,7 +444,7 @@ impl Controller {
                         log::error!("failed to send ice candidate to peer {}: {}", &dest, e);
                     }
                 }
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             }));
 
         // Set the handler for ICE connection state
@@ -459,7 +459,7 @@ impl Controller {
                     connection_state
                 );
 
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             },
         ));
 
@@ -477,7 +477,7 @@ impl Controller {
                         log::error!("failed to send track added event for peer {}: {}", &dest, e);
                     }
                 }
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             },
         ));
 
@@ -497,7 +497,7 @@ impl Controller {
                             e
                         );
                     }
-                    Box::pin(async {})
+                    Box::pin(futures::future::ready(()))
                 }));
 
                 let tx2 = tx.clone();
@@ -512,7 +512,7 @@ impl Controller {
                             e
                         );
                     }
-                    Box::pin(async {})
+                    Box::pin(futures::future::ready(()))
                 }));
 
                 if let Err(e) = tx.send(EmittedEvents::DataChannelCreated {
@@ -525,7 +525,7 @@ impl Controller {
                         e
                     );
                 }
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             }));
 
         // attach all media sources to the peer
