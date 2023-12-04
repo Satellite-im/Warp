@@ -10,6 +10,7 @@ use rust_ipfs::{
     unixfs::{AddOption, UnixfsStatus},
     Ipfs, IpfsPath,
 };
+
 use tokio_util::io::ReaderStream;
 use warp::{
     constellation::{
@@ -44,6 +45,8 @@ pub struct FileStore {
     signal: futures::channel::mpsc::UnboundedSender<()>,
 
     config: config::Config,
+
+    signal_guard: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl FileStore {
@@ -95,6 +98,7 @@ impl FileStore {
             constellation_tx,
             config,
             signal: tx,
+            signal_guard: Arc::default(),
         };
 
         if let Err(e) = store.import().await {
@@ -122,6 +126,7 @@ impl FileStore {
                 });
 
                 while stream_ctx.next().await.is_some() {
+                    let _g = fs.signal_guard.read().await;
                     if let Err(_e) = fs.export().await {
                         tracing::error!("Error exporting index: {_e}");
                     }
@@ -298,6 +303,8 @@ impl FileStore {
 
         let name = name.to_string();
         let fs = self.clone();
+        let guard = self.signal_guard.clone();
+
         let progress_stream = async_stream::stream! {
 
             let mut last_written = 0;
@@ -393,6 +400,8 @@ impl FileStore {
             } else {
                 tokio::spawn(task);
             }
+
+            let _guard = guard.write().await;
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
@@ -517,6 +526,8 @@ impl FileStore {
 
         self.current_directory()?.add_item(file)?;
 
+        let _guard = self.signal_guard.write().await;
+
         self.constellation_tx
             .emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
@@ -577,6 +588,8 @@ impl FileStore {
         let fs = self.clone();
         let name = name.to_string();
         let stream = stream.map(Ok::<_, std::io::Error>).boxed();
+        let guard = self.signal_guard.clone();
+
         let progress_stream = async_stream::stream! {
 
             let mut last_written = 0;
@@ -662,6 +675,8 @@ impl FileStore {
                 return;
             }
 
+            let _guard = guard.write().await;
+
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
@@ -734,6 +749,8 @@ impl FileStore {
 
         directory.remove_item(&item.name())?;
 
+        let _guard = self.signal_guard.write().await;
+
         let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
         tracing::info!(blocks = blocks.len(), "blocks removed");
 
@@ -755,6 +772,8 @@ impl FileStore {
         }
 
         directory.rename_item(current, new)?;
+
+        let _guard = self.signal_guard.write().await;
 
         self.constellation_tx
             .emit(ConstellationEventKind::Renamed {
@@ -778,6 +797,8 @@ impl FileStore {
         }
 
         directory.add_directory(Directory::new(name))?;
+
+        let _guard = self.signal_guard.write().await;
 
         Ok(())
     }
