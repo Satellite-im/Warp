@@ -136,7 +136,7 @@ impl FlatfileIndex {
                 return Err(Error::DataObjectExist);
             }
         }
-        index.entry(data_type).or_insert_with(Vec::new).push(data);
+        index.entry(data_type).or_default().push(data);
         Ok(())
     }
 

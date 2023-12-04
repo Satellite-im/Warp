@@ -63,7 +63,7 @@ pub async fn init(call_id: Uuid, log_path: PathBuf) -> Result<()> {
     };
     RTP_LOGGER.write().replace(logger);
 
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         if let Err(e) = run(rx, should_quit, log_path.join(format!("{}.csv", call_id))) {
             log::error!("error running rtp_logger: {e}");
         }
@@ -153,13 +153,21 @@ fn run(
             let prev_time = prev_packet_times
                 .entry(wrapper.id.clone())
                 .or_insert(wrapper.val.timestamp);
-            let packet_time_diff = wrapper.val.timestamp.checked_sub(*prev_time).unwrap_or_default();
+            let packet_time_diff = wrapper
+                .val
+                .timestamp
+                .checked_sub(*prev_time)
+                .unwrap_or_default();
             *prev_time = wrapper.val.timestamp;
 
             let prev_num = prev_sequence_numbers
                 .entry(wrapper.id.clone())
                 .or_insert(wrapper.val.sequence_number);
-            let sequence_num_diff = wrapper.val.sequence_number.checked_sub(*prev_num).unwrap_or_default();
+            let sequence_num_diff = wrapper
+                .val
+                .sequence_number
+                .checked_sub(*prev_num)
+                .unwrap_or_default();
             *prev_num = wrapper.val.sequence_number;
 
             writer.write_all(

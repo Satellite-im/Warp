@@ -21,12 +21,9 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 
 use warp::{
-    blink::MimeType,
     crypto::DID,
     sync::{Arc, RwLock},
 };
-
-use super::audio::AudioCodec;
 
 static MP4_LOGGER: Lazy<RwLock<Option<Mp4Logger>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));
@@ -48,15 +45,14 @@ struct Mp4Logger {
     config: Mp4LoggerConfig,
     audio_track_ids: HashMap<DID, u32>,
     // video_track_ids: HashMap<DID, u32>,
-    should_quit: Arc<AtomicBool>,
     should_log: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
 pub struct Mp4LoggerConfig {
+    pub own_id: DID,
     pub call_id: Uuid,
     pub participants: Vec<DID>,
-    pub audio_codec: AudioCodec,
     // pub video_codec: todo!(),
     pub log_path: PathBuf,
 }
@@ -67,9 +63,7 @@ struct MpLoggerConfigInternal {
     // video_track_ids: HashMap<DID, u32>,
 }
 
-pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
-    deinit().await;
-
+pub fn init(config: Mp4LoggerConfig) -> Result<()> {
     let call_id = config.call_id;
     let log_path = config.log_path.clone();
 
@@ -96,7 +90,6 @@ pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
         audio_track_ids: audio_track_ids.clone(),
     };
     let (tx, rx) = tokio::sync::mpsc::channel(1024 * 5);
-    let should_quit = Arc::new(AtomicBool::new(false));
     let should_log = Arc::new(AtomicBool::new(true));
 
     let logger = Mp4Logger {
@@ -104,14 +97,15 @@ pub async fn init(config: Mp4LoggerConfig) -> Result<()> {
         start_time: Instant::now(),
         audio_track_ids,
         // video_track_ids,
-        should_quit: should_quit.clone(),
         should_log: should_log.clone(),
         config,
     };
+
+    // this will drop the other one, the tx channel will be dropped/closed, and the thread should terminate.
     MP4_LOGGER.write().replace(logger);
 
-    std::thread::spawn(move || {
-        if let Err(e) = run(rx, should_quit, should_log, internal_config) {
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = run(rx, should_log, internal_config) {
             log::error!("error running mp4_logger: {e}");
         }
         log::debug!("mp4_logger terminating: {}", call_id);
@@ -132,43 +126,27 @@ pub fn resume() {
     }
 }
 
-pub async fn deinit() {
-    let tx = match MP4_LOGGER.write().take() {
-        Some(logger) => {
-            logger.should_quit.store(true, Ordering::Relaxed);
-            logger.tx.clone()
-        }
-        None => return,
-    };
-    let _ = tx
-        .send(Mp4Fragment {
-            traf: TrafBox::default(),
-            mdat: Bytes::default(),
-            system_time_ms: 0,
-        })
-        .await;
+pub fn deinit() {
+    let _ = MP4_LOGGER.write().take();
 }
 
-pub fn get_audio_logger(peer_id: &DID) -> Result<Box<dyn Mp4LoggerInstance>> {
+pub fn get_audio_logger(peer_id: &DID) -> Box<dyn Mp4LoggerInstance> {
     let logger = match MP4_LOGGER.read().as_ref() {
         Some(logger) => {
-            let track_id = logger
-                .audio_track_ids
-                .get(peer_id)
-                .ok_or(anyhow::anyhow!("no audio track found for peer"))?;
-
-            log::debug!("getting audio logger for peer {}", peer_id);
-            match logger.config.audio_codec.mime {
-                MimeType::OPUS => loggers::get_opus_logger(logger.tx.clone(), *track_id),
-                _ => {
-                    bail!("unsupported audio codec");
+            let track_id = match logger.audio_track_ids.get(peer_id) {
+                Some(x) => x,
+                None => {
+                    log::error!("audio track id not found for peer");
+                    return Box::new(loggers::DummyLogger {});
                 }
-            }
+            };
+            log::debug!("getting audio logger for peer {}", peer_id);
+            loggers::get_opus_logger(logger.tx.clone(), *track_id)
         }
-        None => bail!("no mp4 logger instance"),
+        None => Box::new(loggers::DummyLogger {}),
     };
 
-    Ok(logger)
+    logger
 }
 
 // pub fn get_video_logger(peer_id: DID) -> Option<()> {
@@ -177,7 +155,6 @@ pub fn get_audio_logger(peer_id: &DID) -> Result<Box<dyn Mp4LoggerInstance>> {
 
 fn run(
     mut ch: Receiver<Mp4Fragment>,
-    should_quit: Arc<AtomicBool>,
     should_log: Arc<AtomicBool>,
     internal_config: MpLoggerConfigInternal,
 ) -> Result<()> {
@@ -196,12 +173,8 @@ fn run(
     let f = fs::File::create(mp4_file_path.clone())?;
     let mut writer = BufWriter::new(f);
 
-    write_mp4_header(
-        &mut writer,
-        &internal_config.config.audio_codec,
-        &internal_config.audio_track_ids,
-    )
-    .map_err(|e| anyhow::anyhow!("failed to write mp4 header: {e}"))?;
+    write_mp4_header(&mut writer, &internal_config.audio_track_ids)
+        .map_err(|e| anyhow::anyhow!("failed to write mp4 header: {e}"))?;
 
     // the timestamp is in system_time_ms
     // represents the timestamp of the earliest received fragment
@@ -210,138 +183,136 @@ fn run(
     // time base.
     let mut fragment_decode_time = 0;
 
-    while !should_quit.load(Ordering::Relaxed) {
-        while let Some(fragment) = ch.blocking_recv() {
-            if fragment.mdat.is_empty() {
-                log::debug!("mp4_logger received empty mdat fragment");
-                break;
-            }
+    while let Some(fragment) = ch.blocking_recv() {
+        if fragment.mdat.is_empty() {
+            log::debug!("mp4_logger received empty mdat fragment");
+            break;
+        }
 
-            if !should_log.load(Ordering::Relaxed) {
+        if !should_log.load(Ordering::Relaxed) {
+            continue;
+        }
+
+        let track_id = fragment.traf.tfhd.track_id;
+        let track_idx = track_id.saturating_sub(1);
+        let fragment_system_time = fragment.system_time_ms;
+        match fragments.get_mut(track_idx as usize) {
+            Some(v) => {
+                // only update fragment_start_time for valid track ids
+                if fragment_start_time.is_none() {
+                    fragment_start_time.replace(fragment.system_time_ms);
+                }
+                // queue the fragment
+                v.push_back(fragment);
+            }
+            None => {
+                log::error!("invalid track id: {}", track_id);
                 continue;
             }
+        };
 
-            let track_id = fragment.traf.tfhd.track_id;
-            let track_idx = track_id.saturating_sub(1);
-            let fragment_system_time = fragment.system_time_ms;
-            match fragments.get_mut(track_idx as usize) {
-                Some(v) => {
-                    // only update fragment_start_time for valid track ids
-                    if fragment_start_time.is_none() {
-                        fragment_start_time.replace(fragment.system_time_ms);
-                    }
-                    // queue the fragment
-                    v.push_back(fragment);
-                }
-                None => {
-                    log::error!("invalid track id: {}", track_id);
-                    continue;
-                }
-            };
+        let time_since_fragment_start =
+            fragment_system_time - fragment_start_time.unwrap_or(fragment_system_time);
 
-            let time_since_fragment_start =
-                fragment_system_time - fragment_start_time.unwrap_or(fragment_system_time);
+        if time_since_fragment_start < 1000 {
+            continue;
+        }
 
-            if time_since_fragment_start < 1000 {
-                continue;
-            }
+        let mut trafs = vec![];
+        let mut mdats = vec![];
 
-            let mut trafs = vec![];
-            let mut mdats = vec![];
+        for track_idx in 0..internal_config.audio_track_ids.len() {
+            let track_id = track_idx + 1;
 
-            for track_idx in 0..internal_config.audio_track_ids.len() {
-                let track_id = track_idx + 1;
-
-                // ensure that for every track id, something is appended to trafs and mdats.
-                if let Some(fragments) = fragments.get_mut(track_idx) {
-                    if let Some(mut fragment) = fragments.pop_front() {
-                        if fragment.system_time_ms
-                            - fragment_start_time.unwrap_or(fragment.system_time_ms)
-                            >= 1000
-                        {
-                            // put the fragment back
-                            fragments.push_front(fragment);
-                        } else {
-                            if let Some(tfdt) = fragment.traf.tfdt.as_mut() {
-                                tfdt.base_media_decode_time = fragment_decode_time;
-                            }
-                            trafs.push(fragment.traf);
-                            mdats.push(fragment.mdat);
-                            continue;
+            // ensure that for every track id, something is appended to trafs and mdats.
+            if let Some(fragments) = fragments.get_mut(track_idx) {
+                if let Some(mut fragment) = fragments.pop_front() {
+                    if fragment.system_time_ms
+                        - fragment_start_time.unwrap_or(fragment.system_time_ms)
+                        >= 1000
+                    {
+                        // put the fragment back
+                        fragments.push_front(fragment);
+                    } else {
+                        if let Some(tfdt) = fragment.traf.tfdt.as_mut() {
+                            tfdt.base_media_decode_time = fragment_decode_time;
                         }
+                        trafs.push(fragment.traf);
+                        mdats.push(fragment.mdat);
+                        continue;
                     }
                 }
+            }
 
-                // add empty traf and mdat
-                let traf = TrafBox {
-                    tfhd: TfhdBox {
-                        version: 0,
-                        // default-base-is-moof | duration-is-empty
-                        flags: 0x020000 | 0x010000,
-                        track_id: track_id as u32,
-                        ..Default::default()
-                    },
+            // add empty traf and mdat
+            let traf = TrafBox {
+                tfhd: TfhdBox {
+                    version: 0,
+                    // default-base-is-moof | duration-is-empty
+                    flags: 0x020000 | 0x010000,
+                    track_id: track_id as u32,
                     ..Default::default()
-                };
-                trafs.push(traf);
-                mdats.push(Bytes::default());
-            } // end for
+                },
+                ..Default::default()
+            };
+            trafs.push(traf);
+            mdats.push(Bytes::default());
+        } // end for
 
-            // get new fragment start time
-            fragment_start_time.take();
-            for track_idx in 0..internal_config.audio_track_ids.len() {
-                if let Some(fragments) = fragments.get_mut(track_idx) {
-                    if let Some(f) = fragments.front() {
-                        match fragment_start_time {
-                            None => {
+        // get new fragment start time
+        fragment_start_time.take();
+        for track_idx in 0..internal_config.audio_track_ids.len() {
+            if let Some(fragments) = fragments.get_mut(track_idx) {
+                if let Some(f) = fragments.front() {
+                    match fragment_start_time {
+                        None => {
+                            fragment_start_time.replace(f.system_time_ms);
+                        }
+                        Some(t) => {
+                            if t > f.system_time_ms {
                                 fragment_start_time.replace(f.system_time_ms);
                             }
-                            Some(t) => {
-                                if t > f.system_time_ms {
-                                    fragment_start_time.replace(f.system_time_ms);
-                                }
-                            }
                         }
                     }
                 }
             }
+        }
 
-            let mut moof = MoofBox {
-                mfhd: MfhdBox {
-                    version: 0,
-                    flags: 0,
-                    sequence_number: fragment_sequence_number,
-                },
-                trafs,
-            };
+        let mut moof = MoofBox {
+            mfhd: MfhdBox {
+                version: 0,
+                flags: 0,
+                sequence_number: fragment_sequence_number,
+            },
+            trafs,
+        };
 
-            fragment_sequence_number += 1;
-            // todo: currently this is opus specific. depends on the implementation of logger::opus::Opus
-            // need to add the timebase to the audio codec
-            fragment_decode_time += 100;
+        fragment_sequence_number += 1;
+        // todo: currently this is opus specific. depends on the implementation of logger::opus::Opus
+        // need to add the timebase to the audio codec
+        fragment_decode_time += 100;
 
-            let mut data_offset = moof.box_size() + 8;
-            for traf in moof.trafs.iter_mut() {
-                if let Some(trun) = traf.trun.as_mut() {
-                    trun.data_offset = Some(data_offset as i32);
-                    let data_size: u32 = trun.sample_sizes.iter().sum();
-                    data_offset += data_size as u64;
-                }
+        let mut data_offset = moof.box_size() + 8;
+        for traf in moof.trafs.iter_mut() {
+            if let Some(trun) = traf.trun.as_mut() {
+                trun.data_offset = Some(data_offset as i32);
+                let data_size: u32 = trun.sample_sizes.iter().sum();
+                data_offset += data_size as u64;
             }
-            // want to use the ? operator on a block of code.
-            let write_fn = || -> Result<()> {
-                moof.write_box(&mut writer)?;
-                let data_size = mdats.iter().fold(0, |acc, x| acc + x.len());
-                BoxHeader::new(BoxType::MdatBox, 8_u64 + data_size as u64).write(&mut writer)?;
-                for mdat in mdats {
-                    Write::write(&mut writer, &mdat)?;
-                }
-                writer.flush()?;
-                Ok(())
-            };
-            if let Err(e) = write_fn() {
-                log::error!("error writing fragment: {e}");
+        }
+        // want to use the ? operator on a block of code.
+        let write_fn = || -> Result<()> {
+            moof.write_box(&mut writer)?;
+            let data_size = mdats.iter().fold(0, |acc, x| acc + x.len());
+            BoxHeader::new(BoxType::MdatBox, 8_u64 + data_size as u64).write(&mut writer)?;
+            for mdat in mdats {
+                Write::write(&mut writer, &mdat)?;
             }
+            writer.flush()?;
+            Ok(())
+        };
+        if let Err(e) = write_fn() {
+            log::error!("error writing fragment: {e}");
         }
     }
 
@@ -381,7 +352,6 @@ fn update_duration(mp4_file_path: PathBuf, duration: u32) -> Result<()> {
 
 fn write_mp4_header(
     writer: &mut BufWriter<File>,
-    audio_codec: &AudioCodec,
     audio_track_ids: &HashMap<DID, u32>,
 ) -> Result<()> {
     let ftyp = mp4::FtypBox {
@@ -403,7 +373,7 @@ fn write_mp4_header(
         let dops = DopsBox {
             version: 0,
             pre_skip: 0,
-            input_sample_rate: audio_codec.sample_rate(),
+            input_sample_rate: 48000,
             output_gain: 0,
             channel_mapping_family: mp4::ChannelMappingFamily::Family0 { stereo: false },
         };
@@ -411,7 +381,7 @@ fn write_mp4_header(
             data_reference_index: 1,
             channelcount: 1,
             samplesize: 16, // per https://opus-codec.org/docs/opus_in_isobmff.html
-            samplerate: FixedPointU16::new(audio_codec.sample_rate() as u16),
+            samplerate: FixedPointU16::new(48000),
             dops,
         };
 

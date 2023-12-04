@@ -61,8 +61,8 @@ pub mod ipfs_routes {
     use uuid::Uuid;
     use warp::crypto::DID;
 
-    const TELECON_BROADCAST: &str = "telecon";
-    const OFFER_CALL: &str = "offer_call";
+    const TELECON_BROADCAST: &str = "telecon2";
+    const OFFER_CALL: &str = "offer_call2";
     /// subscribe/unsubscribe per-call
     /// CallSignal
     pub fn call_signal_route(call_id: &Uuid) -> String {

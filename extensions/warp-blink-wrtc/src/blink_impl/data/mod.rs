@@ -5,9 +5,6 @@ use warp::{
     crypto::DID,
 };
 
-mod notify_wrapper;
-pub use notify_wrapper::*;
-
 #[derive(Clone)]
 pub struct CallData {
     pub info: CallInfo,
