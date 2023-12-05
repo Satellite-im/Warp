@@ -196,6 +196,8 @@ impl IdentityDocument {
             }
         }
 
+        let _ = std::mem::take(&mut payload.metadata);
+
         let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
         let signature_bytes = bs58::decode(signature).into_vec()?;
         let bytes = serde_json::to_vec(&payload)?;
