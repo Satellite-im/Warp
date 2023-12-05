@@ -22,11 +22,9 @@ pub struct IdentityDocument {
 
     pub did: DID,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<DateTime<Utc>>,
+    pub created: DateTime<Utc>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modified: Option<DateTime<Utc>>,
+    pub modified: DateTime<Utc>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
@@ -62,8 +60,8 @@ impl From<Identity> for IdentityDocument {
         let did = identity.did_key();
         let short_id = *identity.short_id();
         let status_message = identity.status_message();
-        let created = Some(identity.created());
-        let modified = Some(identity.modified());
+        let created = identity.created();
+        let modified = identity.modified();
 
         IdentityDocument {
             username,
@@ -92,8 +90,8 @@ impl From<&IdentityDocument> for Identity {
         identity.set_short_id(document.short_id);
         identity.set_status_message(document.status_message.clone());
         identity.set_username(&document.username);
-        identity.set_created(document.created.unwrap_or(Utc::now()));
-        identity.set_modified(document.modified.unwrap_or(Utc::now()));
+        identity.set_created(document.created);
+        identity.set_modified(document.modified);
         identity
     }
 }
@@ -145,11 +143,9 @@ impl IdentityDocument {
         //identification process, but will include it after it is signed
         self.metadata = Default::default();
         self.signature = None;
-        if self.created.is_none() {
-            self.created = Some(Utc::now());
-        }
-        self.modified = Some(Utc::now());
-        
+
+        self.modified = Utc::now();
+
         let bytes = serde_json::to_vec(&self)?;
         let signature = bs58::encode(did.sign(&bytes)).into_string();
         self.metadata = metadata;

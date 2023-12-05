@@ -1384,8 +1384,8 @@ impl IdentityStore {
                 .try_into()
                 .map_err(anyhow::Error::from)?,
             did: public_key.into(),
-            created: Some(time),
-            modified: Some(time),
+            created: time,
+            modified: time,
             status_message: None,
             metadata: Default::default(),
             version: Default::default(),
