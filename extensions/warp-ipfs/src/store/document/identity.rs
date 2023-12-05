@@ -8,6 +8,12 @@ use warp::{
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
 
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub enum IdentityDocumentVersion {
+    #[default]
+    V0,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Eq)]
 pub struct IdentityDocument {
     pub username: String,
@@ -25,6 +31,18 @@ pub struct IdentityDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
 
+    #[serde(default, flatten)]
+    pub metadata: IdentityMetadata,
+
+    #[serde(default)]
+    pub version: IdentityDocumentVersion,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+}
+
+#[derive(Default, Debug, Clone, Copy, Deserialize, Serialize, Eq, PartialEq)]
+pub struct IdentityMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_picture: Option<Cid>,
 
@@ -36,9 +54,6 @@ pub struct IdentityDocument {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
 }
 
 impl From<Identity> for IdentityDocument {
@@ -57,10 +72,8 @@ impl From<Identity> for IdentityDocument {
             status_message,
             created,
             modified,
-            profile_picture: None,
-            profile_banner: None,
-            platform: None,
-            status: None,
+            metadata: Default::default(),
+            version: IdentityDocumentVersion::V0,
             signature: None,
         }
     }
@@ -115,10 +128,7 @@ impl IdentityDocument {
 
         self.username != other.username
             || self.status_message != other.status_message
-            || self.status != other.status
-            || self.profile_banner != other.profile_banner
-            || self.profile_picture != other.profile_picture
-            || self.platform != other.platform
+            || self.metadata != other.metadata
     }
 }
 
@@ -129,13 +139,20 @@ impl IdentityDocument {
     }
 
     pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
+        let metadata = self.metadata;
+
+        //We blank out the metadata since it will not be used as apart of the
+        //identification process, but will include it after it is signed
+        self.metadata = Default::default();
         self.signature = None;
         if self.created.is_none() {
             self.created = Some(Utc::now());
         }
         self.modified = Some(Utc::now());
+        
         let bytes = serde_json::to_vec(&self)?;
         let signature = bs58::encode(did.sign(&bytes)).into_string();
+        self.metadata = metadata;
         self.signature = Some(signature);
         Ok(self)
     }

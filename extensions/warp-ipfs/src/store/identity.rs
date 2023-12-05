@@ -780,16 +780,12 @@ impl IdentityStore {
         let platform =
             (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
 
-        let status = identity.status.and_then(|status| {
-            (!is_blocked || !is_blocked_by)
-                .then_some(status)
-                .or(Some(IdentityStatus::Offline))
-        });
+        let mut metadata = identity.metadata;
+        metadata.platform = platform;
 
-        let profile_picture = identity.profile_picture;
-        let profile_banner = identity.profile_banner;
+        identity.metadata = Default::default();
 
-        let include_pictures = (matches!(
+        let include_meta = (matches!(
             self.config.store_setting.update_events,
             UpdateEvents::Enabled
         ) || matches!(
@@ -798,15 +794,11 @@ impl IdentityStore {
         ) && is_friend)
             && (!is_blocked && !is_blocked_by);
 
-        tracing::trace!("Including cid in push: {include_pictures}");
+        tracing::trace!("Including metadata in push: {include_meta}");
 
-        identity.profile_picture =
-            profile_picture.and_then(|picture| include_pictures.then_some(picture));
-        identity.profile_banner =
-            profile_banner.and_then(|banner| include_pictures.then_some(banner));
-
-        identity.status = status;
-        identity.platform = platform;
+        if include_meta {
+            identity.metadata = metadata;
+        }
 
         let kp_did = self.get_keypair_did()?;
 
@@ -852,7 +844,7 @@ impl IdentityStore {
 
         let identity = self.own_identity_document().await?;
 
-        let Some(picture_cid) = identity.profile_picture else {
+        let Some(picture_cid) = identity.metadata.profile_picture else {
             return Ok(());
         };
 
@@ -914,7 +906,7 @@ impl IdentityStore {
 
         let identity = self.own_identity_document().await?;
 
-        let Some(banner_cid) = identity.profile_banner else {
+        let Some(banner_cid) = identity.metadata.profile_banner else {
             return Ok(());
         };
 
@@ -1029,8 +1021,9 @@ impl IdentityStore {
                                 emit = true;
                             }
 
-                            if document.profile_picture != identity.profile_picture
-                                && identity.profile_picture.is_some()
+                            if document.metadata.profile_picture
+                                != identity.metadata.profile_picture
+                                && identity.metadata.profile_picture.is_some()
                             {
                                 tracing::info!("Requesting profile picture from {}", identity.did);
 
@@ -1040,7 +1033,7 @@ impl IdentityStore {
                                             in_did,
                                             RequestOption::Image {
                                                 banner: None,
-                                                picture: identity.profile_picture,
+                                                picture: identity.metadata.profile_picture,
                                             },
                                         )
                                         .await
@@ -1051,7 +1044,7 @@ impl IdentityStore {
                                     }
                                 } else {
                                     let identity_profile_picture =
-                                        identity.profile_picture.expect("Cid is provided");
+                                        identity.metadata.profile_picture.expect("Cid is provided");
                                     tokio::spawn({
                                         let ipfs = self.ipfs.clone();
                                         let emit = emit;
@@ -1089,8 +1082,8 @@ impl IdentityStore {
                                     });
                                 }
                             }
-                            if document.profile_banner != identity.profile_banner
-                                && identity.profile_banner.is_some()
+                            if document.metadata.profile_banner != identity.metadata.profile_banner
+                                && identity.metadata.profile_banner.is_some()
                             {
                                 tracing::info!("Requesting profile banner from {}", identity.did);
 
@@ -1099,7 +1092,7 @@ impl IdentityStore {
                                         .request(
                                             in_did,
                                             RequestOption::Image {
-                                                banner: identity.profile_banner,
+                                                banner: identity.metadata.profile_banner,
                                                 picture: None,
                                             },
                                         )
@@ -1111,7 +1104,7 @@ impl IdentityStore {
                                     }
                                 } else {
                                     let identity_profile_banner =
-                                        identity.profile_banner.expect("Cid is provided");
+                                        identity.metadata.profile_banner.expect("Cid is provided");
                                     tokio::spawn({
                                         let ipfs = self.ipfs.clone();
                                         let emit = emit;
@@ -1192,11 +1185,11 @@ impl IdentityStore {
                             let mut picture = None;
                             let mut banner = None;
 
-                            if let Some(cid) = identity.profile_picture {
+                            if let Some(cid) = identity.metadata.profile_picture {
                                 picture = Some(cid);
                             }
 
-                            if let Some(cid) = identity.profile_banner {
+                            if let Some(cid) = identity.metadata.profile_banner {
                                 banner = Some(cid)
                             }
 
@@ -1286,7 +1279,9 @@ impl IdentityStore {
             } => {
                 let cache = self.identity_cache.get(in_did).await?;
 
-                if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
+                if cache.metadata.profile_picture == Some(cid)
+                    || cache.metadata.profile_banner == Some(cid)
+                {
                     tokio::spawn({
                         let store = self.clone();
                         let did = in_did.clone();
@@ -1392,10 +1387,8 @@ impl IdentityStore {
             created: Some(time),
             modified: Some(time),
             status_message: None,
-            profile_banner: None,
-            profile_picture: None,
-            platform: None,
-            status: None,
+            metadata: Default::default(),
+            version: Default::default(),
             signature: None,
         };
 
@@ -1576,6 +1569,7 @@ impl IdentityStore {
 
         if identity.did.eq(did) {
             return identity
+                .metadata
                 .status
                 .or(Some(IdentityStatus::Online))
                 .ok_or(Error::MultiPassExtensionUnavailable);
@@ -1607,7 +1601,7 @@ impl IdentityStore {
             .get(did)
             .await
             .ok()
-            .and_then(|cache| cache.status)
+            .and_then(|cache| cache.metadata.status)
             .or(Some(status))
             .ok_or(Error::IdentityDoesntExist)
     }
@@ -1641,7 +1635,7 @@ impl IdentityStore {
             .get(did)
             .await
             .ok()
-            .and_then(|cache| cache.platform)
+            .and_then(|cache| cache.metadata.platform)
             .ok_or(Error::IdentityDoesntExist)
     }
 
@@ -1692,7 +1686,7 @@ impl IdentityStore {
             Err(_) | Ok(_) => self.identity_cache.get(did).await?,
         };
 
-        if let Some(cid) = document.profile_picture {
+        if let Some(cid) = document.metadata.profile_picture {
             return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
                 .await
                 .map_err(|_| Error::InvalidIdentityPicture);
@@ -1722,7 +1716,7 @@ impl IdentityStore {
             Err(_) | Ok(_) => self.identity_cache.get(did).await?,
         };
 
-        if let Some(cid) = document.profile_banner {
+        if let Some(cid) = document.metadata.profile_banner {
             return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
                 .await
                 .map_err(|_| Error::InvalidIdentityPicture);
