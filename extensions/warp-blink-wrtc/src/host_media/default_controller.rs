@@ -201,10 +201,10 @@ pub async fn get_audio_device_config() -> AudioDeviceConfigImpl {
     let _lock = LOCK.lock().await;
     unsafe {
         AudioDeviceConfigImpl::new(
-            DATA.audio_input_device
+            DATA.audio_output_device
                 .as_ref()
                 .map(|x| x.name().unwrap_or_default()),
-            DATA.audio_output_device
+            DATA.audio_input_device
                 .as_ref()
                 .map(|x| x.name().unwrap_or_default()),
         )
