@@ -9,8 +9,10 @@ use chrono::{DateTime, Utc};
 
 use futures::{
     channel::oneshot::{self, Canceled},
+    stream::SelectAll,
     SinkExt, StreamExt,
 };
+
 use ipfs::{Ipfs, Keypair};
 
 use libipld::Cid;
@@ -18,7 +20,7 @@ use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -1806,8 +1808,6 @@ impl IdentityStore {
             .map(|identity| identity.did_key())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
-        let mut preidentity = vec![];
-
         let mut idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
@@ -1824,15 +1824,14 @@ impl IdentityStore {
                 self.identity_cache
                     .list()
                     .await?
-                    .iter()
-                    .filter(|ident| ident.did == *pubkey)
-                    .cloned()
+                    .filter(|ident| {
+                        let ident = ident.clone();
+                        async move { ident.did == *pubkey }
+                    })
                     .collect::<Vec<_>>()
+                    .await
             }
             LookupBy::DidKeys(list) => {
-                let mut items = HashSet::new();
-                let cache = self.identity_cache.list().await?;
-
                 for pubkey in list {
                     if !pubkey.eq(&own_did) && !self.discovery.contains(pubkey).await {
                         if let Err(e) = self.discovery.insert(pubkey).await {
@@ -1841,23 +1840,23 @@ impl IdentityStore {
                     }
                 }
 
-                for pubkey in list {
-                    if own_did.eq(pubkey) {
-                        let own_identity = match self.own_identity().await {
-                            Ok(id) => id,
-                            Err(_) => continue,
-                        };
-                        if !preidentity.contains(&own_identity) {
-                            preidentity.push(own_identity);
-                        }
-                        continue;
-                    }
+                let mut prestream = SelectAll::new();
 
-                    if let Some(cache) = cache.iter().find(|cache| cache.did.eq(pubkey)) {
-                        items.insert(cache.clone());
+                if list.contains(&own_did) {
+                    if let Ok(own_identity) = self.own_identity_document().await {
+                        prestream.push(futures::stream::iter(vec![own_identity]));
                     }
                 }
-                Vec::from_iter(items)
+
+                let cache = self.identity_cache.list().await?;
+                cache
+                    .filter(|id| {
+                        let id = id.clone();
+                        async move { list.contains(&id.did) }
+                    })
+                    .chain(prestream.boxed())
+                    .collect::<Vec<_>>()
+                    .await
             }
             LookupBy::Username(username) if username.contains('#') => {
                 let cache = self.identity_cache.list().await?;
@@ -1865,30 +1864,38 @@ impl IdentityStore {
 
                 if split_data.len() != 2 {
                     cache
-                        .iter()
                         .filter(|ident| {
-                            ident
-                                .username
-                                .to_lowercase()
-                                .contains(&username.to_lowercase())
+                            let ident = ident.clone();
+                            async move {
+                                ident
+                                    .username
+                                    .to_lowercase()
+                                    .contains(&username.to_lowercase())
+                            }
                         })
-                        .cloned()
                         .collect::<Vec<_>>()
+                        .await
                 } else {
                     match (
                         split_data.first().map(|s| s.to_lowercase()),
                         split_data.last().map(|s| s.to_lowercase()),
                     ) {
-                        (Some(name), Some(code)) => cache
-                            .iter()
-                            .filter(|ident| {
-                                ident.username.to_lowercase().eq(&name)
-                                    && String::from_utf8_lossy(&ident.short_id)
-                                        .to_lowercase()
-                                        .eq(&code)
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>(),
+                        (Some(name), Some(code)) => {
+                            cache
+                                .filter(|ident| {
+                                    let ident = ident.clone();
+                                    let name = name.clone();
+                                    let code = code.clone();
+                                    async move {
+                                        ident.username.to_lowercase().eq(&name)
+                                            && String::from_utf8_lossy(&ident.short_id)
+                                                .to_lowercase()
+                                                .eq(&code)
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .await
+                        }
                         _ => vec![],
                     }
                 }
@@ -1898,19 +1905,26 @@ impl IdentityStore {
                 self.identity_cache
                     .list()
                     .await?
-                    .iter()
-                    .filter(|ident| ident.username.to_lowercase().contains(&username))
-                    .cloned()
+                    .filter(|ident| {
+                        let ident = ident.clone();
+                        let username = username.clone();
+                        async move { ident.username.to_lowercase().contains(&username) }
+                    })
                     .collect::<Vec<_>>()
+                    .await
             }
-            LookupBy::ShortId(id) => self
-                .identity_cache
-                .list()
-                .await?
-                .iter()
-                .filter(|ident| String::from_utf8_lossy(&ident.short_id).eq(id))
-                .cloned()
-                .collect::<Vec<_>>(),
+            LookupBy::ShortId(id) => {
+                self.identity_cache
+                    .list()
+                    .await?
+                    .filter(|ident| {
+                        let ident = ident.clone();
+                        let id = id.clone();
+                        async move { String::from_utf8_lossy(&ident.short_id).eq(&id) }
+                    })
+                    .collect::<Vec<_>>()
+                    .await
+            }
         };
         if idents_docs.is_empty() {
             let kind = match lookup {
@@ -1970,13 +1984,11 @@ impl IdentityStore {
             }
         }
 
-        let mut list = idents_docs
+        let list = idents_docs
             .iter()
             .filter(|document| document.did != own_did)
             .filter_map(|doc| doc.resolve().ok())
             .collect::<Vec<_>>();
-
-        list.extend(preidentity);
 
         Ok(list)
     }
