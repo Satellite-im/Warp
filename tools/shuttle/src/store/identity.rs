@@ -8,6 +8,7 @@ use futures::{
         mpsc::{Receiver, Sender},
         oneshot::Sender as OneshotSender,
     },
+    stream::{BoxStream, FuturesUnordered},
     SinkExt, StreamExt,
 };
 use libipld::Cid;
@@ -269,7 +270,6 @@ impl IdentityStorage {
     // }
 }
 
-
 //Note: Maybe migrate to using a map where the public key points to the cid of the identity document instead
 struct IdentityStorageTask {
     ipfs: Ipfs,
@@ -310,7 +310,9 @@ impl IdentityStorageTask {
                 IdentityStorageCommand::GetPackage { did, response } => {
                     _ = response.send(self.get_package(did).await)
                 }
-                IdentityStorageCommand::List { response } => _ = response.send(self.list().await),
+                IdentityStorageCommand::List { response } => {
+                    _ = response.send(Ok(self.list().await.collect::<Vec<_>>().await))
+                }
             }
         }
     }
@@ -333,7 +335,7 @@ impl IdentityStorageTask {
     async fn register(&mut self, document: IdentityDocument) -> Result<(), Error> {
         document.verify()?;
 
-        let mut list: HashSet<IdentityDocument> = match self.list {
+        let mut list: HashMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -341,14 +343,24 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashSet::new(),
+            None => HashMap::new(),
         };
 
-        if list.contains(&document) {
+        let did_str = document.did.to_string();
+
+        if list.contains_key(&did_str) {
             return Err(Error::IdentityExist);
         }
 
-        list.insert(document);
+        let cid = self
+            .ipfs
+            .dag()
+            .put()
+            .serialize(document.clone())?
+            .pin(false)
+            .await?;
+
+        list.insert(did_str, cid);
 
         let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
@@ -433,34 +445,52 @@ impl IdentityStorageTask {
     async fn update(&mut self, document: IdentityDocument) -> Result<(), Error> {
         document.verify()?;
 
-        let mut list: HashSet<IdentityDocument> = match self.list {
+        let mut list: HashMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
-                .get_dag(IpfsPath::from(cid))
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashSet::new(),
+            None => HashMap::new(),
         };
 
-        if !list
-            .iter()
-            .any(|old_doc| document.did == old_doc.did && document.short_id == old_doc.short_id)
-        {
+        let did_str = document.did.to_string();
+
+        if !list.contains_key(&did_str) {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let internal_document = list
-            .iter()
-            .find(|old_doc| document.did == old_doc.did && document.short_id == old_doc.short_id)
-            .expect("document to exist");
+        let internal_cid = list.get(&did_str).expect("document to exist");
+
+        let internal_document = self
+            .ipfs
+            .get_dag(*internal_cid)
+            .local()
+            .deserialized::<IdentityDocument>()
+            .await
+            .map_err(|_| Error::IdentityDoesntExist)?;
 
         if !internal_document.different(&document) {
             return Err(Error::CannotUpdateIdentity);
         }
 
-        list.replace(document);
+        let cid = self
+            .ipfs
+            .dag()
+            .put()
+            .serialize(document)?
+            .pin(false)
+            .await?;
+
+        let old_cid = list.insert(did_str, cid);
+
+        if let Some(old_cid) = old_cid {
+            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                let _ = self.ipfs.remove_pin(&old_cid, false).await;
+            }
+        }
 
         let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
@@ -477,8 +507,8 @@ impl IdentityStorageTask {
         Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
-        let list: Vec<IdentityDocument> = match self.list {
+    async fn list(&self) -> BoxStream<'static, IdentityDocument> {
+        let list: HashMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -486,49 +516,48 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => Vec::new(),
+            None => HashMap::new(),
         };
 
-        Ok(list)
+        let ipfs = self.ipfs.clone();
+
+        FuturesUnordered::from_iter(list.values().copied().map(|cid| {
+            let ipfs = ipfs.clone();
+            async move {
+                ipfs.get_dag(cid)
+                    .local()
+                    .deserialized::<IdentityDocument>()
+                    .await
+            }
+        }))
+        .filter_map(|id_result| async move { id_result.ok() })
+        .filter(|id| futures::future::ready(id.verify().is_ok()))
+        .boxed()
     }
 
     //TODO: Use a map instead with the key linked to the content pointer
     //      and resolve within a stream while matching conditions
     async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
-        let list: HashSet<IdentityDocument> = match self.list {
-            Some(cid) => self
-                .ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default(),
-            None => HashSet::new(),
-        };
+        let list_stream = self.list().await;
 
         let list = match kind {
             Lookup::PublicKey { did } => {
-                if !list.iter().any(|old_doc| old_doc.did == did) {
-                    return Ok(Vec::new());
-                }
+                let internal_document = list_stream
+                    .filter(|document| futures::future::ready(document.did == did))
+                    .collect::<Vec<_>>()
+                    .await;
 
-                let internal_document = list
-                    .iter()
-                    .find(|old_doc| did == old_doc.did)
-                    .cloned()
-                    .expect("document to exist");
+                tracing::info!(did = %did, found = internal_document.iter().any(|document| document.did == did));
 
-                tracing::info!(%did, "identity found");
-                vec![internal_document]
+                internal_document
             }
             Lookup::PublicKeys { dids } => {
                 tracing::trace!(list_size = dids.len());
 
-                let list = dids
-                    .iter()
-                    .filter_map(|did| list.iter().find(|document| document.did.eq(did)))
-                    .cloned()
-                    .collect::<Vec<_>>();
+                let list = list_stream
+                    .filter(|document| futures::future::ready(dids.contains(&document.did)))
+                    .collect::<Vec<_>>()
+                    .await;
 
                 tracing::info!(list_size = list.len(), "Found");
 
@@ -539,30 +568,35 @@ impl IdentityStorageTask {
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 let list = if split_data.len() != 2 {
-                    list.iter()
+                    list_stream
                         .filter(|document| {
-                            document
-                                .username
-                                .to_lowercase()
-                                .eq(&username.to_lowercase())
+                            futures::future::ready(
+                                document
+                                    .username
+                                    .to_lowercase()
+                                    .eq(&username.to_lowercase()),
+                            )
                         })
-                        .cloned()
                         .collect::<Vec<_>>()
+                        .await
                 } else {
                     match (
                         split_data.first().map(|s| s.to_lowercase()),
                         split_data.last().map(|s| s.to_lowercase()),
                     ) {
-                        (Some(name), Some(code)) => list
-                            .iter()
-                            .filter(|ident| {
-                                ident.username.to_lowercase().eq(&name)
-                                    && String::from_utf8_lossy(&ident.short_id)
-                                        .to_lowercase()
-                                        .eq(&code)
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>(),
+                        (Some(name), Some(code)) => {
+                            list_stream
+                                .filter(|ident| {
+                                    futures::future::ready(
+                                        ident.username.to_lowercase().eq(&name)
+                                            && String::from_utf8_lossy(&ident.short_id)
+                                                .to_lowercase()
+                                                .eq(&code),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .await
+                        }
                         _ => vec![],
                     }
                 };
@@ -573,31 +607,29 @@ impl IdentityStorageTask {
             }
             Lookup::Username { username, .. } => {
                 //TODO: Score against invalid username scheme
-                let list = list
-                    .iter()
+                let list = list_stream
                     .filter(|document| {
-                        document
-                            .username
-                            .to_lowercase()
-                            .contains(&username.to_lowercase())
+                        futures::future::ready(
+                            document
+                                .username
+                                .to_lowercase()
+                                .contains(&username.to_lowercase()),
+                        )
                     })
-                    .cloned()
-                    .collect::<Vec<_>>();
+                    .collect::<Vec<_>>()
+                    .await;
 
                 tracing::info!(list_size = list.len(), "Found identities");
 
                 list
             }
             Lookup::ShortId { short_id } => {
-                let Some(document) = list
-                    .iter()
-                    .find(|document| document.short_id.eq(short_id.as_ref()))
-                    .cloned()
-                else {
-                    return Ok(Vec::new());
-                };
-
-                vec![document]
+                list_stream
+                    .filter(|document| {
+                        futures::future::ready(document.short_id.eq(short_id.as_ref()))
+                    })
+                    .collect::<Vec<_>>()
+                    .await
             } // Lookup::Locate { .. } => unreachable!(),
         };
 
