@@ -794,8 +794,7 @@ impl IdentityStore {
         ) && is_friend)
             && (!is_blocked && !is_blocked_by);
 
-        tracing::trace!("Including metadata in push: {include_meta}");
-
+        tracing::debug!(?metadata, included = include_meta);
         if include_meta {
             identity.metadata = metadata;
         }
