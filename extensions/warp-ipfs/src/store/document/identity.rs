@@ -9,6 +9,7 @@ use warp::{
 };
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all="lowercase")]
 pub enum IdentityDocumentVersion {
     #[default]
     V0,
@@ -29,7 +30,6 @@ pub struct IdentityDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
 
-    #[serde(default, flatten)]
     pub metadata: IdentityMetadata,
 
     #[serde(default)]
