@@ -29,7 +29,7 @@ pub struct IdentityDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
 
-    #[serde(default, flatten)]
+    #[serde(default, flatten, skip_serializing_if = "IdentityMetadata::is_empty")]
     pub metadata: IdentityMetadata,
 
     #[serde(default)]
@@ -52,6 +52,15 @@ pub struct IdentityMetadata {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
+}
+
+impl IdentityMetadata {
+    fn is_empty(&self) -> bool {
+        self.profile_picture.is_none()
+            || self.profile_banner.is_none()
+            || self.platform.is_none()
+            || self.status.is_none()
+    }
 }
 
 impl From<Identity> for IdentityDocument {
