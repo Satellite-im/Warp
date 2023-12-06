@@ -142,7 +142,10 @@ impl FileStore {
             return Ok(());
         }
 
+        tracing::info!("Importing index");
         let cid = (*self.index_cid.read()).ok_or(Error::Other)?;
+
+        tracing::info!(cid = %cid, "Index located");
 
         let data = self
             .ipfs
@@ -158,10 +161,15 @@ impl FileStore {
         let directory_index: Directory = serde_json::from_slice(&index_bytes)?;
         self.index.set_items(directory_index.get_items());
 
+        tracing::info!(cid = %cid, "Index imported");
+
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn export(&self) -> Result<(), Error> {
+        tracing::info!("Exporting index");
+
         let mut index = self.index.clone();
         let signal = Some(self.signal.clone());
 
@@ -170,6 +178,9 @@ impl FileStore {
         let index = serde_json::to_string(&self.index)?;
 
         let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+
+        //TODO: Disable encryption of the index but instead store it all as a dag object.
+        //      possibly even building an internal graph of the index instead
         let data = ecdh_encrypt(&key, None, index.as_bytes())?;
 
         let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
@@ -186,6 +197,8 @@ impl FileStore {
             )
             .await?;
 
+        tracing::info!(path = %ipfs_path, "Index exported");
+
         let cid = ipfs_path
             .root()
             .cid()
@@ -196,18 +209,23 @@ impl FileStore {
         if let Some(last_cid) = last_cid {
             if *cid != last_cid {
                 if self.ipfs.is_pinned(&last_cid).await? {
+                    tracing::info!(cid = %last_cid, "Unpinning block");
                     self.ipfs.remove_pin(&last_cid, true).await?;
+                    tracing::info!(cid = %last_cid, "Block unpinned");
                 }
 
+                tracing::info!(cid = %last_cid, "Removing block");
                 self.ipfs.remove_block(last_cid, true).await?;
             }
         }
 
         if let Some(path) = self.config.path.as_ref() {
             if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
-                tracing::error!("Error writing index: {_e}");
+                tracing::error!(cid = %cid, "Error writing index: {_e}");
             }
         }
+
+        tracing::info!(cid = %cid, "Index exported");
         Ok(())
     }
 }
