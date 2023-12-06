@@ -305,7 +305,7 @@ impl IdentityStore {
         };
 
         if let Ok(ident) = store.own_identity().await {
-            tracing::info!("Identity loaded with {}", ident.did_key());
+            tracing::info!(did = %ident.did_key(), "Identity loaded");
         }
 
         let did = store.get_keypair_did()?;
@@ -402,7 +402,7 @@ impl IdentityStore {
                                 }
                             };
 
-                            tracing::debug!("Event: {event:?}");
+                            tracing::debug!(from = %in_did, event = ?event);
 
                             if let Err(e) = store.process_message(&in_did, event).await {
                                 error!("Failed to process identity message from {in_did}: {e}");
@@ -491,14 +491,15 @@ impl IdentityStore {
             match data.version {
                 RequestResponsePayloadVersion::V0 => {
                     tracing::warn!(
-                        sender = data.sender.to_string(),
+                        sender = %data.sender,
                         "Request received from a old implementation. Unable to verify signature."
                     );
                 }
                 _ => {
                     tracing::warn!(
-                        sender = data.sender.to_string(),
-                        "Unable to verify signature {e}. Ignoreing request"
+                        sender = %data.sender,
+                        error = %e,
+                        "Unable to verify signature. Ignoreing request"
                     );
                     return Ok(());
                 }
@@ -737,9 +738,7 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        tracing::trace!("Payload size: {} bytes", bytes.len());
-
-        tracing::info!("Sending event to {out_did}");
+        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
         if self
             .ipfs
@@ -750,7 +749,7 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            tracing::info!("Event sent to {out_did}");
+            tracing::info!(to = %out_did, event = ?event, "Event sent");
             tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
@@ -811,9 +810,7 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        tracing::trace!("Payload size: {} bytes", bytes.len());
-
-        tracing::info!("Sending event to {out_did}");
+        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
         if self
             .ipfs
@@ -824,8 +821,8 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            tracing::info!("Event sent to {out_did}");
-            tracing::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!(to = %out_did, event = ?event, "Event sent");
+            tracing::info!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -873,9 +870,7 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        tracing::trace!("Payload size: {} bytes", bytes.len());
-
-        tracing::info!("Sending event to {out_did}");
+        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
         if self
             .ipfs
@@ -886,7 +881,7 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            tracing::info!("Event sent to {out_did}");
+            tracing::info!(to = %out_did, event = ?event, "Event sent");
             tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
@@ -1001,7 +996,7 @@ impl IdentityStore {
                 match previous_identity {
                     Some(document) => {
                         if document.different(&identity) {
-                            tracing::info!("Updating local cache of {}", identity.did);
+                            tracing::info!(%identity.did, "Updating local cache");
 
                             let document_did = identity.did.clone();
 
