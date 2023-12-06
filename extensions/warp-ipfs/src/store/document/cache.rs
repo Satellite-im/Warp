@@ -50,7 +50,7 @@ impl Drop for IdentityCache {
 impl IdentityCache {
     pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
         let list = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".cache_id"))
+            Some(path) => tokio::fs::read(path.join(".cache_id_v0"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
                 .ok()
@@ -147,6 +147,9 @@ struct IdentityCacheTask {
 
 impl IdentityCacheTask {
     pub async fn start(&mut self) {
+        // migrate old identity to new
+        self.migrate().await;
+
         while let Some(command) = self.rx.next().await {
             match command {
                 IdentityCacheCommand::Insert { document, response } => {
@@ -163,6 +166,48 @@ impl IdentityCacheTask {
                 }
             }
         }
+    }
+
+    async fn migrate(&mut self) {
+        if self.list.is_some() {
+            return;
+        }
+
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+
+        let Some(cid) = tokio::fs::read(path.join(".cache_id"))
+            .await
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .ok()
+            .and_then(|cid_str| cid_str.parse::<Cid>().ok())
+        else {
+            return;
+        };
+
+        let Ok(list) = self
+            .ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized::<std::collections::HashSet<IdentityDocument>>()
+            .await
+        else {
+            return;
+        };
+
+        for identity in list {
+            let id = identity.did.clone();
+            if let Err(e) = self.insert(identity).await {
+                tracing::warn!(name = "migration", id = %id, "Failed to migrate identity: {e}");
+            }
+        }
+
+        if self.ipfs.is_pinned(&cid).await.unwrap_or_default() {
+            _ = self.ipfs.remove_pin(&cid, false).await;
+        }
+
+        _ = tokio::fs::remove_file(path.join(".cache_id")).await;
     }
 
     async fn insert(
