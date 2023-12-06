@@ -1,14 +1,15 @@
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use futures::{
     channel::{
         mpsc::{Receiver, Sender},
         oneshot::Sender as OneshotSender,
     },
-    SinkExt, StreamExt,
+    stream::{BoxStream, FuturesUnordered},
+    SinkExt, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::Ipfs;
+use rust_ipfs::{Ipfs, IpfsPath};
 use warp::{crypto::DID, error::Error};
 
 use super::identity::IdentityDocument;
@@ -28,7 +29,7 @@ enum IdentityCacheCommand {
         response: OneshotSender<Result<(), Error>>,
     },
     List {
-        response: OneshotSender<Result<Vec<IdentityDocument>, Error>>,
+        response: OneshotSender<BoxStream<'static, IdentityDocument>>,
     },
 }
 
@@ -49,7 +50,7 @@ impl Drop for IdentityCache {
 impl IdentityCache {
     pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
         let list = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".cache_id"))
+            Some(path) => tokio::fs::read(path.join(".cache_id_v0"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
                 .ok()
@@ -124,7 +125,7 @@ impl IdentityCache {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
+    pub async fn list(&self) -> Result<BoxStream<'static, IdentityDocument>, Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
         let _ = self
@@ -133,7 +134,7 @@ impl IdentityCache {
             .send(IdentityCacheCommand::List { response: tx })
             .await;
 
-        rx.await.map_err(anyhow::Error::from)?
+        rx.await.map_err(anyhow::Error::from).map_err(Error::from)
     }
 }
 
@@ -146,6 +147,9 @@ struct IdentityCacheTask {
 
 impl IdentityCacheTask {
     pub async fn start(&mut self) {
+        // migrate old identity to new
+        self.migrate().await;
+
         while let Some(command) = self.rx.next().await {
             match command {
                 IdentityCacheCommand::Insert { document, response } => {
@@ -164,13 +168,55 @@ impl IdentityCacheTask {
         }
     }
 
+    async fn migrate(&mut self) {
+        if self.list.is_some() {
+            return;
+        }
+
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+
+        let Some(cid) = tokio::fs::read(path.join(".cache_id"))
+            .await
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .ok()
+            .and_then(|cid_str| cid_str.parse::<Cid>().ok())
+        else {
+            return;
+        };
+
+        let Ok(list) = self
+            .ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized::<std::collections::HashSet<IdentityDocument>>()
+            .await
+        else {
+            return;
+        };
+
+        for identity in list {
+            let id = identity.did.clone();
+            if let Err(e) = self.insert(identity).await {
+                tracing::warn!(name = "migration", id = %id, "Failed to migrate identity: {e}");
+            }
+        }
+
+        if self.ipfs.is_pinned(&cid).await.unwrap_or_default() {
+            _ = self.ipfs.remove_pin(&cid, false).await;
+        }
+
+        _ = tokio::fs::remove_file(path.join(".cache_id")).await;
+    }
+
     async fn insert(
         &mut self,
         document: IdentityDocument,
     ) -> Result<Option<IdentityDocument>, Error> {
         document.verify()?;
 
-        let mut list: HashSet<IdentityDocument> = match self.list {
+        let mut list: HashMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -178,13 +224,28 @@ impl IdentityCacheTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashSet::new(),
+            None => HashMap::new(),
         };
 
-        let old_document = list
-            .iter()
-            .find(|old_doc| document.did == old_doc.did && document.short_id == old_doc.short_id)
-            .cloned();
+        let did_str = document.did.to_string();
+
+        let old_document = futures::future::ready(
+            list.get(&did_str)
+                .copied()
+                .ok_or(Error::IdentityDoesntExist),
+        )
+        .and_then(|id| {
+            let ipfs = self.ipfs.clone();
+            async move {
+                ipfs.get_dag(id)
+                    .local()
+                    .deserialized::<IdentityDocument>()
+                    .await
+                    .map_err(Error::from)
+            }
+        })
+        .await
+        .ok();
 
         match old_document {
             Some(old_document) => {
@@ -192,11 +253,29 @@ impl IdentityCacheTask {
                     return Ok(None);
                 }
 
-                list.replace(document);
+                let cid = self
+                    .ipfs
+                    .dag()
+                    .put()
+                    .serialize(document.clone())?
+                    .pin(false)
+                    .await?;
+
+                let old_cid = list.insert(did_str, cid);
+
+                if let Some(old_cid) = old_cid {
+                    if old_cid != cid {
+                        if self.ipfs.is_pinned(&old_cid).await? {
+                            self.ipfs.remove_pin(&old_cid, false).await?;
+                        }
+                        // Do we want to remove the old block?
+                        self.ipfs.remove_block(old_cid, false).await?;
+                    }
+                }
 
                 let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
-                let old_cid = self.list.take();
+                let old_cid = self.list.replace(cid);
 
                 let remove_pin_and_block = async {
                     if let Some(old_cid) = old_cid {
@@ -215,28 +294,54 @@ impl IdentityCacheTask {
 
                 if let Some(path) = self.path.as_ref() {
                     let cid = cid.to_string();
-                    if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
+                    if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
                         tracing::error!("Error writing cid to file: {e}");
                     }
                 }
-
-                self.list = Some(cid);
 
                 Ok(Some(old_document.clone()))
             }
             None => {
-                list.insert(document);
+                let cid = self
+                    .ipfs
+                    .dag()
+                    .put()
+                    .serialize(document.clone())?
+                    .pin(false)
+                    .await?;
 
-                let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
+                let old_cid = list.insert(did_str, cid);
 
-                if let Some(path) = self.path.as_ref() {
-                    let cid = cid.to_string();
-                    if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
-                        tracing::error!("Error writing cid to file: {e}");
+                if let Some(old_cid) = old_cid {
+                    if old_cid != cid {
+                        if self.ipfs.is_pinned(&old_cid).await? {
+                            self.ipfs.remove_pin(&old_cid, false).await?;
+                        }
+                        // Do we want to remove the old block?
+                        self.ipfs.remove_block(old_cid, false).await?;
                     }
                 }
 
-                self.list = Some(cid);
+                let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
+
+                let old_cid = self.list.replace(cid);
+
+                if let Some(old_cid) = old_cid {
+                    if old_cid != cid {
+                        if self.ipfs.is_pinned(&old_cid).await? {
+                            self.ipfs.remove_pin(&old_cid, false).await?;
+                        }
+                        // Do we want to remove the old block?
+                        self.ipfs.remove_block(old_cid, false).await?;
+                    }
+                }
+
+                if let Some(path) = self.path.as_ref() {
+                    let cid = cid.to_string();
+                    if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
+                        tracing::error!("Error writing cid to file: {e}");
+                    }
+                }
 
                 Ok(None)
             }
@@ -244,28 +349,30 @@ impl IdentityCacheTask {
     }
 
     async fn get(&self, did: DID) -> Result<IdentityDocument, Error> {
-        let list: HashSet<IdentityDocument> = match self.list {
-            Some(cid) => self
-                .ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default(),
-            None => HashSet::new(),
+        let cid = match self.list {
+            Some(cid) => cid,
+            None => return Err(Error::IdentityDoesntExist),
         };
 
-        let document = list
-            .iter()
-            .find(|document| document.did == did)
-            .cloned()
-            .ok_or(Error::IdentityDoesntExist)?;
+        let path = IpfsPath::from(cid).sub_path(&did.to_string())?;
 
-        Ok(document)
+        let id = self
+            .ipfs
+            .get_dag(path)
+            .local()
+            .deserialized::<IdentityDocument>()
+            .await
+            .map_err(|_| Error::IdentityDoesntExist)?;
+
+        debug_assert_eq!(id.did, did);
+
+        id.verify()?;
+
+        Ok(id)
     }
 
     async fn remove(&mut self, did: DID) -> Result<(), Error> {
-        let mut list: HashSet<IdentityDocument> = match self.list {
+        let mut list: HashMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -278,21 +385,22 @@ impl IdentityCacheTask {
             }
         };
 
-        let old_document = list.iter().find(|document| document.did == did).cloned();
+        let old_document = match list.remove(&did.to_string()) {
+            Some(cid) => cid,
+            None => return Err(Error::IdentityDoesntExist),
+        };
 
-        if old_document.is_none() {
-            return Err(Error::IdentityDoesntExist);
+        if self.ipfs.is_pinned(&old_document).await.unwrap_or_default() {
+            self.ipfs.remove_pin(&old_document, false).await?;
         }
 
-        let document = old_document.expect("Exist");
-
-        if !list.remove(&document) {
-            return Err(Error::IdentityDoesntExist);
+        if let Err(e) = self.ipfs.remove_block(old_document, false).await {
+            tracing::warn!(cid = %old_document, id = %did, "Unable to remove block: {e}");
         }
 
         let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
-        let old_cid = self.list.take();
+        let old_cid = self.list.replace(cid);
 
         if let Some(old_cid) = old_cid {
             if cid != old_cid {
@@ -306,18 +414,16 @@ impl IdentityCacheTask {
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".cache_id"), cid).await {
+            if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
                 tracing::error!("Error writing cid to file: {e}");
             }
         }
 
-        self.list = Some(cid);
-
         Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
-        let list: HashSet<IdentityDocument> = match self.list {
+    async fn list(&self) -> BoxStream<'static, IdentityDocument> {
+        let list: HashMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -325,9 +431,22 @@ impl IdentityCacheTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashSet::new(),
+            None => HashMap::new(),
         };
 
-        Ok(Vec::from_iter(list))
+        let ipfs = self.ipfs.clone();
+
+        FuturesUnordered::from_iter(list.values().copied().map(|cid| {
+            let ipfs = ipfs.clone();
+            async move {
+                ipfs.get_dag(cid)
+                    .local()
+                    .deserialized::<IdentityDocument>()
+                    .await
+            }
+        }))
+        .filter_map(|id_result| async move { id_result.ok() })
+        .filter(|id| futures::future::ready(id.verify().is_ok()))
+        .boxed()
     }
 }
