@@ -7,11 +7,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 
-use futures::{
-    channel::oneshot,
-    stream::{FuturesUnordered, SelectAll},
-    StreamExt,
-};
+use futures::{channel::oneshot, stream::SelectAll, StreamExt};
 use ipfs::{Ipfs, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
@@ -1436,8 +1432,6 @@ impl IdentityStore {
             .map(|identity| identity.did_key())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
-        let mut preidentity = vec![];
-
         let idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
@@ -1557,12 +1551,10 @@ impl IdentityStore {
             }
         };
 
-        let mut list = idents_docs
+        let list = idents_docs
             .iter()
             .filter_map(|doc| doc.resolve().ok())
             .collect::<Vec<_>>();
-
-        list.extend(preidentity);
 
         Ok(list)
     }
