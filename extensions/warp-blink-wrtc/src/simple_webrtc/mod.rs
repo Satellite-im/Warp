@@ -27,6 +27,7 @@ use warp::crypto::DID;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
+use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -393,6 +394,7 @@ impl Controller {
                         }
                     }
                     RTCPeerConnectionState::Disconnected => {
+                        // todo: possibly jut remove the track and wait for another track to be added..
                         if let Err(e) = tx.send(EmittedEvents::Disconnected { peer: dest.clone() })
                         {
                             log::error!(
@@ -426,7 +428,7 @@ impl Controller {
                     }
                 }
 
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             },
         ));
 
@@ -442,7 +444,7 @@ impl Controller {
                         log::error!("failed to send ice candidate to peer {}: {}", &dest, e);
                     }
                 }
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             }));
 
         // Set the handler for ICE connection state
@@ -457,7 +459,7 @@ impl Controller {
                     connection_state
                 );
 
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             },
         ));
 
@@ -475,9 +477,56 @@ impl Controller {
                         log::error!("failed to send track added event for peer {}: {}", &dest, e);
                     }
                 }
-                Box::pin(async {})
+                Box::pin(futures::future::ready(()))
             },
         ));
+
+        let tx = self.event_ch.clone();
+        let dest = peer_id.clone();
+        peer.connection
+            .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
+                let tx2 = tx.clone();
+                let dest2 = dest.clone();
+                d.on_close(Box::new(move || {
+                    if let Err(e) = tx2.send(EmittedEvents::DataChannelClosed {
+                        peer: dest2.clone(),
+                    }) {
+                        log::error!(
+                            "failed to send data channel closed event for peer {}: {}",
+                            &dest2,
+                            e
+                        );
+                    }
+                    Box::pin(futures::future::ready(()))
+                }));
+
+                let tx2 = tx.clone();
+                let dest2 = dest.clone();
+                d.on_open(Box::new(move || {
+                    if let Err(e) = tx2.send(EmittedEvents::DataChannelOpened {
+                        peer: dest2.clone(),
+                    }) {
+                        log::error!(
+                            "failed to send data channel opened event for peer {}: {}",
+                            &dest2,
+                            e
+                        );
+                    }
+                    Box::pin(futures::future::ready(()))
+                }));
+
+                if let Err(e) = tx.send(EmittedEvents::DataChannelCreated {
+                    peer: dest.clone(),
+                    data_channel: d,
+                }) {
+                    log::error!(
+                        "failed to send data channel opened event for peer {}: {}",
+                        &dest,
+                        e
+                    );
+                }
+                Box::pin(futures::future::ready(()))
+            }));
 
         // attach all media sources to the peer
         for (source_id, track) in &self.media_sources {
