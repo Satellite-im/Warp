@@ -77,9 +77,9 @@ impl Behaviour {
         request: Payload,
         channel: ResponseChannel<Payload>,
     ) {
-        tracing::info!(id = ?request_id, from = ?request.sender());
+        tracing::info!(id = ?request_id, from = %request.sender());
         if request.verify().is_err() {
-            tracing::warn!(id = ?request_id, from = ?request.sender(), "request payload is invalid");
+            tracing::warn!(id = ?request_id, from = %request.sender(), "request payload is invalid");
             //TODO: Score against invalid request
             let payload = Payload::new(
                 &self.keypair,
@@ -239,15 +239,15 @@ impl NetworkBehaviour for Behaviour {
         self.queue_event.retain(
             |id, (channel, req_res)| match self.process_event.poll_ready(cx) {
                 Poll::Ready(Ok(_)) => {
-                    tracing::info!(id = ?id, from = ?req_res.sender(), "Preparing payload");
+                    tracing::info!(id = ?id, from = %req_res.sender(), "Preparing payload");
                     let (tx, rx) = futures::channel::oneshot::channel();
                     if let Some(channel) = channel.take() {
-                        tracing::info!(id = ?id, from = ?req_res.sender(), "Sending payload to stream");
+                        tracing::info!(id = ?id, from = %req_res.sender(), "Sending payload to stream");
                         self.waiting_on_request.insert(*id, rx);
                         let _ = self
                             .process_event
                             .start_send((*id, channel, req_res.clone(), tx));
-                        tracing::info!(id = ?id, from = ?req_res.sender(), "Payload sent");
+                        tracing::info!(id = ?id, from = %req_res.sender(), "Payload sent");
                     }
 
                     false
@@ -261,7 +261,7 @@ impl NetworkBehaviour for Behaviour {
         self.waiting_on_request
             .retain(|id, receiver| match receiver.poll_unpin(cx) {
                 Poll::Ready(Ok((ch, res))) => {
-                    tracing::info!(id = ?id, from = ?res.sender(), "Sending payload response");
+                    tracing::info!(id = ?id, from = %res.sender(), "Sending payload response");
                     let _ = self.inner.send_response(ch, res);
                     false
                 }
