@@ -2672,11 +2672,10 @@ impl IdentityStore {
         {
             self.queue.insert(recipient, payload.clone()).await;
             queued = true;
+            if let Err(e) = self.send_to_mailbox(recipient, payload.clone()).await {
+                tracing::warn!("Unable to send to {recipient} mailbox {e}. ");
+            }
             self.signal.write().await.remove(recipient);
-        }
-
-        if let Err(e) = self.send_to_mailbox(recipient, payload.clone()).await {
-            tracing::warn!("Unable to send to {recipient} mailbox {e}. ");
         }
 
         if !queued {
