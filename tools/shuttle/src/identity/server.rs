@@ -239,7 +239,7 @@ impl NetworkBehaviour for Behaviour {
         self.queue_event.retain(
             |id, (channel, req_res)| match self.process_event.poll_ready(cx) {
                 Poll::Ready(Ok(_)) => {
-                    tracing::info!(id = ?id, from = ?req_res.sender(), "Beginning to payload");
+                    tracing::info!(id = ?id, from = ?req_res.sender(), "Preparing payload");
                     let (tx, rx) = futures::channel::oneshot::channel();
                     if let Some(channel) = channel.take() {
                         tracing::info!(id = ?id, from = ?req_res.sender(), "Sending payload to stream");

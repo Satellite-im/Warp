@@ -271,7 +271,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             keypair,
                             None,
                             Response::RegisterResponse(RegisterResponse::Error(
-                                identity::protocol::RegisterError::IdentityExist,
+                                identity::protocol::RegisterError::NotRegistered,
                             )),
                         )
                         .expect("Valid payload construction");
@@ -390,7 +390,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         continue;
                     }
-
+                    tracing::info!(did = %did, event = ?event);
                     match event {
                         identity::protocol::Mailbox::FetchAll => {
                             let (reqs, remaining) = identity
@@ -811,6 +811,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
                 identity::protocol::Request::Lookup(kind) => {
+                    let peer_id = payload.sender();
+                    tracing::info!(peer_id = %peer_id, lookup = ?kind);
+
                     let identity = identity.lookup(kind.clone()).await.unwrap_or_default();
 
                     let event = Response::LookupResponse(LookupResponse::Ok { identity });
