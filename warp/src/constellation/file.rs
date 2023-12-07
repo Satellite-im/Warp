@@ -71,6 +71,9 @@ pub struct File {
     /// Path to file
     #[serde(default)]
     path: Arc<String>,
+
+    #[serde(skip)]
+    signal: Arc<RwLock<Option<futures::channel::mpsc::UnboundedSender<()>>>>,
 }
 
 impl std::fmt::Debug for File {
@@ -118,6 +121,7 @@ impl Default for File {
             hash: Default::default(),
             reference: Default::default(),
             path: Arc::new("/".into()),
+            signal: Arc::default(),
         }
     }
 }
@@ -155,7 +159,9 @@ impl File {
         if name.len() > 256 {
             name = &name[..256];
         }
-        *self.name.write() = name.to_string()
+        *self.name.write() = name.to_string();
+        *self.modified.write() = Utc::now();
+        self.signal();
     }
 
     pub fn description(&self) -> String {
@@ -176,13 +182,15 @@ impl File {
     /// ```
     pub fn set_description(&self, desc: &str) {
         *self.description.write() = desc.to_string();
-        *self.modified.write() = Utc::now()
+        *self.modified.write() = Utc::now();
+        self.signal();
     }
 
     /// Set thumbnail format
     pub fn set_thumbnail_format(&self, format: FormatType) {
         *self.thumbnail_format.write() = format;
-        *self.modified.write() = Utc::now()
+        *self.modified.write() = Utc::now();
+        self.signal();
     }
 
     /// Get the thumbnail format
@@ -193,7 +201,8 @@ impl File {
     /// Set the thumbnail to the file
     pub fn set_thumbnail(&self, data: &[u8]) {
         *self.thumbnail.write() = data.to_vec();
-        *self.modified.write() = Utc::now()
+        *self.modified.write() = Utc::now();
+        self.signal();
     }
 
     /// Get the thumbnail from the file
@@ -203,7 +212,8 @@ impl File {
 
     pub fn set_favorite(&self, fav: bool) {
         *self.favorite.write() = fav;
-        *self.modified.write() = Utc::now()
+        *self.modified.write() = Utc::now();
+        self.signal();
     }
 
     pub fn favorite(&self) -> bool {
@@ -226,6 +236,7 @@ impl File {
     pub fn set_reference(&self, reference: &str) {
         *self.reference.write() = Some(reference.to_string());
         *self.modified.write() = Utc::now();
+        self.signal();
     }
 
     pub fn reference(&self) -> Option<String> {
@@ -251,10 +262,12 @@ impl File {
     pub fn set_size(&self, size: usize) {
         *self.size.write() = size;
         *self.modified.write() = Utc::now();
+        self.signal();
     }
 
     pub fn set_modified(&self) {
-        *self.modified.write() = Utc::now()
+        *self.modified.write() = Utc::now();
+        self.signal();
     }
 
     pub fn hash(&self) -> Hash {
@@ -267,6 +280,7 @@ impl File {
 
     pub fn set_file_type(&self, file_type: FileType) {
         *self.file_type.write() = file_type;
+        self.signal();
     }
 
     pub fn file_type(&self) -> FileType {
@@ -289,6 +303,19 @@ impl File {
 
         let path = Arc::make_mut(&mut self.path);
         *path = new_path;
+        self.signal();
+    }
+
+    pub(crate) fn set_signal(&mut self, signal: Option<futures::channel::mpsc::UnboundedSender<()>>) {
+        *self.signal.write() = signal;
+    }
+
+    fn signal(&self) {
+        let Some(signal) = self.signal.read().clone() else {
+            return;
+        };
+
+        let _ = signal.unbounded_send(());
     }
 }
 
