@@ -315,18 +315,21 @@ impl IdentityStorageTask {
     }
 
     async fn contains(&self, did: DID) -> bool {
-        let list: HashMap<String, Cid> = match self.list {
-            Some(cid) => self
-                .ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default(),
+        let cid = match self.list {
+            Some(cid) => cid,
             None => return false,
         };
 
-        list.contains_key(&did.to_string())
+        let path = IpfsPath::from(cid)
+            .sub_path(&did.to_string())
+            .expect("Valid path");
+
+        self.ipfs
+            .get_dag(path)
+            .local()
+            .deserialized::<IdentityDocument>()
+            .await
+            .is_ok()
     }
 
     async fn register(&mut self, document: IdentityDocument) -> Result<(), Error> {
