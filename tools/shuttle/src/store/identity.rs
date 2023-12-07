@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use futures::{
     channel::{
@@ -318,7 +315,7 @@ impl IdentityStorageTask {
     }
 
     async fn contains(&self, did: DID) -> bool {
-        let list: HashSet<IdentityDocument> = match self.list {
+        let list: HashMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -329,7 +326,7 @@ impl IdentityStorageTask {
             None => return false,
         };
 
-        list.iter().any(|document| document.did == did)
+        list.contains_key(&did.to_string())
     }
 
     async fn register(&mut self, document: IdentityDocument) -> Result<(), Error> {
@@ -664,7 +661,7 @@ impl IdentityStorageTask {
             return Ok((Vec::new(), 0));
         }
 
-        mailbox.sort();
+        mailbox.sort_by(|a, b| b.cmp(a));
 
         let mut requests = vec![];
 
