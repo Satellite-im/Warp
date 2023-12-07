@@ -523,7 +523,6 @@ impl RootDocumentTask {
     async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
         let mut root = self.get_root_document().await?;
         let mut identity = self.identity().await?;
-        root.status = Some(status);
         identity.status = Some(status);
 
         let identity = identity.sign(&self.keypair)?;
