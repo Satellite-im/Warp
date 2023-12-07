@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Warp repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install Protobuf
         uses: arduino/setup-protoc@v1
       - name: Install dependencies
@@ -20,11 +20,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y llvm-dev cmake libudev-dev
       - name: Setup rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly
-          default: true
-          override: true
       - run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
       - name: Build headers
         run: cargo build --features "build-header" -p warp -p warp-mp-ipfs -p warp-rg-ipfs -p warp-pd-flatfile -p warp-fs-ipfs -p warp-fs-memory
@@ -45,7 +43,7 @@ jobs:
           version: '14.0'
           cached: ${{ steps.cache-llvm.outputs.cache-hit }}
       - name: Checkout warp-dart repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: 'Satellite-im/warp-dart'
           token: ${{ secrets.GH_PAT }}
@@ -87,13 +85,13 @@ jobs:
     steps:
       - name: Install Protobuf
         uses: arduino/setup-protoc@v1
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r25b
           add-to-path: false
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
           target: ${{ matrix.target }}

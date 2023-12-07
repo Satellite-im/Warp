@@ -17,6 +17,7 @@ async fn main() -> anyhow::Result<()> {
     filesystem
         .put_buffer("readme.txt", b"Hello, World!")
         .await?;
+
     let buffer = filesystem.get_buffer("readme.txt").await?;
     let data = String::from_utf8_lossy(&buffer);
     println!("readme.txt: {data}");
