@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use uuid::Uuid;
 
-use ipfs::{PeerId, PublicKey};
+use ipfs::{Keypair, PeerId, PublicKey};
 use warp::{
     crypto::{
         cipher::Cipher,
@@ -47,14 +47,20 @@ pub trait PeerTopic: Display {
 impl PeerTopic for DID {}
 
 pub trait PeerIdExt {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
     fn to_did(&self) -> Result<DID, anyhow::Error>;
 }
 
-pub trait DidExt {
-    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
-}
-
 impl PeerIdExt for PeerId {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error> {
+        let multihash = self.as_ref();
+        if multihash.code() != 0 {
+            anyhow::bail!("PeerId does not contain inline public key");
+        }
+        let public_key = PublicKey::try_decode_protobuf(multihash.digest())?;
+        Ok(public_key)
+    }
+
     fn to_did(&self) -> Result<DID, anyhow::Error> {
         let multihash = self.as_ref();
         if multihash.code() != 0 {
@@ -65,9 +71,32 @@ impl PeerIdExt for PeerId {
     }
 }
 
+pub trait DidExt {
+    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
+    fn to_keypair(&self) -> Result<Keypair, anyhow::Error>;
+}
+
 impl DidExt for DID {
     fn to_peer_id(&self) -> Result<PeerId, anyhow::Error> {
         did_to_libp2p_pub(self).map(|p| p.to_peer_id())
+    }
+
+    fn to_keypair(&self) -> Result<Keypair, anyhow::Error> {
+        use warp::crypto::ed25519_dalek::{
+            PublicKey, SecretKey, KEYPAIR_LENGTH, SECRET_KEY_LENGTH,
+        };
+
+        let bytes = Zeroizing::new(self.private_key_bytes());
+        let secret_key = SecretKey::from_bytes(&bytes)?;
+        let public_key: PublicKey = (&secret_key).into();
+        let mut bytes: Zeroizing<[u8; KEYPAIR_LENGTH]> = Zeroizing::new([0u8; KEYPAIR_LENGTH]);
+
+        bytes[..SECRET_KEY_LENGTH].copy_from_slice(secret_key.as_bytes());
+        bytes[SECRET_KEY_LENGTH..].copy_from_slice(public_key.as_bytes());
+
+        let libp2p_keypair = Keypair::ed25519_from_bytes(bytes)?;
+
+        Ok(libp2p_keypair)
     }
 }
 
