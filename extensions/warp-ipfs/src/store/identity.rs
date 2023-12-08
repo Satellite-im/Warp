@@ -2206,7 +2206,11 @@ impl IdentityStore {
         }
 
         if store_request {
-            let outgoing_request = Request::request_out(recipient.clone());
+            let outgoing_request = Request::Out {
+                did: recipient.clone(),
+                date: payload.created.unwrap_or_else(Utc::now),
+            };
+
             let list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
                 self.root_document.add_request(&outgoing_request).await?;
