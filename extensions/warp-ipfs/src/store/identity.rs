@@ -77,10 +77,32 @@ pub struct IdentityStore {
     event: EventSubscription<MultiPassEventKind>,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
+#[serde(tag = "direction", rename_all = "lowercase")]
 pub enum Request {
-    In(DID),
-    Out(DID),
+    In { did: DID, date: DateTime<Utc> },
+    Out { did: DID, date: DateTime<Utc> },
+}
+
+impl Request {
+    pub fn request_in(did: DID) -> Self {
+        let date = Utc::now();
+        Request::In { did, date }
+    }
+    pub fn request_out(did: DID) -> Self {
+        let date = Utc::now();
+        Request::Out { did, date }
+    }
+}
+
+impl PartialEq for Request {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Request::In { did: left, .. }, Request::In { did: right, .. }) => left.eq(right),
+            (Request::Out { did: left, .. }, Request::Out { did: right, .. }) => left.eq(right),
+            _ => false,
+        }
+    }
 }
 
 impl From<Request> for RequestType {
@@ -92,8 +114,8 @@ impl From<Request> for RequestType {
 impl From<&Request> for RequestType {
     fn from(request: &Request) -> Self {
         match request {
-            Request::In(_) => RequestType::Incoming,
-            Request::Out(_) => RequestType::Outgoing,
+            Request::In { .. } => RequestType::Incoming,
+            Request::Out { .. } => RequestType::Outgoing,
         }
     }
 }
@@ -105,8 +127,15 @@ impl Request {
 
     pub fn did(&self) -> &DID {
         match self {
-            Request::In(did) => did,
-            Request::Out(did) => did,
+            Request::In { did, .. } => did,
+            Request::Out { did, .. } => did,
+        }
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        match self {
+            Request::In { date, .. } => *date,
+            Request::Out { date, .. } => *date,
         }
     }
 }
@@ -576,11 +605,14 @@ impl IdentityStore {
                     self.root_document.remove_request(&inner_req).await?;
                     self.add_friend(inner_req.did()).await?;
                 } else {
-                    self.root_document
-                        .add_request(&Request::In(data.sender.clone()))
-                        .await?;
-
                     let from = data.sender.clone();
+
+                    let req = Request::In {
+                        did: from.clone(),
+                        date: data.created.unwrap_or_else(Utc::now),
+                    };
+
+                    self.root_document.add_request(&req).await?;
 
                     if self.identity_cache.get(&from).await.is_err() {
                         // Attempt to send identity request to peer if identity is not available locally.
@@ -2131,7 +2163,7 @@ impl IdentityStore {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
                 .filter_map(|request| match request {
-                    Request::In(request) => Some(request),
+                    Request::In { did, .. } => Some(did),
                     _ => None,
                 })
                 .cloned()
@@ -2151,7 +2183,7 @@ impl IdentityStore {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
                 .filter_map(|request| match request {
-                    Request::Out(request) => Some(request),
+                    Request::Out { did, .. } => Some(did),
                     _ => None,
                 })
                 .cloned()
@@ -2174,7 +2206,7 @@ impl IdentityStore {
         }
 
         if store_request {
-            let outgoing_request = Request::Out(recipient.clone());
+            let outgoing_request = Request::request_out(recipient.clone());
             let list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
                 self.root_document.add_request(&outgoing_request).await?;
