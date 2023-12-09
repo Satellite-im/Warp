@@ -146,4 +146,8 @@ impl<M> PayloadRequest<M> {
     pub fn message(&self) -> &M {
         &self.message
     }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
 }

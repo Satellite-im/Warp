@@ -47,6 +47,7 @@ use super::{
     event_subscription::EventSubscription,
     phonebook::PhoneBook,
     queue::Queue,
+    request::PayloadRequest,
 };
 
 #[derive(Clone)]
@@ -340,7 +341,7 @@ impl IdentityStore {
         let did = store.get_keypair_did()?;
 
         let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
-        let main_stream = store
+        let identity_announce_stream = store
             .ipfs
             .pubsub_subscribe("/identity/announce".into())
             .await?;
@@ -378,8 +379,7 @@ impl IdentityStore {
         tokio::spawn({
             let mut store = store.clone();
             async move {
-                let _main_stream = main_stream;
-
+                futures::pin_mut!(identity_announce_stream);
                 futures::pin_mut!(event_stream);
                 futures::pin_mut!(friend_stream);
 
@@ -403,6 +403,45 @@ impl IdentityStore {
                 loop {
                     tokio::select! {
                         biased;
+                        Some(message) = identity_announce_stream.next() => {
+                            let payload: PayloadRequest<IdentityDocument> = match serde_json::from_slice(&message.data) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    tracing::error!(from = ?message.source, "Unable to decode payload: {e}");
+                                    continue;
+                                }
+                            };
+
+                            //TODO: Validate the date to be sure it doesnt fall out of range (or that we received a old message)
+                            let from_did = match payload.sender().to_did() {
+                                Ok(did) => did,
+                                Err(_e) => {
+                                    continue;
+                                }
+                            };
+
+                            let identity = payload.message().clone();
+                            
+                            //Maybe establish a connection?
+                            //Note: Although it would be prefer not to establish a connection, it may be ideal to check to determine
+                            //      the actual source of the payload to determine if its a message propagated over the mesh from the peer
+                            //      a third party sending it on behalf of the user, or directly from the user. This would make sure we
+                            //      are connecting to the exact peer directly and not a different source but even if we didnt connect
+                            //      we can continue receiving message from the network
+                            let from_did = match from_did == identity.did {
+                                true => from_did,
+                                false => identity.did.clone()
+                            };
+
+                            let event = IdentityEvent::Receive {
+                                option: ResponseOption::Identity { identity },
+                            };
+
+                            //Ignore requesting images if there is a change for now. 
+                            if let Err(e) = store.process_message(&from_did, event, true).await {
+                                error!("Failed to process identity message from {from_did}: {e}");
+                            }
+                        }
                         Some(message) = event_stream.next() => {
                             let entry = match message.source {
                                 Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
@@ -433,7 +472,7 @@ impl IdentityStore {
 
                             tracing::debug!("Event: {event:?}");
 
-                            if let Err(e) = store.process_message(&in_did, event).await {
+                            if let Err(e) = store.process_message(&in_did, event, false).await {
                                 error!("Failed to process identity message from {in_did}: {e}");
                             }
 
@@ -997,7 +1036,12 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     #[allow(clippy::if_same_then_else)]
-    async fn process_message(&mut self, in_did: &DID, event: IdentityEvent) -> anyhow::Result<()> {
+    async fn process_message(
+        &mut self,
+        in_did: &DID,
+        event: IdentityEvent,
+        exclude_images: bool,
+    ) -> anyhow::Result<()> {
         match event {
             IdentityEvent::Request { option } => match option {
                 RequestOption::Identity => self.push(in_did).await?,
@@ -1048,147 +1092,162 @@ impl IdentityStore {
 
                             let mut emit = false;
 
-                            if matches!(
-                                self.config.store_setting.update_events,
-                                UpdateEvents::Enabled
-                            ) {
-                                emit = true;
-                            } else if matches!(
-                                self.config.store_setting.update_events,
-                                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-                            ) && self.is_friend(&document_did).await.unwrap_or_default()
-                            {
-                                emit = true;
-                            }
+                            if !exclude_images {
+                                if matches!(
+                                    self.config.store_setting.update_events,
+                                    UpdateEvents::Enabled
+                                ) {
+                                    emit = true;
+                                } else if matches!(
+                                    self.config.store_setting.update_events,
+                                    UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+                                ) && self
+                                    .is_friend(&document_did)
+                                    .await
+                                    .unwrap_or_default()
+                                {
+                                    emit = true;
+                                }
 
-                            if document.profile_picture != identity.profile_picture
-                                && identity.profile_picture.is_some()
-                            {
-                                tracing::info!("Requesting profile picture from {}", identity.did);
+                                if document.profile_picture != identity.profile_picture
+                                    && identity.profile_picture.is_some()
+                                {
+                                    tracing::info!(
+                                        "Requesting profile picture from {}",
+                                        identity.did
+                                    );
 
-                                if !self.config.store_setting.fetch_over_bitswap {
-                                    if let Err(e) = self
-                                        .request(
-                                            in_did,
-                                            RequestOption::Image {
-                                                banner: None,
-                                                picture: identity.profile_picture,
-                                            },
-                                        )
-                                        .await
-                                    {
-                                        error!(
+                                    if !self.config.store_setting.fetch_over_bitswap {
+                                        if let Err(e) = self
+                                            .request(
+                                                in_did,
+                                                RequestOption::Image {
+                                                    banner: None,
+                                                    picture: identity.profile_picture,
+                                                },
+                                            )
+                                            .await
+                                        {
+                                            error!(
                                             "Error requesting profile picture from {in_did}: {e}"
                                         );
+                                        }
+                                    } else {
+                                        let identity_profile_picture =
+                                            identity.profile_picture.expect("Cid is provided");
+                                        tokio::spawn({
+                                            let ipfs = self.ipfs.clone();
+                                            let emit = emit;
+                                            let store = self.clone();
+                                            let did = in_did.clone();
+                                            async move {
+                                                let peer_id = vec![did.to_peer_id()?];
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    identity_profile_picture,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(2 * 1024 * 1024),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
+
+                                                tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
+
+                                                if emit {
+                                                    store
+                                                        .emit_event(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        )
+                                                        .await;
+                                                }
+
+                                                Ok::<_, anyhow::Error>(())
+                                            }
+                                        });
                                     }
-                                } else {
-                                    let identity_profile_picture =
-                                        identity.profile_picture.expect("Cid is provided");
-                                    tokio::spawn({
-                                        let ipfs = self.ipfs.clone();
-                                        let emit = emit;
-                                        let store = self.clone();
-                                        let did = in_did.clone();
-                                        async move {
-                                            let peer_id = vec![did.to_peer_id()?];
-                                            let _ = super::document::image_dag::get_image(
-                                                &ipfs,
-                                                identity_profile_picture,
-                                                &peer_id,
-                                                false,
-                                                Some(2 * 1024 * 1024),
+                                }
+                                if document.profile_banner != identity.profile_banner
+                                    && identity.profile_banner.is_some()
+                                {
+                                    tracing::info!(
+                                        "Requesting profile banner from {}",
+                                        identity.did
+                                    );
+
+                                    if !self.config.store_setting.fetch_over_bitswap {
+                                        if let Err(e) = self
+                                            .request(
+                                                in_did,
+                                                RequestOption::Image {
+                                                    banner: identity.profile_banner,
+                                                    picture: None,
+                                                },
                                             )
                                             .await
-                                            .map_err(|e| {
-                                                tracing::error!(
-                                                    "Error fetching image from {did}: {e}"
-                                                );
-                                                e
-                                            })?;
-
-                                            tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
-
-                                            if emit {
-                                                store
-                                                    .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate { did },
-                                                    )
-                                                    .await;
-                                            }
-
-                                            Ok::<_, anyhow::Error>(())
-                                        }
-                                    });
-                                }
-                            }
-                            if document.profile_banner != identity.profile_banner
-                                && identity.profile_banner.is_some()
-                            {
-                                tracing::info!("Requesting profile banner from {}", identity.did);
-
-                                if !self.config.store_setting.fetch_over_bitswap {
-                                    if let Err(e) = self
-                                        .request(
-                                            in_did,
-                                            RequestOption::Image {
-                                                banner: identity.profile_banner,
-                                                picture: None,
-                                            },
-                                        )
-                                        .await
-                                    {
-                                        error!(
+                                        {
+                                            error!(
                                             "Error requesting profile banner from {in_did}: {e}"
                                         );
-                                    }
-                                } else {
-                                    let identity_profile_banner =
-                                        identity.profile_banner.expect("Cid is provided");
-                                    tokio::spawn({
-                                        let ipfs = self.ipfs.clone();
-                                        let emit = emit;
-                                        let did = in_did.clone();
-                                        let store = self.clone();
-                                        async move {
-                                            let peer_id = vec![did.to_peer_id()?];
-
-                                            let _ = super::document::image_dag::get_image(
-                                                &ipfs,
-                                                identity_profile_banner,
-                                                &peer_id,
-                                                false,
-                                                Some(2 * 1024 * 1024),
-                                            )
-                                            .await
-                                            .map_err(|e| {
-                                                tracing::error!(
-                                                    "Error fetching image from {did}: {e}"
-                                                );
-                                                e
-                                            })?;
-
-                                            tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
-
-                                            if emit {
-                                                store
-                                                    .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate { did },
-                                                    )
-                                                    .await;
-                                            }
-
-                                            Ok::<_, anyhow::Error>(())
                                         }
-                                    });
-                                }
-                            }
+                                    } else {
+                                        let identity_profile_banner =
+                                            identity.profile_banner.expect("Cid is provided");
+                                        tokio::spawn({
+                                            let ipfs = self.ipfs.clone();
+                                            let emit = emit;
+                                            let did = in_did.clone();
+                                            let store = self.clone();
+                                            async move {
+                                                let peer_id = vec![did.to_peer_id()?];
 
-                            if emit {
-                                tracing::trace!("Emitting identity update event");
-                                self.emit_event(MultiPassEventKind::IdentityUpdate {
-                                    did: document.did.clone(),
-                                })
-                                .await;
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    identity_profile_banner,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(2 * 1024 * 1024),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
+
+                                                tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
+
+                                                if emit {
+                                                    store
+                                                        .emit_event(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        )
+                                                        .await;
+                                                }
+
+                                                Ok::<_, anyhow::Error>(())
+                                            }
+                                        });
+                                    }
+                                }
+
+                                if emit {
+                                    tracing::trace!("Emitting identity update event");
+                                    self.emit_event(MultiPassEventKind::IdentityUpdate {
+                                        did: document.did.clone(),
+                                    })
+                                    .await;
+                                }
                             }
                         }
                     }
@@ -1206,105 +1265,114 @@ impl IdentityStore {
                                 .await;
                         }
 
-                        let mut emit = false;
-                        if matches!(
-                            self.config.store_setting.update_events,
-                            UpdateEvents::Enabled
-                        ) {
-                            emit = true;
-                        } else if matches!(
-                            self.config.store_setting.update_events,
-                            UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-                        ) && self.is_friend(&document_did).await.unwrap_or_default()
-                        {
-                            emit = true;
-                        }
-
-                        if emit {
-                            let mut picture = None;
-                            let mut banner = None;
-
-                            if let Some(cid) = identity.profile_picture {
-                                picture = Some(cid);
+                        if !exclude_images {
+                            let mut emit = false;
+                            if matches!(
+                                self.config.store_setting.update_events,
+                                UpdateEvents::Enabled
+                            ) {
+                                emit = true;
+                            } else if matches!(
+                                self.config.store_setting.update_events,
+                                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+                            ) && self.is_friend(&document_did).await.unwrap_or_default()
+                            {
+                                emit = true;
                             }
 
-                            if let Some(cid) = identity.profile_banner {
-                                banner = Some(cid)
-                            }
+                            if emit {
+                                let mut picture = None;
+                                let mut banner = None;
 
-                            if banner.is_some() || picture.is_some() {
-                                if !self.config.store_setting.fetch_over_bitswap {
-                                    self.request(in_did, RequestOption::Image { banner, picture })
+                                if let Some(cid) = identity.profile_picture {
+                                    picture = Some(cid);
+                                }
+
+                                if let Some(cid) = identity.profile_banner {
+                                    banner = Some(cid)
+                                }
+
+                                if banner.is_some() || picture.is_some() {
+                                    if !self.config.store_setting.fetch_over_bitswap {
+                                        self.request(
+                                            in_did,
+                                            RequestOption::Image { banner, picture },
+                                        )
                                         .await?;
-                                } else {
-                                    if let Some(picture) = picture {
-                                        tokio::spawn({
-                                            let ipfs = self.ipfs.clone();
-                                            let did = in_did.clone();
-                                            let store = self.clone();
-                                            async move {
-                                                let peer_id = vec![did.to_peer_id()?];
-                                                let _ = super::document::image_dag::get_image(
-                                                    &ipfs,
-                                                    picture,
-                                                    &peer_id,
-                                                    false,
-                                                    Some(2 * 1024 * 1024),
-                                                )
-                                                .await
-                                                .map_err(|e| {
-                                                    tracing::error!(
-                                                        "Error fetching image from {did}: {e}"
-                                                    );
-                                                    e
-                                                })?;
-
-                                                tracing::trace!("Image pointed to {picture} for {did} downloaded");
-
-                                                store
-                                                    .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate { did },
+                                    } else {
+                                        if let Some(picture) = picture {
+                                            tokio::spawn({
+                                                let ipfs = self.ipfs.clone();
+                                                let did = in_did.clone();
+                                                let store = self.clone();
+                                                async move {
+                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let _ = super::document::image_dag::get_image(
+                                                        &ipfs,
+                                                        picture,
+                                                        &peer_id,
+                                                        false,
+                                                        Some(2 * 1024 * 1024),
                                                     )
-                                                    .await;
+                                                    .await
+                                                    .map_err(|e| {
+                                                        tracing::error!(
+                                                            "Error fetching image from {did}: {e}"
+                                                        );
+                                                        e
+                                                    })?;
 
-                                                Ok::<_, anyhow::Error>(())
-                                            }
-                                        });
-                                    }
-                                    if let Some(banner) = banner {
-                                        tokio::spawn({
-                                            let store = self.clone();
-                                            let ipfs = self.ipfs.clone();
+                                                    tracing::trace!("Image pointed to {picture} for {did} downloaded");
 
-                                            let did = in_did.clone();
-                                            async move {
-                                                let peer_id = vec![did.to_peer_id()?];
-                                                let _ = super::document::image_dag::get_image(
-                                                    &ipfs,
-                                                    banner,
-                                                    &peer_id,
-                                                    false,
-                                                    Some(2 * 1024 * 1024),
-                                                )
-                                                .await
-                                                .map_err(|e| {
-                                                    tracing::error!(
-                                                        "Error fetching image from {did}: {e}"
-                                                    );
-                                                    e
-                                                })?;
+                                                    store
+                                                        .emit_event(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        )
+                                                        .await;
 
-                                                tracing::trace!("Image pointed to {banner} for {did} downloaded");
+                                                    Ok::<_, anyhow::Error>(())
+                                                }
+                                            });
+                                        }
+                                        if let Some(banner) = banner {
+                                            tokio::spawn({
+                                                let store = self.clone();
+                                                let ipfs = self.ipfs.clone();
 
-                                                store
-                                                    .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate { did },
+                                                let did = in_did.clone();
+                                                async move {
+                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let _ = super::document::image_dag::get_image(
+                                                        &ipfs,
+                                                        banner,
+                                                        &peer_id,
+                                                        false,
+                                                        Some(2 * 1024 * 1024),
                                                     )
-                                                    .await;
+                                                    .await
+                                                    .map_err(|e| {
+                                                        tracing::error!(
+                                                            "Error fetching image from {did}: {e}"
+                                                        );
+                                                        e
+                                                    })?;
 
-                                                Ok::<_, anyhow::Error>(())
-                                            }
-                                        });
+                                                    tracing::trace!("Image pointed to {banner} for {did} downloaded");
+
+                                                    store
+                                                        .emit_event(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        )
+                                                        .await;
+
+                                                    Ok::<_, anyhow::Error>(())
+                                                }
+                                            });
+                                        }
                                     }
                                 }
                             }
