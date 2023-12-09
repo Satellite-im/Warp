@@ -343,7 +343,7 @@ impl IdentityStore {
         let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
         let identity_announce_stream = store
             .ipfs
-            .pubsub_subscribe("/identity/announce".into())
+            .pubsub_subscribe("/identity/announce/v0".into())
             .await?;
 
         store.discovery.start().await?;
@@ -802,7 +802,7 @@ impl IdentityStore {
         let bytes = serde_json::to_vec(&payload)?;
         _ = self
             .ipfs
-            .pubsub_publish("/identity/announce".into(), bytes)
+            .pubsub_publish("/identity/announce/v0".into(), bytes)
             .await;
 
         Ok(())
