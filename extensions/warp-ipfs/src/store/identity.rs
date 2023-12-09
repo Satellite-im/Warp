@@ -784,7 +784,6 @@ impl IdentityStore {
     }
 
     pub async fn push_to_all(&self) {
-        _ = self.announce_identity_to_mesh().await;
         let list = self
             .discovery
             .list()
@@ -792,7 +791,8 @@ impl IdentityStore {
             .iter()
             .filter_map(|entry| entry.peer_id().to_did().ok())
             .collect::<Vec<_>>();
-        self.push_iter(list).await
+        self.push_iter(list).await;
+        _ = self.announce_identity_to_mesh().await;
     }
 
     pub async fn announce_identity_to_mesh(&self) -> Result<(), Error> {
