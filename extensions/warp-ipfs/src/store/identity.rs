@@ -1089,8 +1089,8 @@ impl IdentityStore {
                     );
                 }
 
-                if !self.discovery.contains(identity.did.clone()).await {
-                    if let Err(e) = self.discovery.insert(identity.did.clone()).await {
+                if !self.discovery.contains(&identity.did).await {
+                    if let Err(e) = self.discovery.insert(&identity.did).await {
                         tracing::warn!("Error inserting into discovery service: {e}");
                     }
                 }
