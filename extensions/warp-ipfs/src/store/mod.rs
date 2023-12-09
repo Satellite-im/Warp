@@ -9,6 +9,7 @@ pub mod message;
 pub mod payload;
 pub mod phonebook;
 pub mod queue;
+pub mod request;
 
 use chrono::{DateTime, Utc};
 use rust_ipfs as ipfs;
