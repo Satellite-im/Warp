@@ -796,14 +796,16 @@ impl IdentityStore {
     }
 
     pub async fn announce_identity_to_mesh(&self) -> Result<(), Error> {
-        let kp = self.ipfs.keypair()?;
-        let document = self.own_identity_document().await?;
-        let payload = PayloadRequest::new(kp, None, document)?;
-        let bytes = serde_json::to_vec(&payload)?;
-        _ = self
-            .ipfs
-            .pubsub_publish("/identity/announce/v0".into(), bytes)
-            .await;
+        if self.config.store_setting.announce_to_mesh {
+            let kp = self.ipfs.keypair()?;
+            let document = self.own_identity_document().await?;
+            let payload = PayloadRequest::new(kp, None, document)?;
+            let bytes = serde_json::to_vec(&payload)?;
+            _ = self
+                .ipfs
+                .pubsub_publish("/identity/announce/v0".into(), bytes)
+                .await;
+        }
 
         Ok(())
     }
