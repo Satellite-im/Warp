@@ -2182,12 +2182,14 @@ impl IdentityStore {
 
         // Push to give an update in the event any wasnt transmitted during the initial push
         // We dont care if this errors or not.
-        let _ = self.push(pubkey).await.ok();
+        let _ = self.push(pubkey).await;
 
         self.emit_event(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
         })
         .await;
+
+        _ = self.announce_identity_to_mesh().await;
 
         Ok(())
     }
