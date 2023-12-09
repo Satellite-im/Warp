@@ -354,16 +354,18 @@ impl IdentityStore {
         if let Err(_e) = store.queue.load().await {}
 
         let phonebook = &store.phonebook;
-        tracing::info!("Loading friends list into phonebook");
-        if let Ok(friends) = store.friends_list().await {
-            if let Err(_e) = phonebook.add_friend_list(friends).await {
-                error!("Error adding friends in phonebook: {_e}");
-            }
-        }
 
         // scan through friends list to see if there is any incoming request or outgoing request matching
         // and clear them out of the request list as a precautionary measure
         let friends = store.friends_list().await.unwrap_or_default();
+
+        if !friends.is_empty() {
+            tracing::info!("Loading friends list into phonebook");
+            if let Err(_e) = phonebook.add_friend_list(&friends).await {
+                error!("Error adding friends in phonebook: {_e}");
+            }
+            _ = store.announce_identity_to_mesh().await;
+        }
 
         for friend in friends {
             let list = store.list_all_raw_request().await.unwrap_or_default();
@@ -421,7 +423,7 @@ impl IdentityStore {
                             };
 
                             let identity = payload.message().clone();
-                            
+
                             //Maybe establish a connection?
                             //Note: Although it would be prefer not to establish a connection, it may be ideal to check to determine
                             //      the actual source of the payload to determine if its a message propagated over the mesh from the peer
@@ -437,7 +439,7 @@ impl IdentityStore {
                                 option: ResponseOption::Identity { identity },
                             };
 
-                            //Ignore requesting images if there is a change for now. 
+                            //Ignore requesting images if there is a change for now.
                             if let Err(e) = store.process_message(&from_did, event, true).await {
                                 error!("Failed to process identity message from {from_did}: {e}");
                             }
@@ -782,6 +784,7 @@ impl IdentityStore {
     }
 
     pub async fn push_to_all(&self) {
+        _ = self.announce_identity_to_mesh().await;
         let list = self
             .discovery
             .list()
@@ -790,6 +793,19 @@ impl IdentityStore {
             .filter_map(|entry| entry.peer_id().to_did().ok())
             .collect::<Vec<_>>();
         self.push_iter(list).await
+    }
+
+    pub async fn announce_identity_to_mesh(&self) -> Result<(), Error> {
+        let kp = self.ipfs.keypair()?;
+        let document = self.own_identity_document().await?;
+        let payload = PayloadRequest::new(kp, None, document)?;
+        let bytes = serde_json::to_vec(&payload)?;
+        _ = self
+            .ipfs
+            .pubsub_publish("/identity/announce".into(), bytes)
+            .await;
+
+        Ok(())
     }
 
     #[tracing::instrument(skip(self))]
@@ -1453,10 +1469,13 @@ impl IdentityStore {
 
         tracing::info!("Loading friends list into phonebook");
         if let Ok(friends) = self.friends_list().await {
-            let phonebook = self.phonebook();
+            if !friends.is_empty() {
+                let phonebook = self.phonebook();
 
-            if let Err(_e) = phonebook.add_friend_list(friends).await {
-                error!("Error adding friends in phonebook: {_e}");
+                if let Err(_e) = phonebook.add_friend_list(&friends).await {
+                    error!("Error adding friends in phonebook: {_e}");
+                }
+                _ = self.announce_identity_to_mesh().await;
             }
         }
 
