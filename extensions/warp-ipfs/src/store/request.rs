@@ -151,3 +151,38 @@ impl<M> PayloadRequest<M> {
         self.date
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    use rust_ipfs::Keypair;
+
+    use super::PayloadRequest;
+
+    #[test]
+    fn payload_validation() -> anyhow::Result<()> {
+        let data = String::from("Request");
+        let keypair = Keypair::generate_ed25519();
+
+        let payload = PayloadRequest::new(&keypair, None, data)?;
+        assert_eq!(payload.sender(), keypair.public().to_peer_id());
+        payload.verify()?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn payload_cosign_validation() -> anyhow::Result<()> {
+        let data = String::from("Request");
+        let keypair = Keypair::generate_ed25519();
+        let cosigner_keypair = Keypair::generate_ed25519();
+
+        let payload = PayloadRequest::new(&keypair, Some(&cosigner_keypair), data)?;
+
+        assert_ne!(payload.sender(), keypair.public().to_peer_id());
+        assert_eq!(payload.sender(), cosigner_keypair.public().to_peer_id());
+        payload.verify()?;
+
+        Ok(())
+    }
+}
