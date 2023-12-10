@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
+use chrono::Utc;
 use futures::{
     channel::{mpsc::Receiver, oneshot},
     SinkExt, StreamExt,
@@ -394,6 +395,8 @@ struct RootDocumentTask {
 
 impl RootDocumentTask {
     pub async fn start(&mut self) {
+        self.migrate().await;
+
         while let Some(command) = self.rx.next().await {
             match command {
                 RootDocumentCommand::Get { response } => {
@@ -461,6 +464,60 @@ impl RootDocumentTask {
                 }
             }
         }
+    }
+
+    async fn migrate(&mut self) {
+        let mut root = match self.get_root_document().await {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        #[derive(serde::Serialize, serde::Deserialize)]
+        enum OldRequest {
+            In(DID),
+            Out(DID),
+        }
+
+        let Some(cid) = root.request else {
+            return;
+        };
+
+        let list = self
+            .ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized::<Vec<OldRequest>>()
+            .await
+            .unwrap_or_default();
+
+        if list.is_empty() {
+            return;
+        }
+
+        let list = list
+            .iter()
+            .map(|item| match item {
+                OldRequest::In(did) => Request::In {
+                    did: did.clone(),
+                    date: Utc::now(),
+                },
+                OldRequest::Out(did) => Request::Out {
+                    did: did.clone(),
+                    date: Utc::now(),
+                },
+            })
+            .collect::<Vec<_>>();
+
+        let new_cid_fut = async { self.ipfs.dag().put().serialize(list)?.await };
+
+        let new_cid = match new_cid_fut.await {
+            Ok(cid) => cid,
+            Err(_) => return,
+        };
+
+        root.request = Some(new_cid);
+
+        _ = self.set_root_document(root).await;
     }
 }
 
