@@ -177,7 +177,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .set_keypair(keypair)
         .fd_limit(FDLimit::Max)
-        .with_rendezvous_server()
         .set_idle_connection_timeout(120)
         .default_record_key_validator()
         .set_transport_configuration(TransportConfig {
@@ -242,6 +241,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let identity = shuttle::store::identity::IdentityStorage::new(&ipfs, &root).await;
 
     let mut subscriptions = Subscriptions::new(&ipfs, &identity);
+    _ = subscriptions
+        .subscribe("/identity/announce/v0".into())
+        .await;
     let keypair = ipfs.keypair()?;
 
     while let Some((_id, ch, payload, resp)) = id_event_rx.next().await {
@@ -346,6 +348,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
                         // Although we arent able to subscribe, we can still process the request while leaving this as a warning
                     }
+
+                    let payload = shuttle::PayloadRequest::new(keypair, None, document.clone())
+                        .expect("Valid payload construction");
+
+                    let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
+
+                    _ = ipfs
+                        .pubsub_publish("/identity/announce/v0".into(), bytes)
+                        .await;
 
                     tracing::info!(%document.did, "identity registered");
                     let payload = payload_message_construct(
@@ -669,6 +680,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     tracing::info!(%did, "Identity updated");
+
+                    tracing::info!(%did, "Announcing to mesh");
+
+                    let payload = shuttle::PayloadRequest::new(keypair, None, document.clone())
+                        .expect("Valid payload construction");
+
+                    let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
+
+                    _ = ipfs
+                        .pubsub_publish("/identity/announce/v0".into(), bytes)
+                        .await;
 
                     let payload = payload_message_construct(
                         keypair,
