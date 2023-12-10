@@ -24,8 +24,8 @@ impl PhoneBook {
         PhoneBook { discovery, pb_tx }
     }
 
-    pub async fn add_friend_list(&self, list: Vec<DID>) -> Result<(), Error> {
-        for friend in list.iter() {
+    pub async fn add_friend_list(&self, list: &[DID]) -> Result<(), Error> {
+        for friend in list {
             self.add_friend(friend).await?;
         }
         Ok(())
