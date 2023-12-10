@@ -1,8 +1,8 @@
+use super::PeerIdExt;
 use chrono::{DateTime, Utc};
 use rust_ipfs::{libp2p::identity::KeyType, Keypair, PeerId};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
-use super::PeerIdExt;
+use warp::error::Error;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PayloadRequest<M> {
@@ -28,11 +28,7 @@ pub struct PayloadRequest<M> {
 }
 
 impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
-    pub fn new(
-        keypair: &Keypair,
-        cosigner: Option<&Keypair>,
-        message: M,
-    ) -> Result<Self, anyhow::Error> {
+    pub fn new(keypair: &Keypair, cosigner: Option<&Keypair>, message: M) -> Result<Self, Error> {
         assert_ne!(keypair.key_type(), KeyType::RSA);
 
         let sender = keypair.public().to_peer_id();
@@ -48,7 +44,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
 
         let bytes = serde_json::to_vec(&payload)?;
 
-        let signature = keypair.sign(&bytes)?;
+        let signature = keypair.sign(&bytes).expect("Valid signing");
 
         payload.signature = signature;
 
@@ -60,39 +56,43 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
         Ok(payload)
     }
 
-    fn co_sign(mut self, keypair: &Keypair) -> Result<Self, anyhow::Error> {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
+        serde_json::from_slice(data).map_err(Error::from)
+    }
+
+    #[inline]
+    pub fn verify(&self) -> Result<(), Error> {
+        self.verify_original()?;
+        self.verify_cosigner()
+    }
+
+    fn co_sign(mut self, keypair: &Keypair) -> Result<Self, Error> {
         assert_ne!(keypair.key_type(), KeyType::RSA);
 
         let sender = keypair.public().to_peer_id();
 
         if sender == self.sender {
-            anyhow::bail!("Sender cannot cosign payload");
+            return Err(Error::PublicKeyInvalid);
         }
 
         if self.on_behalf.is_some() {
-            anyhow::bail!("Payload already signed on behalf of another identity");
+            return Err(Error::PublicKeyDoesntExist);
         }
 
         self.on_behalf = Some(sender);
 
         let bytes = serde_json::to_vec(&self)?;
 
-        let signature = keypair.sign(&bytes)?;
+        let signature = keypair.sign(&bytes).expect("Valid signing");
 
         self.co_signature = Some(signature);
 
         Ok(self)
     }
 
-    #[inline]
-    pub fn verify(&self) -> Result<(), anyhow::Error> {
-        self.verify_original()?;
-        self.verify_cosigner()
-    }
-
-    fn verify_original(&self) -> Result<(), anyhow::Error> {
+    fn verify_original(&self) -> Result<(), Error> {
         if self.signature.is_empty() {
-            anyhow::bail!("Payload dont contain a signature");
+            return Err(Error::InvalidSignature);
         }
         let mut payload = self.clone();
         let signature = std::mem::take(&mut payload.signature);
@@ -104,23 +104,23 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
         let public_key = self.sender.to_public_key()?;
 
         if !public_key.verify(&bytes, &signature) {
-            anyhow::bail!("Signature is invalid");
+            return Err(Error::InvalidSignature);
         }
 
         Ok(())
     }
 
-    fn verify_cosigner(&self) -> Result<(), anyhow::Error> {
+    fn verify_cosigner(&self) -> Result<(), Error> {
         if self.on_behalf.is_none() && self.co_signature.is_none() {
             return Ok(());
         }
 
         let Some(co_sender) = self.on_behalf else {
-            anyhow::bail!("Payload doesnt contain a valid cosigner");
+            return Err(Error::PublicKeyDoesntExist);
         };
 
         let Some(co_signature) = self.co_signature.as_ref() else {
-            anyhow::bail!("Payload doesnt contain a valid cosignature");
+            return Err(Error::InvalidSignature);
         };
 
         let mut payload = self.clone();
@@ -131,7 +131,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
         let public_key = co_sender.to_public_key()?;
 
         if !public_key.verify(&bytes, co_signature) {
-            anyhow::bail!("Signature is invalid");
+            return Err(Error::PublicKeyDoesntExist);
         }
 
         Ok(())
