@@ -1096,23 +1096,28 @@ impl IdentityStore {
 
                             let mut emit = false;
 
-                            if !exclude_images {
-                                if matches!(
-                                    self.config.store_setting.update_events,
-                                    UpdateEvents::Enabled
-                                ) {
-                                    emit = true;
-                                } else if matches!(
-                                    self.config.store_setting.update_events,
-                                    UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-                                ) && self
-                                    .is_friend(&document_did)
-                                    .await
-                                    .unwrap_or_default()
-                                {
-                                    emit = true;
-                                }
+                            if matches!(
+                                self.config.store_setting.update_events,
+                                UpdateEvents::Enabled
+                            ) {
+                                emit = true;
+                            } else if matches!(
+                                self.config.store_setting.update_events,
+                                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+                            ) && self.is_friend(&document_did).await.unwrap_or_default()
+                            {
+                                emit = true;
+                            }
 
+                            if emit {
+                                tracing::trace!("Emitting identity update event");
+                                self.emit_event(MultiPassEventKind::IdentityUpdate {
+                                    did: document.did.clone(),
+                                })
+                                .await;
+                            }
+
+                            if !exclude_images {
                                 if document.metadata.profile_picture
                                     != identity.metadata.profile_picture
                                     && identity.metadata.profile_picture.is_some()
@@ -1249,14 +1254,6 @@ impl IdentityStore {
                                             }
                                         });
                                     }
-                                }
-
-                                if emit {
-                                    tracing::trace!("Emitting identity update event");
-                                    self.emit_event(MultiPassEventKind::IdentityUpdate {
-                                        did: document.did.clone(),
-                                    })
-                                    .await;
                                 }
                             }
                         }
