@@ -46,6 +46,30 @@ pub enum Request {
     Lookup(Lookup),
 }
 
+impl From<Register> for Request {
+    fn from(reg: Register) -> Self {
+        Request::Register(reg)
+    }
+}
+
+impl From<Mailbox> for Request {
+    fn from(mailbox: Mailbox) -> Self {
+        Request::Mailbox(mailbox)
+    }
+}
+
+impl From<Synchronized> for Request {
+    fn from(sync: Synchronized) -> Self {
+        Request::Synchronized(sync)
+    }
+}
+
+impl From<Lookup> for Request {
+    fn from(lookup: Lookup) -> Self {
+        Request::Lookup(lookup)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
@@ -54,6 +78,30 @@ pub enum Response {
     MailboxResponse(MailboxResponse),
     LookupResponse(LookupResponse),
     Error(String),
+}
+
+impl From<RegisterResponse> for Response {
+    fn from(res: RegisterResponse) -> Self {
+        Response::RegisterResponse(res)
+    }
+}
+
+impl From<SynchronizedResponse> for Response {
+    fn from(res: SynchronizedResponse) -> Self {
+        Response::SynchronizedResponse(res)
+    }
+}
+
+impl From<MailboxResponse> for Response {
+    fn from(res: MailboxResponse) -> Self {
+        Response::MailboxResponse(res)
+    }
+}
+
+impl From<LookupResponse> for Response {
+    fn from(res: LookupResponse) -> Self {
+        Response::LookupResponse(res)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
