@@ -242,7 +242,7 @@ impl Discovery {
     pub async fn insert<P: Into<PeerType> + Debug>(&self, peer_type: P) -> Result<(), Error> {
         let peer_id = match &peer_type.into() {
             PeerType::PeerId(peer_id) => *peer_id,
-            PeerType::DID(did_key) => did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())?,
+            PeerType::DID(did_key) => did_key.to_peer_id()?,
         };
 
         if self.get(peer_id).await.is_ok() {

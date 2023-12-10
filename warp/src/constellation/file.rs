@@ -306,7 +306,10 @@ impl File {
         self.signal();
     }
 
-    pub(crate) fn set_signal(&mut self, signal: Option<futures::channel::mpsc::UnboundedSender<()>>) {
+    pub(crate) fn set_signal(
+        &mut self,
+        signal: Option<futures::channel::mpsc::UnboundedSender<()>>,
+    ) {
         *self.signal.write() = signal;
     }
 

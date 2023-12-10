@@ -229,6 +229,8 @@ pub struct StoreSetting {
     pub disable_images: bool,
     /// Enables spam check
     pub check_spam: bool,
+    /// Announce to mesh network
+    pub announce_to_mesh: bool,
     /// Function to call to provide data for a default profile picture if one is not apart of the identity
     #[serde(skip)]
     pub default_profile_picture: Option<DefaultPfpFn>,
@@ -269,6 +271,7 @@ impl Default for StoreSetting {
             check_spam: true,
             with_friends: false,
             default_profile_picture: None,
+            announce_to_mesh: false,
         }
     }
 }
