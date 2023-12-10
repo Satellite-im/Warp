@@ -19,11 +19,15 @@ use rust_ipfs::{
 use rust_ipfs::libp2p::request_response;
 use warp::crypto::DID;
 
-use super::{document::IdentityDocument, protocol::Payload};
+use crate::{identity::protocol::payload_message_construct, PayloadRequest};
+
+use super::document::IdentityDocument;
 use super::{
     protocol::{Lookup, LookupResponse, Message, Register, RegisterResponse, Request, Response},
     RequestPayload,
 };
+
+type Payload = PayloadRequest<Message>;
 
 // Note: primary_keypair to be used for `Payload`
 #[allow(dead_code)]
@@ -165,7 +169,7 @@ impl Behaviour {
             .into_signed_envelope()
             .into_protobuf_encoding();
 
-        let payload = Payload::new(
+        let payload = payload_message_construct(
             &self.keypair,
             self.primary_keypair.as_ref(),
             Request::Synchronized(super::protocol::Synchronized::PeerRecord { record }),
@@ -481,7 +485,7 @@ impl NetworkBehaviour for Behaviour {
                         response,
                     } => {
                         tracing::info!("Registering to {peer_id}");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
                             Request::Register(Register::RegisterIdentity { document: identity }),
@@ -497,7 +501,7 @@ impl NetworkBehaviour for Behaviour {
                     }
                     IdentityCommand::IsRegistered { peer_id, response } => {
                         tracing::info!("Registering to {peer_id}");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
                             Request::Register(Register::IsRegistered),
@@ -517,7 +521,7 @@ impl NetworkBehaviour for Behaviour {
                         response,
                     } => {
                         tracing::info!("Sending lookup request to {peer_id}");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
                             Request::Lookup(kind),
@@ -539,7 +543,7 @@ impl NetworkBehaviour for Behaviour {
                             package_size = package.len(),
                             "Sending package to {peer_id}"
                         );
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
                             Request::Synchronized(super::protocol::Synchronized::Store { package }),
@@ -558,7 +562,7 @@ impl NetworkBehaviour for Behaviour {
                         response,
                     } => {
                         tracing::info!(%did, "Fetching package");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
                             Request::Synchronized(super::protocol::Synchronized::Fetch { did }),
@@ -577,7 +581,7 @@ impl NetworkBehaviour for Behaviour {
                         response,
                     } => {
                         tracing::info!(?identity, "Updating identity");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
                             Request::Synchronized(super::protocol::Synchronized::Update {
@@ -599,7 +603,7 @@ impl NetworkBehaviour for Behaviour {
                         response,
                     } => {
                         tracing::info!(to = %to, request = ?request.event, "Sending request");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
                             Request::Mailbox(super::protocol::Mailbox::Send { did: to, request }),
@@ -614,7 +618,7 @@ impl NetworkBehaviour for Behaviour {
                     }
                     IdentityCommand::FetchAllRequests { peer_id, response } => {
                         tracing::info!("Fetching mailbox from {peer_id}");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             &self.keypair,
                             self.primary_keypair.as_ref(),
                             Request::Mailbox(super::protocol::Mailbox::FetchAll),

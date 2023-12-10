@@ -18,12 +18,16 @@ use rust_ipfs::{
 
 use rust_ipfs::libp2p::request_response;
 
-use super::protocol::{self, Payload, Response};
+use crate::{PayloadRequest, identity::protocol::payload_message_construct};
+
+use super::protocol::{self, Message, Response};
+
+type Payload = PayloadRequest<Message>;
 
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 pub struct Behaviour {
-    inner: request_response::json::Behaviour<protocol::Payload, protocol::Payload>,
+    inner: request_response::json::Behaviour<Payload, Payload>,
 
     keypair: Keypair,
 
@@ -81,7 +85,7 @@ impl Behaviour {
         if request.verify().is_err() {
             tracing::warn!(id = ?request_id, from = %request.sender(), "request payload is invalid");
             //TODO: Score against invalid request
-            let payload = Payload::new(
+            let payload = payload_message_construct(
                 &self.keypair,
                 None,
                 Response::Error("Request is invalid or corrupted".into()),
@@ -110,8 +114,8 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = <request_response::json::Behaviour<
-        protocol::Payload,
-        protocol::Payload,
+        Payload,
+        Payload,
     > as NetworkBehaviour>::ConnectionHandler;
     type ToSwarm = void::Void;
 

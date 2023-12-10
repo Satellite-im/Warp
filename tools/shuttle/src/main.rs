@@ -2,8 +2,8 @@ use shuttle::{
     identity::{
         self,
         protocol::{
-            LookupResponse, Message, Payload, Register, RegisterResponse, Response, Synchronized,
-            SynchronizedError, SynchronizedResponse,
+            payload_message_construct, LookupResponse, Message, Register, RegisterResponse,
+            Response, Synchronized, SynchronizedError, SynchronizedResponse,
         },
     },
     subscription_stream::Subscriptions,
@@ -251,7 +251,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let peer_id = payload.sender();
                     let Ok(did) = peer_id.to_did() else {
                         tracing::warn!(%peer_id, "Could not convert to did key");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::RegisterResponse(RegisterResponse::Error(
@@ -267,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if !identity.contains(&did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::RegisterResponse(RegisterResponse::Error(
@@ -280,7 +280,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    let payload = Payload::new(
+                    let payload = payload_message_construct(
                         keypair,
                         None,
                         Response::RegisterResponse(RegisterResponse::Ok),
@@ -293,7 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     tracing::info!(%document.did, "Receive register request");
                     if identity.contains(&document.did).await.unwrap_or_default() {
                         tracing::warn!(%document.did, "Identity is already registered");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::RegisterResponse(RegisterResponse::Error(
@@ -308,7 +308,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if document.verify().is_err() {
                         tracing::warn!(%document.did, "Identity cannot be verified");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::RegisterResponse(RegisterResponse::Error(
@@ -335,7 +335,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             )),
                         };
 
-                        let payload = Payload::new(keypair, None, res_error)
+                        let payload = payload_message_construct(keypair, None, res_error)
                             .expect("Valid payload construction");
 
                         let _ = resp.send((ch, payload));
@@ -348,7 +348,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     tracing::info!(%document.did, "identity registered");
-                    let payload = Payload::new(
+                    let payload = payload_message_construct(
                         keypair,
                         None,
                         Response::RegisterResponse(RegisterResponse::Ok),
@@ -361,7 +361,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let peer_id = payload.sender();
                     let Ok(did) = peer_id.to_did() else {
                         tracing::warn!(%peer_id, "Could not convert to did key");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::RegisterResponse(RegisterResponse::Error(
@@ -377,7 +377,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if !identity.contains(&did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::MailboxResponse(identity::protocol::MailboxResponse::Error(
@@ -400,7 +400,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             tracing::info!(%did, request = reqs.len(), remaining = remaining);
 
-                            let payload = Payload::new(
+                            let payload = payload_message_construct(
                                 keypair,
                                 None,
                                 Response::MailboxResponse(
@@ -417,7 +417,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         identity::protocol::Mailbox::FetchFrom { .. } => {
                             tracing::warn!(%did, "accessed to unimplemented request");
                             //TODO
-                            let payload = Payload::new(
+                            let payload = payload_message_construct(
                                 keypair,
                                 None,
                                 Response::MailboxResponse(
@@ -434,7 +434,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         identity::protocol::Mailbox::Send { did: to, request } => {
                             if !identity.contains(to).await.unwrap_or_default() {
                                 tracing::warn!(%did, "Identity is not registered");
-                                let payload = Payload::new(
+                                let payload = payload_message_construct(
                                     keypair,
                                     None,
                                     Response::MailboxResponse(
@@ -452,7 +452,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             if request.verify().is_err() {
                                 tracing::warn!(%did, to = %to, "request could not be vertified");
-                                let payload = Payload::new(
+                                let payload = payload_message_construct(
                                     keypair,
                                     None,
                                     Response::MailboxResponse(
@@ -471,7 +471,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 match e {
                                     WarpError::InvalidSignature => {
                                         tracing::warn!(%did, to = %to, "request could not be vertified");
-                                        let payload = Payload::new(
+                                        let payload = payload_message_construct(
                                             keypair,
                                             None,
                                             Response::MailboxResponse(
@@ -486,7 +486,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     e => {
                                         tracing::warn!(%did, to = %to, "could not deliver request");
-                                        let payload = Payload::new(
+                                        let payload = payload_message_construct(
                                             keypair,
                                             None,
                                             Response::MailboxResponse(
@@ -507,7 +507,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             tracing::info!(%did, to = %to, "request has been stored");
 
-                            let payload = Payload::new(
+                            let payload = payload_message_construct(
                                 keypair,
                                 None,
                                 Response::MailboxResponse(
@@ -524,7 +524,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let peer_id = payload.sender();
                     let Ok(did) = peer_id.to_did() else {
                         tracing::warn!(%peer_id, "Could not convert to did key");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::RegisterResponse(RegisterResponse::Error(
@@ -540,7 +540,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if !identity.contains(&did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::SynchronizedResponse(
@@ -558,7 +558,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if package.is_empty() {
                         tracing::warn!(%did, "package supplied is zero. Will skip");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::SynchronizedResponse(
@@ -579,7 +579,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     tracing::info!(%did, package_size=package.len());
 
                     if let Err(e) = identity.store_package(&did, package.clone()).await {
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::SynchronizedResponse(
@@ -596,7 +596,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     tracing::info!(%did, package_size=package.len(), "package is stored");
 
-                    let payload = Payload::new(
+                    let payload = payload_message_construct(
                         keypair,
                         None,
                         Response::SynchronizedResponse(SynchronizedResponse::IdentityUpdated),
@@ -610,7 +610,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     tracing::info!(%document.did, "Receive identity update");
                     if document.verify().is_err() {
                         tracing::warn!(%document.did, "identity is not valid or corrupted");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::SynchronizedResponse(SynchronizedResponse::Error(
@@ -627,7 +627,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if !identity.contains(&did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::SynchronizedResponse(SynchronizedResponse::Error(
@@ -645,7 +645,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let payload = match e {
                             WarpError::InvalidSignature => {
                                 tracing::warn!(%did, "Identity is not registered");
-                                Payload::new(
+                                payload_message_construct(
                                     keypair,
                                     None,
                                     Response::SynchronizedResponse(SynchronizedResponse::Error(
@@ -654,7 +654,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 )
                                 .expect("Valid payload construction")
                             }
-                            _ => Payload::new(
+                            _ => payload_message_construct(
                                 keypair,
                                 None,
                                 Response::SynchronizedResponse(SynchronizedResponse::Error(
@@ -670,7 +670,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     tracing::info!(%did, "Identity updated");
 
-                    let payload = Payload::new(
+                    let payload = payload_message_construct(
                         keypair,
                         None,
                         Response::SynchronizedResponse(SynchronizedResponse::IdentityUpdated),
@@ -684,7 +684,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let signed_envelope = match SignedEnvelope::from_protobuf_encoding(record) {
                         Ok(signed_envelope) => signed_envelope,
                         Err(e) => {
-                            let payload = Payload::new(
+                            let payload = payload_message_construct(
                                 keypair,
                                 None,
                                 Response::SynchronizedResponse(
@@ -702,7 +702,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let record = match PeerRecord::from_signed_envelope(signed_envelope) {
                         Ok(record) => record,
                         Err(e) => {
-                            let payload = Payload::new(
+                            let payload = payload_message_construct(
                                 keypair,
                                 None,
                                 Response::SynchronizedResponse(
@@ -722,7 +722,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let Ok(did) = peer_id.to_did() else {
                         tracing::warn!(%peer_id, "Could not convert to did key");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::SynchronizedResponse(
@@ -739,7 +739,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     if !identity.contains(&did).await.unwrap_or_default() {
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::SynchronizedResponse(
@@ -756,7 +756,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     _ = precord_tx.send(record).await;
 
-                    let payload = Payload::new(
+                    let payload = payload_message_construct(
                         keypair,
                         None,
                         Response::SynchronizedResponse(SynchronizedResponse::RecordStored),
@@ -770,7 +770,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     tracing::info!(%did, "Fetching document");
                     if !identity.contains(did).await.unwrap_or_default() {
                         tracing::warn!(%did, "Identity is not registered");
-                        let payload = Payload::new(
+                        let payload = payload_message_construct(
                             keypair,
                             None,
                             Response::SynchronizedResponse(
@@ -803,8 +803,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
 
-                    let payload =
-                        Payload::new(keypair, None, event).expect("Valid payload construction");
+                    let payload = payload_message_construct(keypair, None, event)
+                        .expect("Valid payload construction");
 
                     let _ = resp.send((ch, payload));
 
@@ -818,8 +818,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let event = Response::LookupResponse(LookupResponse::Ok { identity });
 
-                    let payload =
-                        Payload::new(keypair, None, event).expect("Valid payload construction");
+                    let payload = payload_message_construct(keypair, None, event)
+                        .expect("Valid payload construction");
 
                     let _ = resp.send((ch, payload));
                 } // identity::protocol::Request::Lookup(Lookup::PublicKeys { dids }) => {
@@ -841,7 +841,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   //     };
 
                   //     let payload =
-                  //         Payload::new(keypair, None, event).expect("Valid payload construction");
+                  //         payload_message_construct(keypair, None, event).expect("Valid payload construction");
 
                   //     let _ = resp.send((ch, payload));
                   // }
@@ -892,7 +892,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   //     };
 
                   //     let payload =
-                  //         Payload::new(keypair, None, event).expect("Valid payload construction");
+                  //         payload_message_construct(keypair, None, event).expect("Valid payload construction");
 
                   //     let _ = resp.send((ch, payload));
                   // }
@@ -919,7 +919,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   //     };
 
                   //     let payload =
-                  //         Payload::new(keypair, None, event).expect("Valid payload construction");
+                  //         payload_message_construct(keypair, None, event).expect("Valid payload construction");
 
                   //     let _ = resp.send((ch, payload));
                   // }
@@ -928,7 +928,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   //         .values()
                   //         .find(|document| document.short_id.eq(short_id.as_ref()))
                   //     else {
-                  //         let payload = Payload::new(
+                  //         let payload = payload_message_construct(
                   //             keypair,
                   //             None,
                   //             Response::LookupResponse(LookupResponse::Error(
@@ -941,7 +941,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   //         continue;
                   //     };
 
-                  //     let payload = Payload::new(
+                  //     let payload = payload_message_construct(
                   //         keypair,
                   //         None,
                   //         Response::LookupResponse(LookupResponse::Ok {
