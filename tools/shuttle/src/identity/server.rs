@@ -81,7 +81,7 @@ impl Behaviour {
         request: Payload,
         channel: ResponseChannel<Payload>,
     ) {
-        tracing::info!(id = ?request_id, from = %request.sender());
+        tracing::info!(id = ?request_id, from = %request.sender(), message = ?request.message());
         if request.verify().is_err() {
             tracing::warn!(id = ?request_id, from = %request.sender(), "request payload is invalid");
             //TODO: Score against invalid request
