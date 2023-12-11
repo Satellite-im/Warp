@@ -349,6 +349,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // Although we arent able to subscribe, we can still process the request while leaving this as a warning
                     }
 
+                    if let Err(e) = subscriptions.subscribe(document.did.messaging()).await {
+                        tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
+                        // Although we arent able to subscribe, we can still process the request while leaving this as a warning
+                    }
+
                     let payload = shuttle::PayloadRequest::new(keypair, None, document.clone())
                         .expect("Valid payload construction");
 
