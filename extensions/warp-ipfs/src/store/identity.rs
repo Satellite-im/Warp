@@ -20,7 +20,7 @@ use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -1929,6 +1929,8 @@ impl IdentityStore {
             .map(|identity| identity.did_key())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
+        let cache = self.identity_cache.list().await?;
+
         let mut idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
@@ -1941,15 +1943,12 @@ impl IdentityStore {
                 if !self.discovery.contains(pubkey).await {
                     self.discovery.insert(pubkey).await?;
                 }
-
-                self.identity_cache
-                    .list()
-                    .await?
+                cache
                     .filter(|ident| {
                         let ident = ident.clone();
                         async move { ident.did == *pubkey }
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<HashSet<_>>()
                     .await
             }
             LookupBy::DidKeys(list) => {
@@ -1969,18 +1968,16 @@ impl IdentityStore {
                     }
                 }
 
-                let cache = self.identity_cache.list().await?;
                 cache
                     .filter(|id| {
                         let id = id.clone();
                         async move { list.contains(&id.did) }
                     })
                     .chain(prestream.boxed())
-                    .collect::<Vec<_>>()
+                    .collect::<HashSet<_>>()
                     .await
             }
             LookupBy::Username(username) if username.contains('#') => {
-                let cache = self.identity_cache.list().await?;
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
@@ -1994,7 +1991,7 @@ impl IdentityStore {
                                     .contains(&username.to_lowercase())
                             }
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<HashSet<_>>()
                         .await
                 } else {
                     match (
@@ -2014,36 +2011,32 @@ impl IdentityStore {
                                                 .eq(&code)
                                     }
                                 })
-                                .collect::<Vec<_>>()
+                                .collect::<HashSet<_>>()
                                 .await
                         }
-                        _ => vec![],
+                        _ => HashSet::new(),
                     }
                 }
             }
             LookupBy::Username(username) => {
                 let username = username.to_lowercase();
-                self.identity_cache
-                    .list()
-                    .await?
+                cache
                     .filter(|ident| {
                         let ident = ident.clone();
                         let username = username.clone();
                         async move { ident.username.to_lowercase().contains(&username) }
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<HashSet<_>>()
                     .await
             }
             LookupBy::ShortId(id) => {
-                self.identity_cache
-                    .list()
-                    .await?
+                cache
                     .filter(|ident| {
                         let ident = ident.clone();
                         let id = id.clone();
                         async move { String::from_utf8_lossy(&ident.short_id).eq(&id) }
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<HashSet<_>>()
                     .await
             }
         };
@@ -2107,7 +2100,6 @@ impl IdentityStore {
 
         let list = idents_docs
             .iter()
-            .filter(|document| document.did != own_did)
             .filter_map(|doc| doc.resolve().ok())
             .collect::<Vec<_>>();
 
