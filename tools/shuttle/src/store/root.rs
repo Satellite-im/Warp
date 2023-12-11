@@ -57,6 +57,14 @@ impl RootStorage {
     pub async fn new(ipfs: &Ipfs) -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(0);
         let peer_id = ipfs.keypair().expect("Valid").public().to_peer_id();
+        let root_cid = ipfs
+            .ipns()
+            .resolve(&IpfsPath::from(peer_id))
+            .await
+            .map(|path| path.root().cid().copied())
+            .ok()
+            .flatten();
+
         let root = ipfs
             .get_dag(peer_id)
             .local()
@@ -71,6 +79,7 @@ impl RootStorage {
         let mut task = RootStorageTask {
             ipfs: ipfs.clone(),
             root,
+            cid: root_cid,
             rx,
         };
 
@@ -133,6 +142,7 @@ impl RootStorage {
 struct RootStorageTask {
     ipfs: Ipfs,
     root: Root,
+    cid: Option<Cid>,
     rx: Receiver<RootCommand>,
 }
 
@@ -163,10 +173,22 @@ impl RootStorageTask {
             .pin(false)
             .await?;
 
+        let old_cid = self.cid.replace(cid);
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                tracing::debug!(cid = %old_cid, "unpinning root block");
+                _ = self.ipfs.remove_pin(&old_cid, false).await;
+            }
+        }
+
+        tracing::info!(cid = %cid, "storing root in ipns");
         self.ipfs
             .ipns()
             .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
             .await?;
+
+        tracing::info!(cid = %cid, "root is stored in ipns");
 
         //TODO: Broadcast root document to nodes
         Ok(())
@@ -179,14 +201,25 @@ impl RootStorageTask {
             .dag()
             .put()
             .serialize(self.root)?
-            .pin(false)
+            .pin(true)
             .await?;
 
+        let old_cid = self.cid.replace(cid);
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                tracing::debug!(cid = %old_cid, "unpinning root block");
+                _ = self.ipfs.remove_pin(&old_cid, true).await;
+            }
+        }
+
+        tracing::info!(cid = %cid, "storing root in ipns");
         self.ipfs
             .ipns()
             .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
             .await?;
 
+        tracing::info!(cid = %cid, "root is stored in ipns");
         //TODO: Broadcast root document to nodes
         Ok(())
     }
@@ -198,14 +231,25 @@ impl RootStorageTask {
             .dag()
             .put()
             .serialize(self.root)?
-            .pin(false)
+            .pin(true)
             .await?;
 
+        let old_cid = self.cid.replace(cid);
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                tracing::debug!(cid = %old_cid, "unpinning root block");
+                _ = self.ipfs.remove_pin(&old_cid, true).await;
+            }
+        }
+
+        tracing::info!(cid = %cid, "storing root in ipns");
         self.ipfs
             .ipns()
             .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
             .await?;
 
+        tracing::info!(cid = %cid, "root is stored in ipns");
         //TODO: Broadcast root document to nodes
         Ok(())
     }

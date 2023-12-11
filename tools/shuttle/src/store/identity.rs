@@ -684,15 +684,9 @@ impl IdentityStorageTask {
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        let old_cid = self.mailbox.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                let _ = self.ipfs.remove_pin(&old_cid, false).await;
-            }
-        }
+        self.mailbox.replace(cid);
 
         self.root.set_mailbox(cid).await?;
 
@@ -742,15 +736,9 @@ impl IdentityStorageTask {
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        let old_cid = self.mailbox.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                let _ = self.ipfs.remove_pin(&old_cid, false).await;
-            }
-        }
+        self.mailbox.replace(cid);
 
         self.root.set_mailbox(cid).await?;
 
