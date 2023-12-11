@@ -265,8 +265,13 @@ impl NetworkBehaviour for Behaviour {
         self.waiting_on_request
             .retain(|id, receiver| match receiver.poll_unpin(cx) {
                 Poll::Ready(Ok((ch, res))) => {
-                    tracing::info!(id = ?id, from = %res.sender(), "Sending payload response");
-                    let _ = self.inner.send_response(ch, res);
+                    let sender = res.sender();
+                    tracing::info!(id = ?id, from = %sender, "Sending payload response");
+                    let sent = self.inner.send_response(ch, res).is_ok();
+                    match sent {
+                        true => tracing::info!(id = ?id, from = %sender, "Payload response sent"),
+                        false => tracing::info!(id = ?id, from = %sender, "Failed to send payload reponse")
+                    };
                     false
                 }
                 Poll::Ready(Err(Canceled)) => false,
