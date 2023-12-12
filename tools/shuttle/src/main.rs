@@ -246,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let keypair = ipfs.keypair()?;
 
     while let Some((id, ch, payload, resp)) = id_event_rx.next().await {
-        tracing::info!(request_id = ?id, payload = ?payload, "Processing Incoming Request");
+        tracing::info!(request_id = ?id, "Processing Incoming Request");
         match payload.message() {
             Message::Request(req) => match req {
                 identity::protocol::Request::Register(Register::IsRegistered) => {
