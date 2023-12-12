@@ -3,7 +3,7 @@ use std::sync::Arc;
 use futures::stream::BoxStream;
 use warp::crypto::DID;
 use webrtc::{
-    data_channel::RTCDataChannel, ice_transport::ice_candidate::RTCIceCandidate,
+    ice_transport::ice_candidate::RTCIceCandidate,
     peer_connection::sdp::session_description::RTCSessionDescription,
     track::track_remote::TrackRemote,
 };

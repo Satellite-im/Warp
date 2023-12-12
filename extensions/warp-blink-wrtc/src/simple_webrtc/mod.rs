@@ -35,25 +35,23 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
+pub use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecParameters, RTPCodecType};
+use webrtc::rtp_transceiver::rtp_receiver::RTCRtpReceiver;
+use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
 use webrtc::rtp_transceiver::rtp_transceiver_direction::RTCRtpTransceiverDirection;
 use webrtc::sdp::extmap::AUDIO_LEVEL_URI;
-
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-
-use webrtc::rtp_transceiver::rtp_receiver::RTCRtpReceiver;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-
 use webrtc::track::track_remote::TrackRemote;
+
+use self::events::{EmittedEvents, WebRtcEventStream};
 
 // public exports
 pub mod events;
 
-pub use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
-use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
-
-use self::events::{EmittedEvents, WebRtcEventStream};
+mod time_of_flight;
 
 /// simple-webrtc
 /// This library augments the [webrtc-rs](https://github.com/webrtc-rs/webrtc) library, hopefully
@@ -78,6 +76,7 @@ pub struct Controller {
     peers: HashMap<DID, Peer>,
     event_ch: broadcast::Sender<EmittedEvents>,
     media_sources: HashMap<MediaSourceId, Arc<TrackLocalStaticRTP>>,
+    tof: time_of_flight::Controller,
 }
 
 /// stores a PeerConnection for updating SDP and ICE candidates, adding and removing tracks
@@ -125,6 +124,7 @@ impl Controller {
             peers: HashMap::new(),
             event_ch,
             media_sources: HashMap::new(),
+            tof: time_of_flight::Controller::new(),
         })
     }
     /// Rust doesn't have async drop, so this function should be called when the user is
@@ -135,6 +135,7 @@ impl Controller {
                 log::error!("failed to close peer connection: {e}");
             }
         }
+        self.tof.reset();
         // remove RTP tracks
         self.media_sources.clear();
         if self.peers.is_empty() {
@@ -488,19 +489,42 @@ impl Controller {
             },
         ));
 
-        let tx = self.event_ch.clone();
+        //let event_ch = self.event_ch.clone();
+        let tof_ch = self.tof.get_ch();
         let dest = peer_id.clone();
         peer.connection
             .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
-                let tx2 = tx.clone();
                 let dest2 = dest.clone();
-                d.on_close(Box::new(move || Box::pin(futures::future::ready(()))));
+                let ch = tof_ch.clone();
+                d.on_close(Box::new(move || {
+                    let _ = ch.send(time_of_flight::Cmd::Remove {
+                        peer: dest2.clone(),
+                    });
+                    Box::pin(futures::future::ready(()))
+                }));
 
-                let tx2 = tx.clone();
-                let dest2 = dest.clone();
                 d.on_open(Box::new(move || Box::pin(futures::future::ready(()))));
 
+                let dest2 = dest.clone();
+                let ch = tof_ch.clone();
                 d.on_message(Box::new(move |msg: DataChannelMessage| {
+                    let mut tof = match serde_cbor::from_slice::<time_of_flight::Tof>(&msg.data) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            log::error!("deserialize failed for tof: {}", e);
+                            return Box::pin(futures::future::ready(()));
+                        }
+                    };
+                    tof.stamp();
+                    if tof.ready() {
+                        log::debug!("tof received from peer {}: {:#?}", dest2, tof);
+                    }
+                    if tof.should_send() {
+                        let _ = ch.send(time_of_flight::Cmd::Send {
+                            peer: dest2.clone(),
+                            msg: tof,
+                        });
+                    }
                     Box::pin(futures::future::ready(()))
                 }));
 
