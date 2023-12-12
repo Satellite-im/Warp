@@ -149,7 +149,7 @@ pub enum BlinkEventKind {
     AudioStreamError,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct CallInfo {
     call_id: Uuid,
     conversation_id: Option<Uuid>,
