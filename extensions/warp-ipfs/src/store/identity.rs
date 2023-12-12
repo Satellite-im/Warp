@@ -1760,12 +1760,10 @@ impl IdentityStore {
                     .await;
 
                 match tokio::time::timeout(Duration::from_secs(20), rx).await {
-                    Ok(Ok(Ok(_))) => {
-                        break;
-                    }
+                    Ok(Ok(Ok(_))) => return Ok(()),
                     Ok(Ok(Err(e))) => {
                         tracing::error!("Identity is not registered: {e}");
-                        break;
+                        return Err(e);
                     }
                     Ok(Err(Canceled)) => {
                         tracing::error!("Channel been unexpectedly closed for {peer_id}");
@@ -1779,7 +1777,7 @@ impl IdentityStore {
             }
         }
 
-        Ok(())
+        Err(Error::IdentityDoesntExist)
     }
 
     async fn register(&self, identity: &IdentityDocument) -> Result<(), Error> {
