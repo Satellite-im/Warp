@@ -6,7 +6,7 @@ use std::{
 use futures::{channel::oneshot, FutureExt, StreamExt};
 use rust_ipfs::{
     libp2p::{
-        core::{Endpoint, PeerRecord},
+        core::Endpoint,
         request_response::OutboundRequestId,
         swarm::{
             ConnectionDenied, ConnectionId, ExternalAddresses, FromSwarm, THandler,
