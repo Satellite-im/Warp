@@ -158,33 +158,33 @@ impl Behaviour {
     }
 
     fn send_record(&mut self) {
-        let addrs = self.external_addresses.iter().cloned().collect::<Vec<_>>();
+        // let addrs = self.external_addresses.iter().cloned().collect::<Vec<_>>();
 
-        tracing::debug!("External Addrs: {}", addrs.len());
+        // tracing::debug!("External Addrs: {}", addrs.len());
 
-        debug_assert!(!addrs.is_empty());
+        // debug_assert!(!addrs.is_empty());
 
-        let record = PeerRecord::new(&self.keypair, addrs)
-            .expect("Valid signature")
-            .into_signed_envelope()
-            .into_protobuf_encoding();
+        // let record = PeerRecord::new(&self.keypair, addrs)
+        //     .expect("Valid signature")
+        //     .into_signed_envelope()
+        //     .into_protobuf_encoding();
 
-        let payload = payload_message_construct(
-            &self.keypair,
-            self.primary_keypair.as_ref(),
-            Request::Synchronized(super::protocol::Synchronized::PeerRecord { record }),
-        )
-        .expect("Valid construction of payload");
+        // let payload = payload_message_construct(
+        //     &self.keypair,
+        //     self.primary_keypair.as_ref(),
+        //     Request::Synchronized(super::protocol::Synchronized::PeerRecord { record }),
+        // )
+        // .expect("Valid construction of payload");
 
-        for peer_id in self.addresses.keys() {
-            let id = self.inner.send_request(peer_id, payload.clone());
+        // for peer_id in self.addresses.keys() {
+        //     let id = self.inner.send_request(peer_id, payload.clone());
 
-            let (tx, rx) = oneshot::channel();
+        //     let (tx, rx) = oneshot::channel();
 
-            self.waiting_on_response
-                .insert(id, IdentityResponse::PeerRecordUpdate { response: tx });
-            self.pending_internal_response.insert(id, rx);
-        }
+        //     self.waiting_on_response
+        //         .insert(id, IdentityResponse::PeerRecordUpdate { response: tx });
+        //     self.pending_internal_response.insert(id, rx);
+        // }
     }
 
     fn process_response(&mut self, id: OutboundRequestId, response: Payload) {
