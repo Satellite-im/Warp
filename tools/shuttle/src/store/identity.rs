@@ -356,8 +356,18 @@ impl IdentityStorageTask {
         let old_cid = self.list.replace(cid);
 
         if let Some(old_cid) = old_cid {
-            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                let _ = self.ipfs.remove_pin(&old_cid, false).await;
+            if old_cid != cid {
+                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                    _ = self.ipfs.remove_pin(&old_cid, false).await;
+                }
+
+                tracing::info!(cid = %old_cid, "removing block(s)");
+                let remove_blocks = self
+                    .ipfs
+                    .remove_block(old_cid, false)
+                    .await
+                    .unwrap_or_default();
+                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
             }
         }
 
@@ -393,10 +403,25 @@ impl IdentityStorageTask {
 
         list.insert(did.to_string(), pkg_cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.await?;
+        let cid = self.ipfs.dag().put().pin(true).serialize(list)?.await?;
 
-        self.packages.replace(cid);
+        let old_cid = self.packages.replace(cid);
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid {
+                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                    tracing::debug!(cid = %old_cid, "unpinning identity package block");
+                    _ = self.ipfs.remove_pin(&old_cid, true).await;
+                }
 
+                tracing::info!(cid = %old_cid, "removing block(s)");
+                let remove_blocks = self
+                    .ipfs
+                    .remove_block(old_cid, true)
+                    .await
+                    .unwrap_or_default();
+                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+            }
+        }
         self.root.set_package(cid).await?;
 
         Ok(())
@@ -470,8 +495,19 @@ impl IdentityStorageTask {
         let old_cid = list.insert(did_str, cid);
 
         if let Some(old_cid) = old_cid {
-            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                let _ = self.ipfs.remove_pin(&old_cid, false).await;
+            if old_cid != cid {
+                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                    _ = self.ipfs.remove_pin(&old_cid, false).await;
+                }
+
+                tracing::info!(cid = %old_cid, "removing block(s)");
+                let remove_blocks = self
+                    .ipfs
+                    .remove_block(old_cid, false)
+                    .await
+                    .unwrap_or_default();
+                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
             }
         }
 
@@ -480,11 +516,21 @@ impl IdentityStorageTask {
         let old_cid = self.list.replace(cid);
 
         if let Some(old_cid) = old_cid {
-            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                let _ = self.ipfs.remove_pin(&old_cid, false).await;
+            if old_cid != cid {
+                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                    _ = self.ipfs.remove_pin(&old_cid, false).await;
+                }
+
+                tracing::info!(cid = %old_cid, "removing block(s)");
+                let remove_blocks = self
+                    .ipfs
+                    .remove_block(old_cid, false)
+                    .await
+                    .unwrap_or_default();
+                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
             }
         }
-
         self.root.set_identity_list(cid).await?;
 
         Ok(())
@@ -667,9 +713,26 @@ impl IdentityStorageTask {
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
 
-        self.mailbox.replace(cid);
+        let old_cid = self.mailbox.replace(cid);
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid {
+                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                    _ = self.ipfs.remove_pin(&old_cid, true).await;
+                }
+
+                tracing::info!(cid = %old_cid, "removing block(s)");
+                let remove_blocks = self
+                    .ipfs
+                    .remove_block(old_cid, true)
+                    .await
+                    .unwrap_or_default();
+                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+            }
+        }
 
         self.root.set_mailbox(cid).await?;
 
@@ -719,9 +782,26 @@ impl IdentityStorageTask {
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
 
-        self.mailbox.replace(cid);
+        let old_cid = self.mailbox.replace(cid);
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid {
+                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                    _ = self.ipfs.remove_pin(&old_cid, true).await;
+                }
+
+                tracing::info!(cid = %old_cid, "removing block(s)");
+                let remove_blocks = self
+                    .ipfs
+                    .remove_block(old_cid, true)
+                    .await
+                    .unwrap_or_default();
+                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+            }
+        }
 
         self.root.set_mailbox(cid).await?;
 
