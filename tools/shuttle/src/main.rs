@@ -30,7 +30,6 @@ use rust_ipfs::libp2p::{
 use rust_ipfs::{
     libp2p::swarm::NetworkBehaviour,
     p2p::{IdentifyConfiguration, RateLimit, RelayConfig, TransportConfig},
-    repo::{GCConfig, GCTrigger},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
@@ -182,10 +181,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_transport_configuration(TransportConfig {
             ..Default::default()
         })
-        .with_gc(GCConfig {
-            duration: Duration::from_secs(60 * 60),
-            trigger: GCTrigger::None,
-        })
+        // .with_gc(GCConfig {
+        //     duration: Duration::from_secs(60 * 60),
+        //     trigger: GCTrigger::None,
+        // })
         .set_temp_pin_duration(Duration::from_secs(60 * 30))
         .listen_as_external_addr();
 
