@@ -766,9 +766,6 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             log::error!("failed to send media_track command: {e}");
                         }
                     },
-                    simple_webrtc::events::EmittedEvents::DataChannelCreated { .. } => {},
-                    simple_webrtc::events::EmittedEvents::DataChannelOpened { .. } => {}
-                    simple_webrtc::events::EmittedEvents::DataChannelClosed { .. } => {}
                 }
             }
         }

@@ -17,6 +17,7 @@
 //!
 
 use anyhow::{bail, Result};
+use webrtc::data_channel::data_channel_message::DataChannelMessage;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -203,6 +204,12 @@ impl Controller {
 
         if self.peers.insert(peer_id.clone(), peer).is_some() {
             log::warn!("overwriting peer connection");
+        }
+
+        if let Some(peer) = self.peers.get(peer_id) {
+            if let Err(e) = peer.connection.create_data_channel("rtt", None).await {
+                log::error!("failed to open datachannel for peer {}: {}", peer_id, e);
+            }
         }
 
         self.event_ch.send(EmittedEvents::Sdp {
@@ -487,44 +494,16 @@ impl Controller {
             .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
                 let tx2 = tx.clone();
                 let dest2 = dest.clone();
-                d.on_close(Box::new(move || {
-                    if let Err(e) = tx2.send(EmittedEvents::DataChannelClosed {
-                        peer: dest2.clone(),
-                    }) {
-                        log::error!(
-                            "failed to send data channel closed event for peer {}: {}",
-                            &dest2,
-                            e
-                        );
-                    }
-                    Box::pin(futures::future::ready(()))
-                }));
+                d.on_close(Box::new(move || Box::pin(futures::future::ready(()))));
 
                 let tx2 = tx.clone();
                 let dest2 = dest.clone();
-                d.on_open(Box::new(move || {
-                    if let Err(e) = tx2.send(EmittedEvents::DataChannelOpened {
-                        peer: dest2.clone(),
-                    }) {
-                        log::error!(
-                            "failed to send data channel opened event for peer {}: {}",
-                            &dest2,
-                            e
-                        );
-                    }
+                d.on_open(Box::new(move || Box::pin(futures::future::ready(()))));
+
+                d.on_message(Box::new(move |msg: DataChannelMessage| {
                     Box::pin(futures::future::ready(()))
                 }));
 
-                if let Err(e) = tx.send(EmittedEvents::DataChannelCreated {
-                    peer: dest.clone(),
-                    data_channel: d,
-                }) {
-                    log::error!(
-                        "failed to send data channel opened event for peer {}: {}",
-                        &dest,
-                        e
-                    );
-                }
                 Box::pin(futures::future::ready(()))
             }));
 

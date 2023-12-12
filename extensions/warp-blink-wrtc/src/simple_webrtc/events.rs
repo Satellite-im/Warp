@@ -55,20 +55,6 @@ pub enum EmittedEvents {
     /// and processing the output
     #[display(fmt = "TrackAdded")]
     TrackAdded { peer: DID, track: Arc<TrackRemote> },
-
-    #[display(fmt = "DataChannelOpened")]
-    DataChannelCreated {
-        peer: DID,
-        data_channel: Arc<RTCDataChannel>,
-    },
-    #[display(fmt = "DataChannelClosed")]
-    DataChannelClosed { peer: DID },
-    #[display(fmt = "DataChannelOpened")]
-    DataChannelOpened { peer: DID },
-    // todo: when a track is removed, does the RTCPeerConnectionState::Disconnected event fire?
-    // it appears that WebRTC doesn't emit an event for this. perhaps the track is automatically
-    // closed on the remote side when the local side calls `remove_track`
-    // TrackRemoved,
 }
 
 // needed because RTcDAtaChannel doesn't implement Debug
