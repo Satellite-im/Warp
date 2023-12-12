@@ -177,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .set_keypair(keypair)
         .fd_limit(FDLimit::Max)
-        .set_idle_connection_timeout(120)
+        .set_idle_connection_timeout(60 * 30)
         .default_record_key_validator()
         .set_transport_configuration(TransportConfig {
             ..Default::default()
@@ -229,7 +229,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         addrs => addrs.to_vec(),
     };
 
-    if let Some(path) = path {
+    if let Some(path) = path.as_ref() {
         uninitialized = uninitialized.set_path(path);
     }
 
@@ -237,7 +237,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ipfs = uninitialized.start().await?;
 
-    let root = shuttle::store::root::RootStorage::new(&ipfs).await;
+    let root = shuttle::store::root::RootStorage::new(&ipfs, path).await;
     let identity = shuttle::store::identity::IdentityStorage::new(&ipfs, &root).await;
 
     let mut subscriptions = Subscriptions::new(&ipfs, &identity);
@@ -246,7 +246,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
     let keypair = ipfs.keypair()?;
 
-    while let Some((_id, ch, payload, resp)) = id_event_rx.next().await {
+    while let Some((id, ch, payload, resp)) = id_event_rx.next().await {
+        tracing::info!(request_id = ?id, payload = ?payload, "Processing Incoming Request");
         match payload.message() {
             Message::Request(req) => match req {
                 identity::protocol::Request::Register(Register::IsRegistered) => {

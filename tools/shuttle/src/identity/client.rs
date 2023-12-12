@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     task::{Context, Poll},
+    time::Duration,
 };
 
 use futures::{channel::oneshot, FutureExt, StreamExt};
@@ -137,7 +138,7 @@ impl Behaviour {
                     super::protocol::PROTOCOL,
                     request_response::ProtocolSupport::Full,
                 )],
-                Default::default(),
+                request_response::Config::default().with_request_timeout(Duration::from_secs(30)),
             ),
             keypair: keypair.clone(),
             primary_keypair: primary_keypair.cloned(),

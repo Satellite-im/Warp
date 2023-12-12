@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use futures::{channel::oneshot::Canceled, FutureExt, StreamExt};
@@ -18,7 +19,7 @@ use rust_ipfs::{
 
 use rust_ipfs::libp2p::request_response;
 
-use crate::{PayloadRequest, identity::protocol::payload_message_construct};
+use crate::{identity::protocol::payload_message_construct, PayloadRequest};
 
 use super::protocol::{self, Message, Response};
 
@@ -64,7 +65,7 @@ impl Behaviour {
         Self {
             inner: request_response::json::Behaviour::new(
                 [(protocol::PROTOCOL, request_response::ProtocolSupport::Full)],
-                Default::default(),
+                request_response::Config::default().with_request_timeout(Duration::from_secs(30)),
             ),
             keypair: keypair.clone(),
             process_event,

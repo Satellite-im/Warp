@@ -1,14 +1,14 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use futures::{
     channel::{
         mpsc::{Receiver, Sender},
         oneshot::Sender as OneshotSender,
     },
-    SinkExt, StreamExt,
+    SinkExt, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::{ipns::IpnsOption, Ipfs, IpfsPath};
+use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
 use warp::error::Error;
 
@@ -37,6 +37,9 @@ enum RootCommand {
         link: Cid,
         response: OneshotSender<Result<(), Error>>,
     },
+    GetRoot {
+        response: OneshotSender<Root>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -54,32 +57,35 @@ impl Drop for RootStorage {
 }
 
 impl RootStorage {
-    pub async fn new(ipfs: &Ipfs) -> Self {
+    pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(0);
-        let peer_id = ipfs.keypair().expect("Valid").public().to_peer_id();
-        let root_cid = ipfs
-            .ipns()
-            .resolve(&IpfsPath::from(peer_id))
-            .await
-            .map(|path| path.root().cid().copied())
-            .ok()
-            .flatten();
+        let root_cid = match path.as_ref() {
+            Some(path) => tokio::fs::read(path.join(".root_v0"))
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                .ok()
+                .and_then(|cid_str| cid_str.parse().ok()),
+            None => None,
+        };
 
-        let root = ipfs
-            .get_dag(peer_id)
-            .local()
-            .deserialized::<Root>()
+        // let root_cid = ipfs
+        //     .ipns()
+        //     .resolve(&IpfsPath::from(peer_id))
+        //     .await
+        //     .map(|path| path.root().cid().copied())
+        //     .ok()
+        //     .flatten();
+
+        let root = futures::future::ready(root_cid.ok_or(anyhow::anyhow!("error")))
+            .and_then(|cid| async move { ipfs.get_dag(cid).local().deserialized::<Root>().await })
             .await
-            .map_err(|e| {
-                tracing::error!("Unable to load local record: {e}.");
-                e
-            })
             .unwrap_or_default();
 
         let mut task = RootStorageTask {
             ipfs: ipfs.clone(),
             root,
             cid: root_cid,
+            path,
             rx,
         };
 
@@ -137,12 +143,25 @@ impl RootStorage {
 
         rx.await.map_err(anyhow::Error::from)?
     }
+
+    pub async fn get_root(&self) -> Result<Root, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+
+        let _ = self
+            .tx
+            .clone()
+            .send(RootCommand::GetRoot { response: tx })
+            .await;
+
+        rx.await.map_err(anyhow::Error::from).map_err(Error::from)
+    }
 }
 
 struct RootStorageTask {
     ipfs: Ipfs,
     root: Root,
     cid: Option<Cid>,
+    path: Option<PathBuf>,
     rx: Receiver<RootCommand>,
 }
 
@@ -158,6 +177,9 @@ impl RootStorageTask {
                 }
                 RootCommand::SetPackages { link, response } => {
                     _ = response.send(self.set_packages(link).await)
+                }
+                RootCommand::GetRoot { response } => {
+                    _ = response.send(self.root);
                 }
             }
         }
@@ -182,13 +204,9 @@ impl RootStorageTask {
             }
         }
 
-        tracing::info!(cid = %cid, "storing root in ipns");
-        self.ipfs
-            .ipns()
-            .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
-            .await?;
-
-        tracing::info!(cid = %cid, "root is stored in ipns");
+        tracing::info!(cid = %cid, "storing root");
+        self.save(cid).await?;
+        tracing::info!(cid = %cid, "root is stored");
 
         //TODO: Broadcast root document to nodes
         Ok(())
@@ -196,6 +214,7 @@ impl RootStorageTask {
 
     async fn set_packages(&mut self, cid: Cid) -> Result<(), Error> {
         self.root.packages.replace(cid);
+        tracing::debug!(cid = %cid, "New cid for root. Store and pinning");
         let cid = self
             .ipfs
             .dag()
@@ -203,6 +222,7 @@ impl RootStorageTask {
             .serialize(self.root)?
             .pin(true)
             .await?;
+        tracing::info!(cid = %cid, "root stored");
 
         let old_cid = self.cid.replace(cid);
 
@@ -213,13 +233,10 @@ impl RootStorageTask {
             }
         }
 
-        tracing::info!(cid = %cid, "storing root in ipns");
-        self.ipfs
-            .ipns()
-            .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
-            .await?;
+        tracing::info!(cid = %cid, "storing root");
+        self.save(cid).await?;
+        tracing::info!(cid = %cid, "root is stored");
 
-        tracing::info!(cid = %cid, "root is stored in ipns");
         //TODO: Broadcast root document to nodes
         Ok(())
     }
@@ -243,14 +260,26 @@ impl RootStorageTask {
             }
         }
 
-        tracing::info!(cid = %cid, "storing root in ipns");
-        self.ipfs
-            .ipns()
-            .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
-            .await?;
-
-        tracing::info!(cid = %cid, "root is stored in ipns");
+        tracing::info!(cid = %cid, "storing root");
+        self.save(cid).await?;
+        tracing::info!(cid = %cid, "root is stored");
         //TODO: Broadcast root document to nodes
+        Ok(())
+    }
+
+    async fn save(&self, cid: Cid) -> std::io::Result<()> {
+        //TODO: Reenable ipns
+        // self.ipfs
+        // .ipns()
+        // .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
+        // .await?;
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            if let Err(e) = tokio::fs::write(path.join(".root_v0"), cid).await {
+                tracing::error!("Error writing cid to file: {e}");
+            }
+        }
         Ok(())
     }
 }

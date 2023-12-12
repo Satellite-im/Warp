@@ -14,7 +14,7 @@ use warp::{crypto::DID, error::Error};
 
 use crate::identity::{document::IdentityDocument, protocol::Lookup, RequestPayload};
 
-use super::root::{Root, RootStorage};
+use super::root::RootStorage;
 
 #[allow(clippy::large_enum_variant)]
 enum IdentityStorageCommand {
@@ -73,18 +73,7 @@ impl Drop for IdentityStorage {
 
 impl IdentityStorage {
     pub async fn new(ipfs: &Ipfs, root: &RootStorage) -> Self {
-        let peer_id = ipfs.keypair().expect("Valid").public().to_peer_id();
-
-        let root_dag = ipfs
-            .get_dag(peer_id)
-            .local()
-            .deserialized::<Root>()
-            .await
-            .map_err(|e| {
-                tracing::error!("Unable to load local record: {e}.");
-                e
-            })
-            .unwrap_or_default();
+        let root_dag = root.get_root().await.unwrap_or_default();
 
         let list = root_dag.identities;
         let mailbox = root_dag.mailbox;
@@ -385,7 +374,7 @@ impl IdentityStorageTask {
         let mut list: HashMap<String, Cid> = match self.packages {
             Some(cid) => self
                 .ipfs
-                .get_dag(IpfsPath::from(cid))
+                .get_dag(cid)
                 .local()
                 .deserialized()
                 .await
@@ -404,15 +393,9 @@ impl IdentityStorageTask {
 
         list.insert(did.to_string(), pkg_cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        let old_cid = self.packages.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                let _ = self.ipfs.remove_pin(&old_cid, false).await;
-            }
-        }
+        self.packages.replace(cid);
 
         self.root.set_package(cid).await?;
 
