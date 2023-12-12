@@ -1573,6 +1573,16 @@ impl IdentityStore {
             }
         }
 
+        match self.is_registered().await.is_ok() {
+            true => if let Err(_e) = self.fetch_mailbox().await {},
+            false => {
+                let id = self.own_identity_document().await.expect("Valid identity");
+                if let Err(e) = self.register(&id).await {
+                    tracing::warn!(%id.did, error = %e, "Unable to register identity");
+                }
+            }
+        }
+
         Ok(identity)
     }
 
