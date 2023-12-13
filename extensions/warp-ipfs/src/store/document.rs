@@ -56,11 +56,9 @@ pub struct RootDocument {
     /// Own Identity
     pub identity: Cid,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<DateTime<Utc>>,
+    pub created: DateTime<Utc>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modified: Option<DateTime<Utc>>,
+    pub modified: DateTime<Utc>,
 
     /// array of friends (DID)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,10 +91,8 @@ impl RootDocument {
     pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
         //In case there is a signature already exist
         self.signature = None;
-        if self.created.is_none() {
-            self.created = Some(Utc::now());
-        }
-        self.modified = Some(Utc::now());
+
+        self.modified = Utc::now();
 
         let bytes = serde_json::to_vec(&self)?;
         let signature = did.sign(&bytes);
@@ -108,8 +104,7 @@ impl RootDocument {
     pub async fn verify(&self, ipfs: &Ipfs) -> Result<(), Error> {
         let identity: IdentityDocument = ipfs
             .dag()
-            .get()
-            .path(self.identity)
+            .get_dag(self.identity)
             .local()
             .deserialized()
             .await
@@ -136,8 +131,8 @@ impl RootDocument {
     ) -> Result<
         (
             Identity,
-            Option<DateTime<Utc>>,
-            Option<DateTime<Utc>>,
+            DateTime<Utc>,
+            DateTime<Utc>,
             Vec<DID>,
             Vec<DID>,
             Vec<DID>,
@@ -276,8 +271,8 @@ impl RootDocument {
 
         let root_document = RootDocument {
             identity,
-            created: Some(data.created),
-            modified: Some(data.modified),
+            created: data.created,
+            modified: data.modified,
             conversations: None,
             conversations_keystore,
             friends,
@@ -306,8 +301,8 @@ impl RootDocument {
 
         let mut exported = ExtractedRootDocument {
             identity,
-            created: created.unwrap_or_default(),
-            modified: modified.unwrap_or_default(),
+            created,
+            modified,
             friends,
             block_list,
             block_by_list,
