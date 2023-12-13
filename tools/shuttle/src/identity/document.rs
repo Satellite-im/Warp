@@ -6,6 +6,13 @@ use warp::crypto::{Fingerprint, DID};
 use warp::error::Error;
 use warp::multipass::identity::{IdentityStatus, Platform, SHORT_ID_SIZE};
 
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all="lowercase")]
+pub enum IdentityDocumentVersion {
+    #[default]
+    V0,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Eq)]
 pub struct IdentityDocument {
     pub username: String,
@@ -14,15 +21,24 @@ pub struct IdentityDocument {
 
     pub did: DID,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<DateTime<Utc>>,
+    pub created: DateTime<Utc>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modified: Option<DateTime<Utc>>,
+    pub modified: DateTime<Utc>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
 
+    pub metadata: IdentityMetadata,
+
+    #[serde(default)]
+    pub version: IdentityDocumentVersion,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+}
+
+#[derive(Default, Debug, Clone, Copy, Deserialize, Serialize, Eq, PartialEq)]
+pub struct IdentityMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_picture: Option<Cid>,
 
@@ -34,9 +50,6 @@ pub struct IdentityDocument {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
 }
 
 impl PartialEq for IdentityDocument {
@@ -65,10 +78,7 @@ impl IdentityDocument {
 
         self.username != other.username
             || self.status_message != other.status_message
-            || self.status != other.status
-            || self.profile_banner != other.profile_banner
-            || self.profile_picture != other.profile_picture
-            || self.platform != other.platform
+            || self.metadata != other.metadata
     }
 }
 
