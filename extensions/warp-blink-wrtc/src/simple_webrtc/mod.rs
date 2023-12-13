@@ -517,7 +517,7 @@ impl Controller {
                     };
                     tof.stamp();
                     if tof.ready() {
-                        log::debug!("tof received from peer {}: {:#?}", dest2, tof);
+                        log::debug!("tof received from peer {}: {}", dest2, tof);
                     }
                     if tof.should_send() {
                         let _ = ch.send(time_of_flight::Cmd::Send {

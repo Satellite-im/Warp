@@ -19,12 +19,36 @@ pub struct UnixTime {
     pub ms: u16,
 }
 
+impl UnixTime {
+    pub fn sub(&self, other: &Self) -> i64 {
+        let l = (self.secs as i64 * 1000_i64) + self.ms as i64;
+        let r = (other.secs as i64 * 1000_i64) + other.ms as i64;
+
+        l - r
+    }
+    pub fn is_empty(&self) -> bool {
+        self.secs == 0 && self.ms == 0
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Tof {
     pub t1: UnixTime,
     pub t2: UnixTime,
     pub t3: UnixTime,
     pub t4: UnixTime,
+}
+
+impl std::fmt::Display for Tof {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.t4.is_empty() {
+            write!(f, "Tof: {}ms", self.t4.sub(&self.t2))
+        } else if !self.t3.is_empty() {
+            write!(f, "Tof: {}ms", self.t3.sub(&self.t1))
+        } else {
+            write!(f, "Tof: pending")
+        }
+    }
 }
 
 impl Tof {
@@ -37,27 +61,23 @@ impl Tof {
             ms: ms as _,
         };
 
-        let default_time = UnixTime::default();
-
-        if self.t1 == default_time {
+        if self.t1.is_empty() {
             self.t1 = time;
-        } else if self.t2 == default_time {
+        } else if self.t2.is_empty() {
             self.t2 = time;
-        } else if self.t3 == default_time {
+        } else if self.t3.is_empty() {
             self.t3 = time;
-        } else if self.t4 == default_time {
+        } else if self.t4.is_empty() {
             self.t4 = time;
         }
     }
 
     pub fn should_send(&self) -> bool {
-        let default_time = UnixTime::default();
-        self.t4 == default_time
+        self.t4.is_empty()
     }
 
     pub fn ready(&self) -> bool {
-        let default_time = UnixTime::default();
-        self.t3 != default_time
+        !self.t3.is_empty()
     }
 }
 
