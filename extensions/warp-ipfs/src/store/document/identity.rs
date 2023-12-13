@@ -8,6 +8,13 @@ use warp::{
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
 
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all="lowercase")]
+pub enum IdentityDocumentVersion {
+    #[default]
+    V0,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Eq)]
 pub struct IdentityDocument {
     pub username: String,
@@ -16,15 +23,24 @@ pub struct IdentityDocument {
 
     pub did: DID,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<DateTime<Utc>>,
+    pub created: DateTime<Utc>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modified: Option<DateTime<Utc>>,
+    pub modified: DateTime<Utc>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
 
+    pub metadata: IdentityMetadata,
+
+    #[serde(default)]
+    pub version: IdentityDocumentVersion,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+}
+
+#[derive(Default, Debug, Clone, Copy, Deserialize, Serialize, Eq, PartialEq)]
+pub struct IdentityMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_picture: Option<Cid>,
 
@@ -36,9 +52,6 @@ pub struct IdentityDocument {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
 }
 
 impl From<Identity> for IdentityDocument {
@@ -47,8 +60,8 @@ impl From<Identity> for IdentityDocument {
         let did = identity.did_key();
         let short_id = *identity.short_id();
         let status_message = identity.status_message();
-        let created = Some(identity.created());
-        let modified = Some(identity.modified());
+        let created = identity.created();
+        let modified = identity.modified();
 
         IdentityDocument {
             username,
@@ -57,10 +70,8 @@ impl From<Identity> for IdentityDocument {
             status_message,
             created,
             modified,
-            profile_picture: None,
-            profile_banner: None,
-            platform: None,
-            status: None,
+            metadata: Default::default(),
+            version: IdentityDocumentVersion::V0,
             signature: None,
         }
     }
@@ -79,8 +90,8 @@ impl From<&IdentityDocument> for Identity {
         identity.set_short_id(document.short_id);
         identity.set_status_message(document.status_message.clone());
         identity.set_username(&document.username);
-        identity.set_created(document.created.unwrap_or(Utc::now()));
-        identity.set_modified(document.modified.unwrap_or(Utc::now()));
+        identity.set_created(document.created);
+        identity.set_modified(document.modified);
         identity
     }
 }
@@ -115,10 +126,7 @@ impl IdentityDocument {
 
         self.username != other.username
             || self.status_message != other.status_message
-            || self.status != other.status
-            || self.profile_banner != other.profile_banner
-            || self.profile_picture != other.profile_picture
-            || self.platform != other.platform
+            || self.metadata != other.metadata
     }
 }
 
@@ -129,13 +137,18 @@ impl IdentityDocument {
     }
 
     pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
+        let metadata = self.metadata;
+
+        //We blank out the metadata since it will not be used as apart of the
+        //identification process, but will include it after it is signed
+        self.metadata = Default::default();
         self.signature = None;
-        if self.created.is_none() {
-            self.created = Some(Utc::now());
-        }
-        self.modified = Some(Utc::now());
+
+        self.modified = Utc::now();
+
         let bytes = serde_json::to_vec(&self)?;
         let signature = bs58::encode(did.sign(&bytes)).into_string();
+        self.metadata = metadata;
         self.signature = Some(signature);
         Ok(self)
     }
@@ -182,6 +195,8 @@ impl IdentityDocument {
                 });
             }
         }
+
+        let _ = std::mem::take(&mut payload.metadata);
 
         let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
         let signature_bytes = bs58::decode(signature).into_vec()?;
