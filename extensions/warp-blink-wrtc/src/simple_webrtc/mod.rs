@@ -207,17 +207,6 @@ impl Controller {
             log::warn!("overwriting peer connection");
         }
 
-        if let Some(peer) = self.peers.get(peer_id) {
-            match peer.connection.create_data_channel("rtt", None).await {
-                Ok(dc) => {
-                    self.tof.add(peer.id.clone(), dc);
-                }
-                Err(e) => {
-                    log::error!("failed to open datachannel for peer {}: {}", peer_id, e);
-                }
-            }
-        }
-
         self.event_ch.send(EmittedEvents::Sdp {
             dest: peer_id.clone(),
             sdp: Box::new(answer),
@@ -565,6 +554,16 @@ impl Controller {
                 }
             }
         }
+
+        match peer.connection.create_data_channel("rtt", None).await {
+            Ok(dc) => {
+                self.tof.add(peer.id.clone(), dc);
+            }
+            Err(e) => {
+                log::error!("failed to open datachannel for peer {}: {}", peer_id, e);
+            }
+        }
+
         Ok(peer)
     }
 }
