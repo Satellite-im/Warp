@@ -119,12 +119,13 @@ impl Controller {
     pub fn new() -> Result<Self> {
         // todo: verify size
         let (event_ch, _rx) = broadcast::channel(1024);
+        let tof = time_of_flight::Controller::new(event_ch.clone());
         Ok(Self {
             api: Some(create_api()?),
             peers: HashMap::new(),
             event_ch,
             media_sources: HashMap::new(),
-            tof: time_of_flight::Controller::new(),
+            tof,
         })
     }
     /// Rust doesn't have async drop, so this function should be called when the user is
@@ -511,7 +512,10 @@ impl Controller {
                     };
                     tof.stamp();
                     if tof.ready() {
-                        log::debug!("tof received from peer {}: {}", dest2, tof);
+                        let _ = ch.send(time_of_flight::Cmd::SendComplete {
+                            peer: dest2.clone(),
+                            msg: tof.clone(),
+                        });
                     }
                     if tof.should_send() {
                         let _ = ch.send(time_of_flight::Cmd::Send {
@@ -557,7 +561,7 @@ impl Controller {
 
         match peer.connection.create_data_channel("rtt", None).await {
             Ok(dc) => {
-                self.tof.add(peer.id.clone(), dc);
+                self.tof.add_channel(peer.id.clone(), dc);
             }
             Err(e) => {
                 log::error!("failed to open datachannel for peer {}: {}", peer_id, e);

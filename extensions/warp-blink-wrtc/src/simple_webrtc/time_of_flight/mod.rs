@@ -6,11 +6,13 @@ use std::{
 
 use rand::random;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{broadcast, mpsc, Notify};
 use warp::crypto::DID;
 use webrtc::data_channel::RTCDataChannel;
 
 use crate::notify_wrapper::NotifyWrapper;
+
+use super::events::EmittedEvents;
 
 // time since 1/1/1970
 #[derive(Serialize, Deserialize, Debug, Default, Clone, Eq, PartialEq)]
@@ -92,13 +94,13 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new() -> Self {
+    pub fn new(event_ch: broadcast::Sender<EmittedEvents>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
 
         let quit = Arc::new(Notify::new());
         let quit2 = quit.clone();
         tokio::spawn(async move {
-            run(quit2, rx).await;
+            run(quit2, rx, event_ch).await;
         });
 
         Self {
@@ -107,16 +109,12 @@ impl Controller {
         }
     }
 
-    pub fn add(&self, peer: DID, data_channel: Arc<RTCDataChannel>) {
+    pub fn add_channel(&self, peer: DID, data_channel: Arc<RTCDataChannel>) {
         let _ = self.ch.send(Cmd::Add { peer, data_channel });
     }
 
-    pub fn remove(&self, peer: DID) {
+    pub fn remove_channel(&self, peer: DID) {
         let _ = self.ch.send(Cmd::Remove { peer });
-    }
-
-    pub fn send(&self, peer: DID, msg: Tof) {
-        let _ = self.ch.send(Cmd::Send { peer, msg });
     }
 
     pub fn reset(&self) {
@@ -140,26 +138,48 @@ pub enum Cmd {
         peer: DID,
         msg: Tof,
     },
+    SendComplete {
+        peer: DID,
+        msg: Tof,
+    },
     Reset,
 }
 
 struct Peer {
     pub dc: Arc<RTCDataChannel>,
     pub next_time: Instant,
+    pub last_sent: Option<Instant>,
 }
 
 impl Peer {
     fn new(dc: Arc<RTCDataChannel>) -> Self {
         let next_time = Instant::now() + Duration::from_millis((random::<u32>() % 5000) as u64);
-        Self { dc, next_time }
+        Self {
+            dc,
+            next_time,
+            last_sent: None,
+        }
     }
 
-    fn set_next_time(&mut self) {
+    fn set_next_send_time(&mut self) {
         self.next_time = Instant::now() + Duration::from_millis((random::<u32>() % 5000) as u64);
+    }
+
+    fn is_delayed(&self) -> bool {
+        self.last_sent
+            .map(|then| {
+                let dur = Instant::now() - then;
+                dur.as_millis() >= 500
+            })
+            .unwrap_or_default()
     }
 }
 
-async fn run(quit: Arc<Notify>, mut cmd_ch: mpsc::UnboundedReceiver<Cmd>) {
+async fn run(
+    quit: Arc<Notify>,
+    mut cmd_ch: mpsc::UnboundedReceiver<Cmd>,
+    _event_ch: broadcast::Sender<EmittedEvents>,
+) {
     let mut peers: HashMap<DID, Peer> = HashMap::new();
 
     let mut msg_timer = tokio::time::interval_at(
@@ -182,9 +202,15 @@ async fn run(quit: Arc<Notify>, mut cmd_ch: mpsc::UnboundedReceiver<Cmd>) {
             },
             _ = msg_timer.tick() => {
                 let now = Instant::now();
-                for peer in peers.values_mut() {
+                for (id, peer) in peers.iter_mut() {
+                    if peer.is_delayed() {
+                        peer.last_sent.take();
+                        log::debug!("delay detected for peer {}", id);
+
+                    }
                     if peer.next_time <= now {
-                        peer.set_next_time();
+                        peer.last_sent.replace(Instant::now());
+                        peer.set_next_send_time();
                         let mut msg = Tof::default();
                         msg.stamp();
 
@@ -220,13 +246,19 @@ async fn run(quit: Arc<Notify>, mut cmd_ch: mpsc::UnboundedReceiver<Cmd>) {
                     let bytes = match serde_cbor::to_vec(&msg) {
                         Ok(r) => bytes::Bytes::from(r),
                         Err(e) => {
-                            log::error!("failed to serialze tof: {e}");
+                            log::error!("failed to serialize tof: {e}");
                             continue;
                         }
                     };
                     if let Err(e) = peer.dc.send(&bytes).await {
                         log::error!("failed to send tof: {e}");
                     }
+                }
+            }
+            Cmd::SendComplete { peer, msg } => {
+                log::trace!("{} {}", peer, msg);
+                if let Some(peer) = peers.get_mut(&peer) {
+                    peer.last_sent.take();
                 }
             }
         }
