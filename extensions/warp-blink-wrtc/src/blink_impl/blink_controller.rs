@@ -477,7 +477,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             host_media::controller::mute_self().await;
                             let call_id = data.info.call_id();
                             data.state.set_self_muted(true);
-                            let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
+                            let own_state = data.get_participant_state(own_id).unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
                             let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =
@@ -492,7 +492,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             host_media::controller::unmute_self().await;
                             let call_id = data.info.call_id();
                             data.state.set_self_muted(false);
-                            let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
+                            let own_state = data.get_participant_state(own_id).unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
                             let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =
@@ -507,7 +507,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             let call_id = data.info.call_id();
                             host_media::controller::deafen().await;
                             data.state.set_deafened(own_id, true);
-                            let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
+                            let own_state = data.get_participant_state(own_id).unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
                             let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =
@@ -522,7 +522,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             let call_id = data.info.call_id();
                             host_media::controller::undeafen().await;
                             data.state.set_deafened(own_id, false);
-                            let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
+                            let own_state = data.get_participant_state(own_id).unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&call_id);
                             let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =
@@ -555,7 +555,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             {
                                 Ok(_) => {
                                     data.state.set_self_recording(true);
-                                    let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
+                                    let own_state = data.get_participant_state(own_id).unwrap_or_default();
                                     let topic = ipfs_routes::call_signal_route(&info.call_id());
                                     let signal = CallSignal::Announce { participant_state: own_state };
                                     if let Err(e) =
@@ -577,7 +577,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                         if let Some(data) = call_data_map.get_active_mut() {
                             host_media::controller::pause_recording().await;
                             data.state.set_self_recording(false);
-                            let own_state = data.state.participants_joined.get(own_id).cloned().unwrap_or_default();
+                            let own_state = data.get_participant_state(own_id).unwrap_or_default();
                             let topic = ipfs_routes::call_signal_route(&data.info.call_id());
                             let signal = CallSignal::Announce { participant_state: own_state };
                             if let Err(e) =

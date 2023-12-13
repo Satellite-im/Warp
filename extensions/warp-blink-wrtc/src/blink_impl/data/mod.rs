@@ -5,7 +5,7 @@ use warp::{
     crypto::DID,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallData {
     pub info: CallInfo,
     pub state: CallState,
@@ -22,6 +22,10 @@ impl CallData {
 
     pub fn get_state(&self) -> CallState {
         self.state.clone()
+    }
+
+    pub fn get_participant_state(&self, id: &DID) -> Option<ParticipantState> {
+        self.state.participants_joined.get(id).cloned()
     }
 }
 
@@ -48,6 +52,7 @@ impl CallDataMap {
 
         let mut state = CallState::new(self.own_id.clone());
         state.add_participant(sender, ParticipantState::default());
+        state.add_participant(&self.own_id, ParticipantState::default());
         self.map.insert(call_id, CallData::new(info, state));
     }
 
@@ -117,30 +122,22 @@ impl CallDataMap {
         self.map.get(&id).map(|x| x.get_info())
     }
 
-    pub fn get_call_state(&self, id: Uuid) -> Option<CallState> {
-        self.map.get(&id).map(|x| x.get_state())
+    fn get_call_data(&self, call_id: Uuid) -> Option<CallData> {
+        self.map.get(&call_id).cloned()
     }
 
     pub fn get_own_state(&self) -> Option<ParticipantState> {
-        self.get_active().cloned().and_then(|data| {
-            data.get_state()
-                .participants_joined
-                .get(&self.own_id)
-                .cloned()
-        })
+        self.get_active()
+            .and_then(|data| data.get_participant_state(&self.own_id))
     }
 
     pub fn get_participant_state(&self, call_id: Uuid, peer_id: &DID) -> Option<ParticipantState> {
-        self.get_call_state(call_id)
-            .and_then(|state| state.participants_joined.get(peer_id).cloned())
+        self.get_call_data(call_id)
+            .and_then(|cd| cd.get_participant_state(peer_id))
     }
 
     pub fn insert(&mut self, id: Uuid, data: CallData) {
         self.map.insert(id, data);
-    }
-
-    pub fn get_call_config(&self, id: Uuid) -> Option<CallState> {
-        self.map.get(&id).map(|x| x.get_state())
     }
 
     pub fn leave_call(&mut self, call_id: Uuid) {

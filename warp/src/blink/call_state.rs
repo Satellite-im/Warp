@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::DID;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct CallState {
     pub own_id: DID,
     pub participants_joined: HashMap<DID, ParticipantState>,

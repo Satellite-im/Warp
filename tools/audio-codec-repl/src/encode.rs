@@ -30,7 +30,7 @@ pub fn f32_mp4(
     output_file_name: String,
 ) -> anyhow::Result<()> {
     // https://stackoverflow.com/questions/35177797/what-exactly-is-fragmented-mp4fmp4-how-is-it-different-from-normal-mp4
-    let output_file = File::create(&output_file_name)?;
+    let output_file = File::create(output_file_name)?;
     let mut writer = BufWriter::new(output_file);
 
     let ftyp = mp4::FtypBox {
@@ -268,7 +268,7 @@ pub fn f32_mp4(
         _ => opus::Channels::Stereo,
     };
     let mut packetizer = OpusPacketizer::init(args.frame_size, args.sample_rate, encoder_channels)?;
-    let mut input_file = File::open(&input_file_name)?;
+    let mut input_file = File::open(input_file_name)?;
     let mut sample_buf = [0_u8; 4];
 
     let mut counter = 0;
@@ -441,8 +441,8 @@ pub async fn f32_opus(
     let mut packetizer = OpusPacketizer::init(args.frame_size, args.sample_rate, encoder_channels)?;
     let mut decoder = opus::Decoder::new(decoded_sample_rate, decoder_channels)?;
 
-    let mut input_file = File::open(&input_file_name)?;
-    let mut output_file = File::create(&output_file_name)?;
+    let mut input_file = File::open(input_file_name)?;
+    let mut output_file = File::create(output_file_name)?;
     let mut sample_buf = [0_u8; 4];
 
     while let Ok(bytes_read) = input_file.read(&mut sample_buf) {

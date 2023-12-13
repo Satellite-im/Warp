@@ -5,8 +5,7 @@ pub struct AudioBuf {
 
 impl AudioBuf {
     pub fn new(frame_size: usize) -> Self {
-        let mut samples = Vec::new();
-        samples.reserve(frame_size);
+        let samples = Vec::with_capacity(frame_size);
         Self {
             samples,
             frame_size,
