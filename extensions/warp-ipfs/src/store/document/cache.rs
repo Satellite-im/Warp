@@ -299,7 +299,6 @@ impl IdentityCacheTask {
 
                 remove_pin_and_block.await?;
 
-
                 Ok(Some(old_document.clone()))
             }
             None => {
@@ -326,7 +325,6 @@ impl IdentityCacheTask {
                 let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
                 let old_cid = self.list.replace(cid);
-
 
                 if let Some(path) = self.path.as_ref() {
                     let cid = cid.to_string();
@@ -403,7 +401,6 @@ impl IdentityCacheTask {
         let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
         let old_cid = self.list.replace(cid);
-
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();

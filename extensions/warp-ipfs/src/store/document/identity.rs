@@ -9,7 +9,7 @@ use warp::{
 };
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all="lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum IdentityDocumentVersion {
     #[default]
     V0,
