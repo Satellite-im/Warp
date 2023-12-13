@@ -14,6 +14,8 @@ use crate::notify_wrapper::NotifyWrapper;
 
 use super::events::EmittedEvents;
 
+const ALLOWED_LATENCY_MS: i64 = 300;
+
 // time since 1/1/1970
 #[derive(Serialize, Deserialize, Debug, Default, Clone, Eq, PartialEq)]
 pub struct UnixTime {
@@ -85,6 +87,18 @@ impl Tof {
 
     pub fn ready(&self) -> bool {
         !self.t3.is_empty()
+    }
+
+    pub fn is_delayed(&self) -> bool {
+        let latency = if !self.t4.is_empty() {
+            (self.t4.sub(&self.t2) + self.t3.sub(&self.t1)) / 2
+        } else if !self.t3.is_empty() {
+            self.t3.sub(&self.t1)
+        } else {
+            0
+        };
+        // matches peer.is_delayed()
+        latency >= ALLOWED_LATENCY_MS
     }
 }
 
@@ -169,7 +183,7 @@ impl Peer {
         self.last_sent
             .map(|then| {
                 let dur = Instant::now() - then;
-                dur.as_millis() >= 300
+                dur.as_millis() >= ALLOWED_LATENCY_MS as _
             })
             .unwrap_or_default()
     }
@@ -178,7 +192,7 @@ impl Peer {
 async fn run(
     quit: Arc<Notify>,
     mut cmd_ch: mpsc::UnboundedReceiver<Cmd>,
-    _event_ch: broadcast::Sender<EmittedEvents>,
+    event_ch: broadcast::Sender<EmittedEvents>,
 ) {
     let mut peers: HashMap<DID, Peer> = HashMap::new();
 
@@ -206,7 +220,7 @@ async fn run(
                     if peer.is_delayed() {
                         peer.last_sent.take();
                         log::debug!("delay detected for peer {}", id);
-
+                        let _ = event_ch.send(EmittedEvents::AudioDegradation { peer: id.clone() });
                     }
                     if peer.next_time <= now {
                         peer.last_sent.replace(Instant::now());
@@ -255,10 +269,13 @@ async fn run(
                     }
                 }
             }
-            Cmd::SendComplete { peer, msg } => {
-                log::trace!("{} {}", peer, msg);
-                if let Some(peer) = peers.get_mut(&peer) {
-                    peer.last_sent.take();
+            Cmd::SendComplete { peer: peer_id, msg } => {
+                log::trace!("{} {}", peer_id, msg);
+                if let Some(peer) = peers.get_mut(&peer_id) {
+                    // clear last_sent an optionally emit an event
+                    if peer.last_sent.take().is_some() && msg.is_delayed() {
+                        let _ = event_ch.send(EmittedEvents::AudioDegradation { peer: peer_id });
+                    }
                 }
             }
         }
