@@ -42,9 +42,14 @@ pub struct Tof {
 impl std::fmt::Display for Tof {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if !self.t4.is_empty() {
-            write!(f, "Tof: {}ms", self.t4.sub(&self.t2))
+            write!(
+                f,
+                "Tof4-2: {}ms, Tof3-1: {}ms",
+                self.t4.sub(&self.t2),
+                self.t3.sub(&self.t1)
+            )
         } else if !self.t3.is_empty() {
-            write!(f, "Tof: {}ms", self.t3.sub(&self.t1))
+            write!(f, "Tof3-1: {}ms", self.t3.sub(&self.t1))
         } else {
             write!(f, "Tof: pending")
         }
