@@ -208,8 +208,13 @@ impl Controller {
         }
 
         if let Some(peer) = self.peers.get(peer_id) {
-            if let Err(e) = peer.connection.create_data_channel("rtt", None).await {
-                log::error!("failed to open datachannel for peer {}: {}", peer_id, e);
+            match peer.connection.create_data_channel("rtt", None).await {
+                Ok(dc) => {
+                    self.tof.add(peer.id.clone(), dc);
+                }
+                Err(e) => {
+                    log::error!("failed to open datachannel for peer {}: {}", peer_id, e);
+                }
             }
         }
 
