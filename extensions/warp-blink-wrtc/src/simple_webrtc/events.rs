@@ -55,6 +55,9 @@ pub enum EmittedEvents {
     /// and processing the output
     #[display(fmt = "TrackAdded")]
     TrackAdded { peer: DID, track: Arc<TrackRemote> },
+
+    #[display(fmt = "AudioDegradation")]
+    AudioDegradation { peer: DID },
 }
 
 // needed because RTcDAtaChannel doesn't implement Debug

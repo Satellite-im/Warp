@@ -169,7 +169,7 @@ impl Peer {
         self.last_sent
             .map(|then| {
                 let dur = Instant::now() - then;
-                dur.as_millis() >= 500
+                dur.as_millis() >= 300
             })
             .unwrap_or_default()
     }

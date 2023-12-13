@@ -685,6 +685,9 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                     }
                 };
                 match event {
+                    simple_webrtc::events::EmittedEvents::AudioDegradation { peer } => {
+                        let _ = ui_event_ch.send(BlinkEventKind::AudioDegradation { peer_id: peer });
+                    }
                     simple_webrtc::events::EmittedEvents::Ice { dest, candidate } => {
                         if let Some(data) = call_data_map.get_active() {
                               let topic = ipfs_routes::peer_signal_route(&dest, &data.info.call_id());
