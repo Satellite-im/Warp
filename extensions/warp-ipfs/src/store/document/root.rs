@@ -580,8 +580,7 @@ impl RootDocumentTask {
     async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
         let mut root = self.get_root_document().await?;
         let mut identity = self.identity().await?;
-        identity.status = Some(status);
-
+        identity.metadata.status = Some(status);
         let identity = identity.sign(&self.keypair)?;
         root.identity = self.ipfs.dag().put().serialize(identity)?.await?;
 

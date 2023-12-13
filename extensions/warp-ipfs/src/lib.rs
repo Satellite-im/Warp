@@ -788,20 +788,20 @@ impl MultiPass for WarpIpfs {
 
                 debug!("Image cid: {cid}");
 
-                if let Some(picture_cid) = identity.profile_picture {
+                if let Some(picture_cid) = identity.metadata.profile_picture {
                     if picture_cid == cid {
                         debug!("Picture is already on document. Not updating identity");
                         return Ok(());
                     }
 
-                    if let Some(banner_cid) = identity.profile_banner {
+                    if let Some(banner_cid) = identity.metadata.profile_banner {
                         if picture_cid != banner_cid {
                             old_cid = Some(picture_cid);
                         }
                     }
                 }
 
-                identity.profile_picture = Some(cid);
+                identity.metadata.profile_picture = Some(cid);
                 store.identity_update(identity).await?;
             }
             IdentityUpdate::PicturePath(path) => {
@@ -863,24 +863,24 @@ impl MultiPass for WarpIpfs {
 
                 debug!("Image cid: {cid}");
 
-                if let Some(picture_cid) = identity.profile_picture {
+                if let Some(picture_cid) = identity.metadata.profile_picture {
                     if picture_cid == cid {
                         debug!("Picture is already on document. Not updating identity");
                         return Ok(());
                     }
 
-                    if let Some(banner_cid) = identity.profile_banner {
+                    if let Some(banner_cid) = identity.metadata.profile_banner {
                         if picture_cid != banner_cid {
                             old_cid = Some(picture_cid);
                         }
                     }
                 }
 
-                identity.profile_picture = Some(cid);
+                identity.metadata.profile_picture = Some(cid);
                 store.identity_update(identity).await?;
             }
             IdentityUpdate::ClearPicture => {
-                let document = identity.profile_picture.take();
+                let document = identity.metadata.profile_picture.take();
                 if let Some(cid) = document {
                     old_cid = Some(cid);
                 }
@@ -927,20 +927,20 @@ impl MultiPass for WarpIpfs {
 
                 debug!("Image cid: {cid}");
 
-                if let Some(banner_cid) = identity.profile_banner {
+                if let Some(banner_cid) = identity.metadata.profile_banner {
                     if banner_cid == cid {
                         debug!("Banner is already on document. Not updating identity");
                         return Ok(());
                     }
 
-                    if let Some(picture_cid) = identity.profile_picture {
+                    if let Some(picture_cid) = identity.metadata.profile_picture {
                         if picture_cid != banner_cid {
                             old_cid = Some(banner_cid);
                         }
                     }
                 }
 
-                identity.profile_banner = Some(cid);
+                identity.metadata.profile_banner = Some(cid);
                 store.identity_update(identity).await?;
             }
             IdentityUpdate::BannerPath(path) => {
@@ -1002,24 +1002,24 @@ impl MultiPass for WarpIpfs {
 
                 debug!("Image cid: {cid}");
 
-                if let Some(banner_cid) = identity.profile_banner {
+                if let Some(banner_cid) = identity.metadata.profile_banner {
                     if banner_cid == cid {
                         debug!("Banner is already on document. Not updating identity");
                         return Ok(());
                     }
 
-                    if let Some(picture_cid) = identity.profile_picture {
+                    if let Some(picture_cid) = identity.metadata.profile_picture {
                         if picture_cid != banner_cid {
                             old_cid = Some(banner_cid);
                         }
                     }
                 }
 
-                identity.profile_banner = Some(cid);
+                identity.metadata.profile_banner = Some(cid);
                 store.identity_update(identity).await?;
             }
             IdentityUpdate::ClearBanner => {
-                let document = identity.profile_banner.take();
+                let document = identity.metadata.profile_banner.take();
                 if let Some(cid) = document {
                     old_cid = Some(cid);
                 }
