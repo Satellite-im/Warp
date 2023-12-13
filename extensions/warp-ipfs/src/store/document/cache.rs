@@ -277,6 +277,13 @@ impl IdentityCacheTask {
 
                 let old_cid = self.list.replace(cid);
 
+                if let Some(path) = self.path.as_ref() {
+                    let cid = cid.to_string();
+                    if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
+                        tracing::error!("Error writing cid to file: {e}");
+                    }
+                }
+
                 let remove_pin_and_block = async {
                     if let Some(old_cid) = old_cid {
                         if old_cid != cid {
@@ -292,12 +299,6 @@ impl IdentityCacheTask {
 
                 remove_pin_and_block.await?;
 
-                if let Some(path) = self.path.as_ref() {
-                    let cid = cid.to_string();
-                    if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
-                        tracing::error!("Error writing cid to file: {e}");
-                    }
-                }
 
                 Ok(Some(old_document.clone()))
             }
@@ -326,6 +327,14 @@ impl IdentityCacheTask {
 
                 let old_cid = self.list.replace(cid);
 
+
+                if let Some(path) = self.path.as_ref() {
+                    let cid = cid.to_string();
+                    if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
+                        tracing::error!("Error writing cid to file: {e}");
+                    }
+                }
+
                 if let Some(old_cid) = old_cid {
                     if old_cid != cid {
                         if self.ipfs.is_pinned(&old_cid).await? {
@@ -333,13 +342,6 @@ impl IdentityCacheTask {
                         }
                         // Do we want to remove the old block?
                         self.ipfs.remove_block(old_cid, false).await?;
-                    }
-                }
-
-                if let Some(path) = self.path.as_ref() {
-                    let cid = cid.to_string();
-                    if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
-                        tracing::error!("Error writing cid to file: {e}");
                     }
                 }
 
@@ -402,6 +404,14 @@ impl IdentityCacheTask {
 
         let old_cid = self.list.replace(cid);
 
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
+                tracing::error!("Error writing cid to file: {e}");
+            }
+        }
+
         if let Some(old_cid) = old_cid {
             if cid != old_cid {
                 if self.ipfs.is_pinned(&old_cid).await? {
@@ -409,13 +419,6 @@ impl IdentityCacheTask {
                 }
                 // Do we want to remove the old block?
                 self.ipfs.remove_block(old_cid, false).await?;
-            }
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
-                tracing::error!("Error writing cid to file: {e}");
             }
         }
 
