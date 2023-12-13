@@ -16,7 +16,6 @@ bytes = { workspace = true }
 # the mp4 crate uses byteorder
 byteorder = "*"
 bs58 = { workspace = true }
-chrono = { workspace = true }
 derive_more = { workspace = true }
 futures = { workspace = true }
 rust-ipfs = { workspace = true }
