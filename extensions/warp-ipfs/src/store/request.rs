@@ -57,7 +57,13 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
-        serde_json::from_slice(data).map_err(Error::from)
+        let payload: Self = serde_json::from_slice(data)?;
+        payload.verify()?;
+        Ok(payload)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
+        serde_json::to_vec(self).map_err(Error::from)
     }
 
     #[inline]
@@ -143,6 +149,14 @@ impl<M> PayloadRequest<M> {
         self.on_behalf.unwrap_or(self.sender)
     }
 
+    pub fn original_sender(&self) -> PeerId {
+        self.sender
+    }
+
+    pub fn cosigner(&self) -> Option<PeerId> {
+        self.on_behalf
+    }
+
     pub fn message(&self) -> &M {
         &self.message
     }
@@ -167,6 +181,7 @@ mod test {
         let payload = PayloadRequest::new(&keypair, None, data)?;
         assert_eq!(payload.sender(), keypair.public().to_peer_id());
         payload.verify()?;
+        assert_eq!(payload.message(), "Request");
 
         Ok(())
     }
@@ -182,6 +197,23 @@ mod test {
         assert_ne!(payload.sender(), keypair.public().to_peer_id());
         assert_eq!(payload.sender(), cosigner_keypair.public().to_peer_id());
         payload.verify()?;
+        assert_eq!(payload.message(), "Request");
+
+        Ok(())
+    }
+
+    #[test]
+    fn payload_serde() -> anyhow::Result<()> {
+        let data = String::from("Request");
+        let keypair = Keypair::generate_ed25519();
+
+        let payload = PayloadRequest::new(&keypair, None, data)?;
+        assert_eq!(payload.sender(), keypair.public().to_peer_id());
+        payload.verify()?;
+
+        let bytes = payload.to_bytes()?;
+        let de_payload: PayloadRequest<String> = PayloadRequest::from_bytes(&bytes)?;
+        assert_eq!(de_payload.message(), "Request");
 
         Ok(())
     }
