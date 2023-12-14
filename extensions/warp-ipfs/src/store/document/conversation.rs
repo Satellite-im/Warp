@@ -365,16 +365,16 @@ impl ConversationTask {
 
         self.ipfs.insert_pin(&cid, true).await?;
 
-        if let Some(old_cid) = old_map_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                self.ipfs.remove_pin(&old_cid, true).await?;
-            }
-        }
-
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             if let Err(e) = tokio::fs::write(path.join(".message_id"), cid).await {
                 tracing::error!("Error writing to '.message_id': {e}.")
+            }
+        }
+
+        if let Some(old_cid) = old_map_cid {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                self.ipfs.remove_pin(&old_cid, true).await?;
             }
         }
 
