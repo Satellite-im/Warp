@@ -3,7 +3,7 @@ use std::sync::Arc;
 use futures::stream::BoxStream;
 use warp::crypto::DID;
 use webrtc::{
-    data_channel::RTCDataChannel, ice_transport::ice_candidate::RTCIceCandidate,
+    ice_transport::ice_candidate::RTCIceCandidate,
     peer_connection::sdp::session_description::RTCSessionDescription,
     track::track_remote::TrackRemote,
 };
@@ -56,19 +56,8 @@ pub enum EmittedEvents {
     #[display(fmt = "TrackAdded")]
     TrackAdded { peer: DID, track: Arc<TrackRemote> },
 
-    #[display(fmt = "DataChannelOpened")]
-    DataChannelCreated {
-        peer: DID,
-        data_channel: Arc<RTCDataChannel>,
-    },
-    #[display(fmt = "DataChannelClosed")]
-    DataChannelClosed { peer: DID },
-    #[display(fmt = "DataChannelOpened")]
-    DataChannelOpened { peer: DID },
-    // todo: when a track is removed, does the RTCPeerConnectionState::Disconnected event fire?
-    // it appears that WebRTC doesn't emit an event for this. perhaps the track is automatically
-    // closed on the remote side when the local side calls `remove_track`
-    // TrackRemoved,
+    #[display(fmt = "AudioDegradation")]
+    AudioDegradation { peer: DID },
 }
 
 // needed because RTcDAtaChannel doesn't implement Debug
