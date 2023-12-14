@@ -556,6 +556,13 @@ impl RootDocumentTask {
 
         let old_cid = self.cid.replace(root_cid);
 
+        if let Some(path) = self.path.as_ref() {
+            let cid = root_cid.to_string();
+            if let Err(e) = tokio::fs::write(path.join(".id"), cid).await {
+                tracing::error!("Error writing to '.id': {e}.")
+            }
+        }
+
         if let Some(old_cid) = old_cid {
             if old_cid != root_cid {
                 if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
@@ -564,13 +571,6 @@ impl RootDocumentTask {
                     }
                 }
                 _ = self.ipfs.remove_block(old_cid, false).await;
-            }
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = root_cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".id"), cid).await {
-                tracing::error!("Error writing to '.id': {e}.")
             }
         }
 

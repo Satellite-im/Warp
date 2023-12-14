@@ -206,6 +206,12 @@ impl FileStore {
 
         let last_cid = self.index_cid.write().replace(*cid);
 
+        if let Some(path) = self.config.path.as_ref() {
+            if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
+                tracing::error!(cid = %cid, "Error writing index: {_e}");
+            }
+        }
+
         if let Some(last_cid) = last_cid {
             if *cid != last_cid {
                 if self.ipfs.is_pinned(&last_cid).await? {
@@ -215,13 +221,8 @@ impl FileStore {
                 }
 
                 tracing::info!(cid = %last_cid, "Removing block");
-                self.ipfs.remove_block(last_cid, true).await?;
-            }
-        }
-
-        if let Some(path) = self.config.path.as_ref() {
-            if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
-                tracing::error!(cid = %cid, "Error writing index: {_e}");
+                let b = self.ipfs.remove_block(last_cid, true).await?;
+                tracing::info!(cid = %last_cid, amount_removed = b.len(), "Blocks removed");
             }
         }
 
