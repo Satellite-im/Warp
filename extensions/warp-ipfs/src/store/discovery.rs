@@ -389,7 +389,7 @@ impl DiscoveryEntry {
                 }
                 loop {
                     if ipfs.is_connected(peer_id).await.unwrap_or_default() {
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        tokio::time::sleep(Duration::from_secs(10)).await;
                         continue;
                     }
 
@@ -428,7 +428,7 @@ impl DiscoveryEntry {
 
                             if let Err(_e) = ipfs.connect(opts).await {
                                 tracing::error!("Error connecting to {peer_id}: {_e}");
-                                tokio::time::sleep(Duration::from_secs(10)).await;
+                                tokio::time::sleep(Duration::from_secs(60)).await;
                                 continue;
                             }
                         }
@@ -454,7 +454,7 @@ impl DiscoveryEntry {
                         }
                     }
 
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    tokio::time::sleep(Duration::from_secs(10)).await;
                 }
             }
         });
