@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
-use crate::{constellation::file::FileType, crypto::DID};
+use crate::{constellation::file::FileType, crypto::DID, error::Error};
+
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -154,6 +155,17 @@ impl Relationship {
     Default, Hash, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Ord,
 )]
 pub struct ShortId([u8; SHORT_ID_SIZE]);
+
+impl TryFrom<String> for ShortId {
+    type Error = Error;
+    fn try_from(short_id: String) -> Result<Self, Self::Error> {
+        let bytes = short_id.as_bytes();
+        let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
+            .try_into()
+            .map_err(|_| Error::InvalidPublicKeyLength)?;
+        Ok(ShortId::from(short_id))
+    }
+}
 
 impl core::ops::Deref for ShortId {
     type Target = [u8; SHORT_ID_SIZE];

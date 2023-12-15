@@ -1,15 +1,21 @@
 [package]
-name = "warp-ipfs"
-version = "0.1.0"
-edition = "2021"
+name = "shuttle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
 
-[lib]
-crate-type = ["cdylib", "rlib", "staticlib"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+# redb_store = ["rust-ipfs/redb_data_store"]
 
 [dependencies]
 warp.workspace = true
 
-rust-ipfs.workspace = true
+rust-ipfs = { workspace = true }
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 tokio = { workspace = true, features = ["full"] }
@@ -23,36 +29,18 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 either = { workspace = true, features = ["serde"] }
-bs58 = "0.4"
 
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 chrono = { workspace = true, features = ["serde"] }
 
 void.workspace = true
 
-image = { workspace = true }
-derive_more.workspace = true
-mediatype.workspace = true
+clap = { version = "4.4", features = ["derive"] }
+zeroize = "1"
+dotenv = "0.15"
+base64 = "0.21"
 
-bincode.workspace = true
-bayespam = "1.1.0"
-bytes.workspace = true
-
-shuttle = { path = "../../tools/shuttle", default-features = false }
-
-[dev-dependencies]
-fdlimit = "0.3"
-rustyline-async = "0.4"
-comfy-table = "7.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
-
-clap = { version = "4.0", features = ["derive"] }
-
-rpassword = "7.3"
-
-
-[features]
-default = []
-build-header = []
+bs58 = "0.4"

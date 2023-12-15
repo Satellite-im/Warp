@@ -65,10 +65,10 @@ use warp::multipass::{
     MultiPass, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 
-use crate::config::Bootstrap;
+use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
+use crate::store::ecdh_decrypt;
 use crate::store::phonebook::PhoneBook;
-use crate::store::{ecdh_decrypt, ecdh_encrypt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
@@ -228,8 +228,19 @@ impl WarpIpfs {
         }
 
         let (pb_tx, pb_rx) = channel(50);
+        let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
+
+        let (enable, nodes) = match &config.store_setting.discovery {
+            config::Discovery::Shuttle { addresses } => (true, addresses.clone()),
+            _ => Default::default(),
+        };
 
         let behaviour = behaviour::Behaviour {
+            shuttle_identity: enable
+                .then_some(shuttle::identity::client::Behaviour::new(
+                    &keypair, None, id_sh_rx, nodes,
+                ))
+                .into(),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
 
@@ -273,7 +284,13 @@ impl WarpIpfs {
             uninitialized = uninitialized.set_path(path);
         }
 
-        if config.store_setting.discovery != config::Discovery::None {
+        if matches!(
+            config.store_setting.discovery,
+            config::Discovery::Namespace {
+                discovery_type: DiscoveryType::DHT,
+                ..
+            }
+        ) {
             uninitialized = uninitialized.with_kademlia(
                 Some(either::Either::Left(KadConfig {
                     query_timeout: std::time::Duration::from_secs(60),
@@ -417,13 +434,24 @@ impl WarpIpfs {
         }
 
         if config.ipfs_setting.dht_client
-            && config.store_setting.discovery != config::Discovery::None
+            && matches!(
+                config.store_setting.discovery,
+                config::Discovery::Namespace {
+                    discovery_type: DiscoveryType::DHT,
+                    ..
+                }
+            )
         {
             ipfs.dht_mode(DhtMode::Client).await?;
         }
 
-        if config.store_setting.discovery != config::Discovery::None
-            && config.ipfs_setting.bootstrap
+        if matches!(
+            config.store_setting.discovery,
+            config::Discovery::Namespace {
+                discovery_type: DiscoveryType::DHT,
+                ..
+            }
+        ) && config.ipfs_setting.bootstrap
             && !empty_bootstrap
         {
             tokio::spawn({
@@ -462,6 +490,27 @@ impl WarpIpfs {
             })
             .collect::<Vec<_>>();
 
+        if let config::Discovery::Namespace {
+            discovery_type: DiscoveryType::RzPoint { addresses },
+            ..
+        } = &config.store_setting.discovery
+        {
+            for mut addr in addresses.iter().cloned() {
+                let Some(peer_id) = addr.extract_peer_id() else {
+                    continue;
+                };
+
+                if let Err(e) = ipfs.add_peer(peer_id, addr).await {
+                    error!("Error adding peer to address book {e}");
+                    continue;
+                }
+
+                if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
+                    let _ = ipfs.connect(peer_id).await;
+                }
+            }
+        }
+
         let discovery = Discovery::new(
             ipfs.clone(),
             config.store_setting.discovery.clone(),
@@ -479,8 +528,10 @@ impl WarpIpfs {
             phonebook,
             &config,
             discovery.clone(),
+            id_sh_tx,
         )
         .await?;
+
         info!("Identity initialized");
 
         *self.identity_store.write() = Some(identity_store.clone());
@@ -1090,32 +1141,54 @@ impl MultiPassImportExport for WarpIpfs {
             }
             IdentityImportOption::Locate {
                 location: ImportLocation::Remote,
-                ..
-            } => return Err(Error::Unimplemented),
+                passphrase,
+            } => {
+                let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
+                let bytes = Zeroizing::new(keypair.private_key_bytes());
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut self.tesseract,
+                    &passphrase,
+                    None,
+                    self.config.save_phrase,
+                    false,
+                )?;
+
+                self.init_ipfs(
+                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                        .map_err(|_| Error::PrivateKeyInvalid)?,
+                )
+                .await?;
+
+                let mut store = self.identity_store(false).await?;
+
+                let package = store.import_identity_remote(keypair.clone()).await?;
+                let decrypted_bundle = ecdh_decrypt(&keypair, None, package)?;
+                let exported_document =
+                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+
+                exported_document.verify()?;
+                return store.import_identity(exported_document).await;
+            }
         }
     }
 
     async fn export_identity<'a>(&mut self, location: ImportLocation<'a>) -> Result<(), Error> {
         let store = self.identity_store(true).await?;
-        let kp = store.get_keypair_did()?;
-        let ipfs = self.ipfs()?;
-        let document = store.root_document().get().await?;
-
-        let exported = document.export(&ipfs).await?;
-
-        let bytes = serde_json::to_vec(&exported)?;
-        let encrypted_bundle = ecdh_encrypt(&kp, None, bytes)?;
 
         match location {
             ImportLocation::Local { path } => {
-                tokio::fs::write(path, encrypted_bundle).await?;
+                let bundle = store.root_document().export_bytes().await?;
+                tokio::fs::write(path, bundle).await?;
                 Ok(())
             }
             ImportLocation::Memory { buffer } => {
-                *buffer = encrypted_bundle;
+                *buffer = store.root_document().export_bytes().await?;
                 Ok(())
             }
-            ImportLocation::Remote => return Err(Error::Unimplemented),
+            ImportLocation::Remote => {
+                store.export_root_document().await?;
+                Ok(())
+            }
         }
     }
 }

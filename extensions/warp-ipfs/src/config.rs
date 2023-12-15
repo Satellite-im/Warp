@@ -1,7 +1,8 @@
-use ipfs::Multiaddr;
+use ipfs::{Multiaddr, PeerId};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
@@ -53,7 +54,10 @@ pub enum Bootstrap {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
-    /// Uses DHT PROVIDER to find and connect to peers using the same context
+    Shuttle {
+        addresses: HashMap<PeerId, HashSet<Multiaddr>>,
+    },
+    /// Uses to find and connect to peers using the same namespace
     Namespace {
         namespace: Option<String>,
         discovery_type: DiscoveryType,
@@ -201,6 +205,19 @@ pub type DefaultPfpFn = std::sync::Arc<
     dyn Fn(&Identity) -> Result<(Vec<u8>, FileType), std::io::Error> + Send + Sync + 'static,
 >;
 
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub enum StoreOffline {
+    Remote,
+    Local {
+        path: PathBuf,
+    },
+    RemoteAndLocal {
+        path: PathBuf,
+    },
+    #[default]
+    None,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     /// Allow only interactions with `MultiPass` friends
@@ -214,6 +231,13 @@ pub struct StoreSetting {
     pub auto_push: Option<Duration>,
     /// Discovery type
     pub discovery: Discovery,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// Placeholder for a offline agents to obtain information regarding one own identity
+    pub offline_agent: Vec<Multiaddr>,
+    /// Export account on update
+    pub store_offline: StoreOffline,
+
     /// Fetch data over bitswap instead of pubsub
     pub fetch_over_bitswap: bool,
     /// Enables sharing platform (Desktop, Mobile, Web) information to another user
@@ -236,18 +260,6 @@ pub struct StoreSetting {
     pub default_profile_picture: Option<DefaultPfpFn>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SynchronizeType {
-    /// Export locally to a file
-    Local { path: PathBuf },
-    /// Export remotely to a service
-    Remote,
-    /// Export locally and remotely
-    RemoteLocal { path: PathBuf },
-    /// Dont export
-    None,
-}
-
 impl std::fmt::Debug for StoreSetting {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StoreSetting").finish()
@@ -262,6 +274,10 @@ impl Default for StoreSetting {
                 namespace: None,
                 discovery_type: Default::default(),
             },
+
+            offline_agent: Vec::new(),
+            store_offline: StoreOffline::None,
+
             fetch_over_bitswap: false,
             share_platform: false,
             friend_request_response_duration: None,
@@ -294,7 +310,6 @@ pub struct Config {
     pub chunking: Option<usize>,
     pub thumbnail_task: bool,
     pub thumbnail_exact_format: bool,
-    pub synchronize_type: SynchronizeType,
 }
 
 impl Default for Config {
@@ -321,7 +336,6 @@ impl Default for Config {
             chunking: None,
             thumbnail_task: false,
             thumbnail_exact_format: true,
-            synchronize_type: SynchronizeType::None,
         }
     }
 }

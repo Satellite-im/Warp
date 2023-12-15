@@ -15,7 +15,7 @@ use tokio::{
 };
 use warp::{crypto::DID, error::Error};
 
-use crate::config::{self, Discovery as DiscoveryConfig, DiscoveryType};
+use crate::config::{Discovery as DiscoveryConfig, DiscoveryType};
 
 use super::{did_to_libp2p_pub, DidExt, PeerIdExt, PeerType};
 
@@ -225,6 +225,7 @@ impl Discovery {
 
                 *self.task.write().await = Some(task);
             }
+            DiscoveryConfig::Shuttle { addresses: _ } => {}
             _ => {}
         }
         Ok(())
@@ -388,50 +389,57 @@ impl DiscoveryEntry {
                     }
                 }
                 loop {
-                    if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
-                        match entry.config {
-                            // Used for provider. Doesnt do anything right now
-                            // TODO: Maybe have separate provider query in case
-                            //       Discovery task isnt enabled?
-                            DiscoveryConfig::Namespace {
-                                discovery_type: DiscoveryType::DHT,
-                                ..
-                            } => {}
-                            DiscoveryConfig::Namespace {
-                                discovery_type: DiscoveryType::RzPoint { .. },
-                                ..
-                            } => {
-                                let opts = DialOpts::peer_id(peer_id).build();
+                    if ipfs.is_connected(peer_id).await.unwrap_or_default() {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+
+                    match entry.config {
+                        // Used for provider. Doesnt do anything right now
+                        // TODO: Maybe have separate provider query in case
+                        //       Discovery task isnt enabled?
+                        DiscoveryConfig::Namespace {
+                            discovery_type: DiscoveryType::DHT,
+                            ..
+                        } => {}
+                        DiscoveryConfig::Namespace {
+                            discovery_type: DiscoveryType::RzPoint { .. },
+                            ..
+                        } => {
+                            let opts = DialOpts::peer_id(peer_id).build();
+
+                            tracing::debug!("Dialing {peer_id}");
+
+                            if let Err(_e) = ipfs.connect(opts).await {
+                                tracing::error!("Error connecting to {peer_id}: {_e}");
+                                tokio::time::sleep(Duration::from_secs(10)).await;
+                                continue;
+
+                            }
+                        }
+                        // Check over DHT
+                        DiscoveryConfig::Direct => {
+                            tokio::select! {
+                                _ = timer.tick() => {
+                                    let _ = entry.ipfs.identity(Some(peer_id)).await.ok();
+                                }
+                                _ = async {} => {}
+                            }
+                        }
+                        //TODO: Possibly obtain peer records from external node
+                        //      of any connected peer, otherwise await on a response for
+                        //      those records to establish a connection
+                        DiscoveryConfig::Shuttle { .. } | DiscoveryConfig::None => {
+                            let opts = DialOpts::peer_id(peer_id)
+                                .addresses(entry.relays.clone())
+                                .build();
 
                                 tracing::debug!("Dialing {peer_id}");
 
-                                if let Err(_e) = ipfs.connect(opts).await {
-                                    tracing::error!("Error connecting to {peer_id}: {_e}");
-                                    tokio::time::sleep(Duration::from_secs(10)).await;
-                                    continue;
-                                }
-                            }
-                            // Check over DHT
-                            DiscoveryConfig::Direct => {
-                                tokio::select! {
-                                    _ = timer.tick() => {
-                                        let _ = entry.ipfs.identity(Some(peer_id)).await.ok();
-                                    }
-                                    _ = async {} => {}
-                                }
-                            }
-                            config::Discovery::None => {
-                                let opts = DialOpts::peer_id(peer_id)
-                                    .addresses(entry.relays.clone())
-                                    .build();
-
-                                tracing::debug!("Dialing {peer_id}");
-
-                                if let Err(_e) = ipfs.connect(opts).await {
-                                    tracing::error!("Error connecting to {peer_id}: {_e}");
-                                    tokio::time::sleep(Duration::from_secs(10)).await;
-                                    continue;
-                                }
+                            if let Err(_e) = ipfs.connect(opts).await {
+                                tracing::error!("Error connecting to {peer_id}: {_e}");
+                                tokio::time::sleep(Duration::from_secs(10)).await;
+                                continue;
                             }
                         }
                     }

@@ -7,13 +7,20 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 
-use futures::{channel::oneshot, stream::SelectAll, StreamExt};
+use futures::{
+    channel::oneshot::{self, Canceled},
+    stream::SelectAll,
+    SinkExt, StreamExt,
+};
+
 use ipfs::{Ipfs, Keypair};
+
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
+use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -50,6 +57,7 @@ use super::{
     request::PayloadRequest,
 };
 
+#[allow(clippy::type_complexity)]
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct IdentityStore {
@@ -74,6 +82,8 @@ pub struct IdentityStore {
     config: config::Config,
 
     tesseract: Tesseract,
+
+    identity_command: futures::channel::mpsc::Sender<shuttle::identity::client::IdentityCommand>,
 
     event: EventSubscription<MultiPassEventKind>,
 }
@@ -172,6 +182,59 @@ pub struct RequestResponsePayload {
     pub created: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<Vec<u8>>,
+}
+
+impl TryFrom<RequestResponsePayload> for RequestPayload {
+    type Error = Error;
+    fn try_from(req: RequestResponsePayload) -> Result<Self, Self::Error> {
+        req.verify()?;
+        let event = match req.event {
+            Event::Request => RequestEvent::Request,
+            Event::Accept => RequestEvent::Accept,
+            Event::Remove => RequestEvent::Remove,
+            Event::Reject => RequestEvent::Reject,
+            Event::Retract => RequestEvent::Retract,
+            Event::Block => RequestEvent::Block,
+            Event::Unblock => RequestEvent::Unblock,
+            Event::Response => return Err(Error::OtherWithContext("Invalid event type".into())),
+        };
+
+        let payload = RequestPayload {
+            sender: req.sender,
+            event,
+            created: req.created.ok_or(Error::InvalidConversion)?,
+            original_signature: req.signature.ok_or(Error::InvalidSignature)?,
+            signature: vec![],
+        };
+
+        Ok(payload)
+    }
+}
+
+impl TryFrom<RequestPayload> for RequestResponsePayload {
+    type Error = Box<dyn std::error::Error>;
+    fn try_from(req: RequestPayload) -> Result<Self, Self::Error> {
+        req.verify()?;
+        let event = match req.event {
+            RequestEvent::Request => Event::Request,
+            RequestEvent::Accept => Event::Accept,
+            RequestEvent::Remove => Event::Remove,
+            RequestEvent::Reject => Event::Reject,
+            RequestEvent::Retract => Event::Retract,
+            RequestEvent::Block => Event::Block,
+            RequestEvent::Unblock => Event::Unblock,
+        };
+
+        let payload = RequestResponsePayload {
+            version: RequestResponsePayloadVersion::V1,
+            sender: req.sender,
+            event,
+            created: Some(req.created),
+            signature: Some(req.original_signature),
+        };
+
+        Ok(payload)
+    }
 }
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Hash, Eq)]
@@ -287,6 +350,8 @@ impl std::fmt::Debug for ResponseOption {
 }
 
 impl IdentityStore {
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ipfs: Ipfs,
         path: Option<PathBuf>,
@@ -295,6 +360,9 @@ impl IdentityStore {
         phonebook: PhoneBook,
         config: &config::Config,
         discovery: Discovery,
+        identity_command: futures::channel::mpsc::Sender<
+            shuttle::identity::client::IdentityCommand,
+        >,
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
             if !path.exists() {
@@ -320,7 +388,7 @@ impl IdentityStore {
 
         let signal = Default::default();
 
-        let store = Self {
+        let mut store = Self {
             ipfs,
             root_document,
             identity_cache,
@@ -328,6 +396,7 @@ impl IdentityStore {
             config,
             tesseract,
             event,
+            identity_command,
             did_key,
             queue,
             phonebook,
@@ -336,6 +405,19 @@ impl IdentityStore {
 
         if let Ok(ident) = store.own_identity().await {
             tracing::info!(did = %ident.did_key(), "Identity loaded");
+            match store.is_registered().await.is_ok() {
+                true => {
+                    if let Err(_e) = store.fetch_mailbox().await {
+                        //TODO:
+                    }
+                }
+                false => {
+                    let id = store.own_identity_document().await.expect("Valid identity");
+                    if let Err(e) = store.register(&id).await {
+                        tracing::warn!(%id.did, "Unable to register identity: {e}");
+                    }
+                }
+            }
         }
 
         let did = store.get_keypair_did()?;
@@ -553,7 +635,7 @@ impl IdentityStore {
     #[tracing::instrument(skip(self, data, signal))]
     async fn check_request_message(
         &mut self,
-        did: &DID,
+        _: &DID,
         data: RequestResponsePayload,
         signal: &mut Option<oneshot::Sender<Result<(), Error>>>,
     ) -> Result<(), Error> {
@@ -656,6 +738,8 @@ impl IdentityStore {
 
                     self.root_document.add_request(&req).await?;
 
+                    _ = self.export_root_document().await;
+
                     if self.identity_cache.get(&from).await.is_err() {
                         // Attempt to send identity request to peer if identity is not available locally.
                         if let Err(e) = self.request(&from, RequestOption::Identity).await {
@@ -684,6 +768,8 @@ impl IdentityStore {
 
                 self.root_document.remove_request(&internal_request).await?;
 
+                _ = self.export_root_document().await;
+
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
                     did: data.sender,
                 })
@@ -705,6 +791,8 @@ impl IdentityStore {
                     .ok_or(Error::FriendRequestDoesntExist)?;
 
                 self.root_document.remove_request(&internal_request).await?;
+
+                _ = self.export_root_document().await;
 
                 self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
                     did: data.sender,
@@ -737,6 +825,8 @@ impl IdentityStore {
 
                 let completed = self.root_document.add_block_by(&sender).await.is_ok();
                 if completed {
+                    _ = self.export_root_document().await;
+
                     let _ = futures::join!(
                         self.push(&sender),
                         self.request(&sender, RequestOption::Identity)
@@ -756,6 +846,8 @@ impl IdentityStore {
                 let completed = self.root_document.remove_block_by(&sender).await.is_ok();
 
                 if completed {
+                    _ = self.export_root_document().await;
+
                     let _ = futures::join!(
                         self.push(&sender),
                         self.request(&sender, RequestOption::Identity)
@@ -1071,13 +1163,13 @@ impl IdentityStore {
                 identity.verify()?;
 
                 if let Ok(own_id) = self.own_identity().await {
-                    anyhow::ensure!(
-                        own_id.did_key() != identity.did,
-                        "Cannot accept own identity"
-                    );
+                    if own_id.did_key() == identity.did {
+                        tracing::warn!(did = %identity.did, "Cannot accept own identity");
+                        return Ok(());
+                    }
                 }
 
-                if !self.discovery.contains(&identity.did).await {
+                if !exclude_images && !self.discovery.contains(&identity.did).await {
                     if let Err(e) = self.discovery.insert(&identity.did).await {
                         tracing::warn!("Error inserting into discovery service: {e}");
                     }
@@ -1472,6 +1564,16 @@ impl IdentityStore {
             }
         }
 
+        match self.is_registered().await.is_ok() {
+            true => if let Err(_e) = self.fetch_mailbox().await {},
+            false => {
+                let id = self.own_identity_document().await.expect("Valid identity");
+                if let Err(e) = self.register(&id).await {
+                    tracing::warn!(%id.did, error = %e, "Unable to register identity");
+                }
+            }
+        }
+
         Ok(identity)
     }
 
@@ -1520,10 +1622,292 @@ impl IdentityStore {
         };
 
         self.root_document.set(root_document).await?;
+        let identity = self.root_document.identity().await?;
 
-        let identity = self.root_document.identity().await?.resolve()?;
+        if let Err(e) = self.register(&identity).await {
+            tracing::warn!(%identity.did, "Unable to register to external node: {e}. Identity will not be discoverable offline");
+        }
+
+        let identity = identity.resolve()?;
 
         Ok(identity)
+    }
+
+    pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::Fetch {
+                        peer_id,
+                        did: did.clone(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(package))) => {
+                        return Ok(package);
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Error importing from {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Err(Error::IdentityDoesntExist)
+    }
+
+    pub async fn export_identity_document(&self) -> Result<(), Error> {
+        let identity = self.own_identity_document().await?;
+
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::UpdateIdentity {
+                        peer_id,
+                        identity: identity.clone().into(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Error exporting to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn export_root_document(&self) -> Result<(), Error> {
+        let package = self.root_document.export_bytes().await?;
+
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::UpdatePackage {
+                        peer_id,
+                        package: package.clone(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Error exporting to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn is_registered(&self) -> Result<(), Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::IsRegistered {
+                        peer_id,
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(_))) => return Ok(()),
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Identity is not registered: {e}");
+                        return Err(e);
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Err(Error::IdentityDoesntExist)
+    }
+
+    async fn register(&self, identity: &IdentityDocument) -> Result<(), Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::Register {
+                        peer_id,
+                        identity: identity.clone().into(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Error registering identity to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn fetch_mailbox(&mut self) -> Result<(), Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(
+                        shuttle::identity::client::IdentityCommand::FetchAllRequests {
+                            peer_id,
+                            response: tx,
+                        },
+                    )
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(Ok(list))) => {
+                        let list = list
+                            .iter()
+                            .cloned()
+                            .filter_map(|r| RequestResponsePayload::try_from(r).ok())
+                            .collect::<Vec<_>>();
+
+                        for req in list {
+                            let from = req.sender.clone();
+                            if let Err(e) = self.check_request_message(&from, req, &mut None).await
+                            {
+                                tracing::warn!(
+                                    "Error processing request from {from}: {e}. Skipping"
+                                );
+                                continue;
+                            }
+                        }
+
+                        return Ok(());
+                    }
+                    Ok(Ok(Err(e))) => return Err(e),
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn send_to_mailbox(
+        &mut self,
+        did: &DID,
+        request: RequestResponsePayload,
+    ) -> Result<(), Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            let request: RequestPayload = request.try_into()?;
+
+            let request = request
+                .sign(&self.did_key)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::SendRequest {
+                        peer_id,
+                        to: did.clone(),
+                        request: request.clone(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(result)) => {
+                        return result;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn local_id_created(&self) -> bool {
@@ -1542,7 +1926,9 @@ impl IdentityStore {
             .map(|identity| identity.did_key())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
-        let idents_docs = match &lookup {
+        let cache = self.identity_cache.list().await?;
+
+        let mut idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
             LookupBy::DidKey(pubkey) => {
@@ -1554,15 +1940,12 @@ impl IdentityStore {
                 if !self.discovery.contains(pubkey).await {
                     self.discovery.insert(pubkey).await?;
                 }
-
-                self.identity_cache
-                    .list()
-                    .await?
+                cache
                     .filter(|ident| {
                         let ident = ident.clone();
                         async move { ident.did == *pubkey }
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<HashSet<_>>()
                     .await
             }
             LookupBy::DidKeys(list) => {
@@ -1582,18 +1965,16 @@ impl IdentityStore {
                     }
                 }
 
-                let cache = self.identity_cache.list().await?;
                 cache
                     .filter(|id| {
                         let id = id.clone();
                         async move { list.contains(&id.did) }
                     })
                     .chain(prestream.boxed())
-                    .collect::<Vec<_>>()
+                    .collect::<HashSet<_>>()
                     .await
             }
             LookupBy::Username(username) if username.contains('#') => {
-                let cache = self.identity_cache.list().await?;
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
@@ -1607,7 +1988,7 @@ impl IdentityStore {
                                     .contains(&username.to_lowercase())
                             }
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<HashSet<_>>()
                         .await
                 } else {
                     match (
@@ -1627,39 +2008,92 @@ impl IdentityStore {
                                                 .eq(&code)
                                     }
                                 })
-                                .collect::<Vec<_>>()
+                                .collect::<HashSet<_>>()
                                 .await
                         }
-                        _ => vec![],
+                        _ => HashSet::new(),
                     }
                 }
             }
             LookupBy::Username(username) => {
                 let username = username.to_lowercase();
-                self.identity_cache
-                    .list()
-                    .await?
+                cache
                     .filter(|ident| {
                         let ident = ident.clone();
                         let username = username.clone();
                         async move { ident.username.to_lowercase().contains(&username) }
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<HashSet<_>>()
                     .await
             }
             LookupBy::ShortId(id) => {
-                self.identity_cache
-                    .list()
-                    .await?
+                cache
                     .filter(|ident| {
                         let ident = ident.clone();
                         let id = id.clone();
                         async move { String::from_utf8_lossy(&ident.short_id).eq(&id) }
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<HashSet<_>>()
                     .await
             }
         };
+        if idents_docs.is_empty() {
+            let kind = match lookup {
+                LookupBy::DidKey(did) => shuttle::identity::protocol::Lookup::PublicKey { did },
+                LookupBy::DidKeys(list) => {
+                    shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
+                }
+                LookupBy::Username(username) => {
+                    shuttle::identity::protocol::Lookup::Username { username, count: 0 }
+                }
+                LookupBy::ShortId(short_id) => shuttle::identity::protocol::Lookup::ShortId {
+                    short_id: short_id.try_into()?,
+                },
+            };
+            if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.keys().copied() {
+                    let (tx, rx) = futures::channel::oneshot::channel();
+                    let _ = self
+                        .identity_command
+                        .clone()
+                        .send(shuttle::identity::client::IdentityCommand::Lookup {
+                            peer_id,
+                            kind: kind.clone(),
+                            response: tx,
+                        })
+                        .await;
+
+                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                        Ok(Ok(Ok(list))) => {
+                            for ident in &list {
+                                let ident = ident.clone().into();
+                                _ = self.identity_cache.insert(&ident).await;
+
+                                if self.discovery.contains(&ident.did).await {
+                                    continue;
+                                }
+                                let _ = self.discovery.insert(&ident.did).await;
+                            }
+
+                            idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
+                            break;
+                        }
+                        Ok(Ok(Err(e))) => {
+                            error!("Error registering identity to {peer_id}: {e}");
+                            break;
+                        }
+                        Ok(Err(Canceled)) => {
+                            error!("Channel been unexpectedly closed for {peer_id}");
+                            continue;
+                        }
+                        Err(_) => {
+                            error!("Request timed out for {peer_id}");
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
 
         let list = idents_docs
             .iter()
@@ -1686,7 +2120,10 @@ impl IdentityStore {
             .map_err(|e| {
                 tracing::error!("Updating root document failed: {e}");
                 e
-            })
+            })?;
+        let _ = futures::join!(self.export_identity_document(), self.export_root_document());
+
+        Ok(())
     }
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
@@ -1706,7 +2143,7 @@ impl IdentityStore {
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(
             self.discovery_type(),
-            DiscoveryConfig::Direct | DiscoveryConfig::None
+            DiscoveryConfig::Direct | DiscoveryConfig::None | DiscoveryConfig::Shuttle { .. }
         ) {
             self.lookup(LookupBy::DidKey(did.clone()))
                 .await?
@@ -1736,6 +2173,9 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
         self.root_document.set_status_indicator(status).await?;
+
+        let _ = futures::join!(self.export_identity_document(), self.export_root_document());
+
         self.push_to_all().await;
         Ok(())
     }
@@ -1987,14 +2427,15 @@ impl IdentityStore {
 
             self.root_document.remove_request(internal_request).await?;
 
+            _ = self.export_root_document().await;
+
             return Ok(());
         }
 
         let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
 
-        self.add_friend(pubkey).await?;
-
         self.root_document.remove_request(internal_request).await?;
+        self.add_friend(pubkey).await?;
 
         self.broadcast_request(pubkey, &payload, false, true).await
     }
@@ -2023,6 +2464,8 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
+        _ = self.export_root_document().await;
+
         self.broadcast_request(pubkey, &payload, false, true).await
     }
 
@@ -2038,6 +2481,8 @@ impl IdentityStore {
         let payload = RequestResponsePayload::new(&self.did_key, Event::Retract)?;
 
         self.root_document.remove_request(internal_request).await?;
+
+        _ = self.export_root_document().await;
 
         if let Some(entry) = self.queue.get(pubkey).await {
             if entry.event == Event::Request {
@@ -2089,6 +2534,8 @@ impl IdentityStore {
 
         self.root_document.add_block(pubkey).await?;
 
+        _ = self.export_root_document().await;
+
         // Remove anything from queue related to the key
         self.queue.remove(pubkey).await;
 
@@ -2130,6 +2577,8 @@ impl IdentityStore {
 
         self.root_document.remove_block(pubkey).await?;
 
+        _ = self.export_root_document().await;
+
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
 
@@ -2167,6 +2616,8 @@ impl IdentityStore {
 
         self.root_document.add_friend(pubkey).await?;
 
+        _ = self.export_root_document().await;
+
         let phonebook = self.phonebook();
         if let Err(_e) = phonebook.add_friend(pubkey).await {
             error!("Error: {_e}");
@@ -2193,6 +2644,7 @@ impl IdentityStore {
         }
 
         self.root_document.remove_friend(pubkey).await?;
+        _ = self.export_root_document().await;
 
         let phonebook = self.phonebook();
 
@@ -2295,6 +2747,7 @@ impl IdentityStore {
             let list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
                 self.root_document.add_request(&outgoing_request).await?;
+                _ = self.export_root_document().await;
             }
         }
 
@@ -2336,6 +2789,9 @@ impl IdentityStore {
         {
             self.queue.insert(recipient, payload.clone()).await;
             queued = true;
+            if let Err(e) = self.send_to_mailbox(recipient, payload.clone()).await {
+                tracing::warn!("Unable to send to {recipient} mailbox {e}. ");
+            }
             self.signal.write().await.remove(recipient);
         }
 
