@@ -2143,7 +2143,7 @@ impl IdentityStore {
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(
             self.discovery_type(),
-            DiscoveryConfig::Direct | DiscoveryConfig::None | DiscoveryConfig::Shuttle { .. }
+            DiscoveryConfig::None | DiscoveryConfig::Shuttle { .. }
         ) {
             self.lookup(LookupBy::DidKey(did.clone()))
                 .await?

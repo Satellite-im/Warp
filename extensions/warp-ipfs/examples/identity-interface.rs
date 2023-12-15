@@ -27,8 +27,6 @@ struct Opt {
     #[clap(long)]
     experimental_node: bool,
     #[clap(long)]
-    direct: bool,
-    #[clap(long)]
     disable_relay: bool,
     #[clap(long)]
     upnp: bool,
@@ -74,7 +72,7 @@ async fn account(
         None => Config::testing(),
     };
 
-    if !opt.direct || !opt.no_discovery {
+    if !opt.no_discovery {
         let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
             (Some(addr), None) => {
                 config.ipfs_setting.bootstrap = false;
@@ -106,9 +104,6 @@ async fn account(
     }
     if opt.upnp {
         config.ipfs_setting.portmapping = true;
-    }
-    if opt.direct {
-        config.store_setting.discovery = Discovery::Direct;
     }
     if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;

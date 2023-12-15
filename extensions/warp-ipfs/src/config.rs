@@ -62,8 +62,6 @@ pub enum Discovery {
         namespace: Option<String>,
         discovery_type: DiscoveryType,
     },
-    /// Dials peers over relay
-    Direct,
     /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
     #[default]
     None,

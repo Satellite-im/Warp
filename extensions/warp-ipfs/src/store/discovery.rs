@@ -380,7 +380,6 @@ impl DiscoveryEntry {
             let ipfs = self.ipfs.clone();
             let peer_id = self.peer_id;
             async move {
-                let mut timer = tokio::time::interval(Duration::from_secs(5));
                 let mut sent_initial_push = false;
                 if !entry.relays.is_empty() {
                     //Adding relay for peer to address book in case we are connected over common relays
@@ -415,15 +414,6 @@ impl DiscoveryEntry {
                                 tokio::time::sleep(Duration::from_secs(10)).await;
                                 continue;
 
-                            }
-                        }
-                        // Check over DHT
-                        DiscoveryConfig::Direct => {
-                            tokio::select! {
-                                _ = timer.tick() => {
-                                    let _ = entry.ipfs.identity(Some(peer_id)).await.ok();
-                                }
-                                _ = async {} => {}
                             }
                         }
                         //TODO: Possibly obtain peer records from external node
