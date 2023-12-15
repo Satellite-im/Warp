@@ -168,7 +168,7 @@ impl FileStore {
 
     #[tracing::instrument(skip(self))]
     async fn export(&self) -> Result<(), Error> {
-        tracing::info!("Exporting index");
+        tracing::trace!("Exporting index");
 
         let mut index = self.index.clone();
         let signal = Some(self.signal.clone());
@@ -197,7 +197,7 @@ impl FileStore {
             )
             .await?;
 
-        tracing::info!(path = %ipfs_path, "Index exported");
+        tracing::trace!(path = %ipfs_path, "Index exported");
 
         let cid = ipfs_path
             .root()
@@ -215,18 +215,18 @@ impl FileStore {
         if let Some(last_cid) = last_cid {
             if *cid != last_cid {
                 if self.ipfs.is_pinned(&last_cid).await? {
-                    tracing::info!(cid = %last_cid, "Unpinning block");
+                    tracing::trace!(cid = %last_cid, "Unpinning block");
                     self.ipfs.remove_pin(&last_cid, true).await?;
-                    tracing::info!(cid = %last_cid, "Block unpinned");
+                    tracing::trace!(cid = %last_cid, "Block unpinned");
                 }
 
-                tracing::info!(cid = %last_cid, "Removing block");
+                tracing::trace!(cid = %last_cid, "Removing block");
                 let b = self.ipfs.remove_block(last_cid, true).await?;
-                tracing::info!(cid = %last_cid, amount_removed = b.len(), "Blocks removed");
+                tracing::trace!(cid = %last_cid, amount_removed = b.len(), "Blocks removed");
             }
         }
 
-        tracing::info!(cid = %cid, "Index exported");
+        tracing::trace!(cid = %cid, "Index exported");
         Ok(())
     }
 }
