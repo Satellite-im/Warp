@@ -48,7 +48,7 @@ impl Subscriptions {
 
         _ = self
             .tx
-            .send(SubscriptionCommand::Susbcribe {
+            .send(SubscriptionCommand::Subscribe {
                 topic,
                 response: tx,
             })
@@ -83,11 +83,11 @@ impl SubscriptionTask {
         loop {
             tokio::select! {
                 //Poll all streams so the internal channels can be flushed out without
-                //stopping those subcribed streams
+                //stopping those subscribed streams
                 _ = self.select_stream.next() => {},
                 Some(command) = self.rx.next() => {
                     match command {
-                        SubscriptionCommand::Susbcribe { topic, response } => {
+                        SubscriptionCommand::Subscribe { topic, response } => {
                             _ = response.send(self.subscribe(topic).await);
                         },
                         SubscriptionCommand::Unsubscribe { topic, response } => {
@@ -113,7 +113,7 @@ impl SubscriptionTask {
 }
 
 enum SubscriptionCommand {
-    Susbcribe {
+    Subscribe {
         topic: String,
         response: futures::channel::oneshot::Sender<Result<(), anyhow::Error>>,
     },

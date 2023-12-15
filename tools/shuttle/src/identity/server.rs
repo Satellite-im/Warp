@@ -273,7 +273,7 @@ impl NetworkBehaviour for Behaviour {
                     let sent = self.inner.send_response(ch, res).is_ok();
                     match sent {
                         true => tracing::info!(id = ?id, from = %sender, "Payload response sent"),
-                        false => tracing::info!(id = ?id, from = %sender, "Failed to send payload reponse")
+                        false => tracing::info!(id = ?id, from = %sender, "Failed to send payload response")
                     };
                     false
                 }

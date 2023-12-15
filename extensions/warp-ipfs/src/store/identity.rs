@@ -651,7 +651,7 @@ impl IdentityStore {
                     tracing::warn!(
                         sender = %data.sender,
                         error = %e,
-                        "Unable to verify signature. Ignoreing request"
+                        "Unable to verify signature. Ignoring request"
                     );
                     return Ok(());
                 }

@@ -854,7 +854,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                   //     let list = dids
                   //         .iter()
-                  //         .filter_map(|did| temp_registeration.get(did))
+                  //         .filter_map(|did| temp_registration.get(did))
                   //         .cloned()
                   //         .collect::<Vec<_>>();
 
@@ -880,7 +880,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   //     let split_data = username.split('#').collect::<Vec<&str>>();
 
                   //     let list = if split_data.len() != 2 {
-                  //         temp_registeration
+                  //         temp_registration
                   //             .values()
                   //             .filter(|document| {
                   //                 document
@@ -895,7 +895,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   //             split_data.first().map(|s| s.to_lowercase()),
                   //             split_data.last().map(|s| s.to_lowercase()),
                   //         ) {
-                  //             (Some(name), Some(code)) => temp_registeration
+                  //             (Some(name), Some(code)) => temp_registration
                   //                 .values()
                   //                 .filter(|ident| {
                   //                     ident.username.to_lowercase().eq(&name)
@@ -925,7 +925,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   // }
                   // identity::protocol::Request::Lookup(Lookup::Username { username, .. }) => {
                   //     //TODO: Score against invalid username scheme
-                  //     let list = temp_registeration
+                  //     let list = temp_registration
                   //         .values()
                   //         .filter(|document| {
                   //             document
@@ -951,7 +951,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   //     let _ = resp.send((ch, payload));
                   // }
                   // identity::protocol::Request::Lookup(Lookup::ShortId { short_id }) => {
-                  //     let Some(document) = temp_registeration
+                  //     let Some(document) = temp_registration
                   //         .values()
                   //         .find(|document| document.short_id.eq(short_id.as_ref()))
                   //     else {
