@@ -65,7 +65,9 @@ impl Behaviour {
         Self {
             inner: request_response::json::Behaviour::new(
                 [(protocol::PROTOCOL, request_response::ProtocolSupport::Full)],
-                request_response::Config::default().with_request_timeout(Duration::from_secs(30)),
+                request_response::Config::default()
+                    .with_request_timeout(Duration::from_secs(30))
+                    .with_max_concurrent_streams(1000),
             ),
             keypair: keypair.clone(),
             process_event,
