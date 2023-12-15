@@ -102,7 +102,7 @@ pub struct PayloadRequest<M> {
     /// Date of the creation of the payload
     date: DateTime<Utc>,
 
-    /// serde compatable message
+    /// serde compatible message
     message: M,
 
     /// signature of the sender
