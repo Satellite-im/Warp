@@ -1163,10 +1163,10 @@ impl IdentityStore {
                 identity.verify()?;
 
                 if let Ok(own_id) = self.own_identity().await {
-                    anyhow::ensure!(
-                        own_id.did_key() != identity.did,
-                        "Cannot accept own identity"
-                    );
+                    if own_id.did_key() == identity.did {
+                        tracing::warn!(did = %identity.did, "Cannot accept own identity");
+                        return Ok(());
+                    }
                 }
 
                 if !exclude_images && !self.discovery.contains(&identity.did).await {
@@ -2143,7 +2143,7 @@ impl IdentityStore {
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(
             self.discovery_type(),
-            DiscoveryConfig::Direct | DiscoveryConfig::None
+            DiscoveryConfig::Direct | DiscoveryConfig::None | DiscoveryConfig::Shuttle { .. }
         ) {
             self.lookup(LookupBy::DidKey(did.clone()))
                 .await?
