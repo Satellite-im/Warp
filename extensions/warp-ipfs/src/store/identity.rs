@@ -1621,7 +1621,7 @@ impl IdentityStore {
         }
 
         let identity = identity.resolve()?;
-
+        _ = self.announce_identity_to_mesh().await;
         Ok(identity)
     }
 

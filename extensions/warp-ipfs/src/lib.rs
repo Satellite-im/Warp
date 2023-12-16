@@ -566,6 +566,10 @@ impl WarpIpfs {
 
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
+
+        if let Ok(store) = self.identity_store(true).await {
+            _ = store.announce_identity_to_mesh().await;
+        }
         Ok(())
     }
 
