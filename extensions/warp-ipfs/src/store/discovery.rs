@@ -405,15 +405,12 @@ impl DiscoveryEntry {
                             discovery_type: DiscoveryType::RzPoint { .. },
                             ..
                         } => {
-                            let opts = DialOpts::peer_id(peer_id).build();
-
                             tracing::debug!("Dialing {peer_id}");
 
-                            if let Err(_e) = ipfs.connect(opts).await {
+                            if let Err(_e) = ipfs.connect(peer_id).await {
                                 tracing::error!("Error connecting to {peer_id}: {_e}");
                                 tokio::time::sleep(Duration::from_secs(10)).await;
                                 continue;
-
                             }
                         }
                         //TODO: Possibly obtain peer records from external node
@@ -424,7 +421,7 @@ impl DiscoveryEntry {
                                 .addresses(entry.relays.clone())
                                 .build();
 
-                                tracing::debug!("Dialing {peer_id}");
+                            tracing::debug!("Dialing {peer_id}");
 
                             if let Err(_e) = ipfs.connect(opts).await {
                                 tracing::error!("Error connecting to {peer_id}: {_e}");
