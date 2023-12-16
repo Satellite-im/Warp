@@ -406,14 +406,14 @@ impl IdentityStore {
             tracing::info!(did = %ident.did_key(), "Identity loaded");
             match store.is_registered().await.is_ok() {
                 true => {
-                    if let Err(_e) = store.fetch_mailbox().await {
-                        //TODO:
+                    if let Err(e) = store.fetch_mailbox().await {
+                        tracing::warn!(error = %e, "Unable to fetch or process mailbox");
                     }
                 }
                 false => {
                     let id = store.own_identity_document().await.expect("Valid identity");
                     if let Err(e) = store.register(&id).await {
-                        tracing::warn!(%id.did, "Unable to register identity: {e}");
+                        tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                     }
                 }
             }
@@ -445,7 +445,6 @@ impl IdentityStore {
             if let Err(_e) = phonebook.add_friend_list(&friends).await {
                 error!("Error adding friends in phonebook: {_e}");
             }
-            _ = store.announce_identity_to_mesh().await;
         }
 
         for friend in friends {
@@ -869,6 +868,8 @@ impl IdentityStore {
     }
 
     pub async fn push_to_all(&self) {
+        //TODO: Possibly announce only to mesh, though this *might* require changing the logic to establish connection
+        //      if profile pictures and banners are supplied in this push too.
         let list = self
             .discovery
             .list()
@@ -1557,11 +1558,15 @@ impl IdentityStore {
         }
 
         match self.is_registered().await.is_ok() {
-            true => if let Err(_e) = self.fetch_mailbox().await {},
+            true => {
+                if let Err(e) = self.fetch_mailbox().await {
+                    tracing::warn!(error = %e, "Unable to fetch or process mailbox");
+                }
+            }
             false => {
                 let id = self.own_identity_document().await.expect("Valid identity");
                 if let Err(e) = self.register(&id).await {
-                    tracing::warn!(%id.did, error = %e, "Unable to register identity");
+                    tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                 }
             }
         }
