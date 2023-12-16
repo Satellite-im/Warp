@@ -54,6 +54,8 @@ use super::{
     request::PayloadRequest,
 };
 
+const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
+
 #[allow(clippy::type_complexity)]
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
@@ -1637,7 +1639,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(package))) => {
                         return Ok(package);
                     }
@@ -1675,7 +1677,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(_))) => {
                         break;
                     }
@@ -1713,7 +1715,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(_))) => {
                         break;
                     }
@@ -1748,7 +1750,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(_))) => return Ok(()),
                     Ok(Ok(Err(e))) => {
                         tracing::error!("Identity is not registered: {e}");
@@ -1783,7 +1785,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(_))) => {
                         break;
                     }
@@ -1821,7 +1823,7 @@ impl IdentityStore {
                     )
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(list))) => {
                         let list = list
                             .iter()
@@ -1882,7 +1884,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(result)) => {
                         return result;
                     }
@@ -2053,7 +2055,7 @@ impl IdentityStore {
                         })
                         .await;
 
-                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                         Ok(Ok(Ok(list))) => {
                             for ident in &list {
                                 let ident = ident.clone().into();
