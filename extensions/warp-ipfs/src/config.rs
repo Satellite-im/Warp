@@ -11,39 +11,6 @@ use warp::{constellation::file::FileType, multipass::identity::Identity};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Network {
-    /// IPFS Public Network
-    #[default]
-    Ipfs,
-    /// Satellite Network
-    Satellite { addresses: Vec<NetworkAddress> },
-    /// Custom Network
-    Custom { addresses: Vec<NetworkAddress> },
-    /// No network selection.
-    None,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct NetworkAddress {
-    /// Address of the node
-    pub address: Multiaddr,
-    /// Type for the network.
-    /// - DHT
-    /// - Relay
-    /// - RzPoint
-    pub network_type: Vec<NetworkType>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum NetworkType {
-    DHT,
-    RzPoint,
-    Relay,
-}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum Bootstrap {
     #[default]
     Ipfs,
@@ -188,12 +155,12 @@ pub struct IpfsSetting {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum UpdateEvents {
+    #[default]
     /// Emit events for all identity updates
     Enabled,
     /// Emit events for identity updates from friends
     FriendsOnly,
     /// Send events for all identity updates, but only emit with friends
-    #[default]
     EmitFriendsOnly,
     /// Disable events
     Disable,
@@ -218,7 +185,7 @@ pub enum StoreOffline {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
-    /// Allow only interactions with `MultiPass` friends
+    /// Allow only interactions with friends
     /// Note: This is ignored when it comes to chating between group chat recipients
     pub with_friends: bool,
     /// Interval for broadcasting out identity (cannot be less than 3 minutes)
@@ -294,7 +261,6 @@ impl Default for StoreSetting {
 pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
-    pub network: Network,
     pub bootstrap: Bootstrap,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub listen_on: Vec<Multiaddr>,
@@ -314,7 +280,6 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             path: None,
-            network: Network::Ipfs,
             bootstrap: Bootstrap::Ipfs,
             listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"]
                 .iter()
