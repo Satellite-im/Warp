@@ -1,6 +1,3 @@
-//We are cloning the Cid rather than dereferencing to be sure that we are not holding
-//onto the lock.
-#![allow(clippy::clone_on_copy)]
 use crate::{
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
@@ -688,7 +685,6 @@ impl IdentityStore {
                     .iter()
                     .filter(|req| req.r#type() == RequestType::Outgoing)
                     .find(|req| data.sender.eq(req.did()))
-                    .cloned()
                 else {
                     return Err(Error::from(anyhow::anyhow!(
                         "Unable to locate pending request. Already been accepted or rejected?"
@@ -696,7 +692,7 @@ impl IdentityStore {
                 };
 
                 // Maybe just try the function instead and have it be a hard error?
-                if self.root_document.remove_request(&item).await.is_err() {
+                if self.root_document.remove_request(item).await.is_err() {
                     return Err(Error::from(anyhow::anyhow!(
                         "Unable to locate pending request. Already been accepted or rejected?"
                     )));
@@ -717,16 +713,12 @@ impl IdentityStore {
 
                 let list = self.list_all_raw_request().await?;
 
-                if let Some(inner_req) = list
-                    .iter()
-                    .find(|request| {
-                        request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
-                    })
-                    .cloned()
-                {
+                if let Some(inner_req) = list.iter().find(|request| {
+                    request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
+                }) {
                     //Because there is also a corresponding outgoing request for the incoming request
                     //we can automatically add them
-                    self.root_document.remove_request(&inner_req).await?;
+                    self.root_document.remove_request(inner_req).await?;
                     self.add_friend(inner_req.did()).await?;
                 } else {
                     let from = data.sender.clone();
@@ -763,10 +755,9 @@ impl IdentityStore {
                     .find(|request| {
                         request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
                     })
-                    .cloned()
                     .ok_or(Error::FriendRequestDoesntExist)?;
 
-                self.root_document.remove_request(&internal_request).await?;
+                self.root_document.remove_request(internal_request).await?;
 
                 _ = self.export_root_document().await;
 
@@ -787,10 +778,9 @@ impl IdentityStore {
                     .find(|request| {
                         request.r#type() == RequestType::Incoming && data.sender.eq(request.did())
                     })
-                    .cloned()
                     .ok_or(Error::FriendRequestDoesntExist)?;
 
-                self.root_document.remove_request(&internal_request).await?;
+                self.root_document.remove_request(internal_request).await?;
 
                 _ = self.export_root_document().await;
 
