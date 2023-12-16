@@ -32,7 +32,7 @@ pub struct ExtractedRootDocument {
     pub friends: Vec<DID>,
     pub block_list: Vec<DID>,
     pub block_by_list: Vec<DID>,
-    pub request: Vec<super::identity::Request>,
+    pub request: Vec<Request>,
     pub conversation_keystore: BTreeMap<Uuid, Keystore>,
     pub signature: Option<Vec<u8>>,
 }
@@ -123,24 +123,8 @@ impl RootDocument {
         Ok(())
     }
 
-    #[allow(clippy::type_complexity)]
     #[tracing::instrument(skip(self, ipfs))]
-    pub async fn resolve(
-        &self,
-        ipfs: &Ipfs,
-    ) -> Result<
-        (
-            Identity,
-            DateTime<Utc>,
-            DateTime<Utc>,
-            Vec<DID>,
-            Vec<DID>,
-            Vec<DID>,
-            Vec<Request>,
-            BTreeMap<Uuid, Keystore>,
-        ),
-        Error,
-    > {
+    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {
         let document: IdentityDocument = ipfs
             .get_dag(self.identity)
             .local()
@@ -213,16 +197,24 @@ impl RootDocument {
                 .await
                 .unwrap_or_default();
 
-        Ok((
+        let mut exported = ExtractedRootDocument {
             identity,
-            self.created,
-            self.modified,
+            created: self.created,
+            modified: self.modified,
             friends,
             block_list,
             block_by_list,
             request,
             conversation_keystore,
-        ))
+            signature: None,
+        };
+
+        let bytes = serde_json::to_vec(&exported)?;
+        let kp = ipfs.keypair()?;
+        let signature = kp.sign(&bytes).map_err(anyhow::Error::from)?;
+
+        exported.signature = Some(signature);
+        Ok(exported)
     }
 
     pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
@@ -285,38 +277,5 @@ impl RootDocument {
         let root_document = root_document.sign(&did_kp)?;
 
         Ok(root_document)
-    }
-
-    pub async fn export(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {
-        let (
-            identity,
-            created,
-            modified,
-            friends,
-            block_list,
-            block_by_list,
-            request,
-            conversation_keystore,
-        ) = self.resolve(ipfs).await?;
-
-        let mut exported = ExtractedRootDocument {
-            identity,
-            created,
-            modified,
-            friends,
-            block_list,
-            block_by_list,
-            request,
-            conversation_keystore,
-            signature: None,
-        };
-
-        let bytes = serde_json::to_vec(&exported)?;
-        let kp = ipfs.keypair()?;
-        let signature = kp.sign(&bytes).map_err(anyhow::Error::from)?;
-
-        exported.signature = Some(signature);
-
-        Ok(exported)
     }
 }
