@@ -539,6 +539,7 @@ impl WarpIpfs {
             &config,
             discovery.clone(),
             id_sh_tx,
+            span.clone(),
         )
         .await?;
 
@@ -549,7 +550,7 @@ impl WarpIpfs {
         *self.ipfs.write() = Some(ipfs.clone());
 
         let filestore =
-            FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone()).await?;
+            FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone(), span.clone()).await?;
 
         *self.file_store.write() = Some(filestore);
 
@@ -563,6 +564,7 @@ impl WarpIpfs {
             false,
             1000,
             self.raygun_tx.clone(),
+            span.clone(),
             (
                 config.store_setting.check_spam,
                 config.store_setting.with_friends,

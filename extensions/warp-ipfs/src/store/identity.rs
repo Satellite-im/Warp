@@ -23,7 +23,7 @@ use std::{
 };
 
 use tokio::sync::RwLock;
-use tracing::{error, warn};
+use tracing::{error, warn, Span};
 
 use warp::{
     constellation::file::FileType,
@@ -57,8 +57,8 @@ use super::{
 const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[allow(clippy::type_complexity)]
+#[allow(dead_code)]
 #[derive(Clone)]
-#[allow(clippy::type_complexity)]
 pub struct IdentityStore {
     ipfs: Ipfs,
 
@@ -83,6 +83,8 @@ pub struct IdentityStore {
     tesseract: Tesseract,
 
     identity_command: futures::channel::mpsc::Sender<shuttle::identity::client::IdentityCommand>,
+
+    span: Span,
 
     event: EventSubscription<MultiPassEventKind>,
 }
@@ -362,6 +364,7 @@ impl IdentityStore {
         identity_command: futures::channel::mpsc::Sender<
             shuttle::identity::client::IdentityCommand,
         >,
+        span: Span,
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
             if !path.exists() {
@@ -400,6 +403,7 @@ impl IdentityStore {
             queue,
             phonebook,
             signal,
+            span,
         };
 
         if let Ok(ident) = store.own_identity().await {

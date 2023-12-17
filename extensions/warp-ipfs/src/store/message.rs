@@ -15,6 +15,7 @@ use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
+use tracing::Span;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
@@ -88,6 +89,7 @@ pub struct MessageStore {
     spam_filter: Arc<Option<SpamFilter>>,
 
     with_friends: Arc<AtomicBool>,
+    span: Span,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -102,6 +104,7 @@ impl MessageStore {
         _: bool,
         interval_ms: u64,
         event: EventSubscription<RayGunEventKind>,
+        span: Span,
         (check_spam, with_friends): (bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
@@ -143,6 +146,7 @@ impl MessageStore {
             spam_filter,
             with_friends,
             stream_conversation_task,
+            span,
         };
 
         info!("Loading queue");
@@ -869,7 +873,10 @@ impl MessageStore {
                     .sum();
 
                 if lines_value_length == 0 && lines_value_length > 4096 {
-                    error!(message_length = lines_value_length, "Length of message is invalid.");
+                    error!(
+                        message_length = lines_value_length,
+                        "Length of message is invalid."
+                    );
                     return Err(Error::InvalidLength {
                         context: "message".into(),
                         current: lines_value_length,
@@ -895,7 +902,7 @@ impl MessageStore {
                     .concat();
                     verify_serde_sig(sender, &construct, &signature)?;
                 }
-                
+
                 spam_check(&mut message, self.spam_filter.clone())?;
                 let conversation_id = message.conversation_id();
 

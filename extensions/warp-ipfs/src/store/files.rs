@@ -12,6 +12,7 @@ use rust_ipfs::{
 };
 
 use tokio_util::io::ReaderStream;
+use tracing::Span;
 use warp::{
     constellation::{
         directory::Directory, ConstellationEventKind, ConstellationProgressStream, Progression,
@@ -46,6 +47,8 @@ pub struct FileStore {
 
     config: config::Config,
 
+    span: Span,
+
     signal_guard: Arc<tokio::sync::RwLock<()>>,
 }
 
@@ -54,6 +57,7 @@ impl FileStore {
         ipfs: Ipfs,
         config: &Config,
         constellation_tx: EventSubscription<ConstellationEventKind>,
+        span: Span
     ) -> Result<Self, Error> {
         let mut index_cid = None;
 
@@ -99,6 +103,7 @@ impl FileStore {
             config,
             signal: tx,
             signal_guard: Arc::default(),
+            span,
         };
 
         if let Err(e) = store.import().await {
