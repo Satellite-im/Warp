@@ -739,8 +739,10 @@ impl IdentityStore {
 
                     if self.identity_cache.get(&from).await.is_err() {
                         // Attempt to send identity request to peer if identity is not available locally.
-                        if let Err(e) = self.request(&from, RequestOption::Identity).await {
-                            tracing::warn!("Failed to request identity from {from}: {e}.")
+                        if self.request(&from, RequestOption::Identity).await.is_err() {
+                            if let Err(e) = self.lookup(LookupBy::DidKey(from.clone())).await {
+                                tracing::warn!("Failed to request identity from {from}: {e}.");
+                            }
                         }
                     }
 
