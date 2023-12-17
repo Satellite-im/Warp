@@ -125,7 +125,6 @@ enum IdentityResponse {
 }
 
 impl Behaviour {
-    #[allow(clippy::type_complexity)]
     pub fn new(
         keypair: &Keypair,
         primary_keypair: Option<&Keypair>,

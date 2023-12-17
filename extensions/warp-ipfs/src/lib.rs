@@ -31,7 +31,7 @@ use store::files::FileStore;
 use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn, Instrument, Span};
 use utils::ExtensionType;
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
@@ -67,8 +67,8 @@ use warp::multipass::{
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
-use crate::store::ecdh_decrypt;
 use crate::store::phonebook::PhoneBook;
+use crate::store::{ecdh_decrypt, PeerIdExt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
@@ -76,6 +76,7 @@ pub struct WarpIpfs {
     identity_guard: Arc<tokio::sync::Mutex<()>>,
     ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
+    span: Arc<RwLock<Span>>,
     identity_store: Arc<RwLock<Option<IdentityStore>>>,
     message_store: Arc<RwLock<Option<MessageStore>>>,
     file_store: Arc<RwLock<Option<FileStore>>>,
@@ -140,10 +141,11 @@ impl WarpIpfs {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
-
+        let span = Arc::new(RwLock::new(Span::current()));
         let identity = WarpIpfs {
             config,
             tesseract,
+            span,
             ipfs: Default::default(),
             identity_store: Default::default(),
             message_store: Default::default(),
@@ -210,10 +212,17 @@ impl WarpIpfs {
 
     pub(crate) async fn init_ipfs(&self, keypair: Keypair) -> Result<(), Error> {
         let tesseract = self.tesseract.clone();
-        info!(
-            "Have keypair with peer id: {}",
-            keypair.public().to_peer_id()
-        );
+        let peer_id = keypair.public().to_peer_id();
+
+        let did = peer_id.to_did().expect("Valid conversion");
+
+        info!(peer_id = %peer_id, did = %did);
+
+        let span = tracing::trace_span!(parent: &Span::current(), "warp-ipfs", identity = %did);
+
+        *self.span.write() = span.clone();
+
+        let _g = span.enter();
 
         let config = self.config.clone();
 
@@ -267,6 +276,7 @@ impl WarpIpfs {
             .with_custom_behaviour(behaviour)
             .set_keypair(keypair)
             .with_rendezvous_client()
+            .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
                 enable_quic: !config.ipfs_setting.disable_quic,
                 quic_max_idle_timeout: Duration::from_secs(5),
@@ -529,6 +539,7 @@ impl WarpIpfs {
             &config,
             discovery.clone(),
             id_sh_tx,
+            span.clone(),
         )
         .await?;
 
@@ -539,7 +550,7 @@ impl WarpIpfs {
         *self.ipfs.write() = Some(ipfs.clone());
 
         let filestore =
-            FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone()).await?;
+            FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone(), span.clone()).await?;
 
         *self.file_store.write() = Some(filestore);
 
@@ -553,6 +564,7 @@ impl WarpIpfs {
             false,
             1000,
             self.raygun_tx.clone(),
+            span.clone(),
             (
                 config.store_setting.check_spam,
                 config.store_setting.with_friends,
@@ -566,6 +578,13 @@ impl WarpIpfs {
 
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
+
+        if let Ok(store) = self.identity_store(true).await {
+            _ = store
+                .announce_identity_to_mesh()
+                .instrument(span.clone())
+                .await;
+        }
         Ok(())
     }
 

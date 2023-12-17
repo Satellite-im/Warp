@@ -44,8 +44,6 @@ struct Opt {
     #[clap(long)]
     discovery_point: Option<Multiaddr>,
     #[clap(long)]
-    direct: bool,
-    #[clap(long)]
     disable_relay: bool,
     #[clap(long)]
     upnp: bool,
@@ -87,7 +85,7 @@ async fn setup<P: AsRef<Path>>(
         None => warp_ipfs::config::Config::testing(),
     };
 
-    if !opt.direct || !opt.no_discovery {
+    if !opt.no_discovery {
         let discovery_type = match &opt.discovery_point {
             Some(addr) => {
                 config.ipfs_setting.bootstrap = false;
@@ -107,9 +105,6 @@ async fn setup<P: AsRef<Path>>(
     }
     if opt.upnp {
         config.ipfs_setting.portmapping = true;
-    }
-    if opt.direct {
-        config.store_setting.discovery = Discovery::Direct;
     }
     if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;

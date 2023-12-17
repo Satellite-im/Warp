@@ -1,6 +1,3 @@
-//We are cloning the Cid rather than dereferencing to be sure that we are not holding
-//onto the lock.
-#![allow(clippy::clone_on_copy)]
 use crate::{
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
@@ -26,7 +23,7 @@ use std::{
 };
 
 use tokio::sync::RwLock;
-use tracing::{error, warn};
+use tracing::{error, warn, Span};
 
 use warp::{
     constellation::file::FileType,
@@ -57,9 +54,11 @@ use super::{
     request::PayloadRequest,
 };
 
+const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
+
 #[allow(clippy::type_complexity)]
+#[allow(dead_code)]
 #[derive(Clone)]
-#[allow(clippy::type_complexity)]
 pub struct IdentityStore {
     ipfs: Ipfs,
 
@@ -84,6 +83,8 @@ pub struct IdentityStore {
     tesseract: Tesseract,
 
     identity_command: futures::channel::mpsc::Sender<shuttle::identity::client::IdentityCommand>,
+
+    span: Span,
 
     event: EventSubscription<MultiPassEventKind>,
 }
@@ -363,6 +364,7 @@ impl IdentityStore {
         identity_command: futures::channel::mpsc::Sender<
             shuttle::identity::client::IdentityCommand,
         >,
+        span: Span,
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
             if !path.exists() {
@@ -401,20 +403,21 @@ impl IdentityStore {
             queue,
             phonebook,
             signal,
+            span,
         };
 
         if let Ok(ident) = store.own_identity().await {
             tracing::info!(did = %ident.did_key(), "Identity loaded");
             match store.is_registered().await.is_ok() {
                 true => {
-                    if let Err(_e) = store.fetch_mailbox().await {
-                        //TODO:
+                    if let Err(e) = store.fetch_mailbox().await {
+                        tracing::warn!(error = %e, "Unable to fetch or process mailbox");
                     }
                 }
                 false => {
                     let id = store.own_identity_document().await.expect("Valid identity");
                     if let Err(e) = store.register(&id).await {
-                        tracing::warn!(%id.did, "Unable to register identity: {e}");
+                        tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                     }
                 }
             }
@@ -446,7 +449,6 @@ impl IdentityStore {
             if let Err(_e) = phonebook.add_friend_list(&friends).await {
                 error!("Error adding friends in phonebook: {_e}");
             }
-            _ = store.announce_identity_to_mesh().await;
         }
 
         for friend in friends {
@@ -688,7 +690,6 @@ impl IdentityStore {
                     .iter()
                     .filter(|req| req.r#type() == RequestType::Outgoing)
                     .find(|req| data.sender.eq(req.did()))
-                    .cloned()
                 else {
                     return Err(Error::from(anyhow::anyhow!(
                         "Unable to locate pending request. Already been accepted or rejected?"
@@ -696,7 +697,7 @@ impl IdentityStore {
                 };
 
                 // Maybe just try the function instead and have it be a hard error?
-                if self.root_document.remove_request(&item).await.is_err() {
+                if self.root_document.remove_request(item).await.is_err() {
                     return Err(Error::from(anyhow::anyhow!(
                         "Unable to locate pending request. Already been accepted or rejected?"
                     )));
@@ -717,16 +718,12 @@ impl IdentityStore {
 
                 let list = self.list_all_raw_request().await?;
 
-                if let Some(inner_req) = list
-                    .iter()
-                    .find(|request| {
-                        request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
-                    })
-                    .cloned()
-                {
+                if let Some(inner_req) = list.iter().find(|request| {
+                    request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
+                }) {
                     //Because there is also a corresponding outgoing request for the incoming request
                     //we can automatically add them
-                    self.root_document.remove_request(&inner_req).await?;
+                    self.root_document.remove_request(inner_req).await?;
                     self.add_friend(inner_req.did()).await?;
                 } else {
                     let from = data.sender.clone();
@@ -763,10 +760,9 @@ impl IdentityStore {
                     .find(|request| {
                         request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
                     })
-                    .cloned()
                     .ok_or(Error::FriendRequestDoesntExist)?;
 
-                self.root_document.remove_request(&internal_request).await?;
+                self.root_document.remove_request(internal_request).await?;
 
                 _ = self.export_root_document().await;
 
@@ -787,10 +783,9 @@ impl IdentityStore {
                     .find(|request| {
                         request.r#type() == RequestType::Incoming && data.sender.eq(request.did())
                     })
-                    .cloned()
                     .ok_or(Error::FriendRequestDoesntExist)?;
 
-                self.root_document.remove_request(&internal_request).await?;
+                self.root_document.remove_request(internal_request).await?;
 
                 _ = self.export_root_document().await;
 
@@ -877,6 +872,8 @@ impl IdentityStore {
     }
 
     pub async fn push_to_all(&self) {
+        //TODO: Possibly announce only to mesh, though this *might* require changing the logic to establish connection
+        //      if profile pictures and banners are supplied in this push too.
         let list = self
             .discovery
             .list()
@@ -1565,11 +1562,15 @@ impl IdentityStore {
         }
 
         match self.is_registered().await.is_ok() {
-            true => if let Err(_e) = self.fetch_mailbox().await {},
+            true => {
+                if let Err(e) = self.fetch_mailbox().await {
+                    tracing::warn!(error = %e, "Unable to fetch or process mailbox");
+                }
+            }
             false => {
                 let id = self.own_identity_document().await.expect("Valid identity");
                 if let Err(e) = self.register(&id).await {
-                    tracing::warn!(%id.did, error = %e, "Unable to register identity");
+                    tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                 }
             }
         }
@@ -1629,7 +1630,7 @@ impl IdentityStore {
         }
 
         let identity = identity.resolve()?;
-
+        _ = self.announce_identity_to_mesh().await;
         Ok(identity)
     }
 
@@ -1647,7 +1648,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(package))) => {
                         return Ok(package);
                     }
@@ -1685,7 +1686,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(_))) => {
                         break;
                     }
@@ -1723,7 +1724,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(_))) => {
                         break;
                     }
@@ -1758,7 +1759,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(_))) => return Ok(()),
                     Ok(Ok(Err(e))) => {
                         tracing::error!("Identity is not registered: {e}");
@@ -1793,7 +1794,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(_))) => {
                         break;
                     }
@@ -1831,7 +1832,7 @@ impl IdentityStore {
                     )
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(Ok(list))) => {
                         let list = list
                             .iter()
@@ -1892,7 +1893,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                     Ok(Ok(result)) => {
                         return result;
                     }
@@ -2063,7 +2064,7 @@ impl IdentityStore {
                         })
                         .await;
 
-                    match tokio::time::timeout(Duration::from_secs(20), rx).await {
+                    match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                         Ok(Ok(Ok(list))) => {
                             for ident in &list {
                                 let ident = ident.clone().into();
@@ -2143,7 +2144,7 @@ impl IdentityStore {
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(
             self.discovery_type(),
-            DiscoveryConfig::Direct | DiscoveryConfig::None | DiscoveryConfig::Shuttle { .. }
+            DiscoveryConfig::None | DiscoveryConfig::Shuttle { .. }
         ) {
             self.lookup(LookupBy::DidKey(did.clone()))
                 .await?

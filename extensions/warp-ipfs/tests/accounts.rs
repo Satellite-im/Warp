@@ -47,13 +47,11 @@ mod test {
 
     #[tokio::test]
     async fn get_identity() -> anyhow::Result<()> {
-        let accounts =
-            create_accounts(vec![(
-            Some("JohnDoe"),
-            Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-            Some("test::get_identity".into()),
-        ), (Some("JaneDoe"), None, Some("test::get_identity".into()))])
-            .await?;
+        let accounts = create_accounts(vec![
+            (Some("JohnDoe"), None, Some("test::get_identity".into())),
+            (Some("JaneDoe"), None, Some("test::get_identity".into())),
+        ])
+        .await?;
 
         let (account_a, _, _) = accounts.first().expect("Account exist");
 
@@ -356,8 +354,6 @@ mod test {
         let (account_a, _, _) = accounts.first().unwrap();
 
         let (_account_b, did_b, _) = accounts.last().unwrap();
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
 
         let platform_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {

@@ -15,6 +15,7 @@ use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
+use tracing::Span;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
@@ -88,6 +89,7 @@ pub struct MessageStore {
     spam_filter: Arc<Option<SpamFilter>>,
 
     with_friends: Arc<AtomicBool>,
+    span: Span,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -102,6 +104,7 @@ impl MessageStore {
         _: bool,
         interval_ms: u64,
         event: EventSubscription<RayGunEventKind>,
+        span: Span,
         (check_spam, with_friends): (bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
@@ -143,6 +146,7 @@ impl MessageStore {
             spam_filter,
             with_friends,
             stream_conversation_task,
+            span,
         };
 
         info!("Loading queue");
@@ -773,16 +777,16 @@ impl MessageStore {
                                         .collect::<Vec<_>>()
                                         .first()
                                         .cloned() else {
-                                            tracing::warn!("participant is not in {}", conversation_id);
+                                            tracing::warn!(id = %conversation_id, "participant is not in conversation");
                                             continue;
                                         };
                                     ecdh_decrypt(own_did, Some(&recipient), data.data())
                                 }
                                 ConversationType::Group => {
-                                    let key = match store.conversation_keystore(conversation.id()).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
+                                    let key = match store.conversation_keystore(conversation_id).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
                                         Ok(key) => key,
                                         Err(e) => {
-                                            tracing::warn!("Failed to obtain key for {}: {e}", data.sender());
+                                            tracing::warn!(id = %conversation_id, sender = %data.sender(), error = %e, "Failed to obtain key");
                                             continue;
                                         }
                                     };
@@ -794,7 +798,7 @@ impl MessageStore {
                             let bytes = match bytes_results {
                                 Ok(b) => b,
                                 Err(e) => {
-                                    tracing::warn!("Failed to decrypt payload from {} in {conversation_id}: {e}", data.sender());
+                                    tracing::warn!(id = %conversation_id, sender = %data.sender(), error = %e, "Failed to decrypt payload");
                                     continue;
                                 }
                             };
@@ -802,7 +806,7 @@ impl MessageStore {
                             let event = match serde_json::from_slice::<MessagingEvents>(&bytes) {
                                 Ok(e) => e,
                                 Err(e) => {
-                                    tracing::warn!("Failed to deserialize message from {} in {conversation_id}: {e}", data.sender());
+                                    tracing::warn!(id = %conversation_id, sender = %data.sender(), error = %e, "Failed to deserialize message");
                                     continue;
                                 }
                             };
@@ -814,7 +818,7 @@ impl MessageStore {
                     let result = store
                         .message_event(conversation_id, &event, direction, Default::default())
                         .await.map_err(|e| {
-                            error!(id=%conversation_id, "Failure while processing message in conversation {e}");
+                            error!(id=%conversation_id, error = %e, "Failure while processing message in conversation");
                             e
                         });
 
@@ -869,7 +873,10 @@ impl MessageStore {
                     .sum();
 
                 if lines_value_length == 0 && lines_value_length > 4096 {
-                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+                    error!(
+                        message_length = lines_value_length,
+                        "Length of message is invalid."
+                    );
                     return Err(Error::InvalidLength {
                         context: "message".into(),
                         current: lines_value_length,
@@ -895,6 +902,7 @@ impl MessageStore {
                     .concat();
                     verify_serde_sig(sender, &construct, &signature)?;
                 }
+
                 spam_check(&mut message, self.spam_filter.clone())?;
                 let conversation_id = message.conversation_id();
 

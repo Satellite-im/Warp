@@ -504,7 +504,6 @@ impl ConversationDocument {
             _ => (None, u8::MAX as _),
         };
 
-        let ipfs = ipfs.clone();
 
         let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
         let mut pages = vec![];
@@ -513,7 +512,7 @@ impl ConversationDocument {
             let page = messages_chunk.get(index).ok_or(Error::PageNotFound)?;
             let mut messages = vec![];
             for document in page.iter() {
-                if let Ok(message) = document.resolve(&ipfs, did, keystore).await {
+                if let Ok(message) = document.resolve(ipfs, did, keystore).await {
                     messages.push(message);
                 }
             }
@@ -525,7 +524,7 @@ impl ConversationDocument {
         for (index, chunk) in messages_chunk.iter().enumerate() {
             let mut messages = vec![];
             for document in chunk.iter() {
-                if let Ok(message) = document.resolve(&ipfs, did, keystore).await {
+                if let Ok(message) = document.resolve(ipfs, did, keystore).await {
                     if option.pinned() && !message.pinned() {
                         continue;
                     }
@@ -729,13 +728,13 @@ impl MessageDocument {
         message: Message,
         keystore: Option<&Keystore>,
     ) -> Result<(), Error> {
-        info!("Updating message {} for {}", self.id, self.conversation_id);
+        info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
         let old_message = self.resolve(ipfs, did, keystore).await?;
 
         if old_message.id() != message.id()
             || old_message.conversation_id() != message.conversation_id()
         {
-            info!("Message does not match document");
+            info!(id = %self.conversation_id, message_id = %self.id, "Message does not match document");
             //TODO: Maybe remove message from this point?
             return Err(Error::InvalidMessage);
         }
@@ -755,9 +754,9 @@ impl MessageDocument {
 
         let message_cid = ipfs.dag().put().serialize(data)?.await?;
 
-        info!("Setting Message to document");
+        info!(id = %self.conversation_id, message_id = %self.id, "Setting Message to document");
         self.message = message_cid;
-        info!("Message is updated");
+        info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
         Ok(())
     }
 

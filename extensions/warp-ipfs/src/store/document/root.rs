@@ -944,7 +944,7 @@ impl RootDocumentTask {
 
     async fn export(&self) -> Result<ExtractedRootDocument, Error> {
         let document = self.get_root_document().await?;
-        document.export(&self.ipfs).await
+        document.resolve(&self.ipfs).await
     }
 
     async fn export_bytes(&self) -> Result<Vec<u8>, Error> {
