@@ -221,7 +221,7 @@ impl FileStore {
             if *cid != last_cid {
                 if self.ipfs.is_pinned(&last_cid).await? {
                     tracing::trace!(cid = %last_cid, "Unpinning block");
-                    self.ipfs.remove_pin(&last_cid, true).await?;
+                    self.ipfs.remove_pin(&last_cid).recursive().await?;
                     tracing::trace!(cid = %last_cid, "Block unpinned");
                 }
 
@@ -768,7 +768,7 @@ impl FileStore {
             .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
 
         if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid, true).await?;
+            ipfs.remove_pin(&cid).recursive().await?;
         }
 
         directory.remove_item(&item.name())?;

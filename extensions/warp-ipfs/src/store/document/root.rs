@@ -566,7 +566,7 @@ impl RootDocumentTask {
         if let Some(old_cid) = old_cid {
             if old_cid != root_cid {
                 if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    if let Err(e) = self.ipfs.remove_pin(&old_cid, true).await {
+                    if let Err(e) = self.ipfs.remove_pin(&old_cid).recursive().await {
                         tracing::warn!(cid =? old_cid, "Failed to unpin root document: {e}");
                     }
                 }
