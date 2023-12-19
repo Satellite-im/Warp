@@ -16,7 +16,7 @@ use image::io::Reader as ImageReader;
 use image::ImageFormat;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use warp::{constellation::file::FileType, error::Error, logging::tracing::log};
+use warp::{constellation::file::FileType, error::Error};
 
 use crate::utils::ExtensionType;
 
@@ -111,7 +111,7 @@ impl ThumbnailGenerator {
 
             let stop = instance.elapsed();
 
-            log::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
+            tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
             result
         });
 
@@ -181,7 +181,7 @@ impl ThumbnailGenerator {
 
             let stop = instance.elapsed();
 
-            log::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
+            tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
             result
         });
 

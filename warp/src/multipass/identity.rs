@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-use crate::crypto::DID;
+use crate::{constellation::file::FileType, crypto::DID, error::Error};
+
+use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
@@ -70,6 +72,32 @@ impl IdentityProfile {
     }
 }
 
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IdentityImage {
+    data: Vec<u8>,
+    image_type: FileType,
+}
+
+impl IdentityImage {
+    pub fn set_data(&mut self, data: Vec<u8>) {
+        self.data = data
+    }
+
+    pub fn set_image_type(&mut self, image_type: FileType) {
+        self.image_type = image_type
+    }
+}
+
+impl IdentityImage {
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn image_type(&self) -> &FileType {
+        &self.image_type
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, FFIFree)]
 pub struct Relationship {
     friends: bool,
@@ -128,6 +156,17 @@ impl Relationship {
 )]
 pub struct ShortId([u8; SHORT_ID_SIZE]);
 
+impl TryFrom<String> for ShortId {
+    type Error = Error;
+    fn try_from(short_id: String) -> Result<Self, Self::Error> {
+        let bytes = short_id.as_bytes();
+        let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
+            .try_into()
+            .map_err(|_| Error::InvalidPublicKeyLength)?;
+        Ok(ShortId::from(short_id))
+    }
+}
+
 impl core::ops::Deref for ShortId {
     type Target = [u8; SHORT_ID_SIZE];
     fn deref(&self) -> &Self::Target {
@@ -160,6 +199,12 @@ pub struct Identity {
     /// Public key for the identity
     did_key: DID,
 
+    /// Timestamp when the identity was created
+    created: DateTime<Utc>,
+
+    /// Timestamp when the identity was last modified or updated
+    modified: DateTime<Utc>,
+
     /// Status message
     status_message: Option<String>,
 }
@@ -180,6 +225,14 @@ impl Identity {
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
+
+    pub fn set_created(&mut self, time: DateTime<Utc>) {
+        self.created = time;
+    }
+
+    pub fn set_modified(&mut self, time: DateTime<Utc>) {
+        self.modified = time;
+    }
 }
 
 impl Identity {
@@ -197,6 +250,14 @@ impl Identity {
 
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
+    }
+
+    pub fn created(&self) -> DateTime<Utc> {
+        self.created
+    }
+
+    pub fn modified(&self) -> DateTime<Utc> {
+        self.modified
     }
 }
 
@@ -260,10 +321,10 @@ impl From<&[DID]> for Identifier {
 #[derive(Debug, Clone, FFIFree)]
 pub enum IdentityUpdate {
     Username(String),
-    Picture(String),
+    Picture(Vec<u8>),
     PicturePath(std::path::PathBuf),
     ClearPicture,
-    Banner(String),
+    Banner(Vec<u8>),
     BannerPath(std::path::PathBuf),
     ClearBanner,
     StatusMessage(Option<String>),
@@ -386,33 +447,33 @@ pub mod ffi {
         Box::into_raw(Box::new(IdentityUpdate::Username(name)))
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_update_set_graphics_picture(
-        name: *const c_char,
-    ) -> *mut IdentityUpdate {
-        if name.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn multipass_identity_update_set_graphics_picture(
+    //     name: *const c_char,
+    // ) -> *mut IdentityUpdate {
+    //     if name.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+    //     let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Picture(name)))
-    }
+    //     Box::into_raw(Box::new(IdentityUpdate::Picture(name)))
+    // }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_update_set_graphics_banner(
-        name: *const c_char,
-    ) -> *mut IdentityUpdate {
-        if name.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn multipass_identity_update_set_graphics_banner(
+    //     name: *const c_char,
+    // ) -> *mut IdentityUpdate {
+    //     if name.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+    //     let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::Banner(name)))
-    }
+    //     Box::into_raw(Box::new(IdentityUpdate::Banner(name)))
+    // }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

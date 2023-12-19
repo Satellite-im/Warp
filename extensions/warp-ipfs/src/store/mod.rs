@@ -1,22 +1,23 @@
 pub mod conversation;
 pub mod discovery;
 pub mod document;
+pub mod event_subscription;
 pub mod files;
-pub mod friends;
 pub mod identity;
 pub mod keystore;
 pub mod message;
 pub mod payload;
 pub mod phonebook;
 pub mod queue;
+pub mod request;
 
 use chrono::{DateTime, Utc};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, time::Duration};
+use std::fmt::Display;
 use uuid::Uuid;
 
-use ipfs::{Multiaddr, PeerId, Protocol, PublicKey};
+use ipfs::{Keypair, PeerId, PublicKey};
 use warp::{
     crypto::{
         cipher::Cipher,
@@ -30,8 +31,6 @@ use warp::{
     raygun::{Message, MessageEvent, PinState, ReactionState},
     tesseract::Tesseract,
 };
-
-use crate::config::Discovery;
 
 pub trait PeerTopic: Display {
     fn inbox(&self) -> String {
@@ -49,14 +48,20 @@ pub trait PeerTopic: Display {
 impl PeerTopic for DID {}
 
 pub trait PeerIdExt {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
     fn to_did(&self) -> Result<DID, anyhow::Error>;
 }
 
-pub trait DidExt {
-    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
-}
-
 impl PeerIdExt for PeerId {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error> {
+        let multihash = self.as_ref();
+        if multihash.code() != 0 {
+            anyhow::bail!("PeerId does not contain inline public key");
+        }
+        let public_key = PublicKey::try_decode_protobuf(multihash.digest())?;
+        Ok(public_key)
+    }
+
     fn to_did(&self) -> Result<DID, anyhow::Error> {
         let multihash = self.as_ref();
         if multihash.code() != 0 {
@@ -67,9 +72,32 @@ impl PeerIdExt for PeerId {
     }
 }
 
+pub trait DidExt {
+    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
+    fn to_keypair(&self) -> Result<Keypair, anyhow::Error>;
+}
+
 impl DidExt for DID {
     fn to_peer_id(&self) -> Result<PeerId, anyhow::Error> {
         did_to_libp2p_pub(self).map(|p| p.to_peer_id())
+    }
+
+    fn to_keypair(&self) -> Result<Keypair, anyhow::Error> {
+        use warp::crypto::ed25519_dalek::{
+            PublicKey, SecretKey, KEYPAIR_LENGTH, SECRET_KEY_LENGTH,
+        };
+
+        let bytes = Zeroizing::new(self.private_key_bytes());
+        let secret_key = SecretKey::from_bytes(&bytes)?;
+        let public_key: PublicKey = (&secret_key).into();
+        let mut bytes: Zeroizing<[u8; KEYPAIR_LENGTH]> = Zeroizing::new([0u8; KEYPAIR_LENGTH]);
+
+        bytes[..SECRET_KEY_LENGTH].copy_from_slice(secret_key.as_bytes());
+        bytes[SECRET_KEY_LENGTH..].copy_from_slice(public_key.as_bytes());
+
+        let libp2p_keypair = Keypair::ed25519_from_bytes(bytes)?;
+
+        Ok(libp2p_keypair)
     }
 }
 
@@ -369,7 +397,7 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
-        PeerType::DID(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
+        PeerType::DID(did) => did.to_peer_id()?,
         PeerType::PeerId(peer) => peer,
     };
 
@@ -379,51 +407,6 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
-}
-
-pub async fn discover_peer(
-    ipfs: &ipfs::Ipfs,
-    did: &DID,
-    discovery: Discovery,
-    relay: Vec<Multiaddr>,
-) -> anyhow::Result<()> {
-    let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
-
-    if matches!(
-        connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?,
-        PeerConnectionType::Connected,
-    ) {
-        return Ok(());
-    }
-
-    match discovery {
-        // Check over DHT to locate peer
-        Discovery::Provider(_) | Discovery::Direct => loop {
-            if ipfs.identity(Some(peer_id)).await.is_ok() {
-                break;
-            }
-        },
-        Discovery::None => {
-            //Attempt a direct dial via relay
-            for addr in relay.iter() {
-                let addr = addr.clone().with(Protocol::P2p(peer_id));
-                if let Err(_e) = ipfs.connect(addr).await {
-                    continue;
-                }
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-            loop {
-                if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
-                    == PeerConnectionType::Connected
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

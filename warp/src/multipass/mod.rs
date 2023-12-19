@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
+use futures::Stream;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
 
@@ -17,7 +18,7 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{Identifier, IdentityUpdate};
 
-use self::identity::{IdentityProfile, IdentityStatus, Platform, Relationship};
+use self::identity::{IdentityImage, IdentityProfile, IdentityStatus, Platform, Relationship};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FFIFree)]
 #[serde(rename_all = "snake_case")]
@@ -66,16 +67,13 @@ pub enum IdentityImportOption<'a> {
 #[derive(FFIFree)]
 pub struct MultiPassEventStream(pub BoxStream<'static, MultiPassEventKind>);
 
-impl core::ops::Deref for MultiPassEventStream {
-    type Target = BoxStream<'static, MultiPassEventKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for MultiPassEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for MultiPassEventStream {
+    type Item = MultiPassEventKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
@@ -219,12 +217,12 @@ pub trait FriendsEvent: Sync + Send {
 #[async_trait::async_trait]
 pub trait IdentityInformation: Send + Sync {
     /// Profile picture belonging to the `Identity`
-    async fn identity_picture(&self, _: &DID) -> Result<String, Error> {
+    async fn identity_picture(&self, _: &DID) -> Result<IdentityImage, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Profile banner belonging to the `Identity`
-    async fn identity_banner(&self, _: &DID) -> Result<String, Error> {
+    async fn identity_banner(&self, _: &DID) -> Result<IdentityImage, Error> {
         Err(Error::Unimplemented)
     }
 

@@ -9,6 +9,7 @@ use crate::{Extension, SingleHandle};
 use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
+use futures::Stream;
 use warp_derive::FFIFree;
 
 use chrono::{DateTime, Utc};
@@ -128,32 +129,26 @@ pub enum AttachmentKind {
 #[derive(FFIFree)]
 pub struct AttachmentEventStream(pub BoxStream<'static, AttachmentKind>);
 
-impl core::ops::Deref for AttachmentEventStream {
-    type Target = BoxStream<'static, AttachmentKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for AttachmentEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for AttachmentEventStream {
+    type Item = AttachmentKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
 #[derive(FFIFree)]
 pub struct MessageEventStream(pub BoxStream<'static, MessageEventKind>);
 
-impl core::ops::Deref for MessageEventStream {
-    type Target = BoxStream<'static, MessageEventKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for MessageEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for MessageEventStream {
+    type Item = MessageEventKind;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
@@ -166,16 +161,13 @@ impl Debug for MessageStream {
     }
 }
 
-impl core::ops::Deref for MessageStream {
-    type Target = BoxStream<'static, Message>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for MessageStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Stream for MessageStream {
+    type Item = Message;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.as_mut().poll_next(cx)
     }
 }
 
@@ -189,7 +181,7 @@ pub struct MessageOptions {
     keyword: Option<String>,
     pinned: bool,
     range: Option<Range<usize>>,
-    limit: Option<i64>,
+    limit: Option<u8>,
     skip: Option<i64>,
 }
 
@@ -204,7 +196,7 @@ impl MessageOptions {
         self
     }
 
-    pub fn set_limit(mut self, limit: i64) -> MessageOptions {
+    pub fn set_limit(mut self, limit: u8) -> MessageOptions {
         self.limit = Some(limit);
         self
     }
@@ -253,7 +245,7 @@ impl MessageOptions {
 }
 
 impl MessageOptions {
-    pub fn limit(&self) -> Option<i64> {
+    pub fn limit(&self) -> Option<u8> {
         self.limit
     }
 
@@ -377,7 +369,7 @@ impl MessagePage {
 
 impl PartialOrd for MessagePage {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.id.partial_cmp(&other.id)
+        Some(self.cmp(other))
     }
 }
 
@@ -403,6 +395,8 @@ pub struct Conversation {
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
     creator: Option<DID>,
+    created: DateTime<Utc>,
+    modified: DateTime<Utc>,
     conversation_type: ConversationType,
     recipients: Vec<DID>,
 }
@@ -426,10 +420,13 @@ impl Default for Conversation {
         let creator = None;
         let conversation_type = ConversationType::Direct;
         let recipients = Vec::new();
+        let timestamp = Utc::now();
         Self {
             id,
             name,
             creator,
+            created: timestamp,
+            modified: timestamp,
             conversation_type,
             recipients,
         }
@@ -447,6 +444,14 @@ impl Conversation {
 
     pub fn creator(&self) -> Option<DID> {
         self.creator.clone()
+    }
+
+    pub fn created(&self) -> DateTime<Utc> {
+        self.created
+    }
+
+    pub fn modified(&self) -> DateTime<Utc> {
+        self.modified
     }
 
     pub fn conversation_type(&self) -> ConversationType {
@@ -469,6 +474,14 @@ impl Conversation {
 
     pub fn set_creator(&mut self, creator: Option<DID>) {
         self.creator = creator;
+    }
+
+    pub fn set_created(&mut self, created: DateTime<Utc>) {
+        self.created = created;
+    }
+
+    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
+        self.modified = modified;
     }
 
     pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
@@ -497,6 +510,115 @@ pub enum MessageType {
     #[display(fmt = "event")]
     Event,
 }
+
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+pub struct MessageReference {
+    /// ID of the Message
+    id: Uuid,
+
+    /// Conversion id where `Message` is associated with.
+    conversation_id: Uuid,
+
+    /// ID of the sender of the message
+    sender: DID,
+
+    /// Timestamp of the message
+    date: DateTime<Utc>,
+
+    /// Timestamp of when message was modified
+    modified: Option<DateTime<Utc>>,
+
+    /// Pin a message over other messages
+    pinned: bool,
+
+    /// ID of the message being replied to
+    replied: Option<Uuid>,
+
+    /// Indication that a message been deleted
+    deleted: bool,
+}
+
+impl PartialOrd for MessageReference {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MessageReference {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.date.cmp(&other.date)
+    }
+}
+
+// Getter functions
+impl MessageReference {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn conversation_id(&self) -> Uuid {
+        self.conversation_id
+    }
+
+    pub fn sender(&self) -> DID {
+        self.sender.clone()
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+
+    pub fn modified(&self) -> Option<DateTime<Utc>> {
+        self.modified
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub fn replied(&self) -> Option<Uuid> {
+        self.replied
+    }
+
+    pub fn deleted(&self) -> bool {
+        self.deleted
+    }
+}
+
+impl MessageReference {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id
+    }
+
+    pub fn set_conversation_id(&mut self, id: Uuid) {
+        self.conversation_id = id
+    }
+
+    pub fn set_sender(&mut self, id: DID) {
+        self.sender = id
+    }
+
+    pub fn set_date(&mut self, date: DateTime<Utc>) {
+        self.date = date
+    }
+
+    pub fn set_modified(&mut self, date: DateTime<Utc>) {
+        self.modified = Some(date)
+    }
+
+    pub fn set_pinned(&mut self, pin: bool) {
+        self.pinned = pin
+    }
+
+    pub fn set_replied(&mut self, replied: Option<Uuid>) {
+        self.replied = replied
+    }
+
+    pub fn set_delete(&mut self, deleted: bool) {
+        self.deleted = deleted
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Message {
     /// ID of the Message
@@ -530,7 +652,7 @@ pub struct Message {
     replied: Option<Uuid>,
 
     /// Message context for `Message`
-    value: Vec<String>,
+    lines: Vec<String>,
 
     /// List of Attachment
     attachment: Vec<File>,
@@ -556,7 +678,7 @@ impl Default for Message {
             pinned: false,
             reactions: Vec::new(),
             replied: None,
-            value: Vec::new(),
+            lines: Vec::new(),
             attachment: Vec::new(),
             signature: Default::default(),
             metadata: HashMap::new(),
@@ -566,7 +688,7 @@ impl Default for Message {
 
 impl PartialOrd for Message {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.date.partial_cmp(&other.date)
+        Some(self.cmp(other))
     }
 }
 
@@ -616,8 +738,8 @@ impl Message {
         self.reactions.clone()
     }
 
-    pub fn value(&self) -> Vec<String> {
-        self.value.clone()
+    pub fn lines(&self) -> Vec<String> {
+        self.lines.clone()
     }
 
     pub fn attachments(&self) -> Vec<File> {
@@ -670,8 +792,8 @@ impl Message {
         self.reactions = reaction
     }
 
-    pub fn set_value(&mut self, val: Vec<String>) {
-        self.value = val
+    pub fn set_lines(&mut self, val: Vec<String>) {
+        self.lines = val
     }
 
     pub fn set_attachment(&mut self, attachments: Vec<File>) {
@@ -701,8 +823,8 @@ impl Message {
         &mut self.reactions
     }
 
-    pub fn value_mut(&mut self) -> &mut Vec<String> {
-        &mut self.value
+    pub fn lines_mut(&mut self) -> &mut Vec<String> {
+        &mut self.lines
     }
 
     pub fn metadata_mut(&mut self) -> &mut HashMap<String, String> {
@@ -785,15 +907,14 @@ pub enum EmbedState {
     Disable,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
-    Constellation,
+    Constellation { path: String },
 
     /// Use file from disk
-    #[default]
-    Disk,
+    Disk { path: PathBuf },
 }
 
 #[async_trait::async_trait]
@@ -843,6 +964,20 @@ pub trait RayGun:
 
     /// Get a status of a message in a conversation
     async fn message_status(&self, _: Uuid, _: Uuid) -> Result<MessageStatus, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retrieve all message references from a conversation
+    async fn get_message_references(
+        &self,
+        _: Uuid,
+        _: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retrieve a message reference from a conversation
+    async fn get_message_reference(&self, _: Uuid, _: Uuid) -> Result<MessageReference, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -933,8 +1068,7 @@ pub trait RayGunAttachment: Sync + Send {
         &mut self,
         _: Uuid,
         _: Option<Uuid>,
-        _: Location,
-        _: Vec<PathBuf>,
+        _: Vec<Location>,
         _: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
         Err(Error::Unimplemented)
@@ -1017,7 +1151,7 @@ pub mod ffi {
         EmbedState, FFIResult_FFIVec_Message, FFIVec_Reaction, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
     };
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    // use chrono::{DateTime, NaiveDateTime, Utc};
     use futures::StreamExt;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
@@ -1604,7 +1738,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        let lines = adapter.value();
+        let lines = adapter.lines();
 
         Box::into_raw(Box::new(lines.into()))
     }
@@ -1713,32 +1847,32 @@ pub mod ffi {
         Box::into_raw(Box::new(opt))
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn messageoptions_set_date_range(
-        option: *mut MessageOptions,
-        start: i64,
-        end: i64,
-    ) -> *mut MessageOptions {
-        if option.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn messageoptions_set_date_range(
+    //     option: *mut MessageOptions,
+    //     start: i64,
+    //     end: i64,
+    // ) -> *mut MessageOptions {
+    //     if option.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let opt = Box::from_raw(option);
+    //     let opt = Box::from_raw(option);
 
-        let start = match convert_timstamp(start) {
-            Some(s) => s,
-            None => return std::ptr::null_mut(),
-        };
-        let end = match convert_timstamp(end) {
-            Some(s) => s,
-            None => return std::ptr::null_mut(),
-        };
+    //     let start = match convert_timstamp(start) {
+    //         Some(s) => s,
+    //         None => return std::ptr::null_mut(),
+    //     };
+    //     let end = match convert_timstamp(end) {
+    //         Some(s) => s,
+    //         None => return std::ptr::null_mut(),
+    //     };
 
-        let opt = opt.set_date_range(start..end);
+    //     let opt = opt.set_date_range(start..end);
 
-        Box::into_raw(Box::new(opt))
-    }
+    //     Box::into_raw(Box::new(opt))
+    // }
 
     #[allow(clippy::missing_safety_doc)]
     unsafe fn pointer_to_vec(
@@ -1751,8 +1885,8 @@ pub mod ffi {
             .collect()
     }
 
-    fn convert_timstamp(timestamp: i64) -> Option<DateTime<Utc>> {
-        NaiveDateTime::from_timestamp_opt(timestamp, 0)
-            .map(|naive| DateTime::<Utc>::from_utc(naive, Utc))
-    }
+    // fn convert_timstamp(timestamp: i64) -> Option<DateTime<Utc>> {
+    //     NaiveDateTime::from_timestamp_opt(timestamp, 0)
+    //         .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+    // }
 }

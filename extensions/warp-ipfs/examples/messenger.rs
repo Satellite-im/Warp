@@ -1,7 +1,8 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
-use rustyline_async::{Readline, ReadlineError, SharedWriter};
+use rust_ipfs::Multiaddr;
+use rustyline_async::{Readline, SharedWriter};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -17,12 +18,13 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    AttachmentKind, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
+    AttachmentKind, Location, Message, MessageEvent, MessageEventKind, MessageEventStream,
+    MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun,
+    ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_ipfs::config::Discovery;
+use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
@@ -36,13 +38,11 @@ struct Opt {
     experimental_node: bool,
     #[clap(long)]
     stdout_log: bool,
-    #[clap(long)]
-    disable_sender_emitter: bool,
 
     #[clap(long)]
     context: Option<String>,
     #[clap(long)]
-    direct: bool,
+    discovery_point: Option<Multiaddr>,
     #[clap(long)]
     disable_relay: bool,
     #[clap(long)]
@@ -85,20 +85,30 @@ async fn setup<P: AsRef<Path>>(
         None => warp_ipfs::config::Config::testing(),
     };
 
-    if !opt.direct || !opt.no_discovery {
-        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+    if !opt.no_discovery {
+        let discovery_type = match &opt.discovery_point {
+            Some(addr) => {
+                config.ipfs_setting.bootstrap = false;
+                DiscoveryType::RzPoint {
+                    addresses: vec![addr.clone()],
+                }
+            }
+            None => DiscoveryType::DHT,
+        };
+        config.store_setting.discovery = Discovery::Namespace {
+            namespace: opt.context.clone(),
+            discovery_type,
+        };
     }
     if opt.disable_relay {
-        config.ipfs_setting.relay_client.enable = false;
+        config.enable_relay = false;
     }
     if opt.upnp {
         config.ipfs_setting.portmapping = true;
     }
-    if opt.direct {
-        config.store_setting.discovery = Discovery::Direct;
-    }
     if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;
+        config.bootstrap = Bootstrap::None;
         config.ipfs_setting.bootstrap = false;
     }
 
@@ -113,7 +123,6 @@ async fn setup<P: AsRef<Path>>(
     }
 
     config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
-    config.store_setting.disable_sender_event_emit = opt.disable_sender_emitter;
     config.ipfs_setting.mdns.enable = opt.mdns;
 
     let (mut account, raygun, filesystem) = WarpIpfsBuilder::default()
@@ -133,9 +142,7 @@ async fn setup<P: AsRef<Path>>(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {
-        //raising fd limit
-    }
+    _ = fdlimit::raise_fd_limit().is_ok();
 
     let mut _log_guard = None;
 
@@ -291,7 +298,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             line = rl.readline().fuse() => match line {
-                Ok(line) => {
+                Ok(rustyline_async::ReadlineEvent::Line(line)) => {
+                    rl.add_history_entry(line.clone());
                     let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
                         Some("/create") => {
@@ -308,36 +316,8 @@ async fn main() -> anyhow::Result<()> {
                                     continue
                                 }
                             };
-                            // Note: This is one way to handle it outside of the event stream
-                            if opt.disable_sender_emitter {
-                                let id = match chat.create_conversation(&did).await {
-                                    Ok(id) => id,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error creating conversation: {e}")?;
-                                        continue
-                                    }
-                                };
 
-                                *topic.write() = id.id();
-                                writeln!(stdout, "Set conversation to {}", topic.read())?;
-                                let mut stdout = stdout.clone();
-                                let account = new_account.clone();
-                                let stream = chat.get_conversation_stream(id.id()).await?;
-                                let chat = chat.clone();
-                                let topic = topic.clone();
-
-                                tokio::spawn(async move {
-                                    if let Err(e) = message_event_handle(
-                                        stdout.clone(),
-                                        account.clone(),
-                                        chat.clone(),
-                                        stream,
-                                        topic.clone(),
-                                    ).await {
-                                        writeln!(stdout, ">> Error processing event task: {e}").unwrap();
-                                    }
-                                });
-                            } else if let Err(e) = chat.create_conversation(&did).await {
+                            if let Err(e) = chat.create_conversation(&did).await {
                                 writeln!(stdout, "Error creating conversation: {e}")?;
                                 continue
                             }
@@ -406,37 +386,9 @@ async fn main() -> anyhow::Result<()> {
                                 did_keys.push(did);
                             }
 
-                            if opt.disable_sender_emitter {
-                                let id = match chat.create_group_conversation(Some(name.to_string()), did_keys).await {
-                                    Ok(id) => id,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error creating conversation: {e}")?;
-                                        continue
-                                    }
-                                };
-
-                                *topic.write() = id.id();
-                                writeln!(stdout, "Set conversation to {}", topic.read())?;
-                                let mut stdout = stdout.clone();
-                                let account = new_account.clone();
-                                let stream = chat.get_conversation_stream(id.id()).await?;
-                                let chat = chat.clone();
-                                let topic = topic.clone();
-
-                                tokio::spawn(async move {
-                                    if let Err(e) = message_event_handle(
-                                        stdout.clone(),
-                                        account.clone(),
-                                        chat.clone(),
-                                        stream,
-                                        topic.clone(),
-                                    ).await {
-                                        writeln!(stdout, ">> Error processing event task: {e}").unwrap();
-                                    }
-                                });
-                            } else if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys).await {
-                                    writeln!(stdout, "Error creating conversation: {e}")?;
-                                    continue
+                            if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys).await {
+                                writeln!(stdout, "Error creating conversation: {e}")?;
+                                continue
                             }
                         },
                         Some("/remove-conversation") => {
@@ -482,7 +434,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("/list-conversations") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["Name", "ID", "Recipients"]);
+                            table.set_header(vec!["Name", "ID", "Created", "Updated", "Recipients"]);
                             let list = chat.list_conversations().await?;
                             for convo in list.iter() {
                                 let mut recipients = vec![];
@@ -490,10 +442,74 @@ async fn main() -> anyhow::Result<()> {
                                     let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
-                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), recipients.join(",").to_string()]);
+                                let created = convo.created();
+                                let modified = convo.modified();
+                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), created.to_string(), modified.to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{table}")?;
                         },
+                        Some("/list-references") => {
+
+                            let local_topic = *topic.read();
+                            let mut lower_range = None;
+                            let mut upper_range = None;
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(lower) => {
+                                        lower_range = Some(lower);
+                                        if let Some(id) = cmd_line.next() {
+                                            match id.parse() {
+                                                Ok(upper) => {
+                                                    upper_range = Some(upper);
+                                                },
+                                                Err(e) => {
+                                                    writeln!(stdout, "Error parsing upper range: {e}")?;
+                                                    continue
+                                                }
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing lower range: {e}")?;
+                                        continue
+                                    }
+                                }
+                            };
+
+                            let mut opt = MessageOptions::default();
+                            if let Some(lower) = lower_range {
+                                if let Some(upper) = upper_range {
+                                    opt = opt.set_range(lower..upper);
+                                } else {
+                                    opt = opt.set_range(0..lower);
+                                }
+                            }
+
+                            let mut messages_stream = match chat.get_message_references(local_topic, opt).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+
+
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Conversation ID", "Date", "Modified", "Sender", "Pinned"]);
+                            while let Some(message) = messages_stream.next().await {
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &format!("{}", message.pinned()),
+                                ]);
+                            }
+                            writeln!(stdout, "{table}")?
+                        }
                         Some("/list") => {
 
                             let local_topic = *topic.read();
@@ -556,7 +572,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.date().to_string(),
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
-                                    &message.value().join("\n"),
+                                    &message.lines().join("\n"),
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
@@ -624,7 +640,7 @@ async fn main() -> anyhow::Result<()> {
                                             &message.date().to_string(),
                                             &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                             &username,
-                                            &message.value().join("\n"),
+                                            &message.lines().join("\n"),
                                             &format!("{}", message.pinned()),
                                             &emojis.join(" ")
                                         ]);
@@ -659,7 +675,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.date().to_string(),
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
-                                    &message.value().join("\n"),
+                                    &message.lines().join("\n"),
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
@@ -691,7 +707,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.date().to_string(),
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
-                                    &message.value().join("\n"),
+                                    &message.lines().join("\n"),
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
@@ -732,7 +748,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.date().to_string(),
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
-                                    &message.value().join("\n"),
+                                    &message.lines().join("\n"),
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
@@ -772,7 +788,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut files = vec![];
 
                             for item in cmd_line.by_ref() {
-                                files.push(PathBuf::from(item));
+                                files.push(Location::Disk {path:PathBuf::from(item)});
                             }
 
                             if files.is_empty() {
@@ -786,7 +802,7 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    let mut stream = match chat.attach(conversation_id, None, Default::default(), files, vec![]).await {
+                                    let mut stream = match chat.attach(conversation_id, None, files, vec![]).await {
                                         Ok(stream) => stream,
                                         Err(e) => {
                                             writeln!(stdout, "> Error: {e}")?;
@@ -1071,8 +1087,7 @@ async fn main() -> anyhow::Result<()> {
                        }
                     }
                 },
-                Err(ReadlineError::Interrupted) => break,
-                Err(ReadlineError::Eof) => break,
+                Ok(rustyline_async::ReadlineEvent::Eof) | Ok(rustyline_async::ReadlineEvent::Interrupted) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {e}")?;
                 }
@@ -1123,7 +1138,7 @@ async fn message_event_handle(
                                         stdout,
                                         "[{}] @> [SPAM!] {}",
                                         username,
-                                        message.value().join("\n")
+                                        message.lines().join("\n")
                                     )?;
                                 }
                                 None => {
@@ -1131,19 +1146,19 @@ async fn message_event_handle(
                                         stdout,
                                         "[{}] @> {}",
                                         username,
-                                        message.value().join("\n")
+                                        message.lines().join("\n")
                                     )?;
                                 }
                             },
                             MessageType::Attachment => {
-                                if !message.value().is_empty() {
+                                if !message.lines().is_empty() {
                                     match message.metadata().get("is_spam") {
                                         Some(_) => {
                                             writeln!(
                                                 stdout,
                                                 "[{}] @> [SPAM!] {}",
                                                 username,
-                                                message.value().join("\n")
+                                                message.lines().join("\n")
                                             )?;
                                         }
                                         None => {
@@ -1151,7 +1166,7 @@ async fn message_event_handle(
                                                 stdout,
                                                 "[{}] @> {}",
                                                 username,
-                                                message.value().join("\n")
+                                                message.lines().join("\n")
                                             )?;
                                         }
                                     }

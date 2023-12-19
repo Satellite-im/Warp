@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{
-    stream::{self, BoxStream, FuturesOrdered},
+    stream::{self, BoxStream},
     StreamExt, TryFutureExt,
 };
-use libipld::{Cid, Ipld};
+use libipld::Cid;
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -13,21 +13,16 @@ use uuid::Uuid;
 use warp::{
     crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
-    logging::tracing::log::info,
+    logging::tracing::info,
     raygun::{
-        Conversation, ConversationType, Message, MessageOptions, MessagePage, Messages,
-        MessagesType,
+        Conversation, ConversationType, Message, MessageOptions, MessagePage, MessageReference,
+        Messages, MessagesType,
     },
 };
 
 use crate::store::ecdh_encrypt;
 
-use super::{
-    document::utils::{GetIpldDag, GetLocalDag, ToCid},
-    ecdh_decrypt,
-    keystore::Keystore,
-    verify_serde_sig,
-};
+use super::{ecdh_decrypt, keystore::Keystore, verify_serde_sig};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
@@ -36,6 +31,8 @@ pub struct ConversationDocument {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<DID>,
+    pub created: DateTime<Utc>,
+    pub modified: DateTime<Utc>,
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
@@ -57,7 +54,8 @@ impl From<&Conversation> for ConversationDocument {
             id: conversation.id(),
             name: conversation.name(),
             creator: conversation.creator(),
-
+            created: conversation.created(),
+            modified: conversation.modified(),
             conversation_type: conversation.conversation_type(),
             recipients: conversation.recipients(),
             excluded: Default::default(),
@@ -130,12 +128,15 @@ impl ConversationDocument {
 }
 
 impl ConversationDocument {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         did: &DID,
         name: Option<String>,
         mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
+        created: Option<DateTime<Utc>>,
+        modified: Option<DateTime<Utc>>,
         creator: Option<DID>,
         signature: Option<String>,
     ) -> Result<Self, Error> {
@@ -152,11 +153,16 @@ impl ConversationDocument {
         let messages = None;
         let excluded = Default::default();
 
+        let created = created.unwrap_or(Utc::now());
+        let modified = modified.unwrap_or(created);
+
         let mut document = Self {
             id,
             name,
             recipients,
             creator,
+            created,
+            modified,
             conversation_type,
             excluded,
             messages,
@@ -196,6 +202,8 @@ impl ConversationDocument {
             ConversationType::Direct,
             None,
             None,
+            None,
+            None,
         )
     }
 
@@ -207,6 +215,8 @@ impl ConversationDocument {
             recipients.to_vec(),
             conversation_id,
             ConversationType::Group,
+            None,
+            None,
             Some(did.clone()),
             None,
         )
@@ -276,48 +286,30 @@ impl ConversationDocument {
     }
 
     pub async fn messages_length(&self, ipfs: &Ipfs) -> Result<usize, Error> {
-        let document = self.get_raw_message_list(ipfs).await?;
-        if let Ipld::List(list) = document {
-            return Ok(list.len());
-        }
-        Err(Error::InvalidDataType)
+        self.get_message_list(ipfs).await.map(|l| l.len())
     }
 
     pub async fn get_message_list(&self, ipfs: &Ipfs) -> Result<BTreeSet<MessageDocument>, Error> {
         match self.messages {
-            Some(cid) => cid.get_local_dag(ipfs).await,
+            Some(cid) => ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from),
             None => Ok(BTreeSet::new()),
         }
     }
 
-    pub async fn get_raw_message_list(&self, ipfs: &Ipfs) -> Result<Ipld, Error> {
-        match self.messages {
-            Some(cid) => cid.get_ipld_dag(ipfs).await,
-            None => Ok(Ipld::List(vec![])),
-        }
-    }
     pub async fn set_message_list(
         &mut self,
         ipfs: &Ipfs,
         list: BTreeSet<MessageDocument>,
     ) -> Result<(), Error> {
-        let old_cid = self.messages;
-        let cid = list.to_cid(ipfs).await?;
-        if !ipfs.is_pinned(&cid).await? {
-            ipfs.insert_pin(&cid, false).await?;
-        }
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if ipfs.is_pinned(&old_cid).await? {
-                    ipfs.remove_pin(&old_cid, false).await?;
-                }
-                ipfs.remove_block(old_cid).await?;
-            }
-        }
-
+        self.modified = Utc::now();
+        let cid = ipfs.dag().put().serialize(list)?.await?;
         self.messages = Some(cid);
-
         Ok(())
     }
 
@@ -334,6 +326,65 @@ impl ConversationDocument {
             .collect::<Vec<_>>()
             .await;
         Ok(list)
+    }
+
+    pub async fn get_messages_reference_stream<'a>(
+        &self,
+        ipfs: &Ipfs,
+        option: MessageOptions,
+    ) -> Result<BoxStream<'a, MessageReference>, Error> {
+        let message_list = self.get_message_list(ipfs).await?;
+
+        if message_list.is_empty() {
+            return Ok(stream::empty().boxed());
+        }
+
+        let mut messages = Vec::from_iter(message_list);
+
+        if option.reverse() {
+            messages.reverse()
+        }
+
+        if option.first_message() && !messages.is_empty() {
+            let message = messages.first().copied().ok_or(Error::MessageNotFound)?;
+            return Ok(stream::once(async move { message.into() }).boxed());
+        }
+
+        if option.last_message() && !messages.is_empty() {
+            let message = messages.last().copied().ok_or(Error::MessageNotFound)?;
+            return Ok(stream::once(async move { message.into() }).boxed());
+        }
+
+        let stream = async_stream::stream! {
+            let mut remaining = option.limit();
+            for (index, document) in messages.iter().enumerate() {
+                if remaining.as_ref().map(|x| *x == 0).unwrap_or_default() {
+                    break;
+                }
+                if let Some(range) = option.range() {
+                    if range.start > index || range.end < index {
+                        continue
+                    }
+                }
+                if let Some(range) = option.date_range() {
+                    if !(document.date >= range.start && document.date <= range.end) {
+                        continue
+                    }
+                }
+
+                if option.pinned() && !document.pinned {
+                    continue;
+                }
+
+                if let Some(remaining) = remaining.as_mut() {
+                    *remaining = remaining.saturating_sub(1);
+                }
+
+                yield document.into()
+            }
+        };
+
+        Ok(stream.boxed())
     }
 
     pub async fn get_messages_stream<'a>(
@@ -376,8 +427,11 @@ impl ConversationDocument {
 
         let ipfs = ipfs.clone();
         let stream = async_stream::stream! {
-
+            let mut remaining = option.limit();
             for (index, document) in messages.iter().enumerate() {
+                if remaining.as_ref().map(|x| *x == 0).unwrap_or_default() {
+                    break;
+                }
                 if let Some(range) = option.range() {
                     if range.start > index || range.end < index {
                         continue
@@ -389,19 +443,23 @@ impl ConversationDocument {
                     }
                 }
 
+                if option.pinned() && !document.pinned {
+                    continue;
+                }
+
                 if let Ok(message) = document.resolve(&ipfs, &did, keystore.as_ref()).await {
-                    if option.pinned() && !message.pinned() {
-                        continue;
-                    }
-                    if let Some(keyword) = option.keyword() {
-                        if message
-                            .value()
+                    let should_yield = if let Some(keyword) = option.keyword() {
+                         message
+                            .lines()
                             .iter()
                             .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
-                        {
-                            yield message;
-                        }
                     } else {
+                        true
+                    };
+                    if should_yield {
+                        if let Some(remaining) = remaining.as_mut() {
+                            *remaining = remaining.saturating_sub(1);
+                        }
                         yield message;
                     }
                 }
@@ -446,7 +504,6 @@ impl ConversationDocument {
             _ => (None, u8::MAX as _),
         };
 
-        let ipfs = ipfs.clone();
 
         let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
         let mut pages = vec![];
@@ -455,7 +512,7 @@ impl ConversationDocument {
             let page = messages_chunk.get(index).ok_or(Error::PageNotFound)?;
             let mut messages = vec![];
             for document in page.iter() {
-                if let Ok(message) = document.resolve(&ipfs, did, keystore).await {
+                if let Ok(message) = document.resolve(ipfs, did, keystore).await {
                     messages.push(message);
                 }
             }
@@ -467,7 +524,7 @@ impl ConversationDocument {
         for (index, chunk) in messages_chunk.iter().enumerate() {
             let mut messages = vec![];
             for document in chunk.iter() {
-                if let Ok(message) = document.resolve(&ipfs, did, keystore).await {
+                if let Ok(message) = document.resolve(ipfs, did, keystore).await {
                     if option.pinned() && !message.pinned() {
                         continue;
                     }
@@ -519,13 +576,13 @@ impl ConversationDocument {
             .ok_or(Error::MessageNotFound)?;
         messages.remove(&document);
         self.set_message_list(ipfs, messages).await?;
-        document.remove(ipfs).await
+        Ok(())
     }
 
     pub async fn delete_all_message(&mut self, ipfs: Ipfs) -> Result<(), Error> {
         let cid = std::mem::take(&mut self.messages);
         let (cid, messages): (Cid, BTreeSet<MessageDocument>) = match cid {
-            Some(cid) => (cid, cid.get_local_dag(&ipfs).await?),
+            Some(cid) => (cid, ipfs.get_dag(cid).local().deserialized().await?),
             None => return Ok(()),
         };
 
@@ -533,40 +590,18 @@ impl ConversationDocument {
             ipfs.remove_pin(&cid, false).await?;
         }
 
-        let mut ids = vec![];
-
         for document in messages {
             if ipfs.is_pinned(&document.message).await? {
                 ipfs.remove_pin(&document.message, false).await?;
             }
-            ids.push(document.message);
         }
-
-        ipfs.remove_block(cid).await?;
-
-        //TODO: Replace with gc within ipfs (when completed) in the future
-        //      so we dont need to manually delete the blocks
-        FuturesOrdered::from_iter(ids.iter().map(|cid| {
-            let ipfs = ipfs.clone();
-            async move { (ipfs, *cid) }
-        }))
-        .for_each_concurrent(None, |(ipfs, cid)| async move {
-            let _ = ipfs.remove_block(cid).await.ok();
-        })
-        .await;
         Ok(())
     }
 }
 
 impl From<ConversationDocument> for Conversation {
     fn from(document: ConversationDocument) -> Self {
-        let mut conversation = Conversation::default();
-        conversation.set_id(document.id);
-        conversation.set_name(document.name());
-        conversation.set_creator(document.creator.clone());
-        conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(document.recipients());
-        conversation
+        Conversation::from(&document)
     }
 }
 
@@ -578,6 +613,8 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_creator(document.creator.clone());
         conversation.set_conversation_type(document.conversation_type);
         conversation.set_recipients(document.recipients());
+        conversation.set_created(document.created);
+        conversation.set_modified(document.modified);
         conversation
     }
 }
@@ -588,12 +625,40 @@ pub struct MessageDocument {
     pub conversation_id: Uuid,
     pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replied: Option<Uuid>,
     pub message: Cid,
+}
+
+impl From<MessageDocument> for MessageReference {
+    fn from(document: MessageDocument) -> Self {
+        Self::from(&document)
+    }
+}
+
+impl From<&MessageDocument> for MessageReference {
+    fn from(document: &MessageDocument) -> Self {
+        let mut reference = MessageReference::default();
+        reference.set_id(document.id);
+        reference.set_conversation_id(document.conversation_id);
+        reference.set_date(document.date);
+        if let Some(modified) = document.modified {
+            reference.set_modified(modified);
+        }
+        reference.set_pinned(document.pinned);
+        reference.set_replied(document.replied);
+        reference.set_sender(document.sender.to_did());
+        reference
+    }
 }
 
 impl PartialOrd for MessageDocument {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.date.partial_cmp(&other.date)
+        Some(self.cmp(other))
     }
 }
 
@@ -614,6 +679,9 @@ impl MessageDocument {
         let conversation_id = message.conversation_id();
         let date = message.date();
         let sender = message.sender();
+        let pinned = message.pinned();
+        let modified = message.modified();
+        let replied = message.replied();
 
         let bytes = serde_json::to_vec(&message)?;
 
@@ -625,11 +693,7 @@ impl MessageDocument {
             None => ecdh_encrypt(&did, Some(&sender), &bytes)?,
         };
 
-        let message = data.to_cid(ipfs).await?;
-
-        if !ipfs.is_pinned(&message).await? {
-            ipfs.insert_pin(&message, false).await?;
-        }
+        let message = ipfs.dag().put().serialize(data)?.await?;
 
         let sender = DIDEd25519Reference::from_did(&sender);
 
@@ -639,20 +703,23 @@ impl MessageDocument {
             conversation_id,
             date,
             message,
+            pinned,
+            modified,
+            replied,
         };
 
         Ok(document)
     }
 
-    pub async fn remove(&self, ipfs: &Ipfs) -> Result<(), Error> {
-        let cid = self.message;
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid, false).await?;
-        }
-        ipfs.remove_block(cid).await?;
+    // pub async fn remove(&self, ipfs: &Ipfs) -> Result<(), Error> {
+    //     let cid = self.message;
+    //     if ipfs.is_pinned(&cid).await? {
+    //         ipfs.remove_pin(&cid, false).await?;
+    //     }
+    //     ipfs.remove_block(cid).await?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     pub async fn update(
         &mut self,
@@ -661,14 +728,13 @@ impl MessageDocument {
         message: Message,
         keystore: Option<&Keystore>,
     ) -> Result<(), Error> {
-        info!("Updating message {} for {}", self.id, self.conversation_id);
+        info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
         let old_message = self.resolve(ipfs, did, keystore).await?;
-        let old_document = self.message;
 
         if old_message.id() != message.id()
             || old_message.conversation_id() != message.conversation_id()
         {
-            info!("Message does not match document");
+            info!(id = %self.conversation_id, message_id = %self.id, "Message does not match document");
             //TODO: Maybe remove message from this point?
             return Err(Error::InvalidMessage);
         }
@@ -683,22 +749,14 @@ impl MessageDocument {
             None => ecdh_encrypt(did, Some(&self.sender.to_did()), &bytes)?,
         };
 
-        let message_cid = data.to_cid(ipfs).await?;
+        self.pinned = message.pinned();
+        self.modified = message.modified();
 
-        if !ipfs.is_pinned(&message_cid).await? {
-            ipfs.insert_pin(&message_cid, false).await?;
-        }
+        let message_cid = ipfs.dag().put().serialize(data)?.await?;
 
-        info!("Setting Message to document");
+        info!(id = %self.conversation_id, message_id = %self.id, "Setting Message to document");
         self.message = message_cid;
-        info!("Message is updated");
-        if old_document != message_cid {
-            if ipfs.is_pinned(&old_document).await? {
-                info!("Removing pin for {old_document}");
-                ipfs.remove_pin(&old_document, false).await?;
-            }
-            ipfs.remove_block(old_document).await?;
-        }
+        info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
         Ok(())
     }
 
@@ -708,7 +766,13 @@ impl MessageDocument {
         did: &DID,
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
-        let bytes: Vec<u8> = self.message.get_local_dag(ipfs).await?;
+        let bytes: Vec<u8> = ipfs
+            .dag()
+            .get()
+            .path(self.message)
+            .local()
+            .deserialized()
+            .await?;
 
         let sender = self.sender.to_did();
         let data = match keystore {

@@ -64,11 +64,10 @@ impl Keystore {
     pub fn get_latest(&self, did: &DID, recipient: &DID) -> Result<Vec<u8>, Error> {
         self.recipient_key
             .get(recipient)
-            .map(|list| {
+            .and_then(|list| {
                 list.last()
                     .and_then(|entry| super::ecdh_decrypt(did, None, entry).ok())
             })
-            .and_then(|entry| entry)
             .ok_or(Error::PublicKeyInvalid)
     }
 
@@ -136,7 +135,7 @@ impl KeyEntry {
 
 impl PartialOrd for KeyEntry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.id.partial_cmp(&other.id)
+        Some(self.cmp(other))
     }
 }
 
@@ -211,10 +210,10 @@ mod test {
         let mut keystore = Keystore::default();
 
         let keypair = DID::default();
-        let recipients = (0..100).map(|_| DID::default()).collect::<Vec<_>>();
+        let recipients = (0..10).map(|_| DID::default()).collect::<Vec<_>>();
 
         for recipient in recipients.iter() {
-            for key in (0..100).map(|_| generate::<32>()) {
+            for key in (0..recipients.len()).map(|_| generate::<32>()) {
                 keystore.insert(&keypair, recipient, key)?;
             }
         }

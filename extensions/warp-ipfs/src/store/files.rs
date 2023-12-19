@@ -1,18 +1,18 @@
-use std::{collections::HashSet, ffi::OsStr, path::PathBuf, sync::Arc};
+use std::{ffi::OsStr, path::PathBuf, sync::Arc, task::Poll};
 
 use chrono::{DateTime, Utc};
 use futures::{
-    pin_mut,
     stream::{self, BoxStream},
     StreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{
-    unixfs::{AddOpt, AddOption, UnixfsStatus},
+    unixfs::{AddOption, UnixfsStatus},
     Ipfs, IpfsPath,
 };
-use tokio::sync::broadcast;
+
 use tokio_util::io::ReaderStream;
+use tracing::Span;
 use warp::{
     constellation::{
         directory::Directory, ConstellationEventKind, ConstellationProgressStream, Progression,
@@ -21,9 +21,13 @@ use warp::{
     sync::RwLock,
 };
 
-use crate::{config::Config, thumbnail::ThumbnailGenerator, to_file_type};
+use crate::{
+    config::{self, Config},
+    thumbnail::ThumbnailGenerator,
+    to_file_type,
+};
 
-use super::{ecdh_decrypt, ecdh_encrypt, get_keypair_did};
+use super::{ecdh_decrypt, ecdh_encrypt, event_subscription::EventSubscription, get_keypair_did};
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -37,20 +41,23 @@ pub struct FileStore {
     location_path: Option<PathBuf>,
 
     ipfs: Ipfs,
-    constellation_tx: broadcast::Sender<ConstellationEventKind>,
+    constellation_tx: EventSubscription<ConstellationEventKind>,
 
-    max_storage_size: Option<usize>,
-    max_file_size: Option<usize>,
-    thumbnail_size: (u32, u32),
-    thumbnail_task: bool,
-    thumbnail_exact_format: bool,
+    signal: futures::channel::mpsc::UnboundedSender<()>,
+
+    config: config::Config,
+
+    span: Span,
+
+    signal_guard: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl FileStore {
     pub async fn new(
         ipfs: Ipfs,
         config: &Config,
-        constellation_tx: broadcast::Sender<ConstellationEventKind>,
+        constellation_tx: EventSubscription<ConstellationEventKind>,
+        span: Span
     ) -> Result<Self, Error> {
         let mut index_cid = None;
 
@@ -72,20 +79,19 @@ impl FileStore {
             }
         }
 
+        let config = config.clone();
+
         let index = Directory::new("root");
         let path = Arc::default();
         let modified = Utc::now();
         let index_cid = Arc::new(RwLock::new(index_cid));
         let thumbnail_store = ThumbnailGenerator::default();
 
-        let max_storage_size = config.max_storage_size;
-        let max_file_size = config.max_file_size;
-        let thumbnail_size = config.thumbnail_size;
-        let thumbnail_exact_format = config.thumbnail_exact_format;
-        let thumbnail_task = config.thumbnail_task;
         let location_path = config.path.clone();
 
-        let store = FileStore {
+        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+
+        let mut store = FileStore {
             index,
             path,
             modified,
@@ -94,22 +100,38 @@ impl FileStore {
             location_path,
             ipfs,
             constellation_tx,
-            max_storage_size,
-            max_file_size,
-            thumbnail_size,
-            thumbnail_exact_format,
-            thumbnail_task,
+            config,
+            signal: tx,
+            signal_guard: Arc::default(),
+            span,
         };
 
         if let Err(e) = store.import().await {
             tracing::error!("Error importing index: {e}");
         }
 
+        let signal = Some(store.signal.clone());
+        store.index.rebuild_paths(&signal);
+
         tokio::spawn({
             let fs = store.clone();
             async move {
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                let mut stream_ctx = futures::stream::poll_fn(|cx| {
+                    let mut signaled = false;
+
+                    while let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
+                        signaled = true;
+                    }
+
+                    if signaled {
+                        Poll::Ready(Some(()))
+                    } else {
+                        Poll::Pending
+                    }
+                });
+
+                while stream_ctx.next().await.is_some() {
+                    let _g = fs.signal_guard.read().await;
                     if let Err(_e) = fs.export().await {
                         tracing::error!("Error exporting index: {_e}");
                     }
@@ -121,49 +143,58 @@ impl FileStore {
     }
 
     async fn import(&self) -> Result<(), Error> {
-        if self.location_path.is_some() {
-            let cid = (*self.index_cid.read()).ok_or(Error::Other)?;
-
-            let mut index_stream = self
-                .ipfs
-                .unixfs()
-                .cat(IpfsPath::from(cid), None, &[], true)
-                .await
-                .map_err(anyhow::Error::from)?
-                .boxed();
-
-            let mut data = vec![];
-
-            while let Some(result) = index_stream.next().await {
-                let mut bytes = result.map_err(anyhow::Error::from)?;
-                data.append(&mut bytes);
-            }
-
-            let key = self.ipfs.keypair().and_then(get_keypair_did)?;
-
-            let index_bytes = ecdh_decrypt(&key, None, data)?;
-
-            let mut directory_index: Directory = serde_json::from_slice(&index_bytes)?;
-            directory_index.rebuild_paths();
-
-            self.index.set_items(directory_index.get_items());
+        if self.config.path.is_none() {
+            return Ok(());
         }
+
+        tracing::info!("Importing index");
+        let cid = (*self.index_cid.read()).ok_or(Error::Other)?;
+
+        tracing::info!(cid = %cid, "Index located");
+
+        let data = self
+            .ipfs
+            .unixfs()
+            .cat(cid, None, &[], true, None)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+
+        let index_bytes = ecdh_decrypt(&key, None, data)?;
+
+        let directory_index: Directory = serde_json::from_slice(&index_bytes)?;
+        self.index.set_items(directory_index.get_items());
+
+        tracing::info!(cid = %cid, "Index imported");
+
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn export(&self) -> Result<(), Error> {
+        tracing::trace!("Exporting index");
+
+        let mut index = self.index.clone();
+        let signal = Some(self.signal.clone());
+
+        index.rebuild_paths(&signal);
+
         let index = serde_json::to_string(&self.index)?;
 
         let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+
+        //TODO: Disable encryption of the index but instead store it all as a dag object.
+        //      possibly even building an internal graph of the index instead
         let data = ecdh_encrypt(&key, None, index.as_bytes())?;
 
         let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
 
-        let mut stream = self
+        let ipfs_path = self
             .ipfs
             .unixfs()
             .add(
-                AddOpt::Stream(data_stream),
+                data_stream,
                 Some(AddOption {
                     pin: true,
                     ..Default::default()
@@ -171,81 +202,36 @@ impl FileStore {
             )
             .await?;
 
-        let mut ipfs_path = None;
-
-        while let Some(status) = stream.next().await {
-            match status {
-                UnixfsStatus::CompletedStatus { path, .. } => ipfs_path = Some(path),
-                UnixfsStatus::FailedStatus { error, .. } => {
-                    return match error {
-                        Some(e) => Err(Error::Any(e)),
-                        None => Err(Error::Other),
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let ipfs_path = ipfs_path.ok_or(Error::OtherWithContext("Ipfs path unavailable".into()))?;
+        tracing::trace!(path = %ipfs_path, "Index exported");
 
         let cid = ipfs_path
             .root()
             .cid()
             .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
 
-        let last_cid = { *self.index_cid.read() };
+        let last_cid = self.index_cid.write().replace(*cid);
 
-        *self.index_cid.write() = Some(*cid);
+        if let Some(path) = self.config.path.as_ref() {
+            if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
+                tracing::error!(cid = %cid, "Error writing index: {_e}");
+            }
+        }
 
         if let Some(last_cid) = last_cid {
             if *cid != last_cid {
-                let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
-                    self.ipfs
-                        .list_pins(None)
-                        .await
-                        .filter_map(|r| async move {
-                            match r {
-                                Ok(v) => Some(v.0),
-                                Err(_) => None,
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .await,
-                );
-
                 if self.ipfs.is_pinned(&last_cid).await? {
+                    tracing::trace!(cid = %last_cid, "Unpinning block");
                     self.ipfs.remove_pin(&last_cid, true).await?;
+                    tracing::trace!(cid = %last_cid, "Block unpinned");
                 }
 
-                let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
-                    self.ipfs
-                        .list_pins(None)
-                        .await
-                        .filter_map(|r| async move {
-                            match r {
-                                Ok(v) => Some(v.0),
-                                Err(_) => None,
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .await,
-                );
-
-                for s_cid in new_pinned_blocks.iter() {
-                    pinned_blocks.remove(s_cid);
-                }
-
-                for cid in pinned_blocks {
-                    self.ipfs.remove_block(cid).await?;
-                }
+                tracing::trace!(cid = %last_cid, "Removing block");
+                let b = self.ipfs.remove_block(last_cid, true).await?;
+                tracing::trace!(cid = %last_cid, amount_removed = b.len(), "Blocks removed");
             }
         }
 
-        if let Some(path) = self.location_path.as_ref() {
-            if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
-                tracing::error!("Error writing index: {_e}");
-            }
-        }
+        tracing::trace!(cid = %cid, "Index exported");
         Ok(())
     }
 }
@@ -281,7 +267,7 @@ impl FileStore {
     }
 
     pub fn max_size(&self) -> usize {
-        self.max_storage_size.unwrap_or(1024 * 1024 * 1024)
+        self.config.max_storage_size.unwrap_or(1024 * 1024 * 1024)
     }
 
     pub async fn put(
@@ -327,17 +313,22 @@ impl FileStore {
             return Err(Error::FileExist);
         }
 
-        let ((width, height), exact) = (self.thumbnail_size, self.thumbnail_exact_format);
+        let ((width, height), exact) = (
+            self.config.thumbnail_size,
+            self.config.thumbnail_exact_format,
+        );
 
         let ticket = self
             .thumbnail_store
             .insert(&path, width, height, exact)
             .await?;
 
-        let background = self.thumbnail_task;
+        let background = self.config.thumbnail_task;
 
         let name = name.to_string();
         let fs = self.clone();
+        let guard = self.signal_guard.clone();
+
         let progress_stream = async_stream::stream! {
 
             let mut last_written = 0;
@@ -345,17 +336,7 @@ impl FileStore {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = match ipfs.unixfs().add(path.clone(), Some(AddOption { pin: true, ..Default::default() })).await {
-                Ok(ste) => ste,
-                Err(e) => {
-                    yield Progression::ProgressFailed {
-                            name,
-                            last_size: Some(last_written),
-                            error: Some(e.to_string()),
-                    };
-                    return;
-                }
-            };
+            let mut stream = ipfs.unixfs().add(path.clone(), Some(AddOption { pin: true, ..Default::default() }));
 
             while let Some(status) = stream.next().await {
                 let name = name.clone();
@@ -432,10 +413,6 @@ impl FileStore {
                         Ok((extension_type, thumbnail)) => {
                             file.set_thumbnail(&thumbnail);
                             file.set_thumbnail_format(extension_type.into());
-                            //We export again so the thumbnail can be apart of the index
-                            if background {
-                                if let Err(_e) = fs.export().await {}
-                            }
                         }
                         Err(_e) => {}
                     }
@@ -444,20 +421,21 @@ impl FileStore {
 
             if !background {
                 task.await;
-                if let Err(_e) = fs.export().await {}
             } else {
                 tokio::spawn(task);
             }
+
+            let _guard = guard.write().await;
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
             };
 
-            let _ = fs.constellation_tx.send(ConstellationEventKind::Uploaded {
+            fs.constellation_tx.emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
                 size: Some(total_written)
-            }).ok();
+            }).await;
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
@@ -470,9 +448,7 @@ impl FileStore {
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
 
-        let mut stream = ipfs
-            .get_unixfs(reference.parse::<IpfsPath>()?, path)
-            .await?;
+        let mut stream = ipfs.get_unixfs(reference.parse::<IpfsPath>()?, path);
 
         while let Some(status) = stream.next().await {
             if let UnixfsStatus::FailedStatus { error, .. } = status {
@@ -481,14 +457,14 @@ impl FileStore {
         }
 
         //TODO: Validate file against the hashed reference
-        if let Err(_e) = self
-            .constellation_tx
-            .send(ConstellationEventKind::Downloaded {
+        self.constellation_tx
+            .emit(ConstellationEventKind::Downloaded {
                 filename: file.name(),
                 size: Some(file.size()),
                 location: Some(PathBuf::from(path)),
             })
-        {}
+            .await;
+
         Ok(())
     }
 
@@ -518,7 +494,10 @@ impl FileStore {
             return Err(Error::FileExist);
         }
 
-        let ((width, height), exact) = (self.thumbnail_size, self.thumbnail_exact_format);
+        let ((width, height), exact) = (
+            self.config.thumbnail_size,
+            self.config.thumbnail_exact_format,
+        );
 
         let ticket = self
             .thumbnail_store
@@ -532,16 +511,13 @@ impl FileStore {
         let mut total_written = 0;
         let mut returned_path = None;
 
-        let mut stream = ipfs
-            .unixfs()
-            .add(
-                reader,
-                Some(AddOption {
-                    pin: true,
-                    ..Default::default()
-                }),
-            )
-            .await?;
+        let mut stream = ipfs.unixfs().add(
+            reader,
+            Some(AddOption {
+                pin: true,
+                ..Default::default()
+            }),
+        );
 
         while let Some(status) = stream.next().await {
             match status {
@@ -574,14 +550,14 @@ impl FileStore {
 
         self.current_directory()?.add_item(file)?;
 
-        if let Err(_e) = self.export().await {}
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Uploaded {
+        let _guard = self.signal_guard.write().await;
+
+        self.constellation_tx
+            .emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
                 size: Some(total_written),
             })
-            .ok();
+            .await;
         Ok(())
     }
 
@@ -591,27 +567,20 @@ impl FileStore {
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs
+
+        let buffer = ipfs
             .cat_unixfs(reference.parse::<IpfsPath>()?, None)
             .await
-            .map_err(anyhow::Error::from)?;
-        pin_mut!(stream);
+            .map_err(anyhow::Error::new)?;
 
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let mut bytes = data.map_err(anyhow::Error::from)?;
-            buffer.append(&mut bytes);
-        }
-
-        //TODO: Validate file against the hashed reference
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Downloaded {
+        self.constellation_tx
+            .emit(ConstellationEventKind::Downloaded {
                 filename: file.name(),
                 size: Some(file.size()),
                 location: None,
             })
-            .ok();
+            .await;
+
         Ok(buffer)
     }
 
@@ -633,9 +602,6 @@ impl FileStore {
         }
 
         let ipfs = self.ipfs.clone();
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let current_directory = self.current_directory()?;
 
@@ -646,6 +612,8 @@ impl FileStore {
         let fs = self.clone();
         let name = name.to_string();
         let stream = stream.map(Ok::<_, std::io::Error>).boxed();
+        let guard = self.signal_guard.clone();
+
         let progress_stream = async_stream::stream! {
 
             let mut last_written = 0;
@@ -653,17 +621,7 @@ impl FileStore {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = match ipfs.unixfs().add(stream, Some(AddOption { pin: true, ..Default::default() })).await {
-                Ok(ste) => ste,
-                Err(e) => {
-                    yield Progression::ProgressFailed {
-                        name,
-                        last_size: Some(last_written),
-                        error: Some(e.to_string()),
-                    };
-                    return;
-                }
-            };
+            let mut stream = ipfs.unixfs().add(stream, Some(AddOption { pin: true, ..Default::default() }));
 
             while let Some(status) = stream.next().await {
                 let n = name.clone();
@@ -741,17 +699,17 @@ impl FileStore {
                 return;
             }
 
-            if let Err(_e) = fs.export().await {}
+            let _guard = guard.write().await;
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
             };
 
-            let _ = fs.constellation_tx.send(ConstellationEventKind::Uploaded {
+            fs.constellation_tx.emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
                 size: Some(total_written)
-            }).ok();
+            }).await;
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
@@ -763,9 +721,6 @@ impl FileStore {
         name: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
         let ipfs = self.ipfs.clone();
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
@@ -776,9 +731,7 @@ impl FileStore {
 
         let stream = async_stream::stream! {
             let cat_stream = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-                .await
-                .map_err(anyhow::Error::from)?;
+                .cat_unixfs(reference.parse::<IpfsPath>()?, None);
 
             for await data in cat_stream {
                 match data {
@@ -787,7 +740,7 @@ impl FileStore {
                 }
             }
 
-            let _ = tx.send(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).ok();
+            let _ = tx.emit(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).await;
         };
 
         //TODO: Validate file against the hashed reference
@@ -814,61 +767,27 @@ impl FileStore {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
 
-        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, true).await?;
         }
 
-        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
-        for s_cid in new_pinned_blocks.iter() {
-            pinned_blocks.remove(s_cid);
-        }
-
-        for cid in pinned_blocks {
-            ipfs.remove_block(cid).await?;
-        }
-
         directory.remove_item(&item.name())?;
-        if let Err(_e) = self.export().await {}
 
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Deleted {
+        let _guard = self.signal_guard.write().await;
+
+        let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
+        tracing::info!(blocks = blocks.len(), "blocks removed");
+
+        self.constellation_tx
+            .emit(ConstellationEventKind::Deleted {
                 item_name: name.to_string(),
             })
-            .ok();
+            .await;
 
         Ok(())
     }
 
     pub async fn rename(&mut self, current: &str, new: &str) -> Result<(), Error> {
-        //Used as guard in the event its not available but will be used in the future
-        let _ipfs = self.ipfs.clone();
-
         //Note: This will only support renaming the file or directory in the index
         let directory = self.current_directory()?;
 
@@ -877,21 +796,19 @@ impl FileStore {
         }
 
         directory.rename_item(current, new)?;
-        if let Err(_e) = self.export().await {}
-        let _ = self
-            .constellation_tx
-            .send(ConstellationEventKind::Renamed {
+
+        let _guard = self.signal_guard.write().await;
+
+        self.constellation_tx
+            .emit(ConstellationEventKind::Renamed {
                 old_item_name: current.to_string(),
                 new_item_name: new.to_string(),
             })
-            .ok();
+            .await;
         Ok(())
     }
 
     pub async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
-        //Used as guard in the event its not available but will be used in the future
-        let _ipfs = self.ipfs.clone();
-
         let directory = self.current_directory()?;
 
         //Prevent creating recursive/nested directorieis if `recursive` isnt true
@@ -903,9 +820,10 @@ impl FileStore {
             return Err(Error::DirectoryExist);
         }
 
-        self.current_directory()?
-            .add_directory(Directory::new(name))?;
-        if let Err(_e) = self.export().await {}
+        directory.add_directory(Directory::new(name))?;
+
+        let _guard = self.signal_guard.write().await;
+
         Ok(())
     }
 
@@ -919,20 +837,15 @@ impl FileStore {
 
         let reference = file.reference().ok_or(Error::FileNotFound)?;
 
-        let stream = ipfs
+        let buffer = ipfs
             .cat_unixfs(reference.parse::<IpfsPath>()?, None)
             .await
             .map_err(anyhow::Error::from)?;
 
-        pin_mut!(stream);
-
-        let mut buffer = vec![];
-        while let Some(data) = stream.next().await {
-            let bytes = data.map_err(anyhow::Error::from)?;
-            buffer.extend(bytes);
-        }
-
-        let ((width, height), exact) = (self.thumbnail_size, self.thumbnail_exact_format);
+        let ((width, height), exact) = (
+            self.config.thumbnail_size,
+            self.config.thumbnail_exact_format,
+        );
 
         // Generate the thumbnail for the file
         let id = self
@@ -944,8 +857,6 @@ impl FileStore {
             file.set_thumbnail(&thumbnail);
             file.set_thumbnail_format(extension_type.into())
         }
-
-        let _ = self.export().await;
 
         Ok(())
     }

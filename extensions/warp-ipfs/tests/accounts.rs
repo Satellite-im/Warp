@@ -1,9 +1,11 @@
 pub mod common;
+
 #[cfg(test)]
 mod test {
     use std::time::Duration;
 
-    use crate::common::{create_account, create_accounts};
+    use crate::common::{self, create_account, create_accounts};
+    use warp::constellation::file::FileType;
     use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
     use warp::tesseract::Tesseract;
     use warp_ipfs::WarpIpfsBuilder;
@@ -45,13 +47,11 @@ mod test {
 
     #[tokio::test]
     async fn get_identity() -> anyhow::Result<()> {
-        let accounts =
-            create_accounts(vec![(
-            Some("JohnDoe"),
-            Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-            Some("test::get_identity".into()),
-        ), (Some("JaneDoe"), None, Some("test::get_identity".into()))])
-            .await?;
+        let accounts = create_accounts(vec![
+            (Some("JohnDoe"), None, Some("test::get_identity".into())),
+            (Some("JaneDoe"), None, Some("test::get_identity".into())),
+        ])
+        .await?;
 
         let (account_a, _, _) = accounts.first().expect("Account exist");
 
@@ -270,6 +270,72 @@ mod test {
     }
 
     #[tokio::test]
+    async fn identity_real_profile_picture() -> anyhow::Result<()> {
+        let (mut account, did, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::identity_real_profile_picture".into()),
+        )
+        .await?;
+
+        account
+            .update_identity(IdentityUpdate::Picture(common::PROFILE_IMAGE.into()))
+            .await?;
+
+        let image = account.identity_picture(&did).await?;
+
+        assert_eq!(image.data(), common::PROFILE_IMAGE);
+        assert!(image
+            .image_type()
+            .eq(&FileType::Mime("image/png".parse().unwrap())));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn identity_profile_picture() -> anyhow::Result<()> {
+        let (mut account, did, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::identity_profile_picture".into()),
+        )
+        .await?;
+
+        account
+            .update_identity(IdentityUpdate::Picture("picture".into()))
+            .await?;
+
+        let image = account.identity_picture(&did).await?;
+
+        assert_eq!(image.data(), b"picture");
+        assert!(image
+            .image_type()
+            .eq(&FileType::Mime("application/octet-stream".parse().unwrap())));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn identity_profile_banner() -> anyhow::Result<()> {
+        let (mut account, did, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::identity_profile_banner".into()),
+        )
+        .await?;
+
+        account
+            .update_identity(IdentityUpdate::Banner("banner".into()))
+            .await?;
+
+        let image = account.identity_banner(&did).await?;
+
+        assert_eq!(image.data(), b"banner");
+        assert!(image
+            .image_type()
+            .eq(&FileType::Mime("application/octet-stream".parse().unwrap())));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn get_identity_platform() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (
@@ -288,8 +354,6 @@ mod test {
         let (account_a, _, _) = accounts.first().unwrap();
 
         let (_account_b, did_b, _) = accounts.last().unwrap();
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
 
         let platform_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {

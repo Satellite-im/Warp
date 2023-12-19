@@ -7,30 +7,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use futures::channel::mpsc::{unbounded, Sender, UnboundedSender};
+use futures::channel::mpsc::{channel, Sender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
-use futures::stream::{FuturesUnordered, SelectAll};
+use futures::stream::{BoxStream, SelectAll};
 use futures::{SinkExt, Stream, StreamExt};
-use rust_ipfs::libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
-use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
+use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 
-use libipld::Cid;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
-use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio_stream::wrappers::ReadDirStream;
+use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
+use tracing::Span;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
 use warp::error::Error;
-use warp::logging::tracing::log::{debug, error, info, trace};
-use warp::logging::tracing::warn;
+use warp::logging::tracing::{error, info, trace, warn};
+use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState, Location,
-    Message, MessageEvent, MessageEventKind, MessageOptions, MessageStatus, MessageStream,
-    MessageType, Messages, MessagesType, PinState, RayGunEventKind, Reaction, ReactionState,
+    Message, MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
+    MessageStream, MessageType, Messages, MessagesType, PinState, RayGunEventKind, Reaction,
+    ReactionState,
 };
 use warp::sync::Arc;
 
@@ -38,27 +35,19 @@ use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;
 use crate::store::{
     connected_to_peer, ecdh_decrypt, ecdh_encrypt, get_keypair_did, sign_serde,
-    ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, PeerTopic,
+    ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind, DidExt,
+    PeerTopic,
 };
 
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::discovery::Discovery;
-use super::document::utils::{GetLocalDag, ToCid};
-use super::friends::FriendsStore;
+use super::document::conversation::Conversations;
+use super::event_subscription::EventSubscription;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
-use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, DidExt, MessagingEvents};
+use super::{verify_serde_sig, ConversationEvents, MessagingEvents};
 
-const PERMIT_AMOUNT: usize = 1;
-
-type ConversationSender =
-    UnboundedSender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
-
-#[allow(clippy::large_enum_variant)]
-enum ConversationEventHandle {
-    Set(ConversationDocument, oneshot::Sender<Result<(), Error>>),
-    Get(oneshot::Sender<Result<ConversationDocument, Error>>),
-}
+type ConversationSender = Sender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -70,20 +59,12 @@ pub struct MessageStore {
     path: Option<PathBuf>,
 
     // conversation cid
-    conversation_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
-    conversation_keystore_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
-
-    conversation_lock: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Semaphore>>>>,
-
     conversation_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationSender>>>,
-    conversation_task_tx: Arc<tokio::sync::RwLock<HashMap<Uuid, Sender<ConversationEventHandle>>>>,
 
     // identity store
-    // Note: Not used for now;
     identity: IdentityStore,
 
-    // friend store
-    friends: FriendsStore,
+    conversations: Conversations,
 
     // discovery
     discovery: Discovery,
@@ -91,12 +72,11 @@ pub struct MessageStore {
     // filesystem instance
     filesystem: Option<Box<dyn Constellation>>,
 
-    stream_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastSender<MessageEventKind>>>>,
-
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     stream_reqres_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     stream_event_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     stream_conversation_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
+
     // Queue
     queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
 
@@ -104,13 +84,12 @@ pub struct MessageStore {
     did: Arc<DID>,
 
     // Event
-    event: BroadcastSender<RayGunEventKind>,
+    event: EventSubscription<RayGunEventKind>,
 
     spam_filter: Arc<Option<SpamFilter>>,
 
     with_friends: Arc<AtomicBool>,
-
-    disable_sender_event_emit: Arc<AtomicBool>,
+    span: Span,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -119,18 +98,14 @@ impl MessageStore {
         ipfs: Ipfs,
         path: Option<PathBuf>,
         identity: IdentityStore,
-        friends: FriendsStore,
+        // friends: FriendsStore,
         discovery: Discovery,
         filesystem: Option<Box<dyn Constellation>>,
         _: bool,
         interval_ms: u64,
-        event: BroadcastSender<RayGunEventKind>,
-        (check_spam, disable_sender_event_emit, with_friends, conversation_load_task): (
-            bool,
-            bool,
-            bool,
-            bool,
-        ),
+        event: EventSubscription<RayGunEventKind>,
+        span: Span,
+        (check_spam, with_friends): (bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
 
@@ -141,86 +116,100 @@ impl MessageStore {
         }
 
         let queue = Arc::new(Default::default());
-        let conversation_cid = Arc::new(Default::default());
         let did = Arc::new(get_keypair_did(ipfs.keypair()?)?);
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());
-        let disable_sender_event_emit = Arc::new(AtomicBool::new(disable_sender_event_emit));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
-        let stream_sender = Arc::new(Default::default());
-        let conversation_lock = Arc::new(Default::default());
-        let conversation_sender = Arc::default();
-        let conversation_keystore_cid = Arc::default();
-        let conversation_task_tx = Arc::default();
         let stream_reqres_task = Arc::default();
+        let conversation_sender = Arc::default();
         let stream_conversation_task = Arc::default();
+
+        let root = identity.root_document().clone();
+
+        let conversations = Conversations::new(&ipfs, path.clone(), did.clone(), root).await;
 
         let store = Self {
             path,
             ipfs,
-            stream_sender,
             stream_task,
             stream_event_task,
             stream_reqres_task,
-            conversation_cid,
-            conversation_lock,
             conversation_sender,
-            conversation_task_tx,
+            conversations,
             identity,
-            friends,
             discovery,
             filesystem,
             queue,
             did,
             event,
             spam_filter,
-            disable_sender_event_emit,
             with_friends,
-            conversation_keystore_cid,
             stream_conversation_task,
+            span,
         };
 
-        info!("Loading existing conversations task");
-        if let Err(_e) = store.load_conversations(conversation_load_task).await {}
+        info!("Loading queue");
+        if let Err(e) = store.load_queue().await {
+            warn!("Failed to load queue: {e}");
+        }
+
+        let mut stream = store
+            .ipfs
+            .pubsub_subscribe(store.did.messaging())
+            .await?
+            .boxed();
+
+        let _ = store.load_conversations().await;
 
         tokio::spawn({
             let mut store = store.clone();
             async move {
                 info!("MessagingStore task created");
 
-                tokio::spawn({
-                    let store = store.clone();
-                    async move {
-                        info!("Loading queue");
-                        // Load the queue in a separate task in case it is large
-                        // Note: In the future this will not be needed once a req/res system
-                        //       is implemented
-                        if let Err(_e) = store.load_queue().await {}
-                    }
-                });
-
-                let did = &*(store.did.clone());
-                let Ok(stream) = store.ipfs.pubsub_subscribe(did.messaging()).await else {
-                    error!("Unable to create subscription stream. Terminating task");
-                    //TODO: Maybe panic?
-                    return;
-                };
-                futures::pin_mut!(stream);
                 let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
+
+                let mut identity_stream = store
+                    .identity
+                    .subscribe()
+                    .await
+                    .expect("Channel isnt dropped");
+
                 loop {
                     tokio::select! {
-                        message = stream.next() => {
-                            if let Some(message) = message {
-                                if let Ok(payload) = Payload::from_bytes(&message.data) {
-                                    if let Ok(data) = ecdh_decrypt(&store.did, Some(&payload.sender()), payload.data()) {
-                                        if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
-                                            if let Err(e) = store.process_conversation(payload, events).await {
-                                                error!("Error processing conversation: {e}");
-                                            }
-                                        }
-                                    }
+                        Some(message) = stream.next() => {
+                            let payload = match Payload::from_bytes(&message.data) {
+                                Ok(payload) => payload,
+                                Err(e) => {
+                                    tracing::warn!("Failed to parse payload data: {e}");
+                                    continue;
                                 }
+                            };
+
+                            let data = match ecdh_decrypt(&store.did, Some(&payload.sender()), payload.data()) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    tracing::warn!("Failed to decrypt message from {}: {e}", payload.sender());
+                                    continue;
+                                }
+                            };
+
+                            let events = match serde_json::from_slice::<ConversationEvents>(&data) {
+                                Ok(ev) => ev,
+                                Err(e) => {
+                                    tracing::warn!("Failed to parse message: {e}");
+                                    continue;
+                                }
+                            };
+
+                            if let Err(e) = store.process_conversation(payload, events).await {
+                                error!("Error processing conversation: {e}");
+                            }
+
+                        }
+                        Some(id_event) = identity_stream.next() => {
+                            if let Err(e) = store.process_identity_events(id_event).await {
+                                warn!("Failed to process event: {e}");
                             }
                         }
                         _ = interval.tick() => {
@@ -237,185 +226,200 @@ impl MessageStore {
         Ok(store)
     }
 
-    async fn conversation_event_handle(&self, conversation_id: Uuid) {
-        let (tx, mut rx) = futures::channel::mpsc::channel(1);
-        let conversation_cid = self.conversation_cid.clone();
-        let ipfs = self.ipfs.clone();
-        let own_did = self.did.clone();
-        let path = self.path.clone();
-        let task = tokio::spawn(async move {
-            while let Some(event) = rx.next().await {
-                match event {
-                    ConversationEventHandle::Set(mut document, ret) => {
-                        let result = {
-                            let own_did = own_did.clone();
-                            let ipfs = ipfs.clone();
-                            let conversation_cid = conversation_cid.clone();
-                            let path = path.clone();
-                            async move {
-                                let own_did = &*own_did;
+    async fn process_identity_events(&mut self, event: MultiPassEventKind) -> Result<(), Error> {
+        match event {
+            MultiPassEventKind::FriendAdded { did } => {
+                if !self.with_friends.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
 
-                                if let Some(creator) = document.creator.as_ref() {
-                                    if creator.eq(own_did)
-                                        && matches!(
-                                            document.conversation_type,
-                                            ConversationType::Group
-                                        )
-                                    {
-                                        document.sign(own_did)?;
-                                    }
-                                }
+                match self.create_conversation(&did).await {
+                    Ok(_) | Err(Error::ConversationExist { .. }) => return Ok(()),
+                    Err(e) => return Err(e),
+                }
+            }
 
-                                document.verify()?;
+            MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did } => {
+                let list = self.conversations.list().await?;
 
-                                let new_cid = document.to_cid(&ipfs).await?;
-
-                                let old_cid = conversation_cid
-                                    .write()
-                                    .await
-                                    .insert(conversation_id, new_cid);
-
-                                if let Some(old_cid) = old_cid {
-                                    if new_cid != old_cid {
-                                        if ipfs.is_pinned(&old_cid).await? {
-                                            if let Err(e) = ipfs.remove_pin(&old_cid, false).await {
-                                                error!("Unable to remove pin on {old_cid}: {e}");
-                                            }
-                                        }
-                                        if let Err(e) = ipfs.remove_block(old_cid).await {
-                                            error!("Unable to remove {old_cid}: {e}");
-                                        }
-                                    }
-                                }
-
-                                if let Some(path) = path.as_ref() {
-                                    let cid = new_cid.to_string();
-                                    if let Err(e) = tokio::fs::write(
-                                        path.join(conversation_id.to_string()),
-                                        cid,
-                                    )
-                                    .await
-                                    {
-                                        error!("Unable to save info to file: {e}");
-                                    }
-                                }
-                                Ok::<_, Error>(())
+                for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
+                    let id = conversation.id();
+                    match conversation.conversation_type {
+                        ConversationType::Direct => {
+                            if let Err(e) = self.delete_conversation(id, true).await {
+                                warn!("Failed to delete conversation {id}: {e}");
+                                continue;
                             }
-                        };
-
-                        let _ = ret.send(result.await);
-                    }
-                    ConversationEventHandle::Get(ret) => {
-                        let result = {
-                            let conversation_cid = conversation_cid.clone();
-                            let ipfs = ipfs.clone();
-                            async move {
-                                let map = conversation_cid.read().await;
-                                let cid = map
-                                    .get(&conversation_id)
-                                    .ok_or(Error::InvalidConversation)?;
-                                let conversation: ConversationDocument =
-                                    (*cid).get_local_dag(&ipfs).await?;
-                                conversation.verify().map(|_| conversation)
+                        }
+                        ConversationType::Group => {
+                            if conversation.creator != Some((*self.did).clone()) {
+                                continue;
                             }
-                        };
 
-                        let _ = ret.send(result.await);
+                            if let Err(e) = self.remove_recipient(id, &did, true).await {
+                                warn!("Failed to remove {did} from conversation {id}: {e}");
+                                continue;
+                            }
+                        }
                     }
                 }
             }
-        });
-        self.conversation_task_tx
-            .write()
-            .await
-            .insert(conversation_id, tx);
-        self.stream_conversation_task
-            .write()
-            .await
-            .insert(conversation_id, task);
+            MultiPassEventKind::FriendRemoved { did } => {
+                if !self.with_friends.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+
+                let list = self.conversations.list().await?;
+
+                for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
+                    let id = conversation.id();
+                    match conversation.conversation_type {
+                        ConversationType::Direct => {
+                            if let Err(e) = self.delete_conversation(id, true).await {
+                                warn!("Failed to delete conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                        ConversationType::Group => {
+                            if conversation.creator != Some((*self.did).clone()) {
+                                continue;
+                            }
+
+                            if let Err(e) = self.remove_recipient(id, &did, true).await {
+                                warn!("Failed to remove {did} from conversation {id}: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            MultiPassEventKind::IdentityOnline { .. } => {
+                //TODO: Check queue and process any entry once peer is subscribed to the respective topics.
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn start_event_task(&self, conversation_id: Uuid) {
         info!("Event Task started for {conversation_id}");
-        let did = self.did.clone();
-        let Ok(mut conversation) = self.get_conversation(conversation_id).await else {
-            return;
-        };
-        conversation.recipients.clear();
 
-        let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
-            return;
-        };
-
-        let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
-            return;
-        };
-
-        let conversation_type = conversation.conversation_type;
-
-        drop(conversation);
         let task = tokio::spawn({
             let store = self.clone();
             async move {
+                let did = store.did.clone();
+
+                let (topic, conversation_type) = store
+                    .conversations
+                    .get(conversation_id)
+                    .await
+                    .map(|conversation| {
+                        (conversation.event_topic(), conversation.conversation_type)
+                    })
+                    .expect("Conversation exist");
+
+                let stream = store
+                    .ipfs
+                    .pubsub_subscribe(topic)
+                    .await
+                    .expect("Topic isnt subscribed");
+
+                let tx = store
+                    .get_conversation_sender(conversation_id)
+                    .await
+                    .expect("Conversation exist");
+
                 futures::pin_mut!(stream);
 
                 while let Some(stream) = stream.next().await {
-                    if let Ok(payload) = Payload::from_bytes(&stream.data) {
-                        let bytes = {
-                            let own_did = &*did;
-                            let store = store.clone();
-                            async move {
-                                match conversation_type {
-                                    ConversationType::Direct => {
-                                        let recipient = store
-                                            .get_conversation(conversation_id)
-                                            .await
-                                            .map(|c| c.recipients())
-                                            .unwrap_or_default()
-                                            .iter()
-                                            .filter(|did| own_did.ne(did))
-                                            .cloned()
-                                            .collect::<Vec<_>>()
-                                            .first()
-                                            .cloned()
-                                            .ok_or(Error::InvalidConversation)?;
-                                        ecdh_decrypt(own_did, Some(&recipient), payload.data())
-                                    }
-                                    ConversationType::Group => {
-                                        let keystore =
-                                            store.conversation_keystore(conversation_id).await?;
-                                        let key =
-                                            keystore.get_latest(own_did, &payload.sender())?;
-                                        Cipher::direct_decrypt(payload.data(), &key)
-                                    }
+                    let payload = match Payload::from_bytes(&stream.data) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            tracing::warn!("Failed to decode payload: {e}");
+                            continue;
+                        }
+                    };
+
+                    let bytes = {
+                        let own_did = &*did;
+                        let store = store.clone();
+                        async move {
+                            match conversation_type {
+                                ConversationType::Direct => {
+                                    let recipient = store
+                                        .conversations
+                                        .get(conversation_id)
+                                        .await
+                                        .map(|c| c.recipients())?
+                                        .iter()
+                                        .filter(|did| own_did.ne(did))
+                                        .cloned()
+                                        .collect::<Vec<_>>()
+                                        .first()
+                                        .cloned()
+                                        .ok_or(Error::InvalidConversation)?;
+                                    ecdh_decrypt(own_did, Some(&recipient), payload.data())
+                                }
+                                ConversationType::Group => {
+                                    let keystore =
+                                        store.conversation_keystore(conversation_id).await?;
+                                    let key = keystore.get_latest(own_did, &payload.sender())?;
+                                    Cipher::direct_decrypt(payload.data(), &key)
                                 }
                             }
+                        }
+                    };
+
+                    let data = match bytes.await {
+                        Ok(data) => data,
+                        Err(e) => {
+                            warn!(
+                                "Failed to decrypt payload from {} in {}: {e}",
+                                payload.sender(),
+                                conversation_id
+                            );
+                            continue;
+                        }
+                    };
+
+                    let event = match serde_json::from_slice::<MessagingEvents>(&data) {
+                        Ok(event @ MessagingEvents::Event { .. }) => event,
+                        Ok(_) => {
+                            warn!("Unreachable event in {conversation_id}");
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Failed to deserialize payload from {} in {}: {e}",
+                                payload.sender(),
+                                conversation_id
+                            );
+                            continue;
+                        }
+                    };
+
+                    if let MessagingEvents::Event {
+                        conversation_id,
+                        member,
+                        event,
+                        cancelled,
+                    } = event
+                    {
+                        let ev = match cancelled {
+                            true => MessageEventKind::EventCancelled {
+                                conversation_id,
+                                did_key: member,
+                                event,
+                            },
+                            false => MessageEventKind::EventReceived {
+                                conversation_id,
+                                did_key: member,
+                                event,
+                            },
                         };
 
-                        if let Ok(data) = bytes.await {
-                            if let Ok(MessagingEvents::Event {
-                                conversation_id,
-                                member,
-                                event,
-                                cancelled,
-                            }) = serde_json::from_slice::<MessagingEvents>(&data)
-                            {
-                                let ev = match cancelled {
-                                    true => MessageEventKind::EventCancelled {
-                                        conversation_id,
-                                        did_key: member,
-                                        event,
-                                    },
-                                    false => MessageEventKind::EventReceived {
-                                        conversation_id,
-                                        did_key: member,
-                                        event,
-                                    },
-                                };
-                                if let Err(e) = tx.send(ev) {
-                                    error!("Error broadcasting event: {e}");
-                                }
-                            }
+                        if let Err(e) = tx.send(ev) {
+                            error!("Error broadcasting event: {e}");
                         }
                     }
                 }
@@ -429,260 +433,245 @@ impl MessageStore {
 
     async fn start_reqres_task(&self, conversation_id: Uuid) {
         info!("RequestResponse Task started for {conversation_id}");
-        let did = self.did.clone();
-        let Ok(conversation) = self.get_conversation(conversation_id).await else {
-            return;
-        };
-
-        let Ok(stream) = self
-            .ipfs
-            .pubsub_subscribe(conversation.reqres_topic(&did))
-            .await
-        else {
-            return;
-        };
-        drop(conversation);
 
         let task = tokio::spawn({
             let store = self.clone();
             async move {
+                let did = store.did.clone();
+
+                let topic = store
+                    .conversations
+                    .get(conversation_id)
+                    .await
+                    .map(|conversation| conversation.reqres_topic(&did))
+                    .expect("Conversation exist");
+
+                let stream = store
+                    .ipfs
+                    .pubsub_subscribe(topic)
+                    .await
+                    .expect("Topic isnt subscribed");
+
                 futures::pin_mut!(stream);
 
                 while let Some(stream) = stream.next().await {
-                    if let Ok(payload) = Payload::from_bytes(&stream.data) {
-                        if let Ok(data) =
-                            ecdh_decrypt(&did, Some(&payload.sender()), payload.data())
-                        {
-                            if let Ok(event) =
-                                serde_json::from_slice::<ConversationRequestResponse>(&data)
-                            {
-                                debug!("Event: {event:?}");
-                                match event {
-                                    ConversationRequestResponse::Request {
-                                        conversation_id,
-                                        kind,
-                                    } => match kind {
-                                        ConversationRequestKind::Key => {
-                                            let Ok(conversation) =
-                                                store.get_conversation(conversation_id).await
-                                            else {
-                                                continue;
-                                            };
+                    let payload = match Payload::from_bytes(&stream.data) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            tracing::warn!("Failed to decode payload: {e}");
+                            continue;
+                        }
+                    };
 
-                                            if !matches!(
-                                                conversation.conversation_type,
-                                                ConversationType::Group
-                                            ) {
-                                                //Only group conversations support keys
-                                                continue;
-                                            }
+                    let data = match ecdh_decrypt(&did, Some(&payload.sender()), payload.data()) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            tracing::warn!("Failed to decrypt data in payload: {e}");
+                            continue;
+                        }
+                    };
 
-                                            if !conversation
-                                                .recipients()
-                                                .contains(&payload.sender())
-                                            {
-                                                continue;
-                                            }
+                    let Ok(event) = serde_json::from_slice::<ConversationRequestResponse>(&data)
+                    else {
+                        continue;
+                    };
 
-                                            let mut keystore = match store
-                                                .conversation_keystore(conversation_id)
-                                                .await
-                                            {
-                                                Ok(keystore) => keystore,
-                                                Err(e) => {
-                                                    error!(
-                                                        "Error obtaining keystore: {e}. Skipping"
-                                                    );
-                                                    continue;
-                                                }
-                                            };
+                    tracing::debug!(?event, "Event received");
+                    match event {
+                        ConversationRequestResponse::Request {
+                            conversation_id,
+                            kind,
+                        } => match kind {
+                            ConversationRequestKind::Key => {
+                                let conversation = store
+                                    .conversations
+                                    .get(conversation_id)
+                                    .await
+                                    .expect("Conversation exist");
 
-                                            let raw_key = match keystore.get_latest(&did, &did) {
-                                                Ok(key) => key,
-                                                Err(Error::PublicKeyInvalid) => {
-                                                    let key = generate::<64>().into();
-                                                    if let Err(e) =
-                                                        keystore.insert(&did, &did, &key)
-                                                    {
-                                                        error!("Error inserting generated key into store: {e}");
-                                                        continue;
-                                                    }
-                                                    if let Err(e) = store
-                                                        .set_conversation_keystore(
-                                                            conversation_id,
-                                                            &keystore,
-                                                        )
-                                                        .await
-                                                    {
-                                                        error!("Error setting keystore: {e}");
-                                                        continue;
-                                                    }
-                                                    key
-                                                }
-                                                Err(e) => {
-                                                    error!("Error getting key from store: {e}");
-                                                    continue;
-                                                }
-                                            };
-                                            let sender = payload.sender();
-                                            let key =
-                                                match ecdh_encrypt(&did, Some(&sender), raw_key) {
-                                                    Ok(key) => key,
-                                                    Err(e) => {
-                                                        error!("Error: {e}");
-                                                        continue;
-                                                    }
-                                                };
-                                            let response = ConversationRequestResponse::Response {
-                                                conversation_id,
-                                                kind: ConversationResponseKind::Key { key },
-                                            };
-                                            let result = {
-                                                let did = did.clone();
-                                                let store = store.clone();
-                                                let topic = conversation.reqres_topic(&sender);
-                                                async move {
-                                                    let bytes = ecdh_encrypt(
-                                                        &did,
-                                                        Some(&sender),
-                                                        serde_json::to_vec(&response)?,
-                                                    )?;
-                                                    let signature = sign_serde(&did, &bytes)?;
+                                if !matches!(
+                                    conversation.conversation_type,
+                                    ConversationType::Group
+                                ) {
+                                    //Only group conversations support keys
+                                    continue;
+                                }
 
-                                                    let payload =
-                                                        Payload::new(&did, &bytes, &signature);
+                                if !conversation.recipients().contains(&payload.sender()) {
+                                    warn!(
+                                        "{} is not apart of conversation {conversation_id}",
+                                        payload.sender()
+                                    );
+                                    continue;
+                                }
 
-                                                    let peers = store
-                                                        .ipfs
-                                                        .pubsub_peers(Some(topic.clone()))
-                                                        .await?;
-                                                    let peer_id = did_to_libp2p_pub(&sender)
-                                                        .map(|pk| pk.to_peer_id())?;
-
-                                                    let bytes = payload.to_bytes()?;
-
-                                                    trace!("Payload size: {} bytes", bytes.len());
-
-                                                    info!("Responding to {sender}");
-
-                                                    if !peers.contains(&peer_id)
-                                                        || (peers.contains(&peer_id)
-                                                            && store
-                                                                .ipfs
-                                                                .pubsub_publish(
-                                                                    topic.clone(),
-                                                                    bytes.into(),
-                                                                )
-                                                                .await
-                                                                .is_err())
-                                                    {
-                                                        warn!("Unable to publish to topic. Queuing event");
-                                                        if let Err(e) = store
-                                                            .queue_event(
-                                                                sender.clone(),
-                                                                Queue::direct(
-                                                                    conversation_id,
-                                                                    None,
-                                                                    peer_id,
-                                                                    topic.clone(),
-                                                                    payload.data().into(),
-                                                                ),
-                                                            )
-                                                            .await
-                                                        {
-                                                            error!("Error submitting event to queue: {e}");
-                                                        }
-                                                    }
-
-                                                    Ok::<_, Error>(())
-                                                }
-                                            };
-                                            if let Err(e) = result.await {
-                                                error!("Error: {e}");
-                                            }
+                                let mut keystore =
+                                    match store.conversation_keystore(conversation_id).await {
+                                        Ok(keystore) => keystore,
+                                        Err(e) => {
+                                            error!("Error obtaining keystore: {e}. Skipping");
+                                            continue;
                                         }
-                                        _ => {
-                                            info!("Unimplemented/Unsupported Event");
+                                    };
+
+                                let raw_key = match keystore.get_latest(&did, &did) {
+                                    Ok(key) => key,
+                                    Err(Error::PublicKeyInvalid) => {
+                                        let key = generate::<64>().into();
+                                        if let Err(e) = keystore.insert(&did, &did, &key) {
+                                            error!("Error inserting generated key into store: {e}");
+                                            continue;
                                         }
-                                    },
-                                    ConversationRequestResponse::Response {
-                                        conversation_id,
-                                        kind,
-                                    } => match kind {
-                                        ConversationResponseKind::Key { key } => {
-                                            let sender = payload.sender();
-                                            let Ok(conversation) =
-                                                store.get_conversation(conversation_id).await
-                                            else {
-                                                continue;
-                                            };
+                                        if let Err(e) = store
+                                            .set_conversation_keystore(conversation_id, keystore)
+                                            .await
+                                        {
+                                            error!("Error setting keystore: {e}");
+                                            continue;
+                                        }
+                                        key
+                                    }
+                                    Err(e) => {
+                                        error!("Error getting key from store: {e}");
+                                        continue;
+                                    }
+                                };
+                                let sender = payload.sender();
+                                let key = match ecdh_encrypt(&did, Some(&sender), raw_key) {
+                                    Ok(key) => key,
+                                    Err(e) => {
+                                        error!("Failed to encrypt response: {e}");
+                                        continue;
+                                    }
+                                };
+                                let response = ConversationRequestResponse::Response {
+                                    conversation_id,
+                                    kind: ConversationResponseKind::Key { key },
+                                };
+                                let result = {
+                                    let did = did.clone();
+                                    let store = store.clone();
+                                    let topic = conversation.reqres_topic(&sender);
+                                    async move {
+                                        let bytes = ecdh_encrypt(
+                                            &did,
+                                            Some(&sender),
+                                            serde_json::to_vec(&response)?,
+                                        )?;
+                                        let signature = sign_serde(&did, &bytes)?;
 
-                                            if !matches!(
-                                                conversation.conversation_type,
-                                                ConversationType::Group
-                                            ) {
-                                                //Only group conversations support keys
-                                                error!("Invalid conversation type");
-                                                continue;
-                                            }
+                                        let payload = Payload::new(&did, &bytes, &signature);
 
-                                            if !conversation.recipients().contains(&sender) {
-                                                continue;
-                                            }
-                                            let mut keystore = match store
-                                                .conversation_keystore(conversation_id)
-                                                .await
-                                            {
-                                                Ok(keystore) => keystore,
-                                                Err(e) => {
-                                                    error!(
-                                                        "Error obtaining keystore: {e}. Skipping"
-                                                    );
-                                                    continue;
-                                                }
-                                            };
+                                        let peers =
+                                            store.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
-                                            let raw_key =
-                                                match ecdh_decrypt(&did, Some(&sender), key) {
-                                                    Ok(key) => key,
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Error decrypting key: {e}. Skipping"
-                                                        );
-                                                        continue;
-                                                    }
-                                                };
+                                        let peer_id = sender.to_peer_id()?;
 
-                                            if let Err(e) = keystore.insert(&did, &sender, raw_key)
-                                            {
-                                                match e {
-                                                    Error::PublicKeyInvalid => {
-                                                        error!("Key already exist in store")
-                                                    }
-                                                    e => error!(
-                                                        "Error inserting key into store: {e}"
-                                                    ),
-                                                }
-                                                continue;
-                                            }
+                                        let bytes = payload.to_bytes()?;
 
+                                        trace!("Payload size: {} bytes", bytes.len());
+
+                                        info!("Responding to {sender}");
+
+                                        if !peers.contains(&peer_id)
+                                            || (peers.contains(&peer_id)
+                                                && store
+                                                    .ipfs
+                                                    .pubsub_publish(topic.clone(), bytes.into())
+                                                    .await
+                                                    .is_err())
+                                        {
+                                            warn!("Unable to publish to topic. Queuing event");
                                             if let Err(e) = store
-                                                .set_conversation_keystore(
-                                                    conversation_id,
-                                                    &keystore,
+                                                .queue_event(
+                                                    sender.clone(),
+                                                    Queue::direct(
+                                                        conversation_id,
+                                                        None,
+                                                        peer_id,
+                                                        topic.clone(),
+                                                        payload.data().into(),
+                                                    ),
                                                 )
                                                 .await
                                             {
-                                                error!("Error setting keystore: {e}");
+                                                error!("Error submitting event to queue: {e}");
                                             }
                                         }
-                                        _ => {
-                                            info!("Unimplemented/Unsupported Event");
-                                        }
-                                    },
+
+                                        Ok::<_, Error>(())
+                                    }
+                                };
+                                if let Err(e) = result.await {
+                                    error!("Error: {e}");
                                 }
                             }
-                        }
+                            _ => {
+                                info!("Unimplemented/Unsupported Event");
+                            }
+                        },
+                        ConversationRequestResponse::Response {
+                            conversation_id,
+                            kind,
+                        } => match kind {
+                            ConversationResponseKind::Key { key } => {
+                                let sender = payload.sender();
+                                let Ok(conversation) =
+                                    store.conversations.get(conversation_id).await
+                                else {
+                                    continue;
+                                };
+
+                                if !matches!(
+                                    conversation.conversation_type,
+                                    ConversationType::Group
+                                ) {
+                                    //Only group conversations support keys
+                                    tracing::error!(id = ?conversation_id, "Invalid conversation type");
+                                    continue;
+                                }
+
+                                if !conversation.recipients().contains(&sender) {
+                                    continue;
+                                }
+                                let mut keystore =
+                                    match store.conversation_keystore(conversation_id).await {
+                                        Ok(keystore) => keystore,
+                                        Err(e) => {
+                                            error!("Error obtaining keystore: {e}. Skipping");
+                                            continue;
+                                        }
+                                    };
+
+                                let raw_key = match ecdh_decrypt(&did, Some(&sender), key) {
+                                    Ok(key) => key,
+                                    Err(e) => {
+                                        error!("Error decrypting key: {e}. Skipping");
+                                        continue;
+                                    }
+                                };
+
+                                if let Err(e) = keystore.insert(&did, &sender, raw_key) {
+                                    match e {
+                                        Error::PublicKeyInvalid => {
+                                            error!("Key already exist in store")
+                                        }
+                                        e => error!("Error inserting key into store: {e}"),
+                                    }
+                                    continue;
+                                }
+
+                                if let Err(e) = store
+                                    .set_conversation_keystore(conversation_id, keystore)
+                                    .await
+                                {
+                                    error!("Error setting keystore: {e}");
+                                }
+                            }
+                            _ => {
+                                info!("Unimplemented/Unsupported Event");
+                            }
+                        },
                     }
                 }
             }
@@ -699,7 +688,7 @@ impl MessageStore {
             kind: ConversationRequestKind::Key,
         };
 
-        let mut conversation = self.get_conversation(conversation_id).await?;
+        let mut conversation = self.conversations.get(conversation_id).await?;
 
         if !conversation.recipients().contains(did) {
             //TODO: user is not a recipient of the conversation
@@ -718,7 +707,7 @@ impl MessageStore {
         let topic = conversation.reqres_topic(did);
 
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-        let peer_id = did_to_libp2p_pub(did).map(|pk| pk.to_peer_id())?;
+        let peer_id = did.to_peer_id()?;
 
         if !peers.contains(&peer_id)
             || (peers.contains(&peer_id)
@@ -750,22 +739,11 @@ impl MessageStore {
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
-        self.conversation_event_handle(conversation_id).await;
-
-        let (tx, mut rx) = unbounded();
+        let (tx, mut rx) = channel(1);
         self.conversation_sender
             .write()
             .await
             .insert(conversation_id, tx);
-
-        let (tx, _) = broadcast::channel(1024);
-
-        self.stream_sender.write().await.insert(conversation_id, tx);
-
-        self.conversation_lock
-            .write()
-            .await
-            .insert(conversation_id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
 
         info!("Task started for {conversation_id}");
         let did = self.did.clone();
@@ -777,27 +755,17 @@ impl MessageStore {
                 loop {
                     let (direction, event, ret) = tokio::select! {
                         biased;
-                        event = rx.next() => {
-                            let Some((event, ret)) = event else {
-                                continue;
-                            };
-
+                        Some((event, ret)) = rx.next() => {
                             (MessageDirection::Out, event, ret)
                         }
-                        event = stream.next() => {
-                            let Some(event) = event else {
-                                continue;
-                            };
-
+                        Some(event) = stream.next() => {
                             let Ok(data) = Payload::from_bytes(&event.data) else {
                                 continue;
                             };
 
                             let own_did = &*did;
 
-                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
-                                    continue;
-                            };
+                            let conversation = store.conversations.get(conversation_id).await.expect("Conversation exist");
 
                             let bytes_results = match conversation.conversation_type {
                                 ConversationType::Direct => {
@@ -809,44 +777,53 @@ impl MessageStore {
                                         .collect::<Vec<_>>()
                                         .first()
                                         .cloned() else {
+                                            tracing::warn!(id = %conversation_id, "participant is not in conversation");
                                             continue;
                                         };
                                     ecdh_decrypt(own_did, Some(&recipient), data.data())
                                 }
                                 ConversationType::Group => {
-
-                                    let Ok(key) = store.conversation_keystore(conversation.id()).await.and_then(|keystore| keystore.get_latest(own_did, &data.sender())) else {
-                                        continue;
+                                    let key = match store.conversation_keystore(conversation_id).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
+                                        Ok(key) => key,
+                                        Err(e) => {
+                                            tracing::warn!(id = %conversation_id, sender = %data.sender(), error = %e, "Failed to obtain key");
+                                            continue;
+                                        }
                                     };
+
                                     Cipher::direct_decrypt(data.data(), &key)
                                 }
                             };
-                            drop(conversation);
 
-                            let Ok(bytes) = bytes_results else {
-                                continue;
+                            let bytes = match bytes_results {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    tracing::warn!(id = %conversation_id, sender = %data.sender(), error = %e, "Failed to decrypt payload");
+                                    continue;
+                                }
                             };
 
-                            let Ok(event) = serde_json::from_slice::<MessagingEvents>(&bytes) else {
-                                continue;
+                            let event = match serde_json::from_slice::<MessagingEvents>(&bytes) {
+                                Ok(e) => e,
+                                Err(e) => {
+                                    tracing::warn!(id = %conversation_id, sender = %data.sender(), error = %e, "Failed to deserialize message");
+                                    continue;
+                                }
                             };
 
                             (MessageDirection::In, event, None)
                         },
                     };
 
-                    if let Err(e) = store
+                    let result = store
                         .message_event(conversation_id, &event, direction, Default::default())
-                        .await
-                    {
-                        error!("Error processing message: {e}");
-                        if let Some(ret) = ret {
-                            let _ = ret.send(Err(e)).ok();
-                        }
-                        continue;
-                    }
+                        .await.map_err(|e| {
+                            error!(id=%conversation_id, error = %e, "Failure while processing message in conversation");
+                            e
+                        });
+
                     if let Some(ret) = ret {
-                        let _ = ret.send(Ok(())).ok();
+                        let _ = ret.send(result).ok();
                     }
                 }
             }
@@ -863,11 +840,10 @@ impl MessageStore {
         events: &MessagingEvents,
         direction: MessageDirection,
         opt: EventOpt,
-    ) -> Result<bool, Error> {
-        let _guard = self.conversation_queue(conversation_id).await?;
+    ) -> Result<(), Error> {
         let tx = self.get_conversation_sender(conversation_id).await?;
 
-        let mut document = self.get_conversation(conversation_id).await?;
+        let mut document = self.conversations.get(conversation_id).await?;
 
         let keystore = match document.conversation_type {
             ConversationType::Direct => None,
@@ -889,7 +865,7 @@ impl MessageStore {
                 }
 
                 let lines_value_length: usize = message
-                    .value()
+                    .lines()
                     .iter()
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
@@ -897,7 +873,10 @@ impl MessageStore {
                     .sum();
 
                 if lines_value_length == 0 && lines_value_length > 4096 {
-                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+                    error!(
+                        message_length = lines_value_length,
+                        "Length of message is invalid."
+                    );
                     return Err(Error::InvalidLength {
                         context: "message".into(),
                         current: lines_value_length,
@@ -914,7 +893,7 @@ impl MessageStore {
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
                         message
-                            .value()
+                            .lines()
                             .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
@@ -923,34 +902,9 @@ impl MessageStore {
                     .concat();
                     verify_serde_sig(sender, &construct, &signature)?;
                 }
+
                 spam_check(&mut message, self.spam_filter.clone())?;
                 let conversation_id = message.conversation_id();
-
-                if message.message_type() == MessageType::Attachment
-                    && direction == MessageDirection::In
-                {
-                    if let Some(fs) = self.filesystem.clone() {
-                        let dir = fs.root_directory();
-                        for file in message.attachments() {
-                            let original = file.name();
-                            let mut inc = 0;
-                            loop {
-                                if dir.has_item(&original) {
-                                    if inc >= 20 {
-                                        break;
-                                    }
-                                    inc += 1;
-                                    file.set_name(&format!("{original}-{inc}"));
-                                    continue;
-                                }
-                                break;
-                            }
-                            if let Err(e) = dir.add_file(file) {
-                                error!("Error adding file to constellation: {e}");
-                            }
-                        }
-                    }
-                }
 
                 let message_id = message.id();
 
@@ -960,7 +914,7 @@ impl MessageStore {
 
                 messages.insert(message_document);
                 document.set_message_list(&self.ipfs, messages).await?;
-                self.set_conversation(conversation_id, document).await?;
+                self.conversations.set(document).await?;
 
                 let event = match direction {
                     MessageDirection::In => MessageEventKind::MessageReceived {
@@ -1024,7 +978,7 @@ impl MessageStore {
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
                         message
-                            .value()
+                            .lines()
                             .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
@@ -1051,7 +1005,7 @@ impl MessageStore {
                 }
 
                 message.set_signature(Some(signature));
-                *message.value_mut() = lines;
+                *message.lines_mut() = lines;
                 message.set_modified(modified);
 
                 message_document
@@ -1059,7 +1013,7 @@ impl MessageStore {
                     .await?;
                 list.replace(message_document);
                 document.set_message_list(&self.ipfs, list).await?;
-                self.set_conversation(conversation_id, document).await?;
+                self.conversations.set(document).await?;
 
                 if let Err(e) = tx.send(MessageEventKind::MessageEdited {
                     conversation_id,
@@ -1088,7 +1042,7 @@ impl MessageStore {
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
                         message
-                            .value()
+                            .lines()
                             .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
@@ -1100,7 +1054,7 @@ impl MessageStore {
 
                 document.delete_message(&self.ipfs, message_id).await?;
 
-                self.set_conversation(conversation_id, document).await?;
+                self.conversations.set(document).await?;
 
                 if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
                     conversation_id,
@@ -1128,7 +1082,7 @@ impl MessageStore {
                 let event = match state {
                     PinState::Pin => {
                         if message.pinned() {
-                            return Ok(false);
+                            return Ok(());
                         }
                         *message.pinned_mut() = true;
                         MessageEventKind::MessagePinned {
@@ -1138,7 +1092,7 @@ impl MessageStore {
                     }
                     PinState::Unpin => {
                         if !message.pinned() {
-                            return Ok(false);
+                            return Ok(());
                         }
                         *message.pinned_mut() = false;
                         MessageEventKind::MessageUnpinned {
@@ -1154,7 +1108,7 @@ impl MessageStore {
 
                 list.replace(message_document);
                 document.set_message_list(&self.ipfs, list).await?;
-                self.set_conversation(conversation_id, document).await?;
+                self.conversations.set(document).await?;
 
                 if let Err(e) = tx.send(event) {
                     error!("Error broadcasting event: {e}");
@@ -1207,7 +1161,7 @@ impl MessageStore {
 
                         list.replace(message_document);
                         document.set_message_list(&self.ipfs, list).await?;
-                        self.set_conversation(conversation_id, document).await?;
+                        self.conversations.set(document).await?;
 
                         if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
                             conversation_id,
@@ -1247,7 +1201,8 @@ impl MessageStore {
 
                         list.replace(message_document);
                         document.set_message_list(&self.ipfs, list).await?;
-                        self.set_conversation(conversation_id, document).await?;
+
+                        self.conversations.set(document).await?;
 
                         if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
                             conversation_id,
@@ -1276,17 +1231,11 @@ impl MessageStore {
 
                 document.recipients = list;
                 document.signature = Some(signature);
-                self.set_conversation(conversation_id, document).await?;
+                self.conversations.set(document).await?;
 
-                tokio::spawn({
-                    let store = self.clone();
-                    let recipient = recipient.clone();
-                    async move {
-                        if let Err(e) = store.request_key(conversation_id, &recipient).await {
-                            error!("Error requesting key: {e}");
-                        }
-                    }
-                });
+                if let Err(e) = self.request_key(conversation_id, &recipient).await {
+                    error!("Error requesting key: {e}");
+                }
 
                 if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
                     conversation_id,
@@ -1310,7 +1259,7 @@ impl MessageStore {
                 document.recipients = list;
                 document.excluded.remove(&recipient);
                 document.signature = Some(signature);
-                self.set_conversation(conversation_id, document).await?;
+                self.conversations.set(document).await?;
 
                 if can_emit {
                     if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
@@ -1340,14 +1289,14 @@ impl MessageStore {
                 }
                 if let Some(current_name) = document.name() {
                     if current_name.eq(&name) {
-                        return Ok(false);
+                        return Ok(());
                     }
                 }
 
                 document.name = (!name.is_empty()).then_some(name.to_string());
                 document.signature = Some(signature);
 
-                self.set_conversation(conversation_id, document).await?;
+                self.conversations.set(document).await?;
 
                 if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
                     conversation_id,
@@ -1358,7 +1307,7 @@ impl MessageStore {
             }
             _ => {}
         }
-        Ok(false)
+        Ok(())
     }
 
     async fn end_task(&self, conversation_id: Uuid) {
@@ -1389,38 +1338,17 @@ impl MessageStore {
             task.abort();
         }
 
-        self.stream_sender.write().await.remove(&conversation_id);
-
         if let Some(task) = self.stream_task.write().await.remove(&conversation_id) {
             info!("Attempting to end task for {conversation_id}");
             task.abort();
             info!("Task for {conversation_id} has ended");
-            if let Some(tx) = self
+            if let Some(mut tx) = self
                 .conversation_sender
                 .write()
                 .await
                 .remove(&conversation_id)
             {
                 tx.close_channel();
-            }
-
-            if let Some(mut tx) = self
-                .conversation_task_tx
-                .write()
-                .await
-                .remove(&conversation_id)
-            {
-                tx.close_channel();
-            }
-
-            if let Some(permit) = self
-                .conversation_lock
-                .write()
-                .await
-                .remove(&conversation_id)
-            {
-                permit.close();
-                drop(permit);
             }
         }
     }
@@ -1442,7 +1370,7 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                if let Ok(true) = self.friends.is_blocked(&recipient).await {
+                if let Ok(true) = self.identity.is_blocked(&recipient).await {
                     //TODO: Signal back to close conversation
                     warn!("{recipient} is blocked");
                     return Ok(());
@@ -1457,12 +1385,7 @@ impl MessageStore {
                     convo.id()
                 );
 
-                let cid = convo.to_cid(&self.ipfs).await?;
-                if !self.ipfs.is_pinned(&cid).await? {
-                    self.ipfs.insert_pin(&cid, false).await?;
-                }
-
-                self.conversation_cid.write().await.insert(convo.id(), cid);
+                self.conversations.set(convo.clone()).await?;
 
                 let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
                     Ok(stream) => stream,
@@ -1474,17 +1397,11 @@ impl MessageStore {
 
                 self.start_task(convo.id(), stream).await;
 
-                if let Some(path) = self.path.as_ref() {
-                    let cid = cid.to_string();
-                    if let Err(e) = tokio::fs::write(path.join(convo.id().to_string()), cid).await {
-                        error!("Unable to save info to file: {e}");
-                    }
-                }
-                if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                    conversation_id: convo.id(),
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.event
+                    .emit(RayGunEventKind::ConversationCreated {
+                        conversation_id: convo.id(),
+                    })
+                    .await;
             }
             ConversationEvents::NewGroupConversation {
                 creator,
@@ -1501,33 +1418,26 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                tokio::spawn({
-                    let discovery = self.discovery.clone();
-                    let recipients = list.clone();
-                    async move {
-                        for recipient in recipients {
-                            if !discovery.contains(&recipient).await {
-                                let _ = discovery.insert(recipient).await.ok();
-                            }
-                        }
+                for recipient in &list {
+                    if !self.discovery.contains(recipient).await {
+                        let _ = self.discovery.insert(recipient).await;
                     }
-                });
+                }
 
-                info!("Creating conversation");
+                info!(%conversation_id, "Creating group conversation");
                 let convo = ConversationDocument::new(
                     did,
                     name,
                     list.clone(),
                     Some(conversation_id),
                     ConversationType::Group,
+                    None,
+                    None,
                     Some(creator),
                     signature,
                 )?;
-                info!(
-                    "{} conversation created: {}",
-                    convo.conversation_type,
-                    convo.id()
-                );
+
+                let conversation_type = convo.conversation_type;
 
                 let mut keystore = Keystore::new(conversation_id);
                 keystore.insert(did, did, warp::crypto::generate::<64>())?;
@@ -1535,56 +1445,35 @@ impl MessageStore {
                 //Although we verify internally, this is just as a precaution
                 convo.verify()?;
 
-                let cid = convo.to_cid(&self.ipfs).await?;
-                if !self.ipfs.is_pinned(&cid).await? {
-                    self.ipfs.insert_pin(&cid, false).await?;
-                }
-                self.conversation_cid.write().await.insert(convo.id(), cid);
+                let topic = convo.topic();
 
-                let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        error!("Error subscribing to conversation: {e}");
-                        return Ok(());
-                    }
-                };
+                self.conversations.set(convo).await?;
 
-                self.set_conversation_keystore(conversation_id, &keystore)
+                let stream = self.ipfs.pubsub_subscribe(topic).await.expect("msg");
+
+                self.set_conversation_keystore(conversation_id, keystore)
                     .await?;
 
-                self.start_task(convo.id(), stream).await;
-                if let Some(path) = self.path.as_ref() {
-                    let cid = cid.to_string();
-                    if let Err(e) = tokio::fs::write(path.join(convo.id().to_string()), cid).await {
-                        error!("Unable to save info to file: {e}");
+                self.start_task(conversation_id, stream).await;
+
+                info!(%conversation_id,"{} conversation created", conversation_type);
+
+                for recipient in list.iter().filter(|d| did.ne(d)) {
+                    if let Err(e) = self.request_key(conversation_id, recipient).await {
+                        tracing::warn!("Failed to send exchange request to {recipient}: {e}");
                     }
-                }
-                if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                    conversation_id: convo.id(),
-                }) {
-                    error!("Error broadcasting event: {e}");
                 }
 
-                tokio::spawn({
-                    let store = self.clone();
-                    let recipients = list
-                        .iter()
-                        .filter(|d| did.ne(d))
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    async move {
-                        for recipient in recipients {
-                            if let Err(_e) = store.request_key(conversation_id, &recipient).await {}
-                        }
-                    }
-                });
+                self.event
+                    .emit(RayGunEventKind::ConversationCreated { conversation_id })
+                    .await;
             }
             ConversationEvents::LeaveConversation {
                 conversation_id,
                 recipient,
                 signature,
             } => {
-                let conversation = self.get_conversation(conversation_id).await?;
+                let conversation = self.conversations.get(conversation_id).await?;
 
                 if !matches!(conversation.conversation_type, ConversationType::Group) {
                     return Err(anyhow::anyhow!("Can only leave from a group conversation"));
@@ -1617,8 +1506,6 @@ impl MessageStore {
                     //so we can exclude the recipient
                     drop(conversation);
 
-                    let _guard = self.conversation_queue(conversation_id).await?;
-
                     {
                         //Small validation context
                         let context = format!("exclude {}", recipient);
@@ -1626,7 +1513,7 @@ impl MessageStore {
                         verify_serde_sig(recipient.clone(), &context, &signature)?;
                     }
 
-                    let mut conversation = self.get_conversation(conversation_id).await?;
+                    let mut conversation = self.conversations.get(conversation_id).await?;
 
                     //Validate again since we have a permit
                     if !conversation.recipients.contains(&recipient) {
@@ -1641,7 +1528,7 @@ impl MessageStore {
                         entry.insert(signature);
                         can_emit = true;
                     }
-                    self.set_conversation(conversation_id, conversation).await?;
+                    self.conversations.set(conversation).await?;
                     if can_emit {
                         let tx = self.get_conversation_sender(conversation_id).await?;
                         if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
@@ -1661,7 +1548,7 @@ impl MessageStore {
 
                 let sender = data.sender();
 
-                match self.get_conversation(conversation_id).await {
+                match self.conversations.get(conversation_id).await {
                     Ok(conversation)
                         if conversation.recipients().contains(&sender)
                             && matches!(
@@ -1682,29 +1569,16 @@ impl MessageStore {
 
                 self.end_task(conversation_id).await;
 
-                let conversation_cid = self
-                    .conversation_cid
-                    .write()
-                    .await
-                    .remove(&conversation_id)
-                    .ok_or(Error::InvalidConversation)?;
-
-                if self.ipfs.is_pinned(&conversation_cid).await? {
-                    if let Err(e) = self.ipfs.remove_pin(&conversation_cid, false).await {
-                        error!("Unable to remove pin from {conversation_cid}: {e}");
-                    }
-                }
-
                 let mut document: ConversationDocument =
-                    conversation_cid.get_local_dag(&self.ipfs).await?;
+                    self.conversations.delete(conversation_id).await?;
+
                 let topic = document.topic();
                 self.queue.write().await.remove(&sender);
 
                 tokio::spawn({
                     let ipfs = self.ipfs.clone();
                     async move {
-                        let _ = document.delete_all_message(ipfs.clone()).await.ok();
-                        ipfs.remove_block(conversation_cid).await.ok();
+                        let _ = document.delete_all_message(ipfs.clone()).await;
                     }
                 });
 
@@ -1712,26 +1586,9 @@ impl MessageStore {
                     warn!("topic should have been unsubscribed after dropping conversation.");
                 }
 
-                if let Some(path) = self.path.as_ref() {
-                    if let Err(e) =
-                        tokio::fs::remove_file(path.join(conversation_id.to_string())).await
-                    {
-                        error!("Unable to remove conversation: {e}");
-                    }
-                }
-
-                // Delete a keystore, if any, assigned to the conversation.
-                let _ = self
-                    .remove_conversation_keystore(conversation_id)
-                    .await
-                    .ok();
-
-                if let Err(e) = self
-                    .event
-                    .send(RayGunEventKind::ConversationDeleted { conversation_id })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
+                self.event
+                    .emit(RayGunEventKind::ConversationDeleted { conversation_id })
+                    .await;
             }
         }
         Ok(())
@@ -1808,12 +1665,18 @@ impl MessageStore {
 }
 
 impl MessageStore {
+    pub async fn get_conversation(&self, id: Uuid) -> Result<Conversation, Error> {
+        let document = self.conversations.get(id).await?;
+
+        Ok(document.into())
+    }
+
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
-        if self.with_friends.load(Ordering::SeqCst) && !self.friends.is_friend(did_key).await? {
+        if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did_key).await? {
             return Err(Error::FriendDoesntExist);
         }
 
-        if let Ok(true) = self.friends.is_blocked(did_key).await {
+        if let Ok(true) = self.identity.is_blocked(did_key).await {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -1839,9 +1702,9 @@ impl MessageStore {
         }
 
         //Temporary limit
-        if self.list_conversations().await.unwrap_or_default().len() >= 32 {
-            return Err(Error::ConversationLimitReached);
-        }
+        // if self.list_conversations().await.unwrap_or_default().len() >= 256 {
+        //     return Err(Error::ConversationLimitReached);
+        // }
 
         if !self.discovery.contains(did_key).await {
             self.discovery.insert(did_key).await?;
@@ -1850,18 +1713,16 @@ impl MessageStore {
         let conversation =
             ConversationDocument::new_direct(own_did, [own_did.clone(), did_key.clone()])?;
 
-        let cid = conversation.to_cid(&self.ipfs).await?;
-
         let convo_id = conversation.id();
         let topic = conversation.topic();
 
-        self.conversation_cid.write().await.insert(convo_id, cid);
+        self.conversations.set(conversation.clone()).await?;
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
-        self.start_task(conversation.id(), stream).await;
+        self.start_task(convo_id, stream).await;
 
-        let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
+        let peer_id = did_key.to_peer_id()?;
 
         let event = ConversationEvents::NewConversation {
             recipient: own_did.clone(),
@@ -1900,21 +1761,11 @@ impl MessageStore {
             }
         }
 
-        if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
-            if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            }) {
-                error!("Error broadcasting event: {e}");
-            }
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-
-            if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
-                error!("Unable to save info to file: {e}");
-            }
-        }
+        self.event
+            .emit(RayGunEventKind::ConversationCreated {
+                conversation_id: convo_id,
+            })
+            .await;
 
         Ok(Conversation::from(&conversation))
     }
@@ -1946,12 +1797,12 @@ impl MessageStore {
         let mut removal = vec![];
 
         for did in recipients.iter() {
-            if self.with_friends.load(Ordering::SeqCst) && !self.friends.is_friend(did).await? {
+            if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did).await? {
                 info!("{did} is not on the friends list.. removing from list");
                 removal.push(did.clone());
             }
 
-            if let Ok(true) = self.friends.is_blocked(did).await {
+            if let Ok(true) = self.identity.is_blocked(did).await {
                 info!("{did} is blocked.. removing from list");
                 removal.push(did.clone());
             }
@@ -1962,9 +1813,9 @@ impl MessageStore {
         }
 
         //Temporary limit
-        if self.list_conversations().await.unwrap_or_default().len() >= 32 {
-            return Err(Error::ConversationLimitReached);
-        }
+        // if self.list_conversations().await.unwrap_or_default().len() >= 256 {
+        //     return Err(Error::ConversationLimitReached);
+        // }
 
         for recipient in &recipients {
             if !self.discovery.contains(recipient).await {
@@ -1977,36 +1828,30 @@ impl MessageStore {
 
         let recipient = conversation.recipients();
 
-        let cid = conversation.to_cid(&self.ipfs).await?;
-
         let convo_id = conversation.id();
         let topic = conversation.topic();
 
-        self.conversation_cid.write().await.insert(convo_id, cid);
-        let mut keystore = Keystore::new(conversation.id());
+        self.conversations.set(conversation).await?;
+
+        let mut keystore = Keystore::new(convo_id);
         keystore.insert(own_did, own_did, warp::crypto::generate::<64>())?;
-        self.set_conversation_keystore(convo_id, &keystore).await?;
+
+        self.set_conversation_keystore(convo_id, keystore).await?;
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
-        self.start_task(conversation.id(), stream).await;
+        self.start_task(convo_id, stream).await;
 
         let peer_id_list = recipient
             .clone()
             .iter()
             .filter(|did| own_did.ne(did))
             .map(|did| (did.clone(), did))
-            .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
-            .map(|(did, pk)| (did, pk.to_peer_id()))
+            .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
 
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
+        let conversation = self.conversations.get(convo_id).await?;
 
-            if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
-                error!("Unable to save info to file: {e}");
-            }
-        }
         let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
             creator: own_did.clone(),
             name: conversation.name(),
@@ -2049,28 +1894,17 @@ impl MessageStore {
             }
         }
 
-        if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
-            if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            }) {
-                error!("Error broadcasting event: {e}");
+        for recipient in recipient.iter().filter(|d| own_did.ne(d)) {
+            if let Err(e) = self.request_key(conversation.id(), recipient).await {
+                tracing::warn!("Failed to send exchange request to {recipient}: {e}");
             }
         }
 
-        tokio::spawn({
-            let store = self.clone();
-            let conversation_id = conversation.id();
-            let recipients = recipient
-                .iter()
-                .filter(|d| own_did.ne(d))
-                .cloned()
-                .collect::<Vec<_>>();
-            async move {
-                for recipient in recipients {
-                    if let Err(_e) = store.request_key(conversation_id, &recipient).await {}
-                }
-            }
-        });
+        self.event
+            .emit(RayGunEventKind::ConversationCreated {
+                conversation_id: conversation.id(),
+            })
+            .await;
 
         Ok(Conversation::from(&conversation))
     }
@@ -2082,22 +1916,8 @@ impl MessageStore {
     ) -> Result<(), Error> {
         self.end_task(conversation_id).await;
 
-        let conversation_cid = self
-            .conversation_cid
-            .write()
-            .await
-            .remove(&conversation_id)
-            .ok_or(Error::InvalidConversation)?;
-
-        if self.ipfs.is_pinned(&conversation_cid).await? {
-            if let Err(e) = self.ipfs.remove_pin(&conversation_cid, false).await {
-                error!("Unable to remove pin from {conversation_cid}: {e}");
-            }
-        }
         let mut document_type: ConversationDocument =
-            conversation_cid.get_local_dag(&self.ipfs).await?;
-
-        self.ipfs.remove_block(conversation_cid).await?;
+            self.conversations.delete(conversation_id).await?;
 
         if broadcast {
             let recipients = document_type.recipients();
@@ -2136,8 +1956,8 @@ impl MessageStore {
                     .iter()
                     .filter(|did| own_did.ne(did))
                     .map(|did| (did.clone(), did))
-                    .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
-                    .map(|(did, pk)| (did, pk.to_peer_id()))
+                    .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
+                    .map(|(did, pk)| (did, pk))
                     .collect::<Vec<_>>();
 
                 let event = serde_json::to_vec(&ConversationEvents::DeleteConversation {
@@ -2207,124 +2027,40 @@ impl MessageStore {
             }
         });
 
-        if let Some(path) = self.path.as_ref() {
-            if let Err(e) = tokio::fs::remove_file(path.join(conversation_id.to_string())).await {
-                error!("Unable to remove conversation: {e}");
-            }
-        }
+        self.event
+            .emit(RayGunEventKind::ConversationDeleted { conversation_id })
+            .await;
 
-        let _ = self
-            .remove_conversation_keystore(conversation_id)
-            .await
-            .ok();
-
-        if let Err(e) = self
-            .event
-            .send(RayGunEventKind::ConversationDeleted { conversation_id })
-        {
-            error!("Error broadcasting event: {e}");
-        }
         Ok(())
     }
 
-    async fn conversation_queue(
-        &self,
-        conversation_id: Uuid,
-    ) -> Result<OwnedSemaphorePermit, Error> {
-        let permit = self
-            .conversation_lock
-            .read()
-            .await
-            .get(&conversation_id)
-            .cloned()
-            .ok_or(Error::InvalidConversation)?;
+    pub async fn load_conversations(&self) -> Result<(), Error> {
+        let list = self.conversations.list().await.unwrap_or_default();
 
-        permit
-            .acquire_owned()
-            .await
-            .map_err(anyhow::Error::from)
-            .map_err(Error::from)
-    }
+        for conversation in &list {
+            let task = {
+                let store = self.clone();
+                async move {
+                    conversation.verify()?;
 
-    pub async fn load_conversations(&self, background: bool) -> Result<(), Error> {
-        let Some(path) = self.path.as_ref() else {
-            return Ok(());
-        };
+                    let recipients = conversation.recipients();
 
-        if !path.is_dir() {
-            return Err(Error::InvalidDirectory);
-        }
-
-        let mut entry_stream = ReadDirStream::new(tokio::fs::read_dir(path).await?);
-
-        while let Some(entry) = entry_stream.next().await {
-            let entry = entry?;
-            let entry_path = entry.path();
-            if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
-                let Some(filename) = entry_path
-                    .file_name()
-                    .map(|file| file.to_string_lossy().to_string())
-                else {
-                    continue;
-                };
-
-                //TODO: Maybe check file extension instead
-                let slices = filename.split('.').collect::<Vec<&str>>();
-
-                let keystore = slices
-                    .last()
-                    .map(|s| s.ends_with("keystore"))
-                    .unwrap_or_default();
-
-                let Some(file_id) = slices.first() else {
-                    continue;
-                };
-
-                let Ok(id) = Uuid::from_str(file_id) else {
-                    continue;
-                };
-
-                let Ok(cid_str) = tokio::fs::read(entry_path)
-                    .await
-                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                else {
-                    continue;
-                };
-                if let Ok(cid) = cid_str.parse::<Cid>() {
-                    if keystore {
-                        self.conversation_keystore_cid.write().await.insert(id, cid);
-                    } else {
-                        let task = {
-                            let store = self.clone();
-                            async move {
-                                let conversation: ConversationDocument =
-                                    cid.get_local_dag(&store.ipfs).await?;
-                                conversation.verify()?;
-                                store.conversation_cid.write().await.insert(id, cid);
-                                let recipients = conversation.recipients();
-
-                                for recipient in recipients {
-                                    if !store.discovery.contains(&recipient).await {
-                                        let _ = store.discovery.insert(recipient).await.ok();
-                                    }
-                                }
-
-                                let stream =
-                                    store.ipfs.pubsub_subscribe(conversation.topic()).await?;
-
-                                store.start_task(conversation.id(), stream).await;
-
-                                Ok::<_, Error>(())
-                            }
-                        };
-
-                        if background {
-                            tokio::spawn(task);
-                        } else if let Err(e) = task.await {
-                            error!("Error loading conversation: {e}");
+                    for recipient in recipients {
+                        if !store.discovery.contains(&recipient).await {
+                            let _ = store.discovery.insert(recipient).await.ok();
                         }
                     }
+
+                    let stream = store.ipfs.pubsub_subscribe(conversation.topic()).await?;
+
+                    store.start_task(conversation.id(), stream).await;
+
+                    Ok::<_, Error>(())
                 }
+            };
+
+            if let Err(e) = task.await {
+                error!("Error loading conversation {}: {e}", conversation.id());
             }
         }
 
@@ -2332,17 +2068,7 @@ impl MessageStore {
     }
 
     pub async fn list_conversation_documents(&self) -> Result<Vec<ConversationDocument>, Error> {
-        let list = FuturesUnordered::from_iter(
-            self.conversation_cid
-                .read()
-                .await
-                .values()
-                .map(|cid| async { (*cid).get_local_dag(&self.ipfs).await }),
-        )
-        .filter_map(|res| async { res.ok() })
-        .collect::<Vec<_>>()
-        .await;
-        Ok(list)
+        self.conversations.list().await
     }
 
     pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
@@ -2352,84 +2078,25 @@ impl MessageStore {
     }
 
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
-        self.get_conversation(conversation_id)
+        self.conversations
+            .get(conversation_id)
             .await?
             .messages_length(&self.ipfs)
             .await
     }
 
     pub async fn conversation_keystore(&self, conversation_id: Uuid) -> Result<Keystore, Error> {
-        let guard = self.conversation_keystore_cid.read().await;
-
-        let cid = guard
-            .get(&conversation_id)
-            .ok_or(Error::InvalidConversation)?;
-
-        cid.get_local_dag(&self.ipfs).await
+        self.conversations.get_keystore(conversation_id).await
     }
 
     pub async fn set_conversation_keystore(
         &self,
         conversation_id: Uuid,
-        keystore: &Keystore,
+        keystore: Keystore,
     ) -> Result<(), Error> {
-        let cid = keystore.to_cid(&self.ipfs).await?;
-
-        if !self.ipfs.is_pinned(&cid).await? {
-            self.ipfs.insert_pin(&cid, false).await?;
-        }
-
-        let old_cid = self
-            .conversation_keystore_cid
-            .write()
+        self.conversations
+            .set_keystore(conversation_id, keystore)
             .await
-            .insert(conversation_id, cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.remove_pin(&old_cid, false).await?;
-                }
-                if let Err(_e) = self.ipfs.remove_block(old_cid).await {}
-            }
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            let keystore_cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(
-                path.join(format!("{}.keystore", conversation_id)),
-                keystore_cid,
-            )
-            .await
-            {
-                error!("Unable to save info to file: {e}");
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn remove_conversation_keystore(&self, conversation_id: Uuid) -> Result<(), Error> {
-        let mut writer = self.conversation_keystore_cid.write().await;
-        let cid = writer
-            .remove(&conversation_id)
-            .ok_or(Error::InvalidConversation)?;
-        drop(writer);
-
-        if self.ipfs.is_pinned(&cid).await? {
-            self.ipfs.remove_pin(&cid, false).await?;
-        }
-        if let Err(_e) = self.ipfs.remove_block(cid).await {}
-
-        if let Some(path) = self.path.as_ref() {
-            if let Err(e) =
-                tokio::fs::remove_file(path.join(format!("{}.keystore", conversation_id))).await
-            {
-                error!("Unable to remove keystore: {e}");
-            }
-        }
-
-        Ok(())
     }
 
     async fn send_single_conversation_event(
@@ -2447,7 +2114,7 @@ impl MessageStore {
 
         let payload = Payload::new(own_did, &bytes, &signature);
 
-        let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
+        let peer_id = did_key.to_peer_id()?;
         let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
 
         let mut time = true;
@@ -2492,7 +2159,7 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<Message, Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
             ConversationType::Group => self.conversation_keystore(conversation.id()).await.ok(),
@@ -2500,6 +2167,29 @@ impl MessageStore {
         conversation
             .get_message(&self.ipfs, &self.did, message_id, keystore.as_ref())
             .await
+    }
+
+    pub async fn get_message_references<'a>(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<BoxStream<'a, MessageReference>, Error> {
+        let conversation = self.conversations.get(conversation_id).await?;
+        conversation
+            .get_messages_reference_stream(&self.ipfs, opt)
+            .await
+    }
+
+    pub async fn get_message_reference(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        let conversation = self.conversations.get(conversation_id).await?;
+        conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await
+            .map(|document| document.into())
     }
 
     //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself
@@ -2513,7 +2203,7 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<MessageStatus, Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
 
         if matches!(conversation.conversation_type, ConversationType::Group) {
             //TODO: Handle message status for group
@@ -2559,7 +2249,7 @@ impl MessageStore {
         conversation: Uuid,
         opt: MessageOptions,
     ) -> Result<Messages, Error> {
-        let conversation = self.get_conversation(conversation).await?;
+        let conversation = self.conversations.get(conversation).await?;
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
             ConversationType::Group => self.conversation_keystore(conversation.id()).await.ok(),
@@ -2588,65 +2278,17 @@ impl MessageStore {
     }
 
     pub async fn exist(&self, conversation: Uuid) -> bool {
-        self.conversation_cid
-            .read()
+        self.conversations
+            .contains(conversation)
             .await
-            .contains_key(&conversation)
-    }
-
-    pub async fn get_conversation(
-        &self,
-        conversation_id: Uuid,
-    ) -> Result<ConversationDocument, Error> {
-        let mut task_tx = self
-            .conversation_task_tx
-            .read()
-            .await
-            .get(&conversation_id)
-            .cloned()
-            .ok_or(Error::InvalidConversation)?;
-
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .send(ConversationEventHandle::Get(tx))
-            .await
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn set_conversation(
-        &self,
-        conversation_id: Uuid,
-        document: ConversationDocument,
-    ) -> Result<(), Error> {
-        let mut task_tx = self
-            .conversation_task_tx
-            .read()
-            .await
-            .get(&conversation_id)
-            .cloned()
-            .ok_or(Error::InvalidConversation)?;
-
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .send(ConversationEventHandle::Set(document, tx))
-            .await
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
+            .unwrap_or_default()
     }
 
     pub async fn get_conversation_sender(
         &self,
         conversation_id: Uuid,
     ) -> Result<BroadcastSender<MessageEventKind>, Error> {
-        let tx = self
-            .stream_sender
-            .read()
-            .await
-            .get(&conversation_id)
-            .ok_or(Error::InvalidConversation)?
-            .clone();
-        Ok(tx)
+        self.conversations.subscribe(conversation_id).await
     }
 
     pub async fn get_conversation_receiver(
@@ -2665,7 +2307,6 @@ impl MessageStore {
         conversation_id: Uuid,
     ) -> Result<impl Stream<Item = MessageEventKind>, Error> {
         let mut rx = self.get_conversation_receiver(conversation_id).await?;
-
         Ok(async_stream::stream! {
             loop {
                 match rx.recv().await {
@@ -2694,8 +2335,7 @@ impl MessageStore {
             });
         }
 
-        let _guard = self.conversation_queue(conversation_id).await?;
-        let mut conversation = self.get_conversation(conversation_id).await?;
+        let mut conversation = self.conversations.get(conversation_id).await?;
 
         if matches!(conversation.conversation_type, ConversationType::Direct) {
             return Err(Error::InvalidConversation);
@@ -2713,9 +2353,9 @@ impl MessageStore {
 
         conversation.name = (!name.is_empty()).then_some(name.to_string());
 
-        self.set_conversation(conversation_id, conversation).await?;
+        self.conversations.set(conversation).await?;
 
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
 
         let Some(signature) = conversation.signature.clone() else {
             return Err(Error::InvalidSignature);
@@ -2741,10 +2381,7 @@ impl MessageStore {
         conversation_id: Uuid,
         did_key: &DID,
     ) -> Result<(), Error> {
-        //Note: The Semaphore is used to "block" the stream while we add a recipient so we could have the next chance of
-        let _guard = self.conversation_queue(conversation_id).await?;
-
-        let mut conversation = self.get_conversation(conversation_id).await?;
+        let mut conversation = self.conversations.get(conversation_id).await?;
 
         if matches!(conversation.conversation_type, ConversationType::Direct) {
             return Err(Error::InvalidConversation);
@@ -2764,7 +2401,7 @@ impl MessageStore {
             return Err(Error::PublicKeyInvalid);
         }
 
-        if self.friends.is_blocked(did_key).await? {
+        if self.identity.is_blocked(did_key).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -2774,9 +2411,9 @@ impl MessageStore {
 
         conversation.recipients.push(did_key.clone());
 
-        self.set_conversation(conversation_id, conversation).await?;
+        self.conversations.set(conversation).await?;
 
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let Some(signature) = conversation.signature.clone() else {
             return Err(Error::InvalidSignature);
         };
@@ -2809,7 +2446,6 @@ impl MessageStore {
             .await?;
 
         if let Err(_e) = self.request_key(conversation_id, did_key).await {}
-        drop(_guard);
         Ok(())
     }
 
@@ -2819,9 +2455,7 @@ impl MessageStore {
         did_key: &DID,
         broadcast: bool,
     ) -> Result<(), Error> {
-        let _guard = self.conversation_queue(conversation_id).await?;
-
-        let mut conversation = self.get_conversation(conversation_id).await?;
+        let mut conversation = self.conversations.get(conversation_id).await?;
 
         if matches!(conversation.conversation_type, ConversationType::Direct) {
             return Err(Error::InvalidConversation);
@@ -2846,11 +2480,9 @@ impl MessageStore {
         }
 
         conversation.recipients.retain(|did| did.ne(did_key));
-        self.set_conversation(conversation_id, conversation).await?;
+        self.conversations.set(conversation).await?;
 
-        drop(_guard);
-
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
 
         let Some(signature) = conversation.signature.clone() else {
             return Err(Error::InvalidSignature);
@@ -2872,11 +2504,9 @@ impl MessageStore {
         self.publish(conversation_id, None, event, true).await?;
 
         if broadcast {
-            let new_event = ConversationEvents::DeleteConversation {
-                conversation_id: conversation.id(),
-            };
+            let new_event = ConversationEvents::DeleteConversation { conversation_id };
 
-            self.send_single_conversation_event(did_key, conversation.id(), new_event)
+            self.send_single_conversation_event(did_key, conversation_id, new_event)
                 .await?;
         }
         Ok(())
@@ -2901,21 +2531,16 @@ impl MessageStore {
         };
 
         //We want to send the event to the recipients until the creator can remove them from the conversation directly
-        tokio::spawn({
-            let event = event.clone();
-            let mut store = self.clone();
-            let list = list.to_vec();
-            async move {
-                for did in list.iter() {
-                    if let Err(_e) = store
-                        .send_single_conversation_event(did, conversation_id, event.clone())
-                        .await
-                    {
-                        //
-                    }
-                }
+
+        for did in list.iter() {
+            if let Err(e) = self
+                .send_single_conversation_event(did, conversation_id, event.clone())
+                .await
+            {
+                tracing::error!("Error sending conversation event to {did}: {e}");
+                continue;
             }
-        });
+        }
 
         self.send_single_conversation_event(creator, conversation_id, event)
             .await
@@ -2938,7 +2563,7 @@ impl MessageStore {
         conversation_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
 
         if messages.is_empty() {
@@ -2967,14 +2592,14 @@ impl MessageStore {
         let mut message = Message::default();
         message.set_conversation_id(conversation.id());
         message.set_sender(own_did.clone());
-        message.set_value(messages.clone());
+        message.set_lines(messages.clone());
 
         let construct = [
             message.id().into_bytes().to_vec(),
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
             message
-                .value()
+                .lines()
                 .iter()
                 .map(|s| s.as_bytes())
                 .collect::<Vec<_>>()
@@ -3007,7 +2632,7 @@ impl MessageStore {
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
@@ -3070,7 +2695,7 @@ impl MessageStore {
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
 
         if messages.is_empty() {
@@ -3099,7 +2724,7 @@ impl MessageStore {
         let mut message = Message::default();
         message.set_conversation_id(conversation.id());
         message.set_sender(own_did.clone());
-        message.set_value(messages);
+        message.set_lines(messages);
         message.set_replied(Some(message_id));
 
         let construct = [
@@ -3107,7 +2732,7 @@ impl MessageStore {
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
             message
-                .value()
+                .lines()
                 .iter()
                 .map(|s| s.as_bytes())
                 .collect::<Vec<_>>()
@@ -3136,7 +2761,7 @@ impl MessageStore {
         message_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
 
         let event = MessagingEvents::Delete {
@@ -3164,7 +2789,7 @@ impl MessageStore {
         message_id: Uuid,
         state: PinState,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
 
         let own_did = &*self.did;
@@ -3202,7 +2827,7 @@ impl MessageStore {
         state: ReactionState,
         emoji: String,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
 
         let own_did = &*self.did;
@@ -3228,14 +2853,13 @@ impl MessageStore {
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
-        location: Location,
-        files: Vec<PathBuf>,
+        locations: Vec<Location>,
         messages: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
-        if files.len() > 8 {
+        if locations.len() > 8 {
             return Err(Error::InvalidLength {
                 context: "files".into(),
-                current: files.len(),
+                current: locations.len(),
                 minimum: Some(1),
                 maximum: Some(8),
             });
@@ -3259,7 +2883,7 @@ impl MessageStore {
                 });
             }
         }
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
         //TODO: Send directly if constellation isnt present
         //      this will require uploading to ipfs directly from here
@@ -3270,20 +2894,17 @@ impl MessageStore {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        let files = files
+        let files = locations
             .iter()
-            .filter(|path| {
-                if matches!(location, Location::Disk) {
-                    path.is_file()
-                } else {
-                    true
-                }
+            .filter(|location| match location {
+                Location::Disk { path } => path.is_file(),
+                _ => true,
             })
             .cloned()
             .collect::<Vec<_>>();
 
         if files.is_empty() {
-            return Err(Error::InvalidMessage);
+            return Err(Error::NoAttachments);
         }
 
         let store = self.clone();
@@ -3297,26 +2918,31 @@ impl MessageStore {
             let mut streams: SelectAll<_> = SelectAll::new();
 
             for file in files {
-                match location {
-                    Location::Constellation => {
-                        let path = file.display().to_string();
+                match file {
+                    Location::Constellation { path } => {
                         match constellation
                             .root_directory()
                             .get_item_by_path(&path)
                             .and_then(|item| item.get_file())
-                            .ok()
                         {
-                            Some(f) => {
+                            Ok(f) => {
                                 let stream = async_stream::stream! {
                                     yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
                                 };
                                 streams.push(stream.boxed());
                             },
-                            None => continue,
+                            Err(e) => {
+                                let constellation_path = PathBuf::from(&path);
+                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
+                                };
+                                streams.push(stream.boxed());
+                            },
                         }
                     }
-                    Location::Disk => {
-                        let mut filename = match file.file_name() {
+                    Location::Disk {path} => {
+                        let mut filename = match path.file_name() {
                             Some(file) => file.to_string_lossy().to_string(),
                             None => continue,
                         };
@@ -3365,7 +2991,7 @@ impl MessageStore {
                             continue;
                         }
 
-                        let file = file.display().to_string();
+                        let file = path.display().to_string();
 
                         in_stack.push(filename.clone());
 
@@ -3436,7 +3062,7 @@ impl MessageStore {
                 async move {
 
                     if attachments.is_empty() {
-                        return Err(Error::IoError(std::io::Error::new(std::io::ErrorKind::Other, "No files are attached")));
+                        return Err(Error::NoAttachments);
                     }
 
                     let own_did = &*store.did;
@@ -3445,14 +3071,14 @@ impl MessageStore {
                     message.set_conversation_id(conversation.id());
                     message.set_sender(own_did.clone());
                     message.set_attachment(attachments);
-                    message.set_value(messages.clone());
+                    message.set_lines(messages.clone());
                     message.set_replied(message_id);
                     let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         own_did.to_string().as_bytes().to_vec(),
                         message
-                            .value()
+                            .lines()
                             .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
@@ -3505,111 +3131,51 @@ impl MessageStore {
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let root = constellation.root_directory();
-        if !root.has_item(&attachment.name()) {
-            root.add_file(attachment.clone())?;
-        }
+        let _root = constellation.root_directory();
+
+        let reference = attachment
+            .reference()
+            .and_then(|reference| IpfsPath::from_str(&reference).ok())
+            .ok_or(Error::FileNotFound)?;
 
         let ipfs = self.ipfs.clone();
-        let constellation = constellation.clone();
-        let own_did = self.did.clone();
-
+        let _constellation = constellation.clone();
         let progress_stream = async_stream::stream! {
-                yield Progression::CurrentProgress {
-                    name: attachment.name(),
-                    current: 0,
-                    total: Some(attachment.size()),
-                };
+            yield Progression::CurrentProgress {
+                name: attachment.name(),
+                current: 0,
+                total: Some(attachment.size()),
+            };
 
-                let did = message.sender();
-                if !did.eq(&own_did) {
-                    if let Ok(peer_id) = did.to_peer_id() {
-                        //This is done to insure we can successfully exchange blocks
-                        let opt = DialOpts::peer_id(peer_id).condition(PeerCondition::NotDialing).build();
-                        if let Err(e) = ipfs.connect(opt).await {
-                            warn!("Issue performing a connection to peer: {e}");
-                        }
-                    }
-                }
+            let stream = ipfs.get_unixfs(reference, &path);
 
-                let mut file = match tokio::fs::File::create(&path).await {
-                    Ok(file) => file,
-                    Err(e) => {
-                        error!("Error creating file: {e}");
-                        yield Progression::ProgressFailed {
-                                    name: attachment.name(),
-                                    last_size: None,
-                                    error: Some(e.to_string()),
+            for await event in stream {
+                match event {
+                    rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
+                        yield Progression::CurrentProgress {
+                            name: attachment.name(),
+                            current: written,
+                            total: total_size
                         };
-                        return;
-                    }
-                };
-
-                let stream = match constellation.get_stream(&attachment.name()).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Error creating stream: {e}");
-                        yield Progression::ProgressFailed {
-                                    name: attachment.name(),
-                                    last_size: None,
-                                    error: Some(e.to_string()),
+                    },
+                    rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
+                        yield Progression::ProgressComplete {
+                            name: attachment.name(),
+                            total: total_size,
                         };
-                        return;
-                    }
-                };
-
-                let mut written = 0;
-                let mut failed = false;
-                for await res in stream  {
-                    match res {
-                        Ok(bytes) => match file.write_all(&bytes).await {
-                            Ok(_) => {
-                                written += bytes.len();
-                                yield Progression::CurrentProgress {
-                                    name: attachment.name(),
-                                    current: written,
-                                    total: Some(attachment.size()),
-                                };
-                            }
-                            Err(e) => {
-                                error!("Error writing to disk: {e}");
-                                yield Progression::ProgressFailed {
-                                    name: attachment.name(),
-                                    last_size: Some(written),
-                                    error: Some(e.to_string()),
-                                };
-                                failed = true;
-                                break;
-                            }
-                        },
-                        Err(e) => {
-                            error!("Error reading from stream: {e}");
-                            yield Progression::ProgressFailed {
-                                    name: attachment.name(),
-                                    last_size: Some(written),
-                                    error: Some(e.to_string()),
-                            };
-                            failed = true;
-                            break;
+                    },
+                    rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
+                        if let Err(e) = tokio::fs::remove_file(&path).await {
+                            error!("Error removing file: {e}");
                         }
-                    }
+                        yield Progression::ProgressFailed {
+                            name: attachment.name(),
+                            last_size: Some(written),
+                            error: error.map(|e| e.to_string()),
+                        };
+                    },
                 }
-
-                if failed {
-                    if let Err(e) = tokio::fs::remove_file(&path).await {
-                        error!("Error removing file: {e}");
-                    }
-                }
-
-                if !failed {
-                    if let Err(e) = file.flush().await {
-                        error!("Error flushing stream: {e}");
-                    }
-                    yield Progression::ProgressComplete {
-                        name: attachment.name(),
-                        total: Some(written),
-                    };
-                }
+            }
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
@@ -3620,7 +3186,7 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let own_did = &*self.did;
 
         let event = MessagingEvents::Event {
@@ -3637,7 +3203,7 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let own_did = &*self.did;
 
         let event = MessagingEvents::Event {
@@ -3654,7 +3220,7 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessagingEvents,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
 
         let own_did = &*self.did;
 
@@ -3707,7 +3273,7 @@ impl MessageStore {
         event: MessagingEvents,
         queue: bool,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation).await?;
+        let conversation = self.conversations.get(conversation).await?;
 
         let own_did = &*self.did;
 
@@ -3746,7 +3312,7 @@ impl MessageStore {
             .iter()
             .filter(|did| own_did.ne(did))
         {
-            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
+            let peer_id = recipient.to_peer_id()?;
 
             // We want to confirm that there is atleast one peer subscribed before attempting to send a message
             match peers.contains(&peer_id) {
@@ -3874,7 +3440,7 @@ impl Queue {
 
 pub fn spam_check(message: &mut Message, filter: Arc<Option<SpamFilter>>) -> anyhow::Result<()> {
     if let Some(filter) = filter.as_ref() {
-        if filter.process(&message.value().join(" "))? {
+        if filter.process(&message.lines().join(" "))? {
             message
                 .metadata_mut()
                 .insert("is_spam".to_owned(), "true".to_owned());

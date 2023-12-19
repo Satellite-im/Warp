@@ -1,12 +1,8 @@
 use futures::channel::oneshot;
 use futures::SinkExt;
-use rust_ipfs as ipfs;
-use tokio::sync::broadcast;
 
-use ipfs::Ipfs;
 use warp::crypto::DID;
 use warp::error::Error;
-use warp::multipass::MultiPassEventKind;
 
 use crate::behaviour::phonebook::PhoneBookCommand;
 
@@ -22,17 +18,14 @@ pub struct PhoneBook {
 
 impl PhoneBook {
     pub fn new(
-        _: Ipfs,
         discovery: Discovery,
-        _: broadcast::Sender<MultiPassEventKind>,
-        _: bool,
         pb_tx: futures::channel::mpsc::Sender<PhoneBookCommand>,
     ) -> Self {
         PhoneBook { discovery, pb_tx }
     }
 
-    pub async fn add_friend_list(&self, list: Vec<DID>) -> Result<(), Error> {
-        for friend in list.iter() {
+    pub async fn add_friend_list(&self, list: &[DID]) -> Result<(), Error> {
+        for friend in list {
             self.add_friend(friend).await?;
         }
         Ok(())

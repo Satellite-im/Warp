@@ -8,7 +8,7 @@ use std::{
 use futures::{channel::mpsc, StreamExt};
 use rust_ipfs::Ipfs;
 use tokio::{sync::RwLock, task::JoinHandle};
-use tracing::log::{self, error};
+use tracing::error;
 use warp::{
     crypto::{
         cipher::Cipher,
@@ -21,7 +21,7 @@ use warp::{
 
 use crate::store::{ecdh_encrypt, PeerIdExt, PeerTopic};
 
-use super::{connected_to_peer, discovery::Discovery, friends::RequestResponsePayload};
+use super::{connected_to_peer, discovery::Discovery, identity::RequestResponsePayload};
 
 pub struct Queue {
     path: Option<PathBuf>,
@@ -248,7 +248,7 @@ impl QueueEntry {
                         })
                         .unwrap_or_default()
                     {
-                        log::info!(
+                        tracing::info!(
                             "{} is connected. Attempting to send request",
                             entry.recipient.clone()
                         );
@@ -262,9 +262,9 @@ impl QueueEntry {
 
                             let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
 
-                            log::trace!("Payload size: {} bytes", bytes.len());
+                            tracing::trace!("Payload size: {} bytes", bytes.len());
 
-                            log::info!("Sending request to {}", recipient);
+                            tracing::info!("Sending request to {}", recipient);
 
                             let time = Instant::now();
 
@@ -272,7 +272,7 @@ impl QueueEntry {
 
                             let elapsed = time.elapsed();
 
-                            log::info!("took {}ms to send", elapsed.as_millis());
+                            tracing::info!("took {}ms to send", elapsed.as_millis());
 
                             Ok::<_, anyhow::Error>(())
                         };
@@ -283,7 +283,7 @@ impl QueueEntry {
                                 break;
                             }
                             Err(e) => {
-                                log::error!(
+                                tracing::error!(
                                     "Error sending request for {}: {e}. Retrying in {}s",
                                     &entry.recipient,
                                     retry

@@ -1,7 +1,10 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
-use rustyline_async::{Readline, ReadlineError};
+use rust_ipfs::p2p::MultiaddrExt;
+use rust_ipfs::Multiaddr;
+use rustyline_async::Readline;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -11,7 +14,7 @@ use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus, IdentityUpdate};
 use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
 use warp::tesseract::Tesseract;
-use warp_ipfs::config::{Config, Discovery};
+use warp_ipfs::config::{Bootstrap, Config, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
 #[derive(Debug, Parser)]
@@ -24,13 +27,15 @@ struct Opt {
     #[clap(long)]
     experimental_node: bool,
     #[clap(long)]
-    direct: bool,
-    #[clap(long)]
     disable_relay: bool,
     #[clap(long)]
     upnp: bool,
     #[clap(long)]
     no_discovery: bool,
+    #[clap(long)]
+    discovery_point: Option<Multiaddr>,
+    #[clap(long)]
+    shuttle_point: Option<Multiaddr>,
     #[clap(long)]
     mdns: bool,
     #[clap(long)]
@@ -67,20 +72,42 @@ async fn account(
         None => Config::testing(),
     };
 
-    if !opt.direct || !opt.no_discovery {
-        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+    if !opt.no_discovery {
+        let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
+            (Some(addr), None) => {
+                config.ipfs_setting.bootstrap = false;
+                DiscoveryType::RzPoint {
+                    addresses: vec![addr.clone()],
+                }
+            }
+            (Some(_), Some(_)) => unimplemented!(),
+            _ => DiscoveryType::DHT,
+        };
+
+        let dis_ty = match &opt.shuttle_point {
+            Some(addr) => Discovery::Shuttle {
+                addresses: {
+                    let mut addr = addr.clone();
+                    let peer_id = addr.extract_peer_id().expect("Peer Id");
+                    HashMap::from([(peer_id, HashSet::from_iter(vec![addr]))])
+                },
+            },
+            None => Discovery::Namespace {
+                namespace: opt.context.clone(),
+                discovery_type,
+            },
+        };
+        config.store_setting.discovery = dis_ty;
     }
     if opt.disable_relay {
-        config.ipfs_setting.relay_client.enable = false;
+        config.enable_relay = false;
     }
     if opt.upnp {
         config.ipfs_setting.portmapping = true;
     }
-    if opt.direct {
-        config.store_setting.discovery = Discovery::Direct;
-    }
     if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;
+        config.bootstrap = Bootstrap::None;
         config.ipfs_setting.bootstrap = false;
     }
 
@@ -116,6 +143,14 @@ async fn account(
                     })
                     .await?;
             }
+            (None, Some(passphrase)) => {
+                account
+                    .import_identity(IdentityImportOption::Locate {
+                        location: ImportLocation::Remote,
+                        passphrase,
+                    })
+                    .await?;
+            }
             _ => {
                 profile = Some(account.create_identity(username, None).await?);
             }
@@ -127,9 +162,7 @@ async fn account(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    if fdlimit::raise_fd_limit().is_none() {
-        //raising fd limit
-    }
+    _ = fdlimit::raise_fd_limit().is_ok();
 
     let file_appender = match &opt.path {
         Some(path) => tracing_appender::rolling::hourly(path, "warp_mp_identity_interface.log"),
@@ -337,12 +370,19 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             line = rl.readline().fuse() => match line {
-                Ok(line) => {
+                Ok(rustyline_async::ReadlineEvent::Line(line)) => {
                     rl.add_history_entry(line.clone());
                     let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
                         Some("export") => {
                             if let Err(e) = account.export_identity(warp::multipass::ImportLocation::Local { path: PathBuf::from("account.bin") }).await {
+                                writeln!(stdout, "Error exporting identity: {e}")?;
+                                continue;
+                            }
+                            writeln!(stdout, "Identity been exported")?;
+                        }
+                        Some("export-remote") => {
+                            if let Err(e) = account.export_identity(warp::multipass::ImportLocation::Remote ).await {
                                 writeln!(stdout, "Error exporting identity: {e}")?;
                                 continue;
                             }
@@ -659,7 +699,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::Picture(picture.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Picture(picture.as_bytes().to_vec())).await {
                                 writeln!(stdout, "Error updating picture: {e}")?;
                                 continue;
                             }
@@ -675,7 +715,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::Banner(banner.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Banner(banner.as_bytes().to_vec())).await {
                                 writeln!(stdout, "Error updating banner: {e}")?;
                                 continue;
                             }
@@ -735,18 +775,23 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             let mut table = Table::new();
-                            table.set_header(vec!["Username", "Public Key", "Status Message", "Banner", "Picture", "Platform", "Status"]);
+                            table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status"]);
                             for identity in idents {
                                 let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
                                 let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
                                 let profile_picture = account.identity_picture(&identity.did_key()).await.unwrap_or_default();
                                 let profile_banner = account.identity_banner(&identity.did_key()).await.unwrap_or_default();
+                                let created = identity.created();
+                                let modified = identity.modified();
+
                                 table.add_row(vec![
                                     identity.username(),
                                     identity.did_key().to_string(),
+                                    created.to_string(),
+                                    modified.to_string(),
                                     identity.status_message().unwrap_or_default(),
-                                    (!profile_banner.is_empty()).to_string(),
-                                    (!profile_picture.is_empty()).to_string(),
+                                    (!profile_banner.data().is_empty()).to_string(),
+                                    (!profile_picture.data().is_empty()).to_string(),
                                     platform.to_string(),
                                     format!("{status:?}"),
                                 ]);
@@ -756,8 +801,7 @@ async fn main() -> anyhow::Result<()> {
                         _ => continue
                     }
                 },
-                Err(ReadlineError::Interrupted) => break,
-                Err(ReadlineError::Eof) => break,
+                Ok(rustyline_async::ReadlineEvent::Eof) | Ok(rustyline_async::ReadlineEvent::Interrupted) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {e}")?;
                 }

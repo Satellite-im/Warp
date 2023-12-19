@@ -1,13 +1,19 @@
-use futures::StreamExt;
+use chrono::{DateTime, Utc};
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
-use std::{hash::Hash, time::Duration};
+use std::hash::Hash;
 use warp::{
-    crypto::{did_key::CoreSign, DID},
+    crypto::{did_key::CoreSign, Fingerprint, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum IdentityDocumentVersion {
+    #[default]
+    V0,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Eq)]
 pub struct IdentityDocument {
@@ -17,9 +23,24 @@ pub struct IdentityDocument {
 
     pub did: DID,
 
+    pub created: DateTime<Utc>,
+
+    pub modified: DateTime<Utc>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
 
+    pub metadata: IdentityMetadata,
+
+    #[serde(default)]
+    pub version: IdentityDocumentVersion,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+}
+
+#[derive(Default, Debug, Clone, Copy, Deserialize, Serialize, Eq, PartialEq)]
+pub struct IdentityMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_picture: Option<Cid>,
 
@@ -31,9 +52,44 @@ pub struct IdentityDocument {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
+}
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
+impl From<shuttle::identity::document::IdentityMetadata> for IdentityMetadata {
+    fn from(meta: shuttle::identity::document::IdentityMetadata) -> Self {
+        Self {
+            profile_picture: meta.profile_picture,
+            profile_banner: meta.profile_banner,
+            platform: meta.platform,
+            status: meta.status,
+        }
+    }
+}
+
+impl From<shuttle::identity::document::IdentityDocumentVersion> for IdentityDocumentVersion {
+    fn from(v: shuttle::identity::document::IdentityDocumentVersion) -> Self {
+        match v {
+            shuttle::identity::document::IdentityDocumentVersion::V0 => IdentityDocumentVersion::V0,
+        }
+    }
+}
+
+impl From<IdentityMetadata> for shuttle::identity::document::IdentityMetadata {
+    fn from(meta: IdentityMetadata) -> Self {
+        Self {
+            profile_picture: meta.profile_picture,
+            profile_banner: meta.profile_banner,
+            platform: meta.platform,
+            status: meta.status,
+        }
+    }
+}
+
+impl From<IdentityDocumentVersion> for shuttle::identity::document::IdentityDocumentVersion {
+    fn from(v: IdentityDocumentVersion) -> Self {
+        match v {
+            IdentityDocumentVersion::V0 => shuttle::identity::document::IdentityDocumentVersion::V0,
+        }
+    }
 }
 
 impl From<Identity> for IdentityDocument {
@@ -42,27 +98,70 @@ impl From<Identity> for IdentityDocument {
         let did = identity.did_key();
         let short_id = *identity.short_id();
         let status_message = identity.status_message();
+        let created = identity.created();
+        let modified = identity.modified();
+
         IdentityDocument {
             username,
             short_id,
             did,
             status_message,
-            profile_picture: None,
-            profile_banner: None,
-            platform: None,
-            status: None,
+            created,
+            modified,
+            metadata: Default::default(),
+            version: IdentityDocumentVersion::V0,
             signature: None,
+        }
+    }
+}
+
+impl From<shuttle::identity::document::IdentityDocument> for IdentityDocument {
+    fn from(document: shuttle::identity::document::IdentityDocument) -> Self {
+        Self {
+            username: document.username,
+            did: document.did,
+            short_id: document.short_id,
+            created: document.created,
+            modified: document.modified,
+            status_message: document.status_message,
+            metadata: document.metadata.into(),
+            version: document.version.into(),
+            signature: document.signature,
+        }
+    }
+}
+
+impl From<IdentityDocument> for shuttle::identity::document::IdentityDocument {
+    fn from(document: IdentityDocument) -> Self {
+        Self {
+            username: document.username,
+            did: document.did,
+            short_id: document.short_id,
+            created: document.created,
+            modified: document.modified,
+            status_message: document.status_message,
+            metadata: document.metadata.into(),
+            version: document.version.into(),
+            signature: document.signature,
         }
     }
 }
 
 impl From<IdentityDocument> for Identity {
     fn from(document: IdentityDocument) -> Self {
+        Self::from(&document)
+    }
+}
+
+impl From<&IdentityDocument> for Identity {
+    fn from(document: &IdentityDocument) -> Self {
         let mut identity = Identity::default();
-        identity.set_did_key(document.did);
+        identity.set_did_key(document.did.clone());
         identity.set_short_id(document.short_id);
-        identity.set_status_message(document.status_message);
+        identity.set_status_message(document.status_message.clone());
         identity.set_username(&document.username);
+        identity.set_created(document.created);
+        identity.set_modified(document.modified);
         identity
     }
 }
@@ -87,35 +186,39 @@ impl IdentityDocument {
             return false;
         }
 
-        if self.username != other.username
-            || self.status_message != other.status_message
-            || self.status != other.status
-            || self.profile_banner != other.profile_banner
-            || self.profile_picture != other.profile_picture
-            || self.platform != other.platform
-        {
-            return other.verify().is_ok();
+        if other.verify().is_err() {
+            tracing::warn!(
+                "identity for {} is not valid, corrupted or been tampered with.",
+                self.did
+            );
+            return false;
         }
 
-        false
+        self.username != other.username
+            || self.status_message != other.status_message
+            || self.metadata != other.metadata
     }
 }
 
 impl IdentityDocument {
     pub fn resolve(&self) -> Result<Identity, Error> {
         self.verify()?;
-        let mut identity = Identity::default();
-        identity.set_username(&self.username);
-        identity.set_did_key(self.did.clone());
-        identity.set_short_id(self.short_id);
-        identity.set_status_message(self.status_message.clone());
-        Ok(identity)
+        Ok(self.into())
     }
 
     pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
+        let metadata = self.metadata;
+
+        //We blank out the metadata since it will not be used as apart of the
+        //identification process, but will include it after it is signed
+        self.metadata = Default::default();
         self.signature = None;
+
+        self.modified = Utc::now();
+
         let bytes = serde_json::to_vec(&self)?;
         let signature = bs58::encode(did.sign(&bytes)).into_string();
+        self.metadata = metadata;
         self.signature = Some(signature);
         Ok(self)
     }
@@ -123,7 +226,47 @@ impl IdentityDocument {
     pub fn verify(&self) -> Result<(), Error> {
         let mut payload = self.clone();
 
-        //TODO: Validate username, short id, and status message
+        if payload.username.is_empty() {
+            return Err(Error::IdentityInvalid); //TODO: Invalid username
+        }
+
+        if !(4..=64).contains(&payload.username.len()) {
+            return Err(Error::InvalidLength {
+                context: "username".into(),
+                current: payload.username.len(),
+                minimum: Some(4),
+                maximum: Some(64),
+            });
+        }
+
+        if payload.short_id.is_empty() {
+            return Err(Error::IdentityInvalid); //TODO: Invalid short id
+        }
+
+        let fingerprint = payload.did.fingerprint();
+
+        let bytes = fingerprint.as_bytes();
+
+        let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
+            .try_into()
+            .map_err(anyhow::Error::from)?;
+
+        if payload.short_id != short_id {
+            return Err(Error::IdentityInvalid); //TODO: Invalid short id
+        }
+
+        if let Some(status) = &payload.status_message {
+            if status.len() > 512 {
+                return Err(Error::InvalidLength {
+                    context: "identity status message".into(),
+                    current: status.len(),
+                    minimum: None,
+                    maximum: Some(512),
+                });
+            }
+        }
+
+        let _ = std::mem::take(&mut payload.metadata);
 
         let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
         let signature_bytes = bs58::decode(signature).into_vec()?;
@@ -132,57 +275,5 @@ impl IdentityDocument {
             .verify(&bytes, &signature_bytes)
             .map_err(|_| Error::InvalidSignature)?;
         Ok(())
-    }
-}
-
-pub async fn unixfs_fetch(
-    ipfs: &Ipfs,
-    cid: Cid,
-    timeout: Option<Duration>,
-    local: bool,
-    limit: Option<usize>,
-) -> Result<Vec<u8>, Error> {
-    let fut = async {
-        let stream = ipfs
-            .unixfs()
-            .cat(IpfsPath::from(cid), None, &[], local)
-            .await
-            .map_err(anyhow::Error::from)?;
-
-        futures::pin_mut!(stream);
-
-        let mut data = vec![];
-
-        while let Some(stream) = stream.next().await {
-            if let Some(limit) = limit {
-                if data.len() >= limit {
-                    return Err(Error::InvalidLength {
-                        context: "data".into(),
-                        current: data.len(),
-                        minimum: None,
-                        maximum: Some(limit),
-                    });
-                }
-            }
-            match stream {
-                Ok(bytes) => {
-                    data.extend(bytes);
-                }
-                Err(e) => return Err(Error::from(anyhow::anyhow!("{e}"))),
-            }
-        }
-        Ok(data)
-    };
-
-    match local {
-        true => fut.await,
-        false => {
-            let timeout = timeout.unwrap_or(std::time::Duration::from_secs(15));
-            match tokio::time::timeout(timeout, fut).await {
-                Ok(Ok(data)) => serde_json::from_slice(&data).map_err(Error::from),
-                Ok(Err(e)) => Err(e),
-                Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-            }
-        }
     }
 }

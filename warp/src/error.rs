@@ -171,10 +171,14 @@ pub enum Error {
     GroupClosed,
     #[error("Group is opened")]
     GroupOpened,
+    #[error("No attachments provided for message")]
+    NoAttachments,
 
     //Crypto Errors
     #[error("{0}")]
     Ed25519Error(#[from] ed25519_dalek::SignatureError),
+    #[error("Encryption key does not exist")]
+    KeyDoesntExist,
     #[error("Unable to encrypt data")]
     EncryptionError,
     #[error("Unable to decrypt data")]
@@ -213,12 +217,31 @@ pub enum Error {
     InvalidDataType,
 
     //Blink Errors
-    #[error("Invalid MIME type: {mime_type}")]
-    InvalidMimeType { mime_type: String },
-    #[error("CPAL: {_0}")]
-    Cpal(String),
-    #[error("Device not found")]
-    DeviceNotFound,
+    #[error("Audio device not found")]
+    AudioDeviceNotFound,
+    #[error("AudioDeviceDisconnected")]
+    AudioDeviceDisconnected,
+    // indicates a problem enumerating audio I/O devices
+    #[error("AudioHostError: {_0}")]
+    AudioHostError(String),
+    #[error("BlinkNotInitialized")]
+    BlinkNotInitialized,
+    #[error("CallNotFound")]
+    CallNotFound,
+    #[error("CallNotInProgress")]
+    CallNotInProgress,
+    #[error("CallAlreadyInProgress")]
+    CallAlreadyInProgress,
+    #[error("FailedToSendSignal: {_0}")]
+    FailedToSendSignal(String),
+    #[error("Invalid MIME type: {_0}")]
+    InvalidMimeType(String),
+    #[error("InvalidAudioConfig")]
+    InvalidAudioConfig,
+    #[error("MicrophoneMissing")]
+    MicrophoneMissing,
+    #[error("SpeakerMissing")]
+    SpeakerMissing,
 
     //Misc
     #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]
@@ -270,6 +293,8 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Functionality is not yet implemented")]
     Unimplemented,
+    #[error(transparent)]
+    Boxed(Box<dyn std::error::Error + Sync + Send>),
     #[error("An unknown error has occurred")]
     Other,
 }

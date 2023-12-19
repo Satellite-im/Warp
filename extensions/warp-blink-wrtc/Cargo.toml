@@ -32,6 +32,7 @@ serde_cbor = { workspace = true }
 tokio = { workspace = true }
 warp.workspace = true
 webrtc = "0.6.0"
+rayon = "1.8"
 
 # media 
 cpal = "0.15.0"
@@ -41,3 +42,4 @@ cbindgen = "0.23"
 
 [features]
 build-header = []
+loopback = []

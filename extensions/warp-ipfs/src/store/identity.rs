@@ -1,33 +1,35 @@
-//We are cloning the Cid rather than dereferencing to be sure that we are not holding
-//onto the lock.
-#![allow(clippy::clone_on_copy)]
 use crate::{
-    config::{DefaultPfpFn, Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, PeerIdExt, PeerTopic, VecExt},
+    config::{self, Discovery as DiscoveryConfig, UpdateEvents},
+    store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
 };
+use chrono::{DateTime, Utc};
+
 use futures::{
-    channel::{mpsc, oneshot},
-    stream::BoxStream,
-    StreamExt,
+    channel::oneshot::{self, Canceled},
+    stream::SelectAll,
+    SinkExt, StreamExt,
 };
-use ipfs::{Ipfs, IpfsPath, Keypair, Multiaddr};
+
+use ipfs::{Ipfs, Keypair};
+
 use libipld::Cid;
 use rust_ipfs as ipfs;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
-use tokio::sync::broadcast;
-use tracing::{
-    log::{self, error},
-    warn,
-};
+use tokio::sync::RwLock;
+use tracing::{error, warn, Span};
 
-use warp::{crypto::zeroize::Zeroizing, multipass::identity::Platform};
+use warp::{
+    constellation::file::FileType,
+    crypto::{did_key::CoreSign, zeroize::Zeroizing},
+    multipass::identity::{IdentityImage, Platform},
+};
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -40,77 +42,251 @@ use warp::{
 };
 
 use super::{
-    connected_to_peer,
+    connected_to_peer, did_keypair,
     document::{
-        identity::{unixfs_fetch, IdentityDocument},
-        utils::GetLocalDag,
-        ExtractedRootDocument, RootDocument, ToCid,
+        cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
+        root::RootDocumentMap, ExtractedRootDocument, RootDocument,
     },
     ecdh_decrypt, ecdh_encrypt,
-    friends::{FriendsStore, Request},
-    libp2p_pub_to_did,
+    event_subscription::EventSubscription,
+    phonebook::PhoneBook,
+    queue::Queue,
+    request::PayloadRequest,
 };
 
+const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[allow(clippy::type_complexity)]
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct IdentityStore {
     ipfs: Ipfs,
 
-    path: Option<PathBuf>,
+    root_document: RootDocumentMap,
 
-    root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
+    identity_cache: IdentityCache,
 
-    cache_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
+    // keypair
+    did_key: Arc<DID>,
 
-    identity: Arc<tokio::sync::RwLock<Option<Identity>>>,
+    // Queue to handle sending friend request
+    queue: Queue,
 
-    online_status: Arc<tokio::sync::RwLock<Option<IdentityStatus>>>,
+    phonebook: PhoneBook,
+
+    signal: Arc<RwLock<HashMap<DID, oneshot::Sender<Result<(), Error>>>>>,
 
     discovery: Discovery,
 
-    relay: Option<Vec<Multiaddr>>,
-
-    fetch_over_bitswap: Arc<AtomicBool>,
-
-    share_platform: Arc<AtomicBool>,
-
-    start_event: Arc<AtomicBool>,
-
-    end_event: Arc<AtomicBool>,
+    config: config::Config,
 
     tesseract: Tesseract,
 
-    root_task: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    identity_command: futures::channel::mpsc::Sender<shuttle::identity::client::IdentityCommand>,
 
-    pub(crate) task_send:
-        Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<RootDocumentEvents>>>>,
+    span: Span,
 
-    event: broadcast::Sender<MultiPassEventKind>,
-
-    update_event: UpdateEvents,
-
-    disable_image: bool,
-
-    friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
-
-    default_pfp_callback: Option<DefaultPfpFn>,
+    event: EventSubscription<MultiPassEventKind>,
 }
 
-#[allow(clippy::large_enum_variant)]
-pub enum RootDocumentEvents {
-    Get(oneshot::Sender<Result<RootDocument, Error>>),
-    Set(RootDocument, oneshot::Sender<Result<(), Error>>),
-    AddFriend(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
-    GetFriendList(oneshot::Sender<Result<Vec<DID>, Error>>),
-    AddRequest(Request, oneshot::Sender<Result<(), Error>>),
-    RemoveRequest(Request, oneshot::Sender<Result<(), Error>>),
-    GetRequestList(oneshot::Sender<Result<Vec<Request>, Error>>),
-    AddBlock(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveBlock(DID, oneshot::Sender<Result<(), Error>>),
-    GetBlockList(oneshot::Sender<Result<Vec<DID>, Error>>),
-    AddBlockBy(DID, oneshot::Sender<Result<(), Error>>),
-    RemoveBlockBy(DID, oneshot::Sender<Result<(), Error>>),
-    GetBlockByList(oneshot::Sender<Result<Vec<DID>, Error>>),
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
+#[serde(tag = "direction", rename_all = "lowercase")]
+pub enum Request {
+    In { did: DID, date: DateTime<Utc> },
+    Out { did: DID, date: DateTime<Utc> },
+}
+
+impl Request {
+    pub fn request_in(did: DID) -> Self {
+        let date = Utc::now();
+        Request::In { did, date }
+    }
+    pub fn request_out(did: DID) -> Self {
+        let date = Utc::now();
+        Request::Out { did, date }
+    }
+}
+
+impl PartialEq for Request {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Request::In { did: left, .. }, Request::In { did: right, .. }) => left.eq(right),
+            (Request::Out { did: left, .. }, Request::Out { did: right, .. }) => left.eq(right),
+            _ => false,
+        }
+    }
+}
+
+impl From<Request> for RequestType {
+    fn from(request: Request) -> Self {
+        RequestType::from(&request)
+    }
+}
+
+impl From<&Request> for RequestType {
+    fn from(request: &Request) -> Self {
+        match request {
+            Request::In { .. } => RequestType::Incoming,
+            Request::Out { .. } => RequestType::Outgoing,
+        }
+    }
+}
+
+impl Request {
+    pub fn r#type(&self) -> RequestType {
+        self.into()
+    }
+
+    pub fn did(&self) -> &DID {
+        match self {
+            Request::In { did, .. } => did,
+            Request::Out { did, .. } => did,
+        }
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        match self {
+            Request::In { date, .. } => *date,
+            Request::Out { date, .. } => *date,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Hash, Eq)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum Event {
+    /// Event indicating a friend request
+    Request,
+    /// Event accepting the request
+    Accept,
+    /// Remove identity as a friend
+    Remove,
+    /// Reject friend request, if any
+    Reject,
+    /// Retract a sent friend request
+    Retract,
+    /// Block user
+    Block,
+    /// Unblock user
+    Unblock,
+    /// Indiciation of a response to a request
+    Response,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
+pub struct RequestResponsePayload {
+    #[serde(default)]
+    pub version: RequestResponsePayloadVersion,
+    pub sender: DID,
+    pub event: Event,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<Vec<u8>>,
+}
+
+impl TryFrom<RequestResponsePayload> for RequestPayload {
+    type Error = Error;
+    fn try_from(req: RequestResponsePayload) -> Result<Self, Self::Error> {
+        req.verify()?;
+        let event = match req.event {
+            Event::Request => RequestEvent::Request,
+            Event::Accept => RequestEvent::Accept,
+            Event::Remove => RequestEvent::Remove,
+            Event::Reject => RequestEvent::Reject,
+            Event::Retract => RequestEvent::Retract,
+            Event::Block => RequestEvent::Block,
+            Event::Unblock => RequestEvent::Unblock,
+            Event::Response => return Err(Error::OtherWithContext("Invalid event type".into())),
+        };
+
+        let payload = RequestPayload {
+            sender: req.sender,
+            event,
+            created: req.created.ok_or(Error::InvalidConversion)?,
+            original_signature: req.signature.ok_or(Error::InvalidSignature)?,
+            signature: vec![],
+        };
+
+        Ok(payload)
+    }
+}
+
+impl TryFrom<RequestPayload> for RequestResponsePayload {
+    type Error = Box<dyn std::error::Error>;
+    fn try_from(req: RequestPayload) -> Result<Self, Self::Error> {
+        req.verify()?;
+        let event = match req.event {
+            RequestEvent::Request => Event::Request,
+            RequestEvent::Accept => Event::Accept,
+            RequestEvent::Remove => Event::Remove,
+            RequestEvent::Reject => Event::Reject,
+            RequestEvent::Retract => Event::Retract,
+            RequestEvent::Block => Event::Block,
+            RequestEvent::Unblock => Event::Unblock,
+        };
+
+        let payload = RequestResponsePayload {
+            version: RequestResponsePayloadVersion::V1,
+            sender: req.sender,
+            event,
+            created: Some(req.created),
+            signature: Some(req.original_signature),
+        };
+
+        Ok(payload)
+    }
+}
+
+#[derive(Default, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Hash, Eq)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum RequestResponsePayloadVersion {
+    /// Original design. Does not include `version`, `created`, or `signature` fields.
+    /// Note: Use for backwards compatibility, but may be deprecated in the future
+    #[default]
+    V0,
+    V1,
+}
+
+impl RequestResponsePayload {
+    pub fn new(keypair: &DID, event: Event) -> Result<Self, Error> {
+        let request = Self::new_unsigned(keypair, event);
+        request.sign(keypair)
+    }
+
+    pub fn new_unsigned(keypair: &DID, event: Event) -> Self {
+        Self {
+            version: RequestResponsePayloadVersion::V1,
+            sender: keypair.clone(),
+            event,
+            created: None,
+            signature: None,
+        }
+    }
+
+    pub fn sign(mut self, keypair: &DID) -> Result<Self, Error> {
+        self.signature = None;
+        self.created = Some(Utc::now());
+        let bytes = serde_json::to_vec(&self)?;
+        let signature = keypair.sign(&bytes);
+        self.signature = Some(signature);
+        Ok(self)
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        let mut doc = self.clone();
+        let signature = doc.signature.take().ok_or(Error::InvalidSignature)?;
+        let bytes = serde_json::to_vec(&doc)?;
+        doc.sender
+            .verify(&bytes, &signature)
+            .map_err(|_| Error::InvalidSignature)
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestType {
+    Incoming,
+    Outgoing,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -152,7 +328,11 @@ pub enum ResponseOption {
     /// Identity request
     Identity { identity: IdentityDocument },
     /// Pictures
-    Image { cid: Cid, data: Vec<u8> },
+    Image {
+        cid: Cid,
+        ty: FileType,
+        data: Vec<u8>,
+    },
 }
 
 impl std::fmt::Debug for ResponseOption {
@@ -171,93 +351,130 @@ impl std::fmt::Debug for ResponseOption {
 }
 
 impl IdentityStore {
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ipfs: Ipfs,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        interval: Option<Duration>,
-        tx: broadcast::Sender<MultiPassEventKind>,
-        default_pfp_callback: Option<DefaultPfpFn>,
-        (discovery, relay, fetch_over_bitswap, share_platform, update_event, disable_image): (
-            Discovery,
-            Option<Vec<Multiaddr>>,
-            bool,
-            bool,
-            UpdateEvents,
-            bool,
-        ),
+        tx: EventSubscription<MultiPassEventKind>,
+        phonebook: PhoneBook,
+        config: &config::Config,
+        discovery: Discovery,
+        identity_command: futures::channel::mpsc::Sender<
+            shuttle::identity::client::IdentityCommand,
+        >,
+        span: Span,
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
             }
         }
-        let identity = Arc::new(Default::default());
-        let start_event = Arc::new(Default::default());
-        let end_event = Arc::new(Default::default());
-        let root_cid = Arc::new(Default::default());
-        let cache_cid = Arc::new(Default::default());
-        let fetch_over_bitswap = Arc::new(AtomicBool::new(fetch_over_bitswap));
-        let online_status = Arc::default();
-        let share_platform = Arc::new(AtomicBool::new(share_platform));
-        let root_task = Arc::default();
-        let task_send = Arc::default();
-        let event = tx;
-        let friend_store = Arc::default();
+        let config = config.clone();
 
-        let store = Self {
+        let identity_cache = IdentityCache::new(&ipfs, path.clone()).await;
+
+        let event = tx.clone();
+
+        let did_key = Arc::new(did_keypair(&tesseract)?);
+
+        let root_document = RootDocumentMap::new(&ipfs, did_key.clone(), path.clone()).await;
+
+        let queue = Queue::new(
+            ipfs.clone(),
+            did_key.clone(),
+            config.path.clone(),
+            discovery.clone(),
+        );
+
+        let signal = Default::default();
+
+        let mut store = Self {
             ipfs,
-            path,
-            root_cid,
-            cache_cid,
-            identity,
-            online_status,
-            start_event,
-            share_platform,
-            end_event,
+            root_document,
+            identity_cache,
             discovery,
-            relay,
+            config,
             tesseract,
-            fetch_over_bitswap,
-            root_task,
-            task_send,
             event,
-            friend_store,
-            update_event,
-            disable_image,
-            default_pfp_callback,
+            identity_command,
+            did_key,
+            queue,
+            phonebook,
+            signal,
+            span,
         };
 
-        if store.path.is_some() {
-            if let Err(_e) = store.load_cid().await {
-                //We can ignore if it doesnt exist
-            }
-        }
-
-        store.start_root_task().await;
-
         if let Ok(ident) = store.own_identity().await {
-            log::info!("Identity loaded with {}", ident.did_key());
-            *store.identity.write().await = Some(ident);
-            store.start_event.store(true, Ordering::SeqCst);
+            tracing::info!(did = %ident.did_key(), "Identity loaded");
+            match store.is_registered().await.is_ok() {
+                true => {
+                    if let Err(e) = store.fetch_mailbox().await {
+                        tracing::warn!(error = %e, "Unable to fetch or process mailbox");
+                    }
+                }
+                false => {
+                    let id = store.own_identity_document().await.expect("Valid identity");
+                    if let Err(e) = store.register(&id).await {
+                        tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
+                    }
+                }
+            }
         }
 
         let did = store.get_keypair_did()?;
 
         let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
+        let identity_announce_stream = store
+            .ipfs
+            .pubsub_subscribe("/identity/announce/v0".into())
+            .await?;
+
+        store.discovery.start().await?;
+
+        let mut discovery_rx = store.discovery.events();
+
+        tracing::info!("Loading queue");
+        if let Err(_e) = store.queue.load().await {}
+
+        let phonebook = &store.phonebook;
+
+        // scan through friends list to see if there is any incoming request or outgoing request matching
+        // and clear them out of the request list as a precautionary measure
+        let friends = store.friends_list().await.unwrap_or_default();
+
+        if !friends.is_empty() {
+            tracing::info!("Loading friends list into phonebook");
+            if let Err(_e) = phonebook.add_friend_list(&friends).await {
+                error!("Error adding friends in phonebook: {_e}");
+            }
+        }
+
+        for friend in friends {
+            let list = store.list_all_raw_request().await.unwrap_or_default();
+
+            // cleanup outgoing
+            for req in list.iter().filter(|req| req.did().eq(&friend)) {
+                let _ = store.root_document.remove_request(req).await;
+            }
+        }
+
+        let friend_stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await?;
 
         tokio::spawn({
             let mut store = store.clone();
             async move {
-                if let Err(e) = store.discovery.start().await {
-                    warn!("Error starting discovery service: {e}. Will not be able to discover peers over namespace");
-                }
-
+                futures::pin_mut!(identity_announce_stream);
                 futures::pin_mut!(event_stream);
+                futures::pin_mut!(friend_stream);
 
-                let auto_push = interval.is_some();
+                let auto_push = store.config.store_setting.auto_push.is_some();
 
-                let interval = interval
+                let interval = store
+                    .config
+                    .store_setting
+                    .auto_push
                     .map(|i| {
                         if i.as_millis() < 300000 {
                             Duration::from_millis(300000)
@@ -268,49 +485,135 @@ impl IdentityStore {
                     .unwrap_or(Duration::from_millis(300000));
 
                 let mut tick = tokio::time::interval(interval);
-                let mut rx = store.discovery.events();
-                loop {
-                    if store.end_event.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    if !store.start_event.load(Ordering::SeqCst) {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                        continue;
-                    }
 
+                loop {
                     tokio::select! {
-                        message = event_stream.next() => {
-                            if let Some(message) = message {
-                                let entry = match message.source {
-                                    Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
-                                        Some(entry) => entry.did_key().await.ok(),
-                                        None => {
-                                            let _ = store.discovery.insert(peer_id).await.ok();
-                                            peer_id.to_did().ok()
-                                        },
-                                    },
-                                    None => continue,
-                                };
-                                if let Some(in_did) = entry {
-                                    if let Err(e) = store.process_message(in_did, &message.data).await {
-                                        error!("Error: {e}");
-                                    }
+                        biased;
+                        Some(message) = identity_announce_stream.next() => {
+                            let payload: PayloadRequest<IdentityDocument> = match serde_json::from_slice(&message.data) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    tracing::error!(from = ?message.source, "Unable to decode payload: {e}");
+                                    continue;
                                 }
+                            };
+
+                            //TODO: Validate the date to be sure it doesnt fall out of range (or that we received a old message)
+                            let from_did = match payload.sender().to_did() {
+                                Ok(did) => did,
+                                Err(_e) => {
+                                    continue;
+                                }
+                            };
+
+                            let identity = payload.message().clone();
+
+                            //Maybe establish a connection?
+                            //Note: Although it would be prefer not to establish a connection, it may be ideal to check to determine
+                            //      the actual source of the payload to determine if its a message propagated over the mesh from the peer
+                            //      a third party sending it on behalf of the user, or directly from the user. This would make sure we
+                            //      are connecting to the exact peer directly and not a different source but even if we didnt connect
+                            //      we can continue receiving message from the network
+                            let from_did = match from_did == identity.did {
+                                true => from_did,
+                                false => identity.did.clone()
+                            };
+
+                            let event = IdentityEvent::Receive {
+                                option: ResponseOption::Identity { identity },
+                            };
+
+                            //Ignore requesting images if there is a change for now.
+                            if let Err(e) = store.process_message(&from_did, event, true).await {
+                                error!("Failed to process identity message from {from_did}: {e}");
+                            }
+                        }
+                        Some(message) = event_stream.next() => {
+                            let entry = match message.source {
+                                Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
+                                    Some(entry) => entry.peer_id().to_did().ok(),
+                                    None => {
+                                        let _ = store.discovery.insert(peer_id).await.ok();
+                                        peer_id.to_did().ok()
+                                    },
+                                },
+                                None => continue,
+                            };
+
+                            let Some(in_did) = entry else {
+                                continue;
+                            };
+
+                            tracing::info!("Received event from {in_did}");
+
+                            let event = match ecdh_decrypt(&store.did_key, Some(&in_did), &message.data).and_then(|bytes| {
+                                serde_json::from_slice::<IdentityEvent>(&bytes).map_err(Error::from)
+                            }) {
+                                Ok(e) => e,
+                                Err(e) => {
+                                    error!("Failed to decrypt payload from {in_did}: {e}");
+                                    continue;
+                                }
+                            };
+
+                            tracing::debug!(from = %in_did, event = ?event);
+
+                            if let Err(e) = store.process_message(&in_did, event, false).await {
+                                error!("Failed to process identity message from {in_did}: {e}");
+                            }
+
+
+                        }
+                        Some(event) = friend_stream.next() => {
+                            let Some(peer_id) = event.source else {
+                                //Note: Due to configuration, we should ALWAYS have a peer set in its source
+                                //      thus we can ignore the request if no peer is provided
+                                continue;
+                            };
+
+                            let Ok(did) = peer_id.to_did() else {
+                                //Note: The peer id is embedded with ed25519 public key, therefore we can decode it into a did key
+                                //      otherwise we can ignore
+                                continue;
+                            };
+
+                            let mut signal = store.signal.write().await.remove(&did);
+
+                            tracing::trace!("received payload size: {} bytes", event.data.len());
+
+                            tracing::info!("Received event from {did}");
+
+                            let data = match ecdh_decrypt(&store.did_key, Some(&did), &event.data).and_then(|bytes| {
+                                serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
+                            }) {
+                                Ok(pl) => pl,
+                                Err(e) => {
+                                    if let Some(tx) = signal {
+                                        let _ = tx.send(Err(e));
+                                    }
+                                    continue;
+                                }
+                            };
+
+                            tracing::debug!("Event from {did}: {:?}", data.event);
+
+                            let result = store.check_request_message(&did, data, &mut signal).await.map_err(|e| {
+                                error!("Error processing message: {e}");
+                                e
+                            });
+
+                            if let Some(tx) = signal {
+                                let _ = tx.send(result);
                             }
                         }
                         // Used as the initial request/push
-                        Ok(push) = rx.recv() => {
-                            tokio::spawn({
-                                let store = store.clone();
-                                async move {
-                                    if let Err(e) = store.request(&push, RequestOption::Identity).await {
-                                        error!("Error requesting identity: {e}");
-                                    }
-                                    if let Err(e) = store.push(&push).await {
-                                        error!("Error pushing identity: {e}");
-                                    }
-                                }
-                            });
+                        Ok(push) = discovery_rx.recv() => {
+                            if let Err(e) = store.request(&push, RequestOption::Identity).await {
+                                error!("Error requesting identity: {e}");
+                            }
+                            if let Err(e) = store.push(&push).await {
+                                error!("Error pushing identity: {e}");
+                            }
                         }
                         _ = tick.tick() => {
                             if auto_push {
@@ -326,444 +629,296 @@ impl IdentityStore {
         Ok(store)
     }
 
-    pub async fn set_friend_store(&self, store: FriendsStore) {
-        *self.friend_store.write().await = Some(store)
+    pub(crate) fn phonebook(&self) -> &PhoneBook {
+        &self.phonebook
     }
 
-    async fn friend_store(&self) -> Result<FriendsStore, Error> {
-        self.friend_store.read().await.clone().ok_or(Error::Other)
-    }
-
-    async fn start_root_task(&self) {
-        let root_cid = self.root_cid.clone();
-        let ipfs = self.ipfs.clone();
-        let (tx, mut rx) = mpsc::unbounded();
-        let store = self.clone();
-        let task = tokio::spawn(async move {
-            let root_cid = root_cid.clone();
-
-            async fn get_root_document(
-                ipfs: &Ipfs,
-                root: Arc<tokio::sync::RwLock<Option<Cid>>>,
-            ) -> Result<RootDocument, Error> {
-                let root_cid = root
-                    .read()
-                    .await
-                    .clone()
-                    .ok_or(Error::IdentityDoesntExist)?;
-                let path = IpfsPath::from(root_cid);
-                let document: RootDocument = path.get_local_dag(ipfs).await?;
-                document.verify(ipfs).await.map(|_| document)
-            }
-
-            async fn set_root_document(
-                ipfs: &Ipfs,
-                store: &IdentityStore,
-                root: Arc<tokio::sync::RwLock<Option<Cid>>>,
-                mut document: RootDocument,
-            ) -> Result<(), Error> {
-                let old_cid = root.read().await.clone();
-
-                let did_kp = store.get_keypair_did()?;
-                document.sign(&did_kp)?;
-                document.verify(ipfs).await?;
-
-                let root_cid = document.to_cid(ipfs).await?;
-                if !ipfs.is_pinned(&root_cid).await? {
-                    ipfs.insert_pin(&root_cid, true).await?;
+    //TODO: Implement Errors
+    #[tracing::instrument(skip(self, data, signal))]
+    async fn check_request_message(
+        &mut self,
+        _: &DID,
+        data: RequestResponsePayload,
+        signal: &mut Option<oneshot::Sender<Result<(), Error>>>,
+    ) -> Result<(), Error> {
+        if let Err(e) = data.verify() {
+            match data.version {
+                RequestResponsePayloadVersion::V0 => {
+                    tracing::warn!(
+                        sender = %data.sender,
+                        "Request received from a old implementation. Unable to verify signature."
+                    );
                 }
-                if let Some(old_cid) = old_cid {
-                    if old_cid != root_cid {
-                        if ipfs.is_pinned(&old_cid).await? {
-                            ipfs.remove_pin(&old_cid, true).await?;
+                _ => {
+                    tracing::warn!(
+                        sender = %data.sender,
+                        error = %e,
+                        "Unable to verify signature. Ignoring request"
+                    );
+                    return Ok(());
+                }
+            };
+        }
+
+        if self
+            .list_incoming_request()
+            .await
+            .unwrap_or_default()
+            .contains(&data.sender)
+            && data.event == Event::Request
+        {
+            warn!("Request exist locally. Skipping");
+            return Ok(());
+        }
+
+        // Before we validate the request, we should check to see if the key is blocked
+        // If it is, skip the request so we dont wait resources storing it.
+        if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+            tracing::warn!("Received event from a blocked identity.");
+            let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
+
+            return self
+                .broadcast_request(&data.sender, &payload, false, true)
+                .await;
+        }
+
+        match data.event {
+            Event::Accept => {
+                let list = self.list_all_raw_request().await?;
+
+                let Some(item) = list
+                    .iter()
+                    .filter(|req| req.r#type() == RequestType::Outgoing)
+                    .find(|req| data.sender.eq(req.did()))
+                else {
+                    return Err(Error::from(anyhow::anyhow!(
+                        "Unable to locate pending request. Already been accepted or rejected?"
+                    )));
+                };
+
+                // Maybe just try the function instead and have it be a hard error?
+                if self.root_document.remove_request(item).await.is_err() {
+                    return Err(Error::from(anyhow::anyhow!(
+                        "Unable to locate pending request. Already been accepted or rejected?"
+                    )));
+                }
+
+                self.add_friend(item.did()).await?;
+            }
+            Event::Request => {
+                if self.is_friend(&data.sender).await? {
+                    tracing::debug!("Friend already exist. Remitting event");
+
+                    let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
+
+                    return self
+                        .broadcast_request(&data.sender, &payload, false, false)
+                        .await;
+                }
+
+                let list = self.list_all_raw_request().await?;
+
+                if let Some(inner_req) = list.iter().find(|request| {
+                    request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
+                }) {
+                    //Because there is also a corresponding outgoing request for the incoming request
+                    //we can automatically add them
+                    self.root_document.remove_request(inner_req).await?;
+                    self.add_friend(inner_req.did()).await?;
+                } else {
+                    let from = data.sender.clone();
+
+                    let req = Request::In {
+                        did: from.clone(),
+                        date: data.created.unwrap_or_else(Utc::now),
+                    };
+
+                    self.root_document.add_request(&req).await?;
+
+                    _ = self.export_root_document().await;
+
+                    if self.identity_cache.get(&from).await.is_err() {
+                        // Attempt to send identity request to peer if identity is not available locally.
+                        if self.request(&from, RequestOption::Identity).await.is_err() {
+                            if let Err(e) = self.lookup(LookupBy::DidKey(from.clone())).await {
+                                tracing::warn!("Failed to request identity from {from}: {e}.");
+                            }
                         }
-                        ipfs.remove_block(old_cid).await?;
                     }
+
+                    self.emit_event(MultiPassEventKind::FriendRequestReceived { from })
+                        .await;
                 }
-                store.save_cid(root_cid).await
+
+                let payload = RequestResponsePayload::new(&self.did_key, Event::Response)?;
+
+                self.broadcast_request(&data.sender, &payload, false, false)
+                    .await?;
             }
+            Event::Reject => {
+                let list = self.list_all_raw_request().await?;
+                let internal_request = list
+                    .iter()
+                    .find(|request| {
+                        request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
+                    })
+                    .ok_or(Error::FriendRequestDoesntExist)?;
 
-            while let Some(event) = rx.next().await {
-                match event {
-                    RootDocumentEvents::Get(res) => {
-                        let _ = res.send(get_root_document(&ipfs, root_cid.clone()).await);
-                    }
-                    RootDocumentEvents::Set(document, res) => {
-                        let _ = res.send(
-                            set_root_document(&ipfs, &store, root_cid.clone(), document).await,
-                        );
-                    }
-                    RootDocumentEvents::AddRequest(request, res) => {
-                        let ipfs = ipfs.clone();
-                        let store = store.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let mut document =
-                                    get_root_document(&ipfs, root_cid.clone()).await?;
-                                let old_document = document.request;
-                                let mut list: Vec<Request> = match document.request {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
-                                    None => vec![],
-                                };
+                self.root_document.remove_request(internal_request).await?;
 
-                                if !list.insert_item(&request) {
-                                    return Err::<_, Error>(Error::FriendRequestExist);
-                                }
+                _ = self.export_root_document().await;
 
-                                document.request =
-                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
-
-                                set_root_document(&ipfs, &store, root_cid, document).await?;
-
-                                if let Some(cid) = old_document {
-                                    if !ipfs.is_pinned(&cid).await? {
-                                        ipfs.remove_block(cid).await?;
-                                    }
-                                }
-                                Ok::<_, Error>(())
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::RemoveRequest(request, res) => {
-                        let ipfs = ipfs.clone();
-                        let store = store.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let mut document =
-                                    get_root_document(&ipfs, root_cid.clone()).await?;
-                                let old_document = document.request;
-                                let mut list: Vec<Request> = match document.request {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
-                                    None => vec![],
-                                };
-
-                                if !list.remove_item(&request) {
-                                    return Err::<_, Error>(Error::FriendRequestExist);
-                                }
-
-                                document.request =
-                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
-
-                                set_root_document(&ipfs, &store, root_cid, document).await?;
-
-                                if let Some(cid) = old_document {
-                                    if !ipfs.is_pinned(&cid).await? {
-                                        ipfs.remove_block(cid).await?;
-                                    }
-                                }
-                                Ok::<_, Error>(())
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::AddFriend(did, res) => {
-                        let ipfs = ipfs.clone();
-                        let store = store.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let mut document =
-                                    get_root_document(&ipfs, root_cid.clone()).await?;
-                                let old_document = document.friends;
-                                let mut list: Vec<DID> = match document.friends {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
-                                    None => vec![],
-                                };
-
-                                if !list.insert_item(&did) {
-                                    return Err::<_, Error>(Error::FriendExist);
-                                }
-
-                                document.friends =
-                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
-
-                                set_root_document(&ipfs, &store, root_cid, document).await?;
-
-                                if let Some(cid) = old_document {
-                                    if !ipfs.is_pinned(&cid).await? {
-                                        ipfs.remove_block(cid).await?;
-                                    }
-                                }
-                                Ok::<_, Error>(())
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::RemoveFriend(did, res) => {
-                        let ipfs = ipfs.clone();
-                        let store = store.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let mut document =
-                                    get_root_document(&ipfs, root_cid.clone()).await?;
-                                let old_document = document.friends;
-                                let mut list: Vec<DID> = match document.friends {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
-                                    None => vec![],
-                                };
-
-                                if !list.remove_item(&did) {
-                                    return Err::<_, Error>(Error::FriendDoesntExist);
-                                }
-
-                                document.friends =
-                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
-
-                                set_root_document(&ipfs, &store, root_cid, document).await?;
-
-                                if let Some(cid) = old_document {
-                                    if !ipfs.is_pinned(&cid).await? {
-                                        ipfs.remove_block(cid).await?;
-                                    }
-                                }
-                                Ok::<_, Error>(())
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::AddBlock(did, res) => {
-                        let ipfs = ipfs.clone();
-                        let store = store.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let mut document =
-                                    get_root_document(&ipfs, root_cid.clone()).await?;
-                                let old_document = document.blocks;
-                                let mut list: Vec<DID> = match document.blocks {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
-                                    None => vec![],
-                                };
-
-                                if !list.insert_item(&did) {
-                                    return Err::<_, Error>(Error::PublicKeyIsBlocked);
-                                }
-
-                                document.blocks =
-                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
-
-                                set_root_document(&ipfs, &store, root_cid, document).await?;
-
-                                if let Some(cid) = old_document {
-                                    if !ipfs.is_pinned(&cid).await? {
-                                        ipfs.remove_block(cid).await?;
-                                    }
-                                }
-                                Ok::<_, Error>(())
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::RemoveBlock(did, res) => {
-                        let ipfs = ipfs.clone();
-                        let store = store.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let mut document =
-                                    get_root_document(&ipfs, root_cid.clone()).await?;
-
-                                let old_document = document.blocks;
-                                let mut list: Vec<DID> = match document.blocks {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
-                                    None => vec![],
-                                };
-
-                                if !list.remove_item(&did) {
-                                    return Err::<_, Error>(Error::PublicKeyIsntBlocked);
-                                }
-
-                                document.blocks =
-                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
-
-                                set_root_document(&ipfs, &store, root_cid, document).await?;
-
-                                if let Some(cid) = old_document {
-                                    if !ipfs.is_pinned(&cid).await? {
-                                        ipfs.remove_block(cid).await?;
-                                    }
-                                }
-                                Ok::<_, Error>(())
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::AddBlockBy(did, res) => {
-                        let ipfs = ipfs.clone();
-                        let store = store.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let mut document =
-                                    get_root_document(&ipfs, root_cid.clone()).await?;
-                                let old_document = document.block_by;
-                                let mut list: Vec<DID> = match document.block_by {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
-                                    None => vec![],
-                                };
-
-                                if !list.insert_item(&did) {
-                                    return Err::<_, Error>(Error::PublicKeyIsntBlocked);
-                                }
-
-                                document.block_by =
-                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
-
-                                set_root_document(&ipfs, &store, root_cid, document).await?;
-
-                                if let Some(cid) = old_document {
-                                    if !ipfs.is_pinned(&cid).await? {
-                                        ipfs.remove_block(cid).await?;
-                                    }
-                                }
-                                Ok::<_, Error>(())
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::RemoveBlockBy(did, res) => {
-                        let ipfs = ipfs.clone();
-                        let store = store.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let mut document =
-                                    get_root_document(&ipfs, root_cid.clone()).await?;
-                                let old_document = document.block_by;
-                                let mut list: Vec<DID> = match document.block_by {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
-                                    None => vec![],
-                                };
-
-                                if !list.remove_item(&did) {
-                                    return Err::<_, Error>(Error::PublicKeyIsntBlocked);
-                                }
-
-                                document.block_by =
-                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
-
-                                set_root_document(&ipfs, &store, root_cid, document).await?;
-
-                                if let Some(cid) = old_document {
-                                    if !ipfs.is_pinned(&cid).await? {
-                                        ipfs.remove_block(cid).await?;
-                                    }
-                                }
-                                Ok::<_, Error>(())
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::GetRequestList(res) => {
-                        let ipfs = ipfs.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let document = get_root_document(&ipfs, root_cid.clone()).await?;
-
-                                let list: Vec<Request> = match document.request {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await?,
-                                    None => vec![],
-                                };
-
-                                Ok::<_, Error>(list)
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::GetFriendList(res) => {
-                        let ipfs = ipfs.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let document = get_root_document(&ipfs, root_cid.clone()).await?;
-
-                                let list: Vec<DID> = match document.friends {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await?,
-                                    None => vec![],
-                                };
-
-                                Ok::<_, Error>(list)
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::GetBlockList(res) => {
-                        let ipfs = ipfs.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let document = get_root_document(&ipfs, root_cid.clone()).await?;
-
-                                let list: Vec<DID> = match document.blocks {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await?,
-                                    None => vec![],
-                                };
-
-                                Ok::<_, Error>(list)
-                            }
-                            .await,
-                        );
-                    }
-                    RootDocumentEvents::GetBlockByList(res) => {
-                        let ipfs = ipfs.clone();
-                        let root_cid = root_cid.clone();
-                        let _ = res.send(
-                            async move {
-                                let document = get_root_document(&ipfs, root_cid.clone()).await?;
-
-                                let list: Vec<DID> = match document.block_by {
-                                    Some(cid) => cid.get_local_dag(&ipfs).await?,
-                                    None => vec![],
-                                };
-
-                                Ok::<_, Error>(list)
-                            }
-                            .await,
-                        );
-                    }
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
+                    did: data.sender,
+                })
+                .await;
+            }
+            Event::Remove => {
+                if self.is_friend(&data.sender).await? {
+                    self.remove_friend(&data.sender, false).await?;
                 }
             }
-        });
+            Event::Retract => {
+                let list = self.list_all_raw_request().await?;
+                let internal_request = list
+                    .iter()
+                    .find(|request| {
+                        request.r#type() == RequestType::Incoming && data.sender.eq(request.did())
+                    })
+                    .ok_or(Error::FriendRequestDoesntExist)?;
 
-        *self.task_send.write().await = Some(tx);
-        *self.root_task.write().await = Some(task);
+                self.root_document.remove_request(internal_request).await?;
+
+                _ = self.export_root_document().await;
+
+                self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
+                    did: data.sender,
+                })
+                .await;
+            }
+            Event::Block => {
+                let sender = data.sender;
+
+                if self.has_request_from(&sender).await? {
+                    self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
+                        did: sender.clone(),
+                    })
+                    .await;
+                } else if self.sent_friend_request_to(&sender).await? {
+                    self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
+                        did: sender.clone(),
+                    })
+                    .await;
+                }
+
+                let list = self.list_all_raw_request().await?;
+                for req in list.iter().filter(|req| req.did().eq(&sender)) {
+                    self.root_document.remove_request(req).await?;
+                }
+
+                if self.is_friend(&sender).await? {
+                    self.remove_friend(&sender, false).await?;
+                }
+
+                let completed = self.root_document.add_block_by(&sender).await.is_ok();
+                if completed {
+                    _ = self.export_root_document().await;
+
+                    let _ = futures::join!(
+                        self.push(&sender),
+                        self.request(&sender, RequestOption::Identity)
+                    );
+
+                    self.emit_event(MultiPassEventKind::BlockedBy { did: sender })
+                        .await;
+                }
+
+                if let Some(tx) = signal.take() {
+                    tracing::debug!("Signaling broadcast of response...");
+                    let _ = tx.send(Err(Error::BlockedByUser));
+                }
+            }
+            Event::Unblock => {
+                let sender = data.sender;
+                let completed = self.root_document.remove_block_by(&sender).await.is_ok();
+
+                if completed {
+                    _ = self.export_root_document().await;
+
+                    let _ = futures::join!(
+                        self.push(&sender),
+                        self.request(&sender, RequestOption::Identity)
+                    );
+
+                    self.emit_event(MultiPassEventKind::UnblockedBy { did: sender })
+                        .await;
+                }
+            }
+            Event::Response => {
+                if let Some(tx) = signal.take() {
+                    tracing::debug!("Signaling broadcast of response...");
+                    let _ = tx.send(Ok(()));
+                }
+            }
+        };
+
+        Ok(())
     }
 
     async fn push_iter<I: IntoIterator<Item = DID>>(&self, list: I) {
         for did in list {
-            tokio::spawn({
-                let did = did.clone();
-                let store = self.clone();
-                async move { if let Err(_e) = store.push(&did).await {} }
-            });
+            if let Err(e) = self.push(&did).await {
+                tracing::error!("Error pushing identity to {did}: {e}");
+            }
         }
     }
 
     pub async fn push_to_all(&self) {
-        let list = self.discovery.did_iter().await.collect::<Vec<_>>().await;
-        self.push_iter(list).await
+        //TODO: Possibly announce only to mesh, though this *might* require changing the logic to establish connection
+        //      if profile pictures and banners are supplied in this push too.
+        let list = self
+            .discovery
+            .list()
+            .await
+            .iter()
+            .filter_map(|entry| entry.peer_id().to_did().ok())
+            .collect::<Vec<_>>();
+        self.push_iter(list).await;
+        _ = self.announce_identity_to_mesh().await;
+    }
+
+    pub async fn announce_identity_to_mesh(&self) -> Result<(), Error> {
+        if self.config.store_setting.announce_to_mesh {
+            let kp = self.ipfs.keypair()?;
+            let document = self.own_identity_document().await?;
+            let payload = PayloadRequest::new(kp, None, document)?;
+            let bytes = serde_json::to_vec(&payload)?;
+            _ = self
+                .ipfs
+                .pubsub_publish("/identity/announce/v0".into(), bytes)
+                .await;
+        }
+
+        Ok(())
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let event = IdentityEvent::Request { option };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        log::trace!("Payload size: {} bytes", bytes.len());
-
-        log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
+        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
         if self
             .ipfs
@@ -774,8 +929,8 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            log::info!("Event sent to {out_did}");
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!(to = %out_did, event = ?event, "Event sent");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -783,55 +938,45 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let mut identity = self.own_identity_document().await?;
 
-        let is_friend = match self.friend_store().await {
-            Ok(store) => store.is_friend(out_did).await.unwrap_or_default(),
-            _ => false,
-        };
+        let is_friend = self.is_friend(out_did).await.unwrap_or_default();
 
-        let is_blocked = match self.friend_store().await {
-            Ok(store) => store.is_blocked(out_did).await.unwrap_or_default(),
-            _ => false,
-        };
+        let is_blocked = self.is_blocked(out_did).await.unwrap_or_default();
 
-        let is_blocked_by = match self.friend_store().await {
-            Ok(store) => store.is_blocked_by(out_did).await.unwrap_or_default(),
-            _ => false,
-        };
+        let is_blocked_by = self.is_blocked_by(out_did).await.unwrap_or_default();
 
-        let share_platform = self.share_platform.load(Ordering::SeqCst);
+        let share_platform = self.config.store_setting.share_platform;
 
         let platform =
             (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
 
-        let status = self.online_status.read().await.clone().and_then(|status| {
-            (!is_blocked || !is_blocked_by)
-                .then_some(status)
-                .or(Some(IdentityStatus::Offline))
-        });
+        let mut metadata = identity.metadata;
+        metadata.platform = platform;
 
-        let profile_picture = identity.profile_picture;
-        let profile_banner = identity.profile_banner;
+        identity.metadata = Default::default();
 
-        let include_pictures = (matches!(self.update_event, UpdateEvents::Enabled)
-            || matches!(
-                self.update_event,
-                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-            ) && is_friend)
+        let include_meta = (matches!(
+            self.config.store_setting.update_events,
+            UpdateEvents::Enabled
+        ) || matches!(
+            self.config.store_setting.update_events,
+            UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+        ) && is_friend)
             && (!is_blocked && !is_blocked_by);
 
-        log::trace!("Including cid in push: {include_pictures}");
-
-        identity.profile_picture =
-            profile_picture.and_then(|picture| include_pictures.then_some(picture));
-        identity.profile_banner =
-            profile_banner.and_then(|banner| include_pictures.then_some(banner));
-
-        identity.status = status;
-        identity.platform = platform;
+        tracing::debug!(?metadata, included = include_meta);
+        if include_meta {
+            identity.metadata = metadata;
+        }
 
         let kp_did = self.get_keypair_did()?;
 
@@ -843,13 +988,9 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        log::trace!("Payload size: {} bytes", bytes.len());
-
-        log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
+        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
         if self
             .ipfs
@@ -860,8 +1001,8 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            log::info!("Event sent to {out_did}");
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!(to = %out_did, event = ?event, "Event sent");
+            tracing::info!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -869,34 +1010,47 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push_profile_picture(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let identity = self.own_identity_document().await?;
 
-        let Some(picture_cid) = identity.profile_picture else {
+        let Some(picture_cid) = identity.metadata.profile_picture else {
             return Ok(());
         };
 
         if cid != picture_cid {
-            log::debug!("Requested profile picture does not match current picture.");
+            tracing::debug!("Requested profile picture does not match current picture.");
             return Ok(());
         }
 
-        let data = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await?;
+        let image = super::document::image_dag::get_image(
+            &self.ipfs,
+            cid,
+            &[],
+            true,
+            Some(2 * 1024 * 1024),
+        )
+        .await?;
 
         let event = IdentityEvent::Receive {
-            option: ResponseOption::Image { cid, data },
+            option: ResponseOption::Image {
+                cid,
+                ty: image.image_type().clone(),
+                data: image.data().to_vec(),
+            },
         };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        log::trace!("Payload size: {} bytes", bytes.len());
-
-        log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
+        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
         if self
             .ipfs
@@ -907,8 +1061,8 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            log::info!("Event sent to {out_did}");
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!(to = %out_did, event = ?event, "Event sent");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -916,11 +1070,17 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
-        let pk_did = self.get_keypair_did()?;
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = &*self.did_key;
 
         let identity = self.own_identity_document().await?;
 
-        let Some(banner_cid) = identity.profile_banner else {
+        let Some(banner_cid) = identity.metadata.profile_banner else {
             return Ok(());
         };
 
@@ -928,21 +1088,30 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let data = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await?;
+        let image = super::document::image_dag::get_image(
+            &self.ipfs,
+            cid,
+            &[],
+            true,
+            Some(2 * 1024 * 1024),
+        )
+        .await?;
 
         let event = IdentityEvent::Receive {
-            option: ResponseOption::Image { cid, data },
+            option: ResponseOption::Image {
+                cid,
+                ty: image.image_type().clone(),
+                data: image.data().to_vec(),
+            },
         };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        log::trace!("Payload size: {} bytes", bytes.len());
+        tracing::trace!("Payload size: {} bytes", bytes.len());
 
-        log::info!("Sending event to {out_did}");
-
-        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
+        tracing::info!("Sending event to {out_did}");
 
         if self
             .ipfs
@@ -953,32 +1122,30 @@ impl IdentityStore {
             let timer = Instant::now();
             self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
-            log::info!("Event sent to {out_did}");
-            log::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!("Event sent to {out_did}");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, message))]
-    async fn process_message(&mut self, in_did: DID, message: &[u8]) -> anyhow::Result<()> {
-        let pk_did = self.get_keypair_did()?;
-
-        let bytes = ecdh_decrypt(&pk_did, Some(&in_did), message)?;
-
-        log::info!("Received event from {in_did}");
-        let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
-
-        log::debug!("Event: {event:?}");
+    #[tracing::instrument(skip(self))]
+    #[allow(clippy::if_same_then_else)]
+    async fn process_message(
+        &mut self,
+        in_did: &DID,
+        event: IdentityEvent,
+        exclude_images: bool,
+    ) -> anyhow::Result<()> {
         match event {
             IdentityEvent::Request { option } => match option {
-                RequestOption::Identity => self.push(&in_did).await?,
+                RequestOption::Identity => self.push(in_did).await?,
                 RequestOption::Image { banner, picture } => {
                     if let Some(cid) = banner {
-                        self.push_profile_banner(&in_did, cid).await?;
+                        self.push_profile_banner(in_did, cid).await?;
                     }
                     if let Some(cid) = picture {
-                        self.push_profile_picture(&in_did, cid).await?;
+                        self.push_profile_picture(in_did, cid).await?;
                     }
                 }
             },
@@ -989,356 +1156,356 @@ impl IdentityStore {
                 // let _pk = did_to_libp2p_pub(&raw_object.did)?;
 
                 //TODO: Remove upon offline implementation
-                anyhow::ensure!(identity.did == in_did, "Payload doesnt match identity");
+                anyhow::ensure!(identity.did.eq(in_did), "Payload doesnt match identity");
 
                 // Validate after making sure the identity did matches the payload
                 identity.verify()?;
 
-                if let Some(own_id) = self.identity.read().await.clone() {
-                    anyhow::ensure!(
-                        own_id.did_key() != identity.did,
-                        "Cannot accept own identity"
-                    );
-                }
-
-                if !self.discovery.contains(identity.did.clone()).await {
-                    if let Err(e) = self.discovery.insert(identity.did.clone()).await {
-                        log::warn!("Error inserting into discovery service: {e}");
+                if let Ok(own_id) = self.own_identity().await {
+                    if own_id.did_key() == identity.did {
+                        tracing::warn!(did = %identity.did, "Cannot accept own identity");
+                        return Ok(());
                     }
                 }
 
-                let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
-                    Ok(cid) => match self
-                        .get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid))
-                        .await
-                    {
-                        Ok(doc) => (Some(cid), doc),
-                        _ => (Some(cid), Default::default()),
-                    },
-                    _ => (None, Default::default()),
-                };
+                if !exclude_images && !self.discovery.contains(&identity.did).await {
+                    if let Err(e) = self.discovery.insert(&identity.did).await {
+                        tracing::warn!("Error inserting into discovery service: {e}");
+                    }
+                }
 
-                let document = cache_documents
-                    .iter()
-                    .find(|document| {
-                        document.did == identity.did && document.short_id == identity.short_id
-                    })
-                    .cloned();
+                let previous_identity = self.identity_cache.get(&identity.did).await.ok();
 
-                match document {
+                self.identity_cache.insert(&identity).await?;
+
+                match previous_identity {
                     Some(document) => {
                         if document.different(&identity) {
-                            log::info!("Updating local cache of {}", identity.did);
+                            tracing::info!(%identity.did, "Updating local cache");
+
                             let document_did = identity.did.clone();
-                            cache_documents.replace(identity.clone());
 
-                            let new_cid = cache_documents.to_cid(&self.ipfs).await?;
-
-                            self.ipfs.insert_pin(&new_cid, false).await?;
-                            self.save_cache_cid(new_cid).await?;
-                            if let Some(old_cid) = old_cid {
-                                if self.ipfs.is_pinned(&old_cid).await? {
-                                    self.ipfs.remove_pin(&old_cid, false).await?;
-                                }
-                                // Do we want to remove the old block?
-                                self.ipfs.remove_block(old_cid).await?;
-                            }
                             let mut emit = false;
 
-                            if matches!(self.update_event, UpdateEvents::Enabled) {
+                            if matches!(
+                                self.config.store_setting.update_events,
+                                UpdateEvents::Enabled
+                            ) {
                                 emit = true;
                             } else if matches!(
-                                self.update_event,
+                                self.config.store_setting.update_events,
                                 UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-                            ) {
-                                if let Ok(store) = self.friend_store().await {
-                                    if store.is_friend(&document_did).await.unwrap_or_default() {
-                                        emit = true;
-                                    }
-                                }
+                            ) && self.is_friend(&document_did).await.unwrap_or_default()
+                            {
+                                emit = true;
                             }
-                            tokio::spawn({
-                                let store = self.clone();
-                                async move {
-                                    if document.profile_picture != identity.profile_picture
-                                        && identity.profile_picture.is_some()
-                                    {
-                                        log::info!(
-                                            "Requesting profile picture from {}",
-                                            identity.did
-                                        );
-
-                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
-                                            if let Err(e) = store
-                                                .request(
-                                                    &in_did,
-                                                    RequestOption::Image {
-                                                        banner: None,
-                                                        picture: identity.profile_picture,
-                                                    },
-                                                )
-                                                .await
-                                            {
-                                                error!("Error requesting profile picture from {in_did}: {e}");
-                                            }
-                                        } else {
-                                            let identity_profile_picture =
-                                                identity.profile_picture.expect("Cid is provided");
-                                            tokio::spawn({
-                                                let ipfs = store.ipfs.clone();
-                                                let emit = emit;
-                                                let store = store.clone();
-                                                let did = in_did.clone();
-                                                async move {
-                                                    let mut stream = ipfs
-                                                        .unixfs()
-                                                        .cat(
-                                                            identity_profile_picture,
-                                                            None,
-                                                            &[],
-                                                            false,
-                                                        )
-                                                        .await?
-                                                        .boxed();
-                                                    while let Some(_d) = stream.next().await {
-                                                        let _d = _d.map_err(anyhow::Error::from)?;
-                                                    }
-
-                                                    if emit {
-                                                        store.emit_event(
-                                                            MultiPassEventKind::IdentityUpdate {
-                                                                did,
-                                                            },
-                                                        );
-                                                    }
-
-                                                    Ok::<_, anyhow::Error>(())
-                                                }
-                                            });
-                                        }
-                                    }
-                                    if document.profile_banner != identity.profile_banner
-                                        && identity.profile_banner.is_some()
-                                    {
-                                        log::info!(
-                                            "Requesting profile banner from {}",
-                                            identity.did
-                                        );
-
-                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
-                                            if let Err(e) = store
-                                                .request(
-                                                    &in_did,
-                                                    RequestOption::Image {
-                                                        banner: identity.profile_banner,
-                                                        picture: None,
-                                                    },
-                                                )
-                                                .await
-                                            {
-                                                error!("Error requesting profile banner from {in_did}: {e}");
-                                            }
-                                        } else {
-                                            let identity_profile_banner =
-                                                identity.profile_banner.expect("Cid is provided");
-                                            tokio::spawn({
-                                                let ipfs = store.ipfs.clone();
-                                                let emit = emit;
-                                                let did = in_did.clone();
-                                                async move {
-                                                    let mut stream = ipfs
-                                                        .unixfs()
-                                                        .cat(
-                                                            identity_profile_banner,
-                                                            None,
-                                                            &[],
-                                                            false,
-                                                        )
-                                                        .await?
-                                                        .boxed();
-
-                                                    while let Some(_d) = stream.next().await {
-                                                        let _d = _d.map_err(anyhow::Error::from)?;
-                                                    }
-
-                                                    if emit {
-                                                        store.emit_event(
-                                                            MultiPassEventKind::IdentityUpdate {
-                                                                did,
-                                                            },
-                                                        );
-                                                    }
-
-                                                    Ok::<_, anyhow::Error>(())
-                                                }
-                                            });
-                                        }
-                                    }
-                                }
-                            });
 
                             if emit {
-                                log::trace!("Emitting identity update event");
+                                tracing::trace!("Emitting identity update event");
                                 self.emit_event(MultiPassEventKind::IdentityUpdate {
                                     did: document.did.clone(),
-                                });
+                                })
+                                .await;
+                            }
+
+                            if !exclude_images {
+                                if document.metadata.profile_picture
+                                    != identity.metadata.profile_picture
+                                    && identity.metadata.profile_picture.is_some()
+                                {
+                                    tracing::info!(
+                                        "Requesting profile picture from {}",
+                                        identity.did
+                                    );
+
+                                    if !self.config.store_setting.fetch_over_bitswap {
+                                        if let Err(e) = self
+                                            .request(
+                                                in_did,
+                                                RequestOption::Image {
+                                                    banner: None,
+                                                    picture: identity.metadata.profile_picture,
+                                                },
+                                            )
+                                            .await
+                                        {
+                                            error!(
+                                            "Error requesting profile picture from {in_did}: {e}"
+                                        );
+                                        }
+                                    } else {
+                                        let identity_profile_picture = identity
+                                            .metadata
+                                            .profile_picture
+                                            .expect("Cid is provided");
+                                        tokio::spawn({
+                                            let ipfs = self.ipfs.clone();
+                                            let emit = emit;
+                                            let store = self.clone();
+                                            let did = in_did.clone();
+                                            async move {
+                                                let peer_id = vec![did.to_peer_id()?];
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    identity_profile_picture,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(2 * 1024 * 1024),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
+
+                                                tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
+
+                                                if emit {
+                                                    store
+                                                        .emit_event(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        )
+                                                        .await;
+                                                }
+
+                                                Ok::<_, anyhow::Error>(())
+                                            }
+                                        });
+                                    }
+                                }
+                                if document.metadata.profile_banner
+                                    != identity.metadata.profile_banner
+                                    && identity.metadata.profile_banner.is_some()
+                                {
+                                    tracing::info!(
+                                        "Requesting profile banner from {}",
+                                        identity.did
+                                    );
+
+                                    if !self.config.store_setting.fetch_over_bitswap {
+                                        if let Err(e) = self
+                                            .request(
+                                                in_did,
+                                                RequestOption::Image {
+                                                    banner: identity.metadata.profile_banner,
+                                                    picture: None,
+                                                },
+                                            )
+                                            .await
+                                        {
+                                            error!(
+                                            "Error requesting profile banner from {in_did}: {e}"
+                                        );
+                                        }
+                                    } else {
+                                        let identity_profile_banner = identity
+                                            .metadata
+                                            .profile_banner
+                                            .expect("Cid is provided");
+                                        tokio::spawn({
+                                            let ipfs = self.ipfs.clone();
+                                            let emit = emit;
+                                            let did = in_did.clone();
+                                            let store = self.clone();
+                                            async move {
+                                                let peer_id = vec![did.to_peer_id()?];
+
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    identity_profile_banner,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(2 * 1024 * 1024),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
+
+                                                tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
+
+                                                if emit {
+                                                    store
+                                                        .emit_event(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        )
+                                                        .await;
+                                                }
+
+                                                Ok::<_, anyhow::Error>(())
+                                            }
+                                        });
+                                    }
+                                }
                             }
                         }
                     }
                     None => {
-                        log::info!("Caching {} identity document", identity.did);
+                        tracing::info!("{} identity document cached", identity.did);
+
                         let document_did = identity.did.clone();
-                        cache_documents.insert(identity.clone());
 
-                        let new_cid = cache_documents.to_cid(&self.ipfs).await?;
-
-                        self.ipfs.insert_pin(&new_cid, false).await?;
-                        self.save_cache_cid(new_cid).await?;
-                        if let Some(old_cid) = old_cid {
-                            if self.ipfs.is_pinned(&old_cid).await? {
-                                self.ipfs.remove_pin(&old_cid, false).await?;
-                            }
-                            // Do we want to remove the old block?
-                            self.ipfs.remove_block(old_cid).await?;
-                        }
-
-                        if matches!(self.update_event, UpdateEvents::Enabled) {
-                            let did = document_did.clone();
-                            self.emit_event(MultiPassEventKind::IdentityUpdate { did });
-                        }
-
-                        let mut emit = false;
-                        if matches!(self.update_event, UpdateEvents::Enabled) {
-                            emit = true;
-                        } else if matches!(
-                            self.update_event,
-                            UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+                        if matches!(
+                            self.config.store_setting.update_events,
+                            UpdateEvents::Enabled
                         ) {
-                            if let Ok(store) = self.friend_store().await {
-                                if store.is_friend(&document_did).await.unwrap_or_default() {
-                                    emit = true;
-                                }
-                            }
+                            let did = document_did.clone();
+                            self.emit_event(MultiPassEventKind::IdentityUpdate { did })
+                                .await;
                         }
 
-                        if emit {
-                            tokio::spawn({
-                                let store = self.clone();
-                                async move {
-                                    let mut picture = None;
-                                    let mut banner = None;
+                        if !exclude_images {
+                            let mut emit = false;
+                            if matches!(
+                                self.config.store_setting.update_events,
+                                UpdateEvents::Enabled
+                            ) {
+                                emit = true;
+                            } else if matches!(
+                                self.config.store_setting.update_events,
+                                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+                            ) && self.is_friend(&document_did).await.unwrap_or_default()
+                            {
+                                emit = true;
+                            }
 
-                                    if let Some(cid) = identity.profile_picture {
-                                        picture = Some(cid);
-                                    }
+                            if emit {
+                                let mut picture = None;
+                                let mut banner = None;
 
-                                    if let Some(cid) = identity.profile_banner {
-                                        banner = Some(cid)
-                                    }
+                                if let Some(cid) = identity.metadata.profile_picture {
+                                    picture = Some(cid);
+                                }
 
-                                    if banner.is_some() || picture.is_some() {
-                                        if !store.fetch_over_bitswap.load(Ordering::Relaxed) {
-                                            store
-                                                .request(
-                                                    &in_did,
-                                                    RequestOption::Image { banner, picture },
-                                                )
-                                                .await?;
-                                        } else {
-                                            if let Some(picture) = picture {
-                                                tokio::spawn({
-                                                    let ipfs = store.ipfs.clone();
-                                                    let did = in_did.clone();
-                                                    let store = store.clone();
-                                                    async move {
-                                                        let mut stream = ipfs
-                                                            .unixfs()
-                                                            .cat(picture, None, &[], false)
-                                                            .await?
-                                                            .boxed();
+                                if let Some(cid) = identity.metadata.profile_banner {
+                                    banner = Some(cid)
+                                }
 
-                                                        while let Some(_d) = stream.next().await {
-                                                            let _d =
-                                                                _d.map_err(anyhow::Error::from)?;
-                                                        }
+                                if banner.is_some() || picture.is_some() {
+                                    if !self.config.store_setting.fetch_over_bitswap {
+                                        self.request(
+                                            in_did,
+                                            RequestOption::Image { banner, picture },
+                                        )
+                                        .await?;
+                                    } else {
+                                        if let Some(picture) = picture {
+                                            tokio::spawn({
+                                                let ipfs = self.ipfs.clone();
+                                                let did = in_did.clone();
+                                                let store = self.clone();
+                                                async move {
+                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let _ = super::document::image_dag::get_image(
+                                                        &ipfs,
+                                                        picture,
+                                                        &peer_id,
+                                                        false,
+                                                        Some(2 * 1024 * 1024),
+                                                    )
+                                                    .await
+                                                    .map_err(|e| {
+                                                        tracing::error!(
+                                                            "Error fetching image from {did}: {e}"
+                                                        );
+                                                        e
+                                                    })?;
 
-                                                        store.emit_event(
+                                                    tracing::trace!("Image pointed to {picture} for {did} downloaded");
+
+                                                    store
+                                                        .emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
                                                                 did,
                                                             },
+                                                        )
+                                                        .await;
+
+                                                    Ok::<_, anyhow::Error>(())
+                                                }
+                                            });
+                                        }
+                                        if let Some(banner) = banner {
+                                            tokio::spawn({
+                                                let store = self.clone();
+                                                let ipfs = self.ipfs.clone();
+
+                                                let did = in_did.clone();
+                                                async move {
+                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let _ = super::document::image_dag::get_image(
+                                                        &ipfs,
+                                                        banner,
+                                                        &peer_id,
+                                                        false,
+                                                        Some(2 * 1024 * 1024),
+                                                    )
+                                                    .await
+                                                    .map_err(|e| {
+                                                        tracing::error!(
+                                                            "Error fetching image from {did}: {e}"
                                                         );
+                                                        e
+                                                    })?;
 
-                                                        Ok::<_, anyhow::Error>(())
-                                                    }
-                                                });
-                                            }
-                                            if let Some(banner) = banner {
-                                                tokio::spawn({
-                                                    let tx = store.event.clone();
-                                                    let ipfs = store.ipfs.clone();
+                                                    tracing::trace!("Image pointed to {banner} for {did} downloaded");
 
-                                                    let did = in_did.clone();
-                                                    async move {
-                                                        let mut stream = ipfs
-                                                            .unixfs()
-                                                            .cat(banner, None, &[], false)
-                                                            .await?
-                                                            .boxed();
-                                                        while let Some(_d) = stream.next().await {
-                                                            let _d =
-                                                                _d.map_err(anyhow::Error::from)?;
-                                                        }
-                                                        let _ = tx.send(
+                                                    store
+                                                        .emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
                                                                 did,
                                                             },
-                                                        );
+                                                        )
+                                                        .await;
 
-                                                        Ok::<_, anyhow::Error>(())
-                                                    }
-                                                });
-                                            }
+                                                    Ok::<_, anyhow::Error>(())
+                                                }
+                                            });
                                         }
                                     }
-
-                                    Ok::<_, Error>(())
                                 }
-                            });
+                            }
                         }
                     }
                 };
             }
             //Used when receiving an image (eg banner, pfp) from a peer
             IdentityEvent::Receive {
-                option: ResponseOption::Image { cid, data },
+                option: ResponseOption::Image { cid, ty, data },
             } => {
-                let cache_documents = self.cache().await;
-                if let Some(cache) = cache_documents
-                    .iter()
-                    .find(|document| document.did == in_did)
-                {
-                    if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
-                        tokio::spawn({
-                            let cid = cid;
-                            let mut store = self.clone();
-                            async move {
-                                let added_cid = store
-                                    .store_photo(
-                                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
-                                            .boxed(),
-                                        Some(2 * 1024 * 1024),
-                                    )
-                                    .await?;
+                let cache = self.identity_cache.get(in_did).await?;
 
-                                debug_assert_eq!(added_cid, cid);
-                                let tx = store.event.clone();
-                                let _ = tx.send(MultiPassEventKind::IdentityUpdate {
-                                    did: in_did.clone(),
-                                });
-                                Ok::<_, Error>(())
-                            }
-                        });
-                    }
+                if cache.metadata.profile_picture == Some(cid)
+                    || cache.metadata.profile_banner == Some(cid)
+                {
+                    tokio::spawn({
+                        let store = self.clone();
+                        let did = in_did.clone();
+                        async move {
+                            let added_cid = super::document::image_dag::store_photo(
+                                &store.ipfs,
+                                futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                                ty,
+                                Some(2 * 1024 * 1024),
+                            )
+                            .await?;
+
+                            debug_assert_eq!(added_cid, cid);
+                            store
+                                .emit_event(MultiPassEventKind::IdentityUpdate { did })
+                                .await;
+                            Ok::<_, Error>(())
+                        }
+                    });
                 }
             }
         };
@@ -1346,7 +1513,7 @@ impl IdentityStore {
     }
 
     fn own_platform(&self) -> Platform {
-        if self.share_platform.load(Ordering::Relaxed) {
+        if self.config.store_setting.share_platform {
             if cfg!(any(
                 target_os = "windows",
                 target_os = "macos",
@@ -1371,21 +1538,6 @@ impl IdentityStore {
         self.discovery.discovery_config()
     }
 
-    pub fn relays(&self) -> Vec<Multiaddr> {
-        self.relay.clone().unwrap_or_default()
-    }
-
-    pub(crate) async fn cache(&self) -> HashSet<IdentityDocument> {
-        let cid = self.cache_cid.read().await;
-        match *cid {
-            Some(cid) => self
-                .get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid))
-                .await
-                .unwrap_or_default(),
-            None => Default::default(),
-        }
-    }
-
     #[tracing::instrument(skip(self, extracted))]
     pub async fn import_identity(
         &mut self,
@@ -1395,26 +1547,36 @@ impl IdentityStore {
 
         let identity = extracted.identity.clone();
 
-        let root_document = RootDocument::import(&self.ipfs, extracted).await?;
+        let document = RootDocument::import(&self.ipfs, extracted).await?;
 
-        let root_cid = root_document.to_cid(&self.ipfs).await?;
+        self.root_document.set(document).await?;
 
-        self.ipfs.insert_pin(&root_cid, true).await?;
+        tracing::info!("Loading friends list into phonebook");
+        if let Ok(friends) = self.friends_list().await {
+            if !friends.is_empty() {
+                let phonebook = self.phonebook();
 
-        self.save_cid(root_cid).await?;
-        self.update_identity().await?;
-        self.enable_event();
+                if let Err(_e) = phonebook.add_friend_list(&friends).await {
+                    error!("Error adding friends in phonebook: {_e}");
+                }
+                _ = self.announce_identity_to_mesh().await;
+            }
+        }
 
-        if let Ok(store) = self.friend_store().await {
-            log::info!("Loading friends list into phonebook");
-            if let Ok(friends) = store.friends_list().await {
-                if let Some(phonebook) = store.phonebook() {
-                    if let Err(_e) = phonebook.add_friend_list(friends).await {
-                        error!("Error adding friends in phonebook: {_e}");
-                    }
+        match self.is_registered().await.is_ok() {
+            true => {
+                if let Err(e) = self.fetch_mailbox().await {
+                    tracing::warn!(error = %e, "Unable to fetch or process mailbox");
+                }
+            }
+            false => {
+                let id = self.own_identity_document().await.expect("Valid identity");
+                if let Err(e) = self.register(&id).await {
+                    tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                 }
             }
         }
+
         Ok(identity)
     }
 
@@ -1436,64 +1598,340 @@ impl IdentityStore {
         let fingerprint = public_key.fingerprint();
         let bytes = fingerprint.as_bytes();
 
+        let time = Utc::now();
+
         let identity = IdentityDocument {
             username,
             short_id: bytes[bytes.len() - SHORT_ID_SIZE..]
                 .try_into()
                 .map_err(anyhow::Error::from)?,
             did: public_key.into(),
+            created: time,
+            modified: time,
             status_message: None,
-            profile_banner: None,
-            profile_picture: None,
-            platform: None,
-            status: None,
+            metadata: Default::default(),
+            version: Default::default(),
             signature: None,
         };
 
         let did_kp = self.get_keypair_did()?;
         let identity = identity.sign(&did_kp)?;
 
-        let ident_cid = identity.to_cid(&self.ipfs).await?;
+        let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
 
-        let mut root_document = RootDocument {
+        let root_document = RootDocument {
             identity: ident_cid,
             ..Default::default()
         };
 
-        root_document.sign(&did_kp)?;
+        self.root_document.set(root_document).await?;
+        let identity = self.root_document.identity().await?;
 
-        let root_cid = root_document.to_cid(&self.ipfs).await?;
-
-        // Pin the dag
-        self.ipfs.insert_pin(&root_cid, true).await?;
+        if let Err(e) = self.register(&identity).await {
+            tracing::warn!(%identity.did, "Unable to register to external node: {e}. Identity will not be discoverable offline");
+        }
 
         let identity = identity.resolve()?;
-
-        self.save_cid(root_cid).await?;
-        self.update_identity().await?;
-        self.enable_event();
+        _ = self.announce_identity_to_mesh().await;
         Ok(identity)
     }
 
+    pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::Fetch {
+                        peer_id,
+                        did: did.clone(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(package))) => {
+                        return Ok(package);
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Error importing from {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Err(Error::IdentityDoesntExist)
+    }
+
+    pub async fn export_identity_document(&self) -> Result<(), Error> {
+        let identity = self.own_identity_document().await?;
+
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::UpdateIdentity {
+                        peer_id,
+                        identity: identity.clone().into(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Error exporting to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn export_root_document(&self) -> Result<(), Error> {
+        let package = self.root_document.export_bytes().await?;
+
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::UpdatePackage {
+                        peer_id,
+                        package: package.clone(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Error exporting to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn is_registered(&self) -> Result<(), Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::IsRegistered {
+                        peer_id,
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(_))) => return Ok(()),
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Identity is not registered: {e}");
+                        return Err(e);
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Err(Error::IdentityDoesntExist)
+    }
+
+    async fn register(&self, identity: &IdentityDocument) -> Result<(), Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::Register {
+                        peer_id,
+                        identity: identity.clone().into(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!("Error registering identity to {peer_id}: {e}");
+                        break;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn fetch_mailbox(&mut self) -> Result<(), Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(
+                        shuttle::identity::client::IdentityCommand::FetchAllRequests {
+                            peer_id,
+                            response: tx,
+                        },
+                    )
+                    .await;
+
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(list))) => {
+                        let list = list
+                            .iter()
+                            .cloned()
+                            .filter_map(|r| RequestResponsePayload::try_from(r).ok())
+                            .collect::<Vec<_>>();
+
+                        for req in list {
+                            let from = req.sender.clone();
+                            if let Err(e) = self.check_request_message(&from, req, &mut None).await
+                            {
+                                tracing::warn!(
+                                    "Error processing request from {from}: {e}. Skipping"
+                                );
+                                continue;
+                            }
+                        }
+
+                        return Ok(());
+                    }
+                    Ok(Ok(Err(e))) => return Err(e),
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn send_to_mailbox(
+        &mut self,
+        did: &DID,
+        request: RequestResponsePayload,
+    ) -> Result<(), Error> {
+        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            let request: RequestPayload = request.try_into()?;
+
+            let request = request
+                .sign(&self.did_key)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+            for peer_id in addresses.keys().copied() {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = self
+                    .identity_command
+                    .clone()
+                    .send(shuttle::identity::client::IdentityCommand::SendRequest {
+                        peer_id,
+                        to: did.clone(),
+                        request: request.clone(),
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    Ok(Ok(result)) => {
+                        return result;
+                    }
+                    Ok(Err(Canceled)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timeout for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn local_id_created(&self) -> bool {
-        self.identity.read().await.is_some()
+        self.own_identity().await.is_ok()
+    }
+
+    pub(crate) fn root_document(&self) -> &RootDocumentMap {
+        &self.root_document
     }
 
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
     pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
         let own_did = self
-            .identity
-            .read()
+            .own_identity()
             .await
-            .clone()
             .map(|identity| identity.did_key())
-            .ok_or_else(|| {
-                Error::OtherWithContext("Identity store may not be initialized".into())
-            })?;
+            .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
-        let mut preidentity = vec![];
+        let cache = self.identity_cache.list().await?;
 
-        let idents_docs = match &lookup {
+        let mut idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
             LookupBy::DidKey(pubkey) => {
@@ -1501,118 +1939,169 @@ impl IdentityStore {
                 if *pubkey == own_did {
                     return self.own_identity().await.map(|i| vec![i]);
                 }
-                tokio::spawn({
-                    let discovery = self.discovery.clone();
-                    let pubkey = pubkey.clone();
-                    async move {
-                        if !discovery.contains(&pubkey).await {
-                            discovery.insert(&pubkey).await?;
-                        }
-                        Ok::<_, Error>(())
-                    }
-                });
 
-                self.cache()
+                if !self.discovery.contains(pubkey).await {
+                    self.discovery.insert(pubkey).await?;
+                }
+                cache
+                    .filter(|ident| {
+                        let ident = ident.clone();
+                        async move { ident.did == *pubkey }
+                    })
+                    .collect::<HashSet<_>>()
                     .await
-                    .iter()
-                    .filter(|ident| ident.did == *pubkey)
-                    .cloned()
-                    .collect::<Vec<_>>()
             }
             LookupBy::DidKeys(list) => {
-                let mut items = HashSet::new();
-                let cache = self.cache().await;
-
-                tokio::spawn({
-                    let discovery = self.discovery.clone();
-                    let list = list.clone();
-                    let own_did = own_did.clone();
-                    async move {
-                        for pubkey in list {
-                            if !pubkey.eq(&own_did) && !discovery.contains(&pubkey).await {
-                                discovery.insert(&pubkey).await?;
-                            }
-                        }
-                        Ok::<_, Error>(())
-                    }
-                });
-
                 for pubkey in list {
-                    if own_did.eq(pubkey) {
-                        let own_identity = match self.own_identity().await {
-                            Ok(id) => id,
-                            Err(_) => continue,
-                        };
-                        if !preidentity.contains(&own_identity) {
-                            preidentity.push(own_identity);
+                    if !pubkey.eq(&own_did) && !self.discovery.contains(pubkey).await {
+                        if let Err(e) = self.discovery.insert(pubkey).await {
+                            tracing::error!("Error inserting {pubkey} into discovery: {e}")
                         }
-                        continue;
-                    }
-
-                    if let Some(cache) = cache.iter().find(|cache| cache.did.eq(pubkey)) {
-                        items.insert(cache.clone());
                     }
                 }
-                Vec::from_iter(items)
+
+                let mut prestream = SelectAll::new();
+
+                if list.contains(&own_did) {
+                    if let Ok(own_identity) = self.own_identity_document().await {
+                        prestream.push(futures::stream::iter(vec![own_identity]));
+                    }
+                }
+
+                cache
+                    .filter(|id| {
+                        let id = id.clone();
+                        async move { list.contains(&id.did) }
+                    })
+                    .chain(prestream.boxed())
+                    .collect::<HashSet<_>>()
+                    .await
             }
             LookupBy::Username(username) if username.contains('#') => {
-                let cache = self.cache().await;
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
                     cache
-                        .iter()
                         .filter(|ident| {
-                            ident
-                                .username
-                                .to_lowercase()
-                                .contains(&username.to_lowercase())
+                            let ident = ident.clone();
+                            async move {
+                                ident
+                                    .username
+                                    .to_lowercase()
+                                    .contains(&username.to_lowercase())
+                            }
                         })
-                        .cloned()
-                        .collect::<Vec<_>>()
+                        .collect::<HashSet<_>>()
+                        .await
                 } else {
                     match (
                         split_data.first().map(|s| s.to_lowercase()),
                         split_data.last().map(|s| s.to_lowercase()),
                     ) {
-                        (Some(name), Some(code)) => cache
-                            .iter()
-                            .filter(|ident| {
-                                ident.username.to_lowercase().eq(&name)
-                                    && String::from_utf8_lossy(&ident.short_id)
-                                        .to_lowercase()
-                                        .eq(&code)
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>(),
-                        _ => vec![],
+                        (Some(name), Some(code)) => {
+                            cache
+                                .filter(|ident| {
+                                    let ident = ident.clone();
+                                    let name = name.clone();
+                                    let code = code.clone();
+                                    async move {
+                                        ident.username.to_lowercase().eq(&name)
+                                            && String::from_utf8_lossy(&ident.short_id)
+                                                .to_lowercase()
+                                                .eq(&code)
+                                    }
+                                })
+                                .collect::<HashSet<_>>()
+                                .await
+                        }
+                        _ => HashSet::new(),
                     }
                 }
             }
             LookupBy::Username(username) => {
                 let username = username.to_lowercase();
-                self.cache()
+                cache
+                    .filter(|ident| {
+                        let ident = ident.clone();
+                        let username = username.clone();
+                        async move { ident.username.to_lowercase().contains(&username) }
+                    })
+                    .collect::<HashSet<_>>()
                     .await
-                    .iter()
-                    .filter(|ident| ident.username.to_lowercase().contains(&username))
-                    .cloned()
-                    .collect::<Vec<_>>()
             }
-            LookupBy::ShortId(id) => self
-                .cache()
-                .await
-                .iter()
-                .filter(|ident| String::from_utf8_lossy(&ident.short_id).eq(id))
-                .cloned()
-                .collect::<Vec<_>>(),
+            LookupBy::ShortId(id) => {
+                cache
+                    .filter(|ident| {
+                        let ident = ident.clone();
+                        let id = id.clone();
+                        async move { String::from_utf8_lossy(&ident.short_id).eq(&id) }
+                    })
+                    .collect::<HashSet<_>>()
+                    .await
+            }
         };
+        if idents_docs.is_empty() {
+            let kind = match lookup {
+                LookupBy::DidKey(did) => shuttle::identity::protocol::Lookup::PublicKey { did },
+                LookupBy::DidKeys(list) => {
+                    shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
+                }
+                LookupBy::Username(username) => {
+                    shuttle::identity::protocol::Lookup::Username { username, count: 0 }
+                }
+                LookupBy::ShortId(short_id) => shuttle::identity::protocol::Lookup::ShortId {
+                    short_id: short_id.try_into()?,
+                },
+            };
+            if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.keys().copied() {
+                    let (tx, rx) = futures::channel::oneshot::channel();
+                    let _ = self
+                        .identity_command
+                        .clone()
+                        .send(shuttle::identity::client::IdentityCommand::Lookup {
+                            peer_id,
+                            kind: kind.clone(),
+                            response: tx,
+                        })
+                        .await;
 
-        let mut list = idents_docs
+                    match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                        Ok(Ok(Ok(list))) => {
+                            for ident in &list {
+                                let ident = ident.clone().into();
+                                _ = self.identity_cache.insert(&ident).await;
+
+                                if self.discovery.contains(&ident.did).await {
+                                    continue;
+                                }
+                                let _ = self.discovery.insert(&ident.did).await;
+                            }
+
+                            idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
+                            break;
+                        }
+                        Ok(Ok(Err(e))) => {
+                            error!("Error registering identity to {peer_id}: {e}");
+                            break;
+                        }
+                        Ok(Err(Canceled)) => {
+                            error!("Channel been unexpectedly closed for {peer_id}");
+                            continue;
+                        }
+                        Err(_) => {
+                            error!("Request timed out for {peer_id}");
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        let list = idents_docs
             .iter()
             .filter_map(|doc| doc.resolve().ok())
             .collect::<Vec<_>>();
-
-        list.extend(preidentity);
 
         Ok(list)
     }
@@ -1622,31 +2111,33 @@ impl IdentityStore {
 
         let identity = identity.sign(&kp)?;
 
-        let mut root_document = self.get_root_document().await?;
-        let ident_cid = identity.to_cid(&self.ipfs).await?;
+        tracing::debug!("Updating document");
+        let mut root_document = self.root_document.get().await?;
+        let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
         root_document.identity = ident_cid;
 
-        self.set_root_document(root_document).await
+        self.root_document
+            .set(root_document)
+            .await
+            .map(|_| tracing::debug!("Root document updated"))
+            .map_err(|e| {
+                tracing::error!("Updating root document failed: {e}");
+                e
+            })?;
+        let _ = futures::join!(self.export_identity_document(), self.export_root_document());
+
+        Ok(())
     }
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     #[tracing::instrument(skip(self))]
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
-        let own_did = self
-            .identity
-            .read()
-            .await
-            .clone()
-            .map(|identity| identity.did_key())
-            .ok_or_else(|| {
-                Error::OtherWithContext("Identity store may not be initialized".into())
-            })?;
+        let identity = self.own_identity_document().await?;
 
-        if own_did.eq(did) {
-            return self
-                .online_status
-                .read()
-                .await
+        if identity.did.eq(did) {
+            return identity
+                .metadata
+                .status
                 .or(Some(IdentityStatus::Online))
                 .ok_or(Error::MultiPassExtensionUnavailable);
         }
@@ -1655,7 +2146,7 @@ impl IdentityStore {
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(
             self.discovery_type(),
-            DiscoveryConfig::Direct | DiscoveryConfig::None
+            DiscoveryConfig::None | DiscoveryConfig::Shuttle { .. }
         ) {
             self.lookup(LookupBy::DidKey(did.clone()))
                 .await?
@@ -1673,21 +2164,21 @@ impl IdentityStore {
             return Ok(status);
         }
 
-        self.cache()
+        self.identity_cache
+            .get(did)
             .await
-            .iter()
-            .find(|cache| cache.did.eq(did))
-            .and_then(|cache| cache.status)
+            .ok()
+            .and_then(|cache| cache.metadata.status)
             .or(Some(status))
             .ok_or(Error::IdentityDoesntExist)
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
-        let mut root_document = self.get_root_document().await?;
-        root_document.status = Some(status);
-        self.set_root_document(root_document).await?;
-        *self.online_status.write().await = Some(status);
+        self.root_document.set_status_indicator(status).await?;
+
+        let _ = futures::join!(self.export_identity_document(), self.export_root_document());
+
         self.push_to_all().await;
         Ok(())
     }
@@ -1695,14 +2186,10 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn identity_platform(&self, did: &DID) -> Result<Platform, Error> {
         let own_did = self
-            .identity
-            .read()
+            .own_identity()
             .await
-            .clone()
             .map(|identity| identity.did_key())
-            .ok_or_else(|| {
-                Error::OtherWithContext("Identity store may not be initialized".into())
-            })?;
+            .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
         if own_did.eq(did) {
             return Ok(self.own_platform());
@@ -1714,11 +2201,11 @@ impl IdentityStore {
             return Ok(Platform::Unknown);
         }
 
-        self.cache()
+        self.identity_cache
+            .get(did)
             .await
-            .iter()
-            .find(|cache| cache.did.eq(did))
-            .and_then(|cache| cache.platform)
+            .ok()
+            .and_then(|cache| cache.metadata.platform)
             .ok_or(Error::IdentityDoesntExist)
     }
 
@@ -1747,314 +2234,62 @@ impl IdentityStore {
             .map_err(anyhow::Error::from)
     }
 
-    pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::Get(tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::Set(document, tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_add_friend(&self, did: &DID) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::AddFriend(did.clone(), tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_remove_friend(&self, did: &DID) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::RemoveFriend(did.clone(), tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_add_block(&self, did: &DID) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::AddBlock(did.clone(), tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_remove_block(&self, did: &DID) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::RemoveBlock(did.clone(), tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_add_block_by(&self, did: &DID) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::AddBlockBy(did.clone(), tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_remove_block_by(&self, did: &DID) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::RemoveBlockBy(did.clone(), tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_add_request(&self, did: &Request) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::AddRequest(did.clone(), tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_remove_request(&self, did: &Request) -> Result<(), Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::RemoveRequest(did.clone(), tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_get_friends(&self) -> Result<Vec<DID>, Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::GetFriendList(tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_get_requests(&self) -> Result<Vec<Request>, Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::GetRequestList(tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_get_blocks(&self) -> Result<Vec<DID>, Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::GetBlockList(tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn root_document_get_block_by(&self) -> Result<Vec<DID>, Error> {
-        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
-        let (tx, rx) = oneshot::channel();
-        task_tx
-            .unbounded_send(RootDocumentEvents::GetBlockByList(tx))
-            .map_err(anyhow::Error::from)?;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn get_local_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
-        path.get_local_dag(&self.ipfs).await
-    }
-
     pub async fn own_identity_document(&self) -> Result<IdentityDocument, Error> {
-        let root_document = self.get_root_document().await?;
-        let path = IpfsPath::from(root_document.identity);
-        let identity = self.get_local_dag::<IdentityDocument>(path).await?;
+        let identity = self.root_document.identity().await?;
         identity.verify()?;
         Ok(identity)
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
-        let root_document = self.get_root_document().await?;
-
-        let path = IpfsPath::from(root_document.identity);
-        let identity = self
-            .get_local_dag::<IdentityDocument>(path)
-            .await?
-            .resolve()?;
-
-        let public_key = identity.did_key();
-        let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
-        if public_key != kp_public_key {
-            //Note if we reach this point, the identity would need to be reconstructed
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        *self.online_status.write().await = root_document.status;
-        Ok(identity)
-    }
-
-    pub async fn save_cid(&self, cid: Cid) -> Result<(), Error> {
-        *self.root_cid.write().await = Some(cid);
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            tokio::fs::write(path.join(".id"), cid).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn save_cache_cid(&self, cid: Cid) -> Result<(), Error> {
-        log::trace!("Updating cache");
-        *self.cache_cid.write().await = Some(cid);
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            tokio::fs::write(path.join(".cache_id"), cid).await?;
-        }
-        Ok(())
-    }
-
-    #[tracing::instrument(skip(self, stream))]
-    pub async fn store_photo(
-        &mut self,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
-        limit: Option<usize>,
-    ) -> Result<Cid, Error> {
-        let ipfs = self.ipfs.clone();
-
-        let mut stream = ipfs.add_unixfs(stream).await?;
-
-        let mut ipfs_path = None;
-
-        while let Some(status) = stream.next().await {
-            match status {
-                ipfs::unixfs::UnixfsStatus::ProgressStatus { written, .. } => {
-                    if let Some(limit) = limit {
-                        if written >= limit {
-                            return Err(Error::InvalidLength {
-                                context: "photo".into(),
-                                current: written,
-                                minimum: Some(1),
-                                maximum: Some(limit),
-                            });
-                        }
-                    }
-                    log::trace!("{written} bytes written");
-                }
-                ipfs::unixfs::UnixfsStatus::CompletedStatus { path, written, .. } => {
-                    log::debug!("Image is written with {written} bytes");
-                    ipfs_path = Some(path);
-                }
-                ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
-                    match error {
-                        Some(e) => {
-                            log::error!("Error uploading picture with {written} bytes written with error: {e}");
-                            return Err(Error::from(e));
-                        }
-                        None => {
-                            log::error!("Error uploading picture with {written} bytes written");
-                            return Err(Error::OtherWithContext("Error uploading photo".into()));
-                        }
-                    }
-                }
-            }
-        }
-
-        let cid = ipfs_path
-            .ok_or(Error::Other)?
-            .root()
-            .cid()
-            .copied()
-            .ok_or(Error::Other)?;
-
-        if !ipfs.is_pinned(&cid).await? {
-            ipfs.insert_pin(&cid, true).await?;
-        }
-
-        Ok(cid)
+        let identity = self.own_identity_document().await?;
+        Ok(identity.into())
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn identity_picture(&self, did: &DID) -> Result<String, Error> {
-        if self.disable_image {
+    pub async fn identity_picture(&self, did: &DID) -> Result<IdentityImage, Error> {
+        if self.config.store_setting.disable_images {
             return Err(Error::InvalidIdentityPicture);
         }
 
         let document = match self.own_identity_document().await {
             Ok(document) if document.did.eq(did) => document,
-            Err(_) | Ok(_) => self
-                .cache()
-                .await
-                .iter()
-                .find(|ident| ident.did == *did)
-                .cloned()
-                .ok_or(Error::IdentityDoesntExist)?,
+            Err(_) | Ok(_) => self.identity_cache.get(did).await?,
         };
 
-        let cb = self.default_pfp_callback.clone();
-
-        if let Some(cid) = document.profile_picture {
-            if let Ok(data) = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
-            {
-                let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                if !picture.is_empty() {
-                    return Ok(picture);
-                }
-            }
+        if let Some(cid) = document.metadata.profile_picture {
+            return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
+                .await
+                .map_err(|_| Error::InvalidIdentityPicture);
         }
 
-        if let Some(cb) = cb {
+        if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
             let identity = document.resolve()?;
-            let picture = cb(&identity)?;
-            return Ok(String::from_utf8_lossy(&picture).to_string());
+            let (picture, ty) = cb(&identity)?;
+            let mut image = IdentityImage::default();
+            image.set_data(picture);
+            image.set_image_type(ty);
+
+            return Ok(image);
         }
 
         Err(Error::InvalidIdentityPicture)
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn identity_banner(&self, did: &DID) -> Result<String, Error> {
-        if self.disable_image {
+    pub async fn identity_banner(&self, did: &DID) -> Result<IdentityImage, Error> {
+        if self.config.store_setting.disable_images {
             return Err(Error::InvalidIdentityBanner);
         }
 
         let document = match self.own_identity_document().await {
             Ok(document) if document.did.eq(did) => document,
-            Err(_) | Ok(_) => self
-                .cache()
-                .await
-                .iter()
-                .find(|ident| ident.did == *did)
-                .cloned()
-                .ok_or(Error::IdentityDoesntExist)?,
+            Err(_) | Ok(_) => self.identity_cache.get(did).await?,
         };
 
-        let cb = self.default_pfp_callback.clone();
-
-        if let Some(cid) = document.profile_banner {
-            if let Ok(data) = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await
-            {
-                let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                if !picture.is_empty() {
-                    return Ok(picture);
-                }
-            }
-        }
-
-        if let Some(cb) = cb {
-            let identity = document.resolve()?;
-            let picture = cb(&identity)?;
-            return Ok(String::from_utf8_lossy(&picture).to_string());
+        if let Some(cid) = document.metadata.profile_banner {
+            return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
+                .await
+                .map_err(|_| Error::InvalidIdentityPicture);
         }
 
         Err(Error::InvalidIdentityBanner)
@@ -2062,81 +2297,12 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
-        let ipfs = self.ipfs.clone();
-
-        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
+        let ipfs = &self.ipfs;
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, true).await?;
         }
-
-        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
-            ipfs.list_pins(None)
-                .await
-                .filter_map(|r| async move {
-                    match r {
-                        Ok(v) => Some(v.0),
-                        Err(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-
-        for s_cid in new_pinned_blocks.iter() {
-            pinned_blocks.remove(s_cid);
-        }
-
-        for cid in pinned_blocks {
-            ipfs.remove_block(cid).await?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn load_cid(&self) -> Result<(), Error> {
-        if let Some(path) = self.path.as_ref() {
-            if let Ok(cid_str) = tokio::fs::read(path.join(".id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            {
-                *self.root_cid.write().await = cid_str.parse().ok()
-            }
-
-            if let Ok(cid_str) = tokio::fs::read(path.join(".cache_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            {
-                *self.cache_cid.write().await = cid_str.parse().ok();
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn get_cache_cid(&self) -> Result<Cid, Error> {
-        (self.cache_cid.read().await)
-            .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
-    }
-
-    pub async fn get_root_cid(&self) -> Result<Cid, Error> {
-        (self.root_cid.read().await).ok_or(Error::IdentityDoesntExist)
-    }
-
-    pub async fn update_identity(&self) -> Result<(), Error> {
-        let ident = self.own_identity().await?;
-        self.validate_identity(&ident)?;
-        *self.identity.write().await = Some(ident);
+        let blocks = ipfs.remove_block(cid, true).await?;
+        tracing::info!("{} blocks removed.", blocks.len());
         Ok(())
     }
 
@@ -2193,21 +2359,501 @@ impl IdentityStore {
         Ok(())
     }
 
-    pub fn enable_event(&mut self) {
-        self.start_event.store(true, Ordering::SeqCst);
-    }
-
-    pub fn disable_event(&mut self) {
-        self.start_event.store(false, Ordering::SeqCst);
-    }
-
-    pub fn end_event(&mut self) {
-        self.end_event.store(true, Ordering::SeqCst);
-    }
-
     pub fn clear_internal_cache(&mut self) {}
 
-    pub fn emit_event(&self, event: MultiPassEventKind) {
-        let _ = self.event.send(event);
+    pub async fn emit_event(&self, event: MultiPassEventKind) {
+        self.event.emit(event).await;
+    }
+}
+
+impl IdentityStore {
+    #[tracing::instrument(skip(self))]
+    pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let local_public_key = (*self.did_key).clone();
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotSendSelfFriendRequest);
+        }
+
+        if self.is_friend(pubkey).await? {
+            return Err(Error::FriendExist);
+        }
+
+        if self.is_blocked_by(pubkey).await? {
+            return Err(Error::BlockedByUser);
+        }
+
+        if self.is_blocked(pubkey).await? {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
+        if self.has_request_from(pubkey).await? {
+            return self.accept_request(pubkey).await;
+        }
+
+        let list = self.list_all_raw_request().await?;
+
+        if list
+            .iter()
+            .any(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
+        {
+            // since the request has already been sent, we should not be sending it again
+            return Err(Error::FriendRequestExist);
+        }
+
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Request)?;
+
+        self.broadcast_request(pubkey, &payload, true, true).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let local_public_key = (*self.did_key).clone();
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotAcceptSelfAsFriend);
+        }
+
+        if !self.has_request_from(pubkey).await? {
+            return Err(Error::FriendRequestDoesntExist);
+        }
+
+        let list = self.list_all_raw_request().await?;
+
+        let internal_request = list
+            .iter()
+            .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
+            .ok_or(Error::CannotFindFriendRequest)?;
+
+        if self.is_friend(pubkey).await? {
+            warn!("Already friends. Removing request");
+
+            self.root_document.remove_request(internal_request).await?;
+
+            _ = self.export_root_document().await;
+
+            return Ok(());
+        }
+
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
+
+        self.root_document.remove_request(internal_request).await?;
+        self.add_friend(pubkey).await?;
+
+        self.broadcast_request(pubkey, &payload, false, true).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let local_public_key = (*self.did_key).clone();
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotDenySelfAsFriend);
+        }
+
+        if !self.has_request_from(pubkey).await? {
+            return Err(Error::FriendRequestDoesntExist);
+        }
+
+        let list = self.list_all_raw_request().await?;
+
+        // Although the request been validated before storing, we should validate again just to be safe
+        let internal_request = list
+            .iter()
+            .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
+            .ok_or(Error::CannotFindFriendRequest)?;
+
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Reject)?;
+
+        self.root_document.remove_request(internal_request).await?;
+
+        _ = self.export_root_document().await;
+
+        self.broadcast_request(pubkey, &payload, false, true).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let list = self.list_all_raw_request().await?;
+
+        let internal_request = list
+            .iter()
+            .find(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
+            .ok_or(Error::CannotFindFriendRequest)?;
+
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Retract)?;
+
+        self.root_document.remove_request(internal_request).await?;
+
+        _ = self.export_root_document().await;
+
+        if let Some(entry) = self.queue.get(pubkey).await {
+            if entry.event == Event::Request {
+                self.queue.remove(pubkey).await;
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
+                    did: pubkey.clone(),
+                })
+                .await;
+
+                return Ok(());
+            }
+        }
+
+        self.broadcast_request(pubkey, &payload, false, true).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn has_request_from(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.list_incoming_request()
+            .await
+            .map(|list| list.contains(pubkey))
+    }
+}
+
+impl IdentityStore {
+    #[tracing::instrument(skip(self))]
+    pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
+        self.root_document.get_blocks().await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
+        self.block_list()
+            .await
+            .map(|list| list.contains(public_key))
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let local_public_key = (*self.did_key).clone();
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotBlockOwnKey);
+        }
+
+        if self.is_blocked(pubkey).await? {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
+        self.root_document.add_block(pubkey).await?;
+
+        _ = self.export_root_document().await;
+
+        // Remove anything from queue related to the key
+        self.queue.remove(pubkey).await;
+
+        let list = self.list_all_raw_request().await?;
+        for req in list.iter().filter(|req| req.did().eq(pubkey)) {
+            self.root_document.remove_request(req).await?;
+        }
+
+        if self.is_friend(pubkey).await? {
+            if let Err(e) = self.remove_friend(pubkey, false).await {
+                error!("Error removing item from friend list: {e}");
+            }
+        }
+
+        // Since we want to broadcast the remove request, banning the peer after would not allow that to happen
+        // Although this may get uncomment in the future to block connections regardless if its sent or not, or
+        // if we decide to send the request through a relay to broadcast it to the peer, however
+        // the moment this extension is reloaded the block list are considered as a "banned peer" in libp2p
+
+        // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
+
+        // self.ipfs.ban_peer(peer_id).await?;
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
+
+        self.broadcast_request(pubkey, &payload, false, true).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let local_public_key = (*self.did_key).clone();
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotUnblockOwnKey);
+        }
+
+        if !self.is_blocked(pubkey).await? {
+            return Err(Error::PublicKeyIsntBlocked);
+        }
+
+        self.root_document.remove_block(pubkey).await?;
+
+        _ = self.export_root_document().await;
+
+        let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
+        self.ipfs.unban_peer(peer_id).await?;
+
+        let payload = RequestResponsePayload::new(&self.did_key, Event::Unblock)?;
+
+        self.broadcast_request(pubkey, &payload, false, true).await
+    }
+}
+
+impl IdentityStore {
+    pub async fn block_by_list(&self) -> Result<Vec<DID>, Error> {
+        self.root_document.get_block_by().await
+    }
+
+    pub async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.block_by_list().await.map(|list| list.contains(pubkey))
+    }
+}
+
+impl IdentityStore {
+    pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
+        self.root_document.get_friends().await
+    }
+
+    // Should not be called directly but only after a request is accepted
+    #[tracing::instrument(skip(self))]
+    pub async fn add_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
+        if self.is_friend(pubkey).await? {
+            return Err(Error::FriendExist);
+        }
+
+        if self.is_blocked(pubkey).await? {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
+        self.root_document.add_friend(pubkey).await?;
+
+        _ = self.export_root_document().await;
+
+        let phonebook = self.phonebook();
+        if let Err(_e) = phonebook.add_friend(pubkey).await {
+            error!("Error: {_e}");
+        }
+
+        // Push to give an update in the event any wasnt transmitted during the initial push
+        // We dont care if this errors or not.
+        let _ = self.push(pubkey).await;
+
+        self.emit_event(MultiPassEventKind::FriendAdded {
+            did: pubkey.clone(),
+        })
+        .await;
+
+        _ = self.announce_identity_to_mesh().await;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self, broadcast))]
+    pub async fn remove_friend(&mut self, pubkey: &DID, broadcast: bool) -> Result<(), Error> {
+        if !self.is_friend(pubkey).await? {
+            return Err(Error::FriendDoesntExist);
+        }
+
+        self.root_document.remove_friend(pubkey).await?;
+        _ = self.export_root_document().await;
+
+        let phonebook = self.phonebook();
+
+        if let Err(_e) = phonebook.remove_friend(pubkey).await {
+            error!("Error: {_e}");
+        }
+
+        if broadcast {
+            let payload = RequestResponsePayload::new(&self.did_key, Event::Remove)?;
+
+            self.broadcast_request(pubkey, &payload, false, true)
+                .await?;
+        }
+
+        self.emit_event(MultiPassEventKind::FriendRemoved {
+            did: pubkey.clone(),
+        })
+        .await;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn is_friend(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.friends_list().await.map(|list| list.contains(pubkey))
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn subscribe(
+        &self,
+    ) -> Result<futures::stream::BoxStream<'static, MultiPassEventKind>, Error> {
+        self.event.subscribe().await
+    }
+}
+
+impl IdentityStore {
+    pub async fn list_all_raw_request(&self) -> Result<Vec<Request>, Error> {
+        self.root_document.get_requests().await
+    }
+
+    pub async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
+        self.list_incoming_request()
+            .await
+            .map(|list| list.iter().any(|request| request.eq(did)))
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+        self.list_all_raw_request().await.map(|list| {
+            list.iter()
+                .filter_map(|request| match request {
+                    Request::In { did, .. } => Some(did),
+                    _ => None,
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
+        self.list_outgoing_request()
+            .await
+            .map(|list| list.iter().any(|request| request.eq(did)))
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+        self.list_all_raw_request().await.map(|list| {
+            list.iter()
+                .filter_map(|request| match request {
+                    Request::Out { did, .. } => Some(did),
+                    _ => None,
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn broadcast_request(
+        &mut self,
+        recipient: &DID,
+        payload: &RequestResponsePayload,
+        store_request: bool,
+        queue_broadcast: bool,
+    ) -> Result<(), Error> {
+        let remote_peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
+
+        if !self.discovery.contains(recipient).await {
+            self.discovery.insert(recipient).await?;
+        }
+
+        if store_request {
+            let outgoing_request = Request::Out {
+                did: recipient.clone(),
+                date: payload.created.unwrap_or_else(Utc::now),
+            };
+
+            let list = self.list_all_raw_request().await?;
+            if !list.contains(&outgoing_request) {
+                self.root_document.add_request(&outgoing_request).await?;
+                _ = self.export_root_document().await;
+            }
+        }
+
+        let kp = &*self.did_key;
+
+        let payload_bytes = serde_json::to_vec(&payload)?;
+
+        let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
+
+        tracing::trace!("Request Payload size: {} bytes", bytes.len());
+
+        tracing::info!("Sending event to {recipient}");
+
+        let peers = self.ipfs.pubsub_peers(Some(recipient.inbox())).await?;
+
+        let mut queued = false;
+
+        let wait = self
+            .config
+            .store_setting
+            .friend_request_response_duration
+            .is_some();
+
+        let mut rx = (matches!(payload.event, Event::Request) && wait).then_some({
+            let (tx, rx) = oneshot::channel();
+            self.signal.write().await.insert(recipient.clone(), tx);
+            rx
+        });
+
+        let start = Instant::now();
+        if !peers.contains(&remote_peer_id)
+            || (peers.contains(&remote_peer_id)
+                && self
+                    .ipfs
+                    .pubsub_publish(recipient.inbox(), bytes)
+                    .await
+                    .is_err())
+                && queue_broadcast
+        {
+            self.queue.insert(recipient, payload.clone()).await;
+            queued = true;
+            if let Err(e) = self.send_to_mailbox(recipient, payload.clone()).await {
+                tracing::warn!("Unable to send to {recipient} mailbox {e}. ");
+            }
+            self.signal.write().await.remove(recipient);
+        }
+
+        if !queued {
+            let end = start.elapsed();
+            tracing::trace!("Took {}ms to send event", end.as_millis());
+        }
+
+        if !queued && matches!(payload.event, Event::Request) {
+            if let Some(rx) = std::mem::take(&mut rx) {
+                if let Some(timeout) = self.config.store_setting.friend_request_response_duration {
+                    let start = Instant::now();
+                    if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
+                        let end = start.elapsed();
+                        tracing::trace!("Took {}ms to receive a response", end.as_millis());
+                        res?
+                    }
+                }
+            }
+        }
+
+        match payload.event {
+            Event::Request => {
+                self.emit_event(MultiPassEventKind::FriendRequestSent {
+                    to: recipient.clone(),
+                })
+                .await;
+            }
+            Event::Retract => {
+                self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
+                    did: recipient.clone(),
+                })
+                .await;
+            }
+            Event::Reject => {
+                self.emit_event(MultiPassEventKind::IncomingFriendRequestRejected {
+                    did: recipient.clone(),
+                })
+                .await;
+            }
+            Event::Block => {
+                let _ = self.push(recipient).await;
+                let _ = self.request(recipient, RequestOption::Identity).await;
+                self.emit_event(MultiPassEventKind::Blocked {
+                    did: recipient.clone(),
+                })
+                .await;
+            }
+            Event::Unblock => {
+                let _ = self.push(recipient).await;
+                let _ = self.request(recipient, RequestOption::Identity).await;
+
+                self.emit_event(MultiPassEventKind::Unblocked {
+                    did: recipient.clone(),
+                })
+                .await;
+            }
+            _ => {}
+        };
+        Ok(())
     }
 }
