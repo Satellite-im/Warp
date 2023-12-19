@@ -91,7 +91,6 @@ libaom = { git="https://github.com/sdwoodbury/aom-rs", rev="51086cef6b3eb177bdb8
 mp4 = { git="https://github.com/sdwoodbury/mp4-rust", rev="9887024513f59e5fcda9f44442b2a3a2cdfe9706" }
 eye = { git="https://github.com/raymanfx/eye-rs.git", rev="24324eb629dd73f349d0b4678cb0dd4dc5d75f1c" }
 opus = { git = "https://github.com/sdwoodbury/opus-rs", rev="3f07443dac1907dbcc847181a0d40d561592072b" }
-opencv = { version = "0.82", features = ["clang-runtime"] }
 
 warp = { path = "./warp" }
 warp-ipfs = { path = "./extensions/warp-ipfs" }
