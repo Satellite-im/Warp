@@ -549,8 +549,13 @@ impl WarpIpfs {
 
         *self.ipfs.write() = Some(ipfs.clone());
 
-        let filestore =
-            FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone(), span.clone()).await?;
+        let filestore = FileStore::new(
+            ipfs.clone(),
+            &config,
+            self.constellation_tx.clone(),
+            span.clone(),
+        )
+        .await?;
 
         *self.file_store.write() = Some(filestore);
 
