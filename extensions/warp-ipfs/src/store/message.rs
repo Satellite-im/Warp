@@ -3118,6 +3118,13 @@ impl MessageStore {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
+        let members = self.get_conversation(conversation).await.map(|c| {
+            c.recipients()
+                .iter()
+                .filter_map(|did| did.to_peer_id().ok())
+                .collect::<Vec<_>>()
+        })?;
+
         let message = self.get_message(conversation, message_id).await?;
 
         if message.message_type() != MessageType::Attachment {
@@ -3147,7 +3154,7 @@ impl MessageStore {
                 total: Some(attachment.size()),
             };
 
-            let stream = ipfs.get_unixfs(reference, &path);
+            let stream = ipfs.unixfs().get(reference, &path, &members, false, None);
 
             for await event in stream {
                 match event {
