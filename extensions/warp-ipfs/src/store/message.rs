@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tracing::Span;
 use uuid::Uuid;
-use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
+use warp::constellation::{ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
 use warp::error::Error;
@@ -43,6 +43,7 @@ use super::conversation::{ConversationDocument, MessageDocument};
 use super::discovery::Discovery;
 use super::document::conversation::Conversations;
 use super::event_subscription::EventSubscription;
+use super::files::FileStore;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
 use super::{verify_serde_sig, ConversationEvents, MessagingEvents};
@@ -70,7 +71,7 @@ pub struct MessageStore {
     discovery: Discovery,
 
     // filesystem instance
-    filesystem: Option<Box<dyn Constellation>>,
+    filesystem: FileStore,
 
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     stream_reqres_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
@@ -98,9 +99,8 @@ impl MessageStore {
         ipfs: Ipfs,
         path: Option<PathBuf>,
         identity: IdentityStore,
-        // friends: FriendsStore,
         discovery: Discovery,
-        filesystem: Option<Box<dyn Constellation>>,
+        filesystem: FileStore,
         _: bool,
         interval_ms: u64,
         event: EventSubscription<RayGunEventKind>,
@@ -2885,14 +2885,8 @@ impl MessageStore {
         }
         let conversation = self.conversations.get(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
-        //TODO: Send directly if constellation isnt present
-        //      this will require uploading to ipfs directly from here
-        //      or setting up a separate stream channel related to
-        //      the subscribed topic possibly as a configuration option
-        let mut constellation = self
-            .filesystem
-            .clone()
-            .ok_or(Error::ConstellationExtensionUnavailable)?;
+
+        let mut constellation = self.filesystem.clone();
 
         let files = locations
             .iter()
@@ -3113,10 +3107,7 @@ impl MessageStore {
         path: PathBuf,
         _: bool,
     ) -> Result<ConstellationProgressStream, Error> {
-        let constellation = self
-            .filesystem
-            .clone()
-            .ok_or(Error::ConstellationExtensionUnavailable)?;
+        let constellation = self.filesystem.clone();
 
         let members = self.get_conversation(conversation).await.map(|c| {
             c.recipients()

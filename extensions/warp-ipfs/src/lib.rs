@@ -557,7 +557,7 @@ impl WarpIpfs {
         )
         .await?;
 
-        *self.file_store.write() = Some(filestore);
+        *self.file_store.write() = Some(filestore.clone());
 
         let message_store = MessageStore::new(
             ipfs.clone(),
@@ -565,7 +565,7 @@ impl WarpIpfs {
             identity_store,
             // friend_store,
             discovery,
-            Some(Box::new(self.clone()) as Box<dyn Constellation>),
+            filestore,
             false,
             1000,
             self.raygun_tx.clone(),
