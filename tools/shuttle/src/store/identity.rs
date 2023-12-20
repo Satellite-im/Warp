@@ -358,7 +358,7 @@ impl IdentityStorageTask {
         if let Some(old_cid) = old_cid {
             if old_cid != cid {
                 if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    _ = self.ipfs.remove_pin(&old_cid, false).await;
+                    _ = self.ipfs.remove_pin(&old_cid).await;
                 }
 
                 tracing::info!(cid = %old_cid, "removing block(s)");
@@ -410,7 +410,7 @@ impl IdentityStorageTask {
             if old_cid != cid {
                 if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                     tracing::debug!(cid = %old_cid, "unpinning identity package block");
-                    _ = self.ipfs.remove_pin(&old_cid, true).await;
+                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
                 }
 
                 tracing::info!(cid = %old_cid, "removing block(s)");
@@ -498,7 +498,7 @@ impl IdentityStorageTask {
             if old_cid != cid {
                 if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                     tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid, false).await;
+                    _ = self.ipfs.remove_pin(&old_cid).await;
                 }
 
                 tracing::info!(cid = %old_cid, "removing block(s)");
@@ -519,7 +519,7 @@ impl IdentityStorageTask {
             if old_cid != cid {
                 if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                     tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid, false).await;
+                    _ = self.ipfs.remove_pin(&old_cid).await;
                 }
 
                 tracing::info!(cid = %old_cid, "removing block(s)");
@@ -721,7 +721,7 @@ impl IdentityStorageTask {
             if old_cid != cid {
                 if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                     tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid, true).await;
+                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
                 }
 
                 tracing::info!(cid = %old_cid, "removing block(s)");
@@ -790,7 +790,7 @@ impl IdentityStorageTask {
             if old_cid != cid {
                 if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                     tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid, true).await;
+                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
                 }
 
                 tracing::info!(cid = %old_cid, "removing block(s)");
