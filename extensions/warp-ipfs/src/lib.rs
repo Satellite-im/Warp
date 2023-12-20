@@ -265,7 +265,7 @@ impl WarpIpfs {
                 }
                 idconfig
             }))
-            .with_bitswap(None)
+            .with_bitswap()
             .with_ping(None)
             .with_pubsub(Some(PubsubConfig {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
