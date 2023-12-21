@@ -50,18 +50,27 @@ async fn main() -> anyhow::Result<()> {
     account_a.send_request(&ident_b.did_key()).await?;
     let mut sent = false;
     let mut received = false;
-
+    let mut seen_a = false;
+    let mut seen_b = false;
     loop {
         tokio::select! {
-            Some(MultiPassEventKind::FriendRequestSent { .. }) = subscribe_a.next() => {
-                sent = true;
+            Some(ev) = subscribe_a.next() => {
+                match ev {
+                    MultiPassEventKind::FriendRequestSent { .. } => sent = true,
+                    MultiPassEventKind::IdentityUpdate { did } if did == ident_b.did_key() => seen_b = true,
+                    _ => {}
+                }
             }
-            Some(MultiPassEventKind::FriendRequestReceived { .. }) = subscribe_b.next() => {
-                received = true;
+            Some(ev) = subscribe_b.next() => {
+                match ev {
+                    MultiPassEventKind::FriendRequestReceived { .. } => received = true,
+                    MultiPassEventKind::IdentityUpdate { did } if did == ident_a.did_key() => seen_a = true,
+                    _ => {}
+                }
             }
         }
 
-        if sent && received {
+        if sent && received && seen_a && seen_b {
             break;
         }
     }
