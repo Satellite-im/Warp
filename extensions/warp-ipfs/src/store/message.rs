@@ -1729,7 +1729,7 @@ impl MessageStore {
             return Err(Error::PublicKeyIsBlocked);
         }
 
-        let own_did = &*(self.did.clone());
+        let own_did = &*self.did;
 
         if did_key == own_did {
             return Err(Error::CannotCreateConversation);
@@ -1824,7 +1824,7 @@ impl MessageStore {
         name: Option<String>,
         mut recipients: HashSet<DID>,
     ) -> Result<Conversation, Error> {
-        let own_did = &*(self.did.clone());
+        let own_did = &*self.did;
 
         if recipients.contains(own_did) {
             return Err(Error::CannotCreateConversation);
@@ -2704,7 +2704,7 @@ impl MessageStore {
             });
         }
 
-        let own_did = &*self.did.clone();
+        let own_did = &*self.did;
 
         let construct = [
             message_id.into_bytes().to_vec(),
