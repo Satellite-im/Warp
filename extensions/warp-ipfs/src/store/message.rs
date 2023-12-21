@@ -908,9 +908,14 @@ impl MessageStore {
 
                 let message_id = message.id();
 
-                let message_document =
-                    MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
-                        .await?;
+                let message_document = MessageDocument::new(
+                    &self.ipfs,
+                    &self.did,
+                    document.conversation_type,
+                    message,
+                    keystore.as_ref(),
+                )
+                .await?;
 
                 messages.insert(message_document);
                 document.set_message_list(&self.ipfs, messages).await?;
@@ -949,7 +954,12 @@ impl MessageStore {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .resolve(
+                        &self.ipfs,
+                        document.conversation_type,
+                        &self.did,
+                        keystore.as_ref(),
+                    )
                     .await?;
 
                 let lines_value_length: usize = lines
@@ -1009,7 +1019,13 @@ impl MessageStore {
                 message.set_modified(modified);
 
                 message_document
-                    .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                    .update(
+                        &self.ipfs,
+                        &self.did,
+                        document.conversation_type,
+                        message,
+                        keystore.as_ref(),
+                    )
                     .await?;
                 list.replace(message_document);
                 document.set_message_list(&self.ipfs, list).await?;
@@ -1032,7 +1048,12 @@ impl MessageStore {
                         .await?;
 
                     let message = message_document
-                        .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                        .resolve(
+                            &self.ipfs,
+                            document.conversation_type,
+                            &self.did,
+                            keystore.as_ref(),
+                        )
                         .await?;
 
                     let signature = message.signature();
@@ -1076,7 +1097,12 @@ impl MessageStore {
                     .await?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .resolve(
+                        &self.ipfs,
+                        document.conversation_type,
+                        &self.did,
+                        keystore.as_ref(),
+                    )
                     .await?;
 
                 let event = match state {
@@ -1103,7 +1129,13 @@ impl MessageStore {
                 };
 
                 message_document
-                    .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                    .update(
+                        &self.ipfs,
+                        &self.did,
+                        document.conversation_type,
+                        message,
+                        keystore.as_ref(),
+                    )
                     .await?;
 
                 list.replace(message_document);
@@ -1132,7 +1164,12 @@ impl MessageStore {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .resolve(
+                        &self.ipfs,
+                        document.conversation_type,
+                        &self.did,
+                        keystore.as_ref(),
+                    )
                     .await?;
 
                 let reactions = message.reactions_mut();
@@ -1156,7 +1193,13 @@ impl MessageStore {
                         };
 
                         message_document
-                            .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                            .update(
+                                &self.ipfs,
+                                &self.did,
+                                document.conversation_type,
+                                message,
+                                keystore.as_ref(),
+                            )
                             .await?;
 
                         list.replace(message_document);
@@ -1196,7 +1239,13 @@ impl MessageStore {
                         }
 
                         message_document
-                            .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                            .update(
+                                &self.ipfs,
+                                &self.did,
+                                document.conversation_type,
+                                message,
+                                keystore.as_ref(),
+                            )
                             .await?;
 
                         list.replace(message_document);
