@@ -4,6 +4,7 @@ use futures::prelude::*;
 use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, SharedWriter};
 use std::collections::HashMap;
+use std::env::temp_dir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -147,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
 
     if !opt.stdout_log {
         let file_appender = tracing_appender::rolling::hourly(
-            opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
+            opt.path.clone().unwrap_or_else(|| temp_dir()),
             "warp_rg_ipfs_messenger.log",
         );
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
