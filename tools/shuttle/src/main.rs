@@ -170,7 +170,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             agent_version: format!("shuttle/{}", env!("CARGO_PKG_VERSION")),
             ..Default::default()
         }))
-        .with_bitswap(None)
+        .with_bitswap()
         .with_ping(None)
         .with_pubsub(Some(PubsubConfig {
             max_transmit_size: 4 * 1024 * 1024,
