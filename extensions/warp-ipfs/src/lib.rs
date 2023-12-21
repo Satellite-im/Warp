@@ -265,7 +265,7 @@ impl WarpIpfs {
                 }
                 idconfig
             }))
-            .with_bitswap(None)
+            .with_bitswap()
             .with_ping(None)
             .with_pubsub(Some(PubsubConfig {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
@@ -357,90 +357,92 @@ impl WarpIpfs {
 
         let ipfs = uninitialized.start().await?;
 
-        let mut relay_peers = HashSet::new();
+        if config.enable_relay {
+            let mut relay_peers = HashSet::new();
 
-        for mut addr in config
-            .ipfs_setting
-            .relay_client
-            .relay_address
-            .iter()
-            .chain(config.bootstrap.address().iter())
-            .cloned()
-        {
-            if addr.is_relayed() {
-                warn!("Relay circuits cannot be used as relays");
-                continue;
+            for mut addr in config
+                .ipfs_setting
+                .relay_client
+                .relay_address
+                .iter()
+                .chain(config.bootstrap.address().iter())
+                .cloned()
+            {
+                if addr.is_relayed() {
+                    warn!("Relay circuits cannot be used as relays");
+                    continue;
+                }
+
+                let Some(peer_id) = addr.extract_peer_id() else {
+                    warn!("{addr} does not contain a peer id. Skipping");
+                    continue;
+                };
+
+                if let Err(e) = ipfs.add_peer(peer_id, addr.clone()).await {
+                    warn!("Failed to add relay to address book: {e}");
+                }
+
+                if let Err(e) = ipfs.add_relay(peer_id, addr).await {
+                    error!("Error adding relay: {e}");
+                    continue;
+                }
+
+                relay_peers.insert(peer_id);
             }
 
-            let Some(peer_id) = addr.extract_peer_id() else {
-                warn!("{addr} does not contain a peer id. Skipping");
-                continue;
-            };
-
-            if let Err(e) = ipfs.add_peer(peer_id, addr.clone()).await {
-                warn!("Failed to add relay to address book: {e}");
+            if relay_peers.is_empty() {
+                warn!("No relays available");
             }
 
-            if let Err(e) = ipfs.add_relay(peer_id, addr).await {
-                error!("Error adding relay: {e}");
-                continue;
-            }
-
-            relay_peers.insert(peer_id);
-        }
-
-        if relay_peers.is_empty() {
-            warn!("No relays available");
-        }
-
-        // Use the selected relays
-        let relay_connection_task = {
-            let ipfs = ipfs.clone();
-            let quorum = config.ipfs_setting.relay_client.quorum;
-            async move {
-                let mut counter = 0;
-                for relay_peer in relay_peers {
-                    match tokio::time::timeout(
-                        Duration::from_secs(5),
-                        ipfs.enable_relay(Some(relay_peer)),
-                    )
-                    .await
-                    {
-                        Ok(Ok(_)) => {}
-                        Ok(Err(e)) => {
-                            error!("Failed to use {relay_peer} as a relay: {e}");
-                            continue;
-                        }
-                        Err(_) => {
-                            error!("Relay connection timed out");
-                            continue;
-                        }
-                    };
-
-                    match quorum {
-                        config::RelayQuorum::First => break,
-                        config::RelayQuorum::N(n) => {
-                            if counter < n {
-                                counter += 1;
+            // Use the selected relays
+            let relay_connection_task = {
+                let ipfs = ipfs.clone();
+                let quorum = config.ipfs_setting.relay_client.quorum;
+                async move {
+                    let mut counter = 0;
+                    for relay_peer in relay_peers {
+                        match tokio::time::timeout(
+                            Duration::from_secs(5),
+                            ipfs.enable_relay(Some(relay_peer)),
+                        )
+                        .await
+                        {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(e)) => {
+                                error!("Failed to use {relay_peer} as a relay: {e}");
                                 continue;
                             }
-                            break;
+                            Err(_) => {
+                                error!("Relay connection timed out");
+                                continue;
+                            }
+                        };
+
+                        match quorum {
+                            config::RelayQuorum::First => break,
+                            config::RelayQuorum::N(n) => {
+                                if counter < n {
+                                    counter += 1;
+                                    continue;
+                                }
+                                break;
+                            }
+                            config::RelayQuorum::All => continue,
                         }
-                        config::RelayQuorum::All => continue,
+                    }
+
+                    let list = ipfs.list_relays(true).await.unwrap_or_default();
+                    for addr in list.iter().flat_map(|(_, addrs)| addrs) {
+                        tracing::info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
                     }
                 }
+            };
 
-                let list = ipfs.list_relays(true).await.unwrap_or_default();
-                for addr in list.iter().flat_map(|(_, addrs)| addrs) {
-                    tracing::info!("Listening on {}", addr.clone().with(Protocol::P2pCircuit));
-                }
+            if config.ipfs_setting.relay_client.background {
+                tokio::spawn(relay_connection_task);
+            } else {
+                relay_connection_task.await;
             }
-        };
-
-        if config.ipfs_setting.relay_client.background {
-            tokio::spawn(relay_connection_task);
-        } else {
-            relay_connection_task.await;
         }
 
         if config.ipfs_setting.dht_client
@@ -549,18 +551,22 @@ impl WarpIpfs {
 
         *self.ipfs.write() = Some(ipfs.clone());
 
-        let filestore =
-            FileStore::new(ipfs.clone(), &config, self.constellation_tx.clone(), span.clone()).await?;
+        let filestore = FileStore::new(
+            ipfs.clone(),
+            &config,
+            self.constellation_tx.clone(),
+            span.clone(),
+        )
+        .await?;
 
-        *self.file_store.write() = Some(filestore);
+        *self.file_store.write() = Some(filestore.clone());
 
         let message_store = MessageStore::new(
             ipfs.clone(),
             config.path.map(|path| path.join("messages")),
             identity_store,
-            // friend_store,
             discovery,
-            Some(Box::new(self.clone()) as Box<dyn Constellation>),
+            filestore,
             false,
             1000,
             self.raygun_tx.clone(),

@@ -23,14 +23,17 @@ use base64::{
 };
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
-use rust_ipfs::libp2p::{
-    self,
-    core::{PeerRecord, SignedEnvelope},
-};
 use rust_ipfs::{
     libp2p::swarm::NetworkBehaviour,
     p2p::{IdentifyConfiguration, RateLimit, RelayConfig, TransportConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
+};
+use rust_ipfs::{
+    libp2p::{
+        self,
+        core::{PeerRecord, SignedEnvelope},
+    },
+    p2p::PubsubConfig,
 };
 
 use zeroize::Zeroizing;
@@ -167,9 +170,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             agent_version: format!("shuttle/{}", env!("CARGO_PKG_VERSION")),
             ..Default::default()
         }))
-        .with_bitswap(None)
+        .with_bitswap()
         .with_ping(None)
-        .with_pubsub(None)
+        .with_pubsub(Some(PubsubConfig {
+            max_transmit_size: 4 * 1024 * 1024,
+            ..Default::default()
+        }))
         .with_custom_behaviour(Behaviour {
             identity: identity::server::Behaviour::new(&keypair, id_event_tx, precord_rx),
             dummy: ext_behaviour::Behaviour::new(local_peer_id),

@@ -504,7 +504,6 @@ impl ConversationDocument {
             _ => (None, u8::MAX as _),
         };
 
-
         let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
         let mut pages = vec![];
         // First check to determine if there is a page that was selected
@@ -587,12 +586,12 @@ impl ConversationDocument {
         };
 
         if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid, false).await?;
+            ipfs.remove_pin(&cid).await?;
         }
 
         for document in messages {
             if ipfs.is_pinned(&document.message).await? {
-                ipfs.remove_pin(&document.message, false).await?;
+                ipfs.remove_pin(&document.message).await?;
             }
         }
         Ok(())
