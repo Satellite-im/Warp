@@ -64,7 +64,6 @@ struct Opt {
 async fn setup<P: AsRef<Path>>(
     path: Option<P>,
     passphrase: Zeroizing<String>,
-    _: bool,
     opt: &Opt,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>)> {
     let tesseract = match path.as_ref() {
@@ -172,13 +171,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Creating or obtaining account...");
-    let (new_account, mut chat, _) = setup(
-        opt.path.clone(),
-        Zeroizing::new(password),
-        opt.experimental_node,
-        &opt,
-    )
-    .await?;
+    let (new_account, mut chat, _) =
+        setup(opt.path.clone(), Zeroizing::new(password), &opt).await?;
 
     println!("Obtaining identity....");
     let identity = new_account.get_own_identity().await?;
