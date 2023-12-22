@@ -427,7 +427,6 @@ mod test {
 
     use chrono::Utc;
     use futures::StreamExt;
-    use libipld::Cid;
     use rust_ipfs::UninitializedIpfsNoop;
     use warp::{
         crypto::{
