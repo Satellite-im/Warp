@@ -438,7 +438,7 @@ mod test {
 
     use crate::store::document::{cache::IdentityCache, identity::IdentityDocument};
 
-    fn random_document() -> IdentityDocument {
+    fn random_document() -> (DID, IdentityDocument) {
         let did_key = DID::default();
         let fingerprint = did_key.fingerprint();
         let bytes = fingerprint.as_bytes();
@@ -462,7 +462,7 @@ mod test {
 
         document.verify().expect("valid");
 
-        document
+        (did_key, document)
     }
 
     async fn pregenerated_cache<const N: usize>() -> IdentityCache {
@@ -474,7 +474,7 @@ mod test {
         let cache = IdentityCache::new(&ipfs, None).await;
 
         for _ in 0..N {
-            let document = random_document();
+            let (_, document) = random_document();
             cache.insert(&document).await.expect("inserted");
         }
 
@@ -485,13 +485,37 @@ mod test {
     async fn new_identity_cache() -> anyhow::Result<()> {
         let cache = pregenerated_cache::<0>().await;
 
-        let document = random_document();
+        let (_, document) = random_document();
 
         cache.insert(&document).await?;
 
         let existing_document = cache.get(&document.did).await?;
 
         assert_eq!(existing_document, document);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_existing_identity_cache() -> anyhow::Result<()> {
+        let cache = pregenerated_cache::<0>().await;
+
+        let (did_key, mut document) = random_document();
+
+        let old_doc = document.clone();
+
+        cache.insert(&document).await?;
+
+        document.username = String::from("NewName");
+
+        let document = document.sign(&did_key).expect("valid");
+
+        let old_document = cache
+            .insert(&document)
+            .await?
+            .expect("previous document provided");
+
+        assert_eq!(old_doc, old_document);
 
         Ok(())
     }
