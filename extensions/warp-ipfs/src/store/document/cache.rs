@@ -149,6 +149,8 @@ impl IdentityCacheTask {
     pub async fn start(&mut self) {
         // migrate old identity to new
         self.migrate().await;
+        // repin map 
+        self.repin_map().await;
 
         while let Some(command) = self.rx.next().await {
             match command {
@@ -208,6 +210,47 @@ impl IdentityCacheTask {
         }
 
         _ = tokio::fs::remove_file(path.join(".cache_id")).await;
+    }
+
+    async fn repin_map(&mut self) {
+        let cid = match self.list {
+            Some(cid) => cid,
+            None => return,
+        };
+
+        let Ok(list) = self
+            .ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized::<std::collections::HashMap<String, Cid>>()
+            .await
+        else {
+            return;
+        };
+
+        for cid in list.values() {
+            if self.ipfs.is_pinned(cid).await.unwrap_or_default() {
+                //We can ignore if its pinned indirectly via a recursive pin root
+                _ = self.ipfs.remove_pin(cid).await;
+            }
+        }
+
+        if self.ipfs.is_pinned(&cid).await.unwrap_or_default() {
+            if self
+                .ipfs
+                .list_pins(Some(rust_ipfs::PinMode::Recursive))
+                .await
+                .filter_map(|res| async move { res.ok() })
+                .any(|(root_cid, _)| async move { root_cid == cid })
+                .await
+            {
+                return;
+            }
+            if self.ipfs.remove_pin(&cid).await.is_err() {
+                return;
+            }
+            _ = self.ipfs.insert_pin(&cid).recursive().local().await;
+        }
     }
 
     async fn insert(
