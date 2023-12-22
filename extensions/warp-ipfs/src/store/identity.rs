@@ -419,7 +419,7 @@ impl IdentityStore {
                     if let Err(e) = store.register(&id).await {
                         tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                     }
-                    if let Err(e) = self.export_root_document().await {
+                    if let Err(e) = store.export_root_document().await {
                         tracing::warn!(%id.did, error = %e, "Unable to export root document after registeration");
                     }
                 }
