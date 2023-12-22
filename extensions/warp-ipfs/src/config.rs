@@ -291,7 +291,7 @@ impl Default for Config {
                 ..Default::default()
             },
             store_setting: Default::default(),
-            enable_relay: false,
+            enable_relay: true,
             save_phrase: false,
             max_storage_size: Some(10 * 1024 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
@@ -328,7 +328,6 @@ impl Config {
                 },
                 ..Default::default()
             },
-            enable_relay: true,
             ..Default::default()
         }
     }
@@ -350,7 +349,6 @@ impl Config {
                 discovery: Discovery::None,
                 ..Default::default()
             },
-            enable_relay: true,
             ..Default::default()
         }
     }
