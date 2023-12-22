@@ -171,7 +171,7 @@ impl Stream for MessageStream {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
     date_range: Option<Range<DateTime<Utc>>>,
     first_message: bool,
