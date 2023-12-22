@@ -253,27 +253,15 @@ impl IdentityCacheTask {
                     return Ok(None);
                 }
 
-                let cid = self
-                    .ipfs
-                    .dag()
-                    .put()
-                    .serialize(document.clone())?
-                    .pin(false)
-                    .await?;
+                let cid = self.ipfs.dag().put().serialize(document)?.await?;
 
-                let old_cid = list.insert(did_str, cid);
+                list.insert(did_str, cid);
 
-                if let Some(old_cid) = old_cid {
-                    if old_cid != cid {
-                        if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid).await?;
-                        }
-                        // Do we want to remove the old block?
-                        self.ipfs.remove_block(old_cid, false).await?;
-                    }
+                let cid = self.ipfs.dag().put().serialize(list)?.await?;
+
+                if !self.ipfs.is_pinned(&cid).await? {
+                    self.ipfs.insert_pin(&cid).recursive().local().await?;
                 }
-
-                let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
                 let old_cid = self.list.replace(cid);
 
@@ -288,7 +276,7 @@ impl IdentityCacheTask {
                     if let Some(old_cid) = old_cid {
                         if old_cid != cid {
                             if self.ipfs.is_pinned(&old_cid).await? {
-                                self.ipfs.remove_pin(&old_cid).await?;
+                                self.ipfs.remove_pin(&old_cid).recursive().await?;
                             }
                             // Do we want to remove the old block?
                             self.ipfs.remove_block(old_cid, false).await?;
@@ -299,30 +287,18 @@ impl IdentityCacheTask {
 
                 remove_pin_and_block.await?;
 
-                Ok(Some(old_document.clone()))
+                Ok(Some(old_document))
             }
             None => {
-                let cid = self
-                    .ipfs
-                    .dag()
-                    .put()
-                    .serialize(document.clone())?
-                    .pin(false)
-                    .await?;
+                let cid = self.ipfs.dag().put().serialize(document)?.await?;
 
-                let old_cid = list.insert(did_str, cid);
+                list.insert(did_str, cid);
 
-                if let Some(old_cid) = old_cid {
-                    if old_cid != cid {
-                        if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid).await?;
-                        }
-                        // Do we want to remove the old block?
-                        self.ipfs.remove_block(old_cid, false).await?;
-                    }
+                let cid = self.ipfs.dag().put().serialize(list)?.await?;
+
+                if !self.ipfs.is_pinned(&cid).await? {
+                    self.ipfs.insert_pin(&cid).recursive().local().await?;
                 }
-
-                let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
 
                 let old_cid = self.list.replace(cid);
 
@@ -336,7 +312,7 @@ impl IdentityCacheTask {
                 if let Some(old_cid) = old_cid {
                     if old_cid != cid {
                         if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid).await?;
+                            self.ipfs.remove_pin(&old_cid).recursive().await?;
                         }
                         // Do we want to remove the old block?
                         self.ipfs.remove_block(old_cid, false).await?;
@@ -385,20 +361,15 @@ impl IdentityCacheTask {
             }
         };
 
-        let old_document = match list.remove(&did.to_string()) {
-            Some(cid) => cid,
-            None => return Err(Error::IdentityDoesntExist),
-        };
-
-        if self.ipfs.is_pinned(&old_document).await.unwrap_or_default() {
-            self.ipfs.remove_pin(&old_document).await?;
+        if list.remove(&did.to_string()).is_none() {
+            return Err(Error::IdentityDoesntExist);
         }
 
-        if let Err(e) = self.ipfs.remove_block(old_document, false).await {
-            tracing::warn!(cid = %old_document, id = %did, "Unable to remove block: {e}");
-        }
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
+        if !self.ipfs.is_pinned(&cid).await? {
+            self.ipfs.insert_pin(&cid).recursive().local().await?;
+        }
 
         let old_cid = self.list.replace(cid);
 
@@ -412,7 +383,7 @@ impl IdentityCacheTask {
         if let Some(old_cid) = old_cid {
             if cid != old_cid {
                 if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.remove_pin(&old_cid).await?;
+                    self.ipfs.remove_pin(&old_cid).recursive().await?;
                 }
                 // Do we want to remove the old block?
                 self.ipfs.remove_block(old_cid, false).await?;
@@ -448,5 +419,99 @@ impl IdentityCacheTask {
         .filter_map(|id_result| async move { id_result.ok() })
         .filter(|id| futures::future::ready(id.verify().is_ok()))
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use chrono::Utc;
+    use futures::StreamExt;
+    use libipld::Cid;
+    use rust_ipfs::UninitializedIpfsNoop;
+    use warp::{
+        crypto::{
+            rand::{self, seq::SliceRandom},
+            Fingerprint, DID,
+        },
+        multipass::identity::SHORT_ID_SIZE,
+    };
+
+    use crate::store::document::{cache::IdentityCache, identity::IdentityDocument};
+
+    fn random_document() -> IdentityDocument {
+        let did_key = DID::default();
+        let fingerprint = did_key.fingerprint();
+        let bytes = fingerprint.as_bytes();
+        let time = Utc::now();
+
+        let document = IdentityDocument {
+            username: warp::multipass::generator::generate_name(),
+            short_id: bytes[bytes.len() - SHORT_ID_SIZE..]
+                .try_into()
+                .expect("Valid conversion"),
+            did: did_key.clone(),
+            created: time,
+            modified: time,
+            status_message: None,
+            metadata: Default::default(),
+            version: Default::default(),
+            signature: None,
+        };
+
+        let document = document.sign(&did_key).expect("valid");
+
+        document.verify().expect("valid");
+
+        document
+    }
+
+    async fn pregenerated_cache<const N: usize>() -> IdentityCache {
+        let ipfs = UninitializedIpfsNoop::new()
+            .start()
+            .await
+            .expect("constructed ipfs instance");
+
+        let cache = IdentityCache::new(&ipfs, None).await;
+
+        for _ in 0..N {
+            let document = random_document();
+            cache.insert(&document).await.expect("inserted");
+        }
+
+        cache
+    }
+
+    #[tokio::test]
+    async fn new_identity_cache() -> anyhow::Result<()> {
+        let cache = pregenerated_cache::<0>().await;
+
+        let document = random_document();
+
+        cache.insert(&document).await?;
+
+        let existing_document = cache.get(&document.did).await?;
+
+        assert_eq!(existing_document, document);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn remove_identity_from_cache() -> anyhow::Result<()> {
+        let mut rng = rand::thread_rng();
+        let cache = pregenerated_cache::<10>().await;
+
+        let list = cache.list().await?.collect::<Vec<_>>().await;
+
+        let random_doc = list.choose(&mut rng).expect("exist");
+
+        cache.remove(&random_doc.did).await?;
+
+        let result = cache.get(&random_doc.did).await;
+
+        assert!(result.is_err());
+
+        Ok(())
     }
 }
