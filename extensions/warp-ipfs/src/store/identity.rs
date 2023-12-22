@@ -419,6 +419,9 @@ impl IdentityStore {
                     if let Err(e) = store.register(&id).await {
                         tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                     }
+                    if let Err(e) = self.export_root_document().await {
+                        tracing::warn!(%id.did, error = %e, "Unable to export root document after registeration");
+                    }
                 }
             }
         }
@@ -1574,6 +1577,10 @@ impl IdentityStore {
                 if let Err(e) = self.register(&id).await {
                     tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                 }
+
+                if let Err(e) = self.export_root_document().await {
+                    tracing::warn!(%id.did, error = %e, "Unable to export root document after registeration");
+                }
             }
         }
 
@@ -1629,6 +1636,10 @@ impl IdentityStore {
 
         if let Err(e) = self.register(&identity).await {
             tracing::warn!(%identity.did, "Unable to register to external node: {e}. Identity will not be discoverable offline");
+        }
+
+        if let Err(e) = self.export_root_document().await {
+            tracing::warn!(%identity.did, "Unable to export root document: {e}");
         }
 
         let identity = identity.resolve()?;
