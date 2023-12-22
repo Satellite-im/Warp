@@ -204,7 +204,7 @@ impl IdentityCacheTask {
         }
 
         if self.ipfs.is_pinned(&cid).await.unwrap_or_default() {
-            _ = self.ipfs.remove_pin(&cid, false).await;
+            _ = self.ipfs.remove_pin(&cid).await;
         }
 
         _ = tokio::fs::remove_file(path.join(".cache_id")).await;
@@ -266,7 +266,7 @@ impl IdentityCacheTask {
                 if let Some(old_cid) = old_cid {
                     if old_cid != cid {
                         if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid, false).await?;
+                            self.ipfs.remove_pin(&old_cid).await?;
                         }
                         // Do we want to remove the old block?
                         self.ipfs.remove_block(old_cid, false).await?;
@@ -288,7 +288,7 @@ impl IdentityCacheTask {
                     if let Some(old_cid) = old_cid {
                         if old_cid != cid {
                             if self.ipfs.is_pinned(&old_cid).await? {
-                                self.ipfs.remove_pin(&old_cid, false).await?;
+                                self.ipfs.remove_pin(&old_cid).await?;
                             }
                             // Do we want to remove the old block?
                             self.ipfs.remove_block(old_cid, false).await?;
@@ -315,7 +315,7 @@ impl IdentityCacheTask {
                 if let Some(old_cid) = old_cid {
                     if old_cid != cid {
                         if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid, false).await?;
+                            self.ipfs.remove_pin(&old_cid).await?;
                         }
                         // Do we want to remove the old block?
                         self.ipfs.remove_block(old_cid, false).await?;
@@ -336,7 +336,7 @@ impl IdentityCacheTask {
                 if let Some(old_cid) = old_cid {
                     if old_cid != cid {
                         if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid, false).await?;
+                            self.ipfs.remove_pin(&old_cid).await?;
                         }
                         // Do we want to remove the old block?
                         self.ipfs.remove_block(old_cid, false).await?;
@@ -391,7 +391,7 @@ impl IdentityCacheTask {
         };
 
         if self.ipfs.is_pinned(&old_document).await.unwrap_or_default() {
-            self.ipfs.remove_pin(&old_document, false).await?;
+            self.ipfs.remove_pin(&old_document).await?;
         }
 
         if let Err(e) = self.ipfs.remove_block(old_document, false).await {
@@ -412,7 +412,7 @@ impl IdentityCacheTask {
         if let Some(old_cid) = old_cid {
             if cid != old_cid {
                 if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.remove_pin(&old_cid, false).await?;
+                    self.ipfs.remove_pin(&old_cid).await?;
                 }
                 // Do we want to remove the old block?
                 self.ipfs.remove_block(old_cid, false).await?;

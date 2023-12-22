@@ -419,6 +419,9 @@ impl IdentityStore {
                     if let Err(e) = store.register(&id).await {
                         tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                     }
+                    if let Err(e) = store.export_root_document().await {
+                        tracing::warn!(%id.did, error = %e, "Unable to export root document after registeration");
+                    }
                 }
             }
         }
@@ -1574,6 +1577,10 @@ impl IdentityStore {
                 if let Err(e) = self.register(&id).await {
                     tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                 }
+
+                if let Err(e) = self.export_root_document().await {
+                    tracing::warn!(%id.did, error = %e, "Unable to export root document after registeration");
+                }
             }
         }
 
@@ -1629,6 +1636,10 @@ impl IdentityStore {
 
         if let Err(e) = self.register(&identity).await {
             tracing::warn!(%identity.did, "Unable to register to external node: {e}. Identity will not be discoverable offline");
+        }
+
+        if let Err(e) = self.export_root_document().await {
+            tracing::warn!(%identity.did, "Unable to export root document: {e}");
         }
 
         let identity = identity.resolve()?;
@@ -2299,7 +2310,7 @@ impl IdentityStore {
     pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
         let ipfs = &self.ipfs;
         if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid, true).await?;
+            ipfs.remove_pin(&cid).recursive().await?;
         }
         let blocks = ipfs.remove_block(cid, true).await?;
         tracing::info!("{} blocks removed.", blocks.len());

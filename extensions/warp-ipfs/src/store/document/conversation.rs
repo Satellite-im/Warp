@@ -359,11 +359,9 @@ impl ConversationTask {
     }
 
     async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let cid = self.ipfs.dag().put().serialize(map)?.await?;
+        let cid = self.ipfs.dag().put().serialize(map)?.pin(true).await?;
 
         let old_map_cid = self.cid.replace(cid);
-
-        self.ipfs.insert_pin(&cid, true).await?;
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
@@ -374,7 +372,7 @@ impl ConversationTask {
 
         if let Some(old_cid) = old_map_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                self.ipfs.remove_pin(&old_cid, true).await?;
+                self.ipfs.remove_pin(&old_cid).recursive().await?;
             }
         }
 
