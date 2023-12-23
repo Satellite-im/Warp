@@ -620,7 +620,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("list-incoming-request") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["From"]);
+                            table.set_header(vec!["From", "Public Key"]);
                             let list = match account.list_incoming_request().await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -630,18 +630,19 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for request in list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(request.clone())).await {
-                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or(String::from("N/A")),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
                                     username.to_string(),
+                                    request.to_string()
                                 ]);
                             }
                             writeln!(stdout, "{table}")?;
                         },
                         Some("list-outgoing-request") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["To"]);
+                            table.set_header(vec!["To", "Public Key"]);
                             let list = match account.list_outgoing_request().await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -651,11 +652,12 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for request in list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(request.clone())).await {
-                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or(String::from("N/A")),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
                                     username.to_string(),
+                                    request.to_string()
                                 ]);
                             }
                             writeln!(stdout, "{table}")?;
