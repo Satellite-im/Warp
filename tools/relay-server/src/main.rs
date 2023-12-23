@@ -103,27 +103,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_circuits: 32768,
             max_circuits_per_peer: 32768,
             max_circuit_duration: Duration::from_secs(2 * 60),
-            max_circuit_bytes: 8 * 1024 * 1024,
+            max_circuit_bytes: 512 * 1024 * 1024,
             circuit_src_rate_limiters: vec![
                 RateLimit::PerIp {
-                    limit: 256.try_into().expect("Greater than 0"),
+                    limit: 32768.try_into().expect("Greater than 0"),
                     interval: Duration::from_secs(60 * 2),
                 },
                 RateLimit::PerPeer {
-                    limit: 256.try_into().expect("Greater than 0"),
+                    limit: 32768.try_into().expect("Greater than 0"),
                     interval: Duration::from_secs(30),
                 },
             ],
-            max_reservations_per_peer: 512,
+            max_reservations_per_peer: 32768,
             max_reservations: 32768,
             reservation_duration: Duration::from_secs(60 * 60),
             reservation_rate_limiters: vec![
                 RateLimit::PerIp {
-                    limit: 256.try_into().expect("Greater than 0"),
+                    limit: 32768.try_into().expect("Greater than 0"),
                     interval: Duration::from_secs(30),
                 },
                 RateLimit::PerPeer {
-                    limit: 256.try_into().expect("Greater than 0"),
+                    limit: 32768.try_into().expect("Greater than 0"),
                     interval: Duration::from_secs(30),
                 },
             ],
