@@ -860,7 +860,7 @@ impl MessageStore {
                     return Err(Error::MessageFound);
                 }
 
-                if !document.recipients().contains(&message.sender()) {
+                if !document.recipients().contains(message.sender()) {
                     return Err(Error::IdentityDoesntExist);
                 }
 
@@ -900,7 +900,7 @@ impl MessageStore {
                             .concat(),
                     ]
                     .concat();
-                    verify_serde_sig(sender, &construct, &signature)?;
+                    verify_serde_sig(sender, &construct, signature)?;
                 }
 
                 spam_check(&mut message, self.spam_filter.clone())?;
@@ -985,7 +985,7 @@ impl MessageStore {
                             .concat(),
                     ]
                     .concat();
-                    verify_serde_sig(sender.clone(), &construct, &signature)?;
+                    verify_serde_sig(sender, &construct, signature)?;
                 }
 
                 //Validate the edit message
@@ -1049,7 +1049,7 @@ impl MessageStore {
                             .concat(),
                     ]
                     .concat();
-                    verify_serde_sig(sender, &construct, &signature)?;
+                    verify_serde_sig(sender, &construct, signature)?;
                 }
 
                 document.delete_message(&self.ipfs, message_id).await?;
@@ -1510,7 +1510,7 @@ impl MessageStore {
                         //Small validation context
                         let context = format!("exclude {}", recipient);
                         let signature = bs58::decode(&signature).into_vec()?;
-                        verify_serde_sig(recipient.clone(), &context, &signature)?;
+                        verify_serde_sig(&recipient, &context, &signature)?;
                     }
 
                     let mut conversation = self.conversations.get(conversation_id).await?;

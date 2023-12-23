@@ -78,8 +78,8 @@ impl GossipSubListener {
         let _ = self.ch.send(GossipSubCmd::ConnectWebRtc { call_id, peer });
     }
 
-    pub fn receive_calls(&self, own_id: DID) {
-        let _ = self.ch.send(GossipSubCmd::ReceiveCalls { own_id });
+    pub fn receive_calls(&self, own_id: &DID) {
+        let _ = self.ch.send(GossipSubCmd::ReceiveCalls { own_id: own_id.clone() });
     }
 }
 

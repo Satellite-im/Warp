@@ -1165,7 +1165,7 @@ impl IdentityStore {
                 identity.verify()?;
 
                 if let Ok(own_id) = self.own_identity().await {
-                    if own_id.did_key() == identity.did {
+                    if own_id.did_key() == &identity.did {
                         tracing::warn!(did = %identity.did, "Cannot accept own identity");
                         return Ok(());
                     }
@@ -1937,7 +1937,7 @@ impl IdentityStore {
         let own_did = self
             .own_identity()
             .await
-            .map(|identity| identity.did_key())
+            .map(|identity| identity.did_key().clone())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
         let cache = self.identity_cache.list().await?;
@@ -1947,7 +1947,7 @@ impl IdentityStore {
             //TODO: Maybe move cache into the backend to serve as a secondary cache
             LookupBy::DidKey(pubkey) => {
                 //Maybe we should omit our own key here?
-                if *pubkey == own_did {
+                if pubkey.eq(&own_did) {
                     return self.own_identity().await.map(|i| vec![i]);
                 }
 
@@ -2199,7 +2199,7 @@ impl IdentityStore {
         let own_did = self
             .own_identity()
             .await
-            .map(|identity| identity.did_key())
+            .map(|identity| identity.did_key().clone())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
         if own_did.eq(did) {

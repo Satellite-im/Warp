@@ -148,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
 
     if !opt.stdout_log {
         let file_appender = tracing_appender::rolling::hourly(
-            opt.path.clone().unwrap_or_else(|| temp_dir()),
+            opt.path.clone().unwrap_or_else(temp_dir),
             "warp_rg_ipfs_messenger.log",
         );
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
@@ -307,7 +307,7 @@ async fn main() -> anyhow::Result<()> {
 
                         continue;
                     }
-                    let cmd = match Command::from_str(&line) {
+                    let cmd = match Command::from_str(line) {
                         Ok(cmd) => cmd,
                         Err(e) => {
                             writeln!(stdout, "{e}")?;
@@ -373,12 +373,12 @@ async fn main() -> anyhow::Result<()> {
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
+                                    let username = get_username(new_account.clone(), recipient).await.unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
                                 let created = convo.created();
                                 let modified = convo.modified();
-                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), created.to_string(), modified.to_string(), recipients.join(",").to_string()]);
+                                table.add_row(vec![convo.name().map(|s| s.to_string()).unwrap_or_default(), convo.id().to_string(), created.to_string(), modified.to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{table}")?;
                         },
@@ -780,9 +780,9 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
+async fn get_username(account: Box<dyn MultiPass>, did: &DID) -> anyhow::Result<String> {
     let identity = account
-        .get_identity(Identifier::did_key(did))
+        .get_identity(Identifier::did_key(did.clone()))
         .await
         .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
     Ok(format!("{}#{}", identity.username(), identity.short_id()))
@@ -918,7 +918,7 @@ async fn message_event_handle(
                 reaction,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
+                    let username = get_username(multipass.clone(), &did_key)
                         .await
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
@@ -934,7 +934,7 @@ async fn message_event_handle(
                 reaction,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
+                    let username = get_username(multipass.clone(), &did_key)
                         .await
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
@@ -949,7 +949,7 @@ async fn message_event_handle(
                 event,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
+                    let username = get_username(multipass.clone(), &did_key)
                         .await
                         .unwrap_or_else(|_| did_key.to_string());
                     match event {
@@ -965,7 +965,7 @@ async fn message_event_handle(
                 event,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
+                    let username = get_username(multipass.clone(), &did_key)
                         .await
                         .unwrap_or_else(|_| did_key.to_string());
 
@@ -989,7 +989,7 @@ async fn message_event_handle(
                 recipient,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), recipient.clone())
+                    let username = get_username(multipass.clone(), &recipient)
                         .await
                         .unwrap_or_else(|_| recipient.to_string());
 
@@ -1001,7 +1001,7 @@ async fn message_event_handle(
                 recipient,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), recipient.clone())
+                    let username = get_username(multipass.clone(), &recipient)
                         .await
                         .unwrap_or_else(|_| recipient.to_string());
 

@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
     println!("{} with {}", username(&ident_b), ident_b.did_key());
     println!();
 
-    account_a.send_request(&ident_b.did_key()).await?;
+    account_a.send_request(ident_b.did_key()).await?;
     let mut sent = false;
     let mut received = false;
     let mut seen_a = false;
@@ -57,14 +57,14 @@ async fn main() -> anyhow::Result<()> {
             Some(ev) = subscribe_a.next() => {
                 match ev {
                     MultiPassEventKind::FriendRequestSent { .. } => sent = true,
-                    MultiPassEventKind::IdentityUpdate { did } if did == ident_b.did_key() => seen_b = true,
+                    MultiPassEventKind::IdentityUpdate { did } if did.eq(ident_b.did_key()) => seen_b = true,
                     _ => {}
                 }
             }
             Some(ev) = subscribe_b.next() => {
                 match ev {
                     MultiPassEventKind::FriendRequestReceived { .. } => received = true,
-                    MultiPassEventKind::IdentityUpdate { did } if did == ident_a.did_key() => seen_a = true,
+                    MultiPassEventKind::IdentityUpdate { did } if did.eq(ident_a.did_key()) => seen_a = true,
                     _ => {}
                 }
             }
@@ -101,10 +101,10 @@ async fn main() -> anyhow::Result<()> {
     match coin {
         0 => {
             println!("Denying {} friend request", username(&ident_a));
-            account_b.deny_request(&ident_a.did_key()).await?;
+            account_b.deny_request(ident_a.did_key()).await?;
         }
         _ => {
-            account_b.accept_request(&ident_a.did_key()).await?;
+            account_b.accept_request(ident_a.did_key()).await?;
 
             println!(
                 "{} accepted {} request",
@@ -137,8 +137,8 @@ async fn main() -> anyhow::Result<()> {
             }
 
             if rand::random() {
-                account_a.remove_friend(&ident_b.did_key()).await?;
-                if account_a.has_friend(&ident_b.did_key()).await? {
+                account_a.remove_friend(ident_b.did_key()).await?;
+                if account_a.has_friend(ident_b.did_key()).await? {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_a),
@@ -148,8 +148,8 @@ async fn main() -> anyhow::Result<()> {
                     println!("{} removed {}", username(&ident_a), username(&ident_b));
                 }
             } else {
-                account_b.remove_friend(&ident_a.did_key()).await?;
-                if account_b.has_friend(&ident_a.did_key()).await? {
+                account_b.remove_friend(ident_a.did_key()).await?;
+                if account_b.has_friend(ident_a.did_key()).await? {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_b),

@@ -29,7 +29,7 @@ impl Payload<'_> {
 
 impl Payload<'_> {
     pub fn verify(&self) -> Result<(), Error> {
-        verify_serde_sig(self.sender(), &self.data.to_vec(), self.signature())?;
+        verify_serde_sig(&self.sender(), &self.data.to_vec(), self.signature())?;
         Ok(())
     }
 }

@@ -124,7 +124,7 @@ impl BlinkImpl {
                 let cpal_host = cpal::default_host();
                 if let Some(input_device) = cpal_host.default_input_device() {
                     if let Err(e) = host_media::controller::change_audio_input(
-                        &public_did,
+                        public_did,
                         input_device,
                         ui_event_ch.clone(),
                     )

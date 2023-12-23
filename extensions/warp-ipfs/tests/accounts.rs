@@ -174,7 +174,7 @@ mod test {
 
         assert_eq!(old_identity.status_message(), None);
 
-        assert_eq!(updated_identity.status_message(), Some("Blast off".into()));
+        assert_eq!(updated_identity.status_message(), Some("Blast off"));
 
         Ok(())
     }

@@ -94,10 +94,10 @@ impl From<IdentityDocumentVersion> for shuttle::identity::document::IdentityDocu
 
 impl From<Identity> for IdentityDocument {
     fn from(identity: Identity) -> Self {
-        let username = identity.username();
-        let did = identity.did_key();
+        let username = identity.username().into();
+        let did = identity.did_key().clone();
         let short_id = *identity.short_id();
-        let status_message = identity.status_message();
+        let status_message = identity.status_message().map(|s| s.to_string());
         let created = identity.created();
         let modified = identity.modified();
 

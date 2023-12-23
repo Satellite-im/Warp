@@ -74,7 +74,7 @@ pub async fn create_account(
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 
-    Ok((account, identity.did_key(), identity))
+    Ok((account, identity.did_key().clone(), identity))
 }
 
 #[allow(dead_code)]
@@ -135,7 +135,7 @@ pub async fn create_account_and_chat(
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 
-    Ok((account, raygun, identity.did_key(), identity))
+    Ok((account, raygun, identity.did_key().clone(), identity))
 }
 
 pub async fn create_accounts_and_chat(

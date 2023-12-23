@@ -262,7 +262,7 @@ fn sign_serde<D: Serialize>(did: &DID, data: &D) -> anyhow::Result<Vec<u8>> {
 }
 
 // Note that this are temporary
-fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
+fn verify_serde_sig<D: Serialize>(pk: &DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec(data)?;
     pk.as_ref()
         .verify(&bytes, signature)

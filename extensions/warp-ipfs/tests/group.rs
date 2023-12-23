@@ -89,7 +89,7 @@ mod test {
         .await?;
 
         let conversation = chat_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.name(), Some(name));
+        assert_eq!(conversation.name(), Some(name.as_str()));
 
         chat_a.update_conversation_name(id_a, "").await?;
 
