@@ -294,6 +294,12 @@ impl From<DID> for Identifier {
     }
 }
 
+impl From<&DID> for Identifier {
+    fn from(did_key: &DID) -> Self {
+        Self::DID(did_key.clone())
+    }
+}
+
 impl From<String> for Identifier {
     fn from(username: String) -> Self {
         Self::Username(username)
