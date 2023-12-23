@@ -7,8 +7,11 @@ use futures::{
 use libipld::Cid;
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
+use std::{
+    collections::{BTreeSet, HashMap},
+    time::Duration,
+};
 use uuid::Uuid;
 use warp::{
     crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
@@ -287,7 +290,7 @@ impl ConversationDocument {
         match self.messages {
             Some(cid) => ipfs
                 .get_dag(cid)
-                .local()
+                .timeout(Duration::from_secs(30))
                 .deserialized()
                 .await
                 .map_err(anyhow::Error::from)
@@ -760,10 +763,8 @@ impl MessageDocument {
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
         let bytes: Vec<u8> = ipfs
-            .dag()
-            .get()
-            .path(self.message)
-            .local()
+            .get_dag(self.message)
+            .timeout(Duration::from_secs(10))
             .deserialized()
             .await?;
 

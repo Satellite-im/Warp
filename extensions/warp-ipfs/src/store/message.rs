@@ -1403,13 +1403,12 @@ impl MessageStore {
                     })
                     .await;
             }
-            ConversationEvents::NewGroupConversation {
-                creator,
-                name,
-                conversation_id,
-                list,
-                signature,
-            } => {
+            ConversationEvents::NewGroupConversation { conversation } => {
+                conversation.verify()?;
+
+                let conversation_id = conversation.id;
+                let list = conversation.recipients.clone();
+
                 let did = &*self.did;
                 info!("New group conversation event received");
 
@@ -1425,31 +1424,21 @@ impl MessageStore {
                 }
 
                 info!(%conversation_id, "Creating group conversation");
-                let convo = ConversationDocument::new(
-                    did,
-                    name,
-                    list.clone(),
-                    Some(conversation_id),
-                    ConversationType::Group,
-                    None,
-                    None,
-                    Some(creator),
-                    signature,
-                )?;
 
-                let conversation_type = convo.conversation_type;
+                let conversation_type = conversation.conversation_type;
 
                 let mut keystore = Keystore::new(conversation_id);
                 keystore.insert(did, did, warp::crypto::generate::<64>())?;
 
-                //Although we verify internally, this is just as a precaution
-                convo.verify()?;
+                let topic = conversation.topic();
 
-                let topic = convo.topic();
+                self.conversations.set(conversation).await?;
 
-                self.conversations.set(convo).await?;
-
-                let stream = self.ipfs.pubsub_subscribe(topic).await.expect("msg");
+                let stream = self
+                    .ipfs
+                    .pubsub_subscribe(topic)
+                    .await
+                    .expect("topic to be subscribed too");
 
                 self.set_conversation_keystore(conversation_id, keystore)
                     .await?;
@@ -1828,19 +1817,20 @@ impl MessageStore {
 
         let recipient = conversation.recipients();
 
-        let convo_id = conversation.id();
+        let conversation_id = conversation.id();
         let topic = conversation.topic();
 
         self.conversations.set(conversation).await?;
 
-        let mut keystore = Keystore::new(convo_id);
+        let mut keystore = Keystore::new(conversation_id);
         keystore.insert(own_did, own_did, warp::crypto::generate::<64>())?;
 
-        self.set_conversation_keystore(convo_id, keystore).await?;
+        self.set_conversation_keystore(conversation_id, keystore)
+            .await?;
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
-        self.start_task(convo_id, stream).await;
+        self.start_task(conversation_id, stream).await;
 
         let peer_id_list = recipient
             .clone()
@@ -1850,15 +1840,9 @@ impl MessageStore {
             .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
 
-        let conversation = self.conversations.get(convo_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
 
-        let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
-            creator: own_did.clone(),
-            name: conversation.name(),
-            conversation_id: conversation.id(),
-            list: recipient.clone(),
-            signature: conversation.signature.clone(),
-        })?;
+        let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation { conversation })?;
 
         for (did, peer_id) in peer_id_list {
             let bytes = ecdh_encrypt(own_did, Some(&did), &event)?;
@@ -1880,7 +1864,7 @@ impl MessageStore {
                     .queue_event(
                         did.clone(),
                         Queue::direct(
-                            convo_id,
+                            conversation_id,
                             None,
                             peer_id,
                             did.messaging(),
@@ -1895,16 +1879,16 @@ impl MessageStore {
         }
 
         for recipient in recipient.iter().filter(|d| own_did.ne(d)) {
-            if let Err(e) = self.request_key(conversation.id(), recipient).await {
+            if let Err(e) = self.request_key(conversation_id, recipient).await {
                 tracing::warn!("Failed to send exchange request to {recipient}: {e}");
             }
         }
 
         self.event
-            .emit(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            })
+            .emit(RayGunEventKind::ConversationCreated { conversation_id })
             .await;
+
+        let conversation = self.conversations.get(conversation_id).await?;
 
         Ok(Conversation::from(&conversation))
     }
@@ -2433,14 +2417,7 @@ impl MessageStore {
 
         self.publish(conversation_id, None, event, true).await?;
 
-        let own_did = &*self.did;
-        let new_event = ConversationEvents::NewGroupConversation {
-            creator: own_did.clone(),
-            name: conversation.name(),
-            conversation_id: conversation.id(),
-            list: conversation.recipients(),
-            signature: Some(signature),
-        };
+        let new_event = ConversationEvents::NewGroupConversation { conversation };
 
         self.send_single_conversation_event(did_key, conversation_id, new_event)
             .await?;

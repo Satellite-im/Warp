@@ -32,6 +32,8 @@ use warp::{
     tesseract::Tesseract,
 };
 
+use self::conversation::ConversationDocument;
+
 pub trait PeerTopic: Display {
     fn inbox(&self) -> String {
         format!("/peer/{self}/inbox")
@@ -134,17 +136,13 @@ where
 #[allow(clippy::large_enum_variant)]
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase", tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationEvents {
     NewConversation {
         recipient: DID,
     },
     NewGroupConversation {
-        creator: DID,
-        name: Option<String>,
-        conversation_id: Uuid,
-        list: Vec<DID>,
-        signature: Option<String>,
+        conversation: ConversationDocument,
     },
     LeaveConversation {
         conversation_id: Uuid,
@@ -158,7 +156,7 @@ pub enum ConversationEvents {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)]
-#[serde(rename_all = "lowercase", tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationRequestResponse {
     Request {
         conversation_id: Uuid,
@@ -172,7 +170,7 @@ pub enum ConversationRequestResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[allow(clippy::type_complexity)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ConversationRequestKind {
     Key,
     Ping,
@@ -187,7 +185,7 @@ pub enum ConversationRequestKind {
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ConversationResponseKind {
     Key { key: Vec<u8> },
     Pong,
