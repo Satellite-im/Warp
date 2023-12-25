@@ -32,7 +32,7 @@ fn encode_kp(kp: &Keypair) -> anyhow::Result<String> {
     Ok(kp_encoded)
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct Config {
     pub max_circuits: Option<u64>,
     pub max_circuits_per_peer: Option<u64>,
@@ -45,13 +45,13 @@ struct Config {
     pub reservation_rate_limiters: Option<Rate>,
 }
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Default, Clone, Deserialize, Serialize)]
 struct Rate {
     pub per_ip: Option<Vec<RateLimiterConfig>>,
     pub per_peer: Option<Vec<RateLimiterConfig>>,
 }
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Default, Clone, Deserialize, Serialize)]
 
 struct RateLimiterConfig {
     pub limit: u32,
@@ -200,6 +200,7 @@ struct Opt {
     #[clap(long)]
     ipfs_config: Option<PathBuf>,
 
+    /// Path to a configuration file to adjust relay setting
     #[clap(long)]
     relay_config: Option<PathBuf>,
 }
@@ -270,20 +271,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
 
-    let mut uninitialized = UninitializedIpfs::new()
-        .with_identify(None)
-        .with_ping(None)
-        .with_relay_server(Some(config.into()))
-        .fd_limit(FDLimit::Max)
-        .set_keypair(keypair)
-        .set_idle_connection_timeout(30)
-        .set_transport_configuration(TransportConfig {
-            quic_max_idle_timeout: Duration::from_secs(5),
-            ..Default::default()
-        })
-        .listen_as_external_addr()
-        .with_custom_behaviour(ext_behaviour::Behaviour);
-
     let addrs = match opts.listen_addr.as_slice() {
         [] => vec![
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
@@ -292,15 +279,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         addrs => addrs.to_vec(),
     };
 
+    let mut uninitialized = UninitializedIpfs::new()
+        .with_identify(None)
+        .with_ping(None)
+        .with_relay_server(Some(config.into()))
+        .fd_limit(FDLimit::Max)
+        .set_keypair(keypair)
+        .set_idle_connection_timeout(30)
+        .listen_as_external_addr()
+        .with_custom_behaviour(ext_behaviour::Behaviour)
+        .set_listening_addrs(addrs);
+
     if let Some(path) = path {
         uninitialized = uninitialized.set_path(path);
     }
 
-    uninitialized = uninitialized.set_listening_addrs(addrs);
-
     let _ipfs = uninitialized.start().await?;
 
     tokio::signal::ctrl_c().await?;
+
+    _ipfs.exit_daemon().await;
 
     Ok(())
 }
