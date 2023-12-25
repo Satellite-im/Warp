@@ -186,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         None => {
             if let Some(config) = opts.ipfs_config {
-                let config = IpfsConfig::load(config)?;
+                let config = IpfsConfig::load(config).await?;
                 config.identity.keypair()?
             } else {
                 tracing::info!("Generating keypair");
