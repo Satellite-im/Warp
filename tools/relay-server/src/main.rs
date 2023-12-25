@@ -1,6 +1,6 @@
 mod config;
 
-use std::{path::PathBuf, time::Duration};
+use std::{num::NonZeroU32, path::PathBuf, time::Duration};
 
 use base64::{
     alphabet::STANDARD,
@@ -34,28 +34,37 @@ fn encode_kp(kp: &Keypair) -> anyhow::Result<String> {
 
 #[derive(Clone, Deserialize, Serialize)]
 struct Config {
-    pub max_circuits: Option<u64>,
-    pub max_circuits_per_peer: Option<u64>,
-    pub max_circuit_duration: Option<u64>,
+    pub max_circuits: Option<usize>,
+    pub max_circuits_per_peer: Option<usize>,
+    pub max_circuit_duration: Option<Duration>,
     pub max_circuit_bytes: Option<u64>,
-    pub circuit_rate_limiters: Option<Rate>,
-    pub max_reservations_per_peer: Option<u64>,
-    pub max_reservations: Option<u64>,
-    pub reservation_duration: Option<u64>,
-    pub reservation_rate_limiters: Option<Rate>,
+    pub circuit_rate_limiters: Option<Vec<Rate>>,
+    pub max_reservations_per_peer: Option<usize>,
+    pub max_reservations: Option<usize>,
+    pub reservation_duration: Option<Duration>,
+    pub reservation_rate_limiters: Option<Vec<Rate>>,
 }
 
-#[derive(Default, Clone, Deserialize, Serialize)]
-struct Rate {
-    pub per_ip: Option<Vec<RateLimiterConfig>>,
-    pub per_peer: Option<Vec<RateLimiterConfig>>,
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Rate {
+    PerPeer {
+        limit: NonZeroU32,
+        interval: Duration,
+    },
+    PerIp {
+        limit: NonZeroU32,
+        interval: Duration,
+    },
 }
 
-#[derive(Default, Clone, Deserialize, Serialize)]
-
-struct RateLimiterConfig {
-    pub limit: u32,
-    pub interval: u64,
+impl From<Rate> for RateLimit {
+    fn from(rate: Rate) -> Self {
+        match rate {
+            Rate::PerPeer { limit, interval } => RateLimit::PerPeer { limit, interval },
+            Rate::PerIp { limit, interval } => RateLimit::PerIp { limit, interval },
+        }
+    }
 }
 
 impl Default for Config {
@@ -63,31 +72,31 @@ impl Default for Config {
         Self {
             max_circuits: Some(32768),
             max_circuits_per_peer: Some(32768),
-            max_circuit_duration: Some(60 * 2),
+            max_circuit_duration: Some(Duration::from_secs(60 * 2)),
             max_circuit_bytes: Some(512 * 1024 * 1024),
-            circuit_rate_limiters: Some(Rate {
-                per_ip: Some(vec![RateLimiterConfig {
-                    limit: 32768,
-                    interval: 60 * 2,
-                }]),
-                per_peer: Some(vec![RateLimiterConfig {
-                    limit: 32768,
-                    interval: 30,
-                }]),
-            }),
+            circuit_rate_limiters: Some(vec![
+                Rate::PerPeer {
+                    limit: 32768.try_into().expect("greater than zero"),
+                    interval: Duration::from_secs(60 * 2),
+                },
+                Rate::PerIp {
+                    limit: 32768.try_into().expect("greater than zero"),
+                    interval: Duration::from_secs(30),
+                },
+            ]),
             max_reservations_per_peer: Some(32768),
             max_reservations: Some(32768),
-            reservation_duration: Some(60 * 60),
-            reservation_rate_limiters: Some(Rate {
-                per_ip: Some(vec![RateLimiterConfig {
-                    limit: 32768,
-                    interval: 30,
-                }]),
-                per_peer: Some(vec![RateLimiterConfig {
-                    limit: 32768,
-                    interval: 30,
-                }]),
-            }),
+            reservation_duration: Some(Duration::from_secs(60 * 60)),
+            reservation_rate_limiters: Some(vec![
+                Rate::PerPeer {
+                    limit: 32768.try_into().expect("greater than zero"),
+                    interval: Duration::from_secs(30),
+                },
+                Rate::PerIp {
+                    limit: 32768.try_into().expect("greater than zero"),
+                    interval: Duration::from_secs(30),
+                },
+            ]),
         }
     }
 }
@@ -96,87 +105,25 @@ impl From<Config> for RelayConfig {
     fn from(config: Config) -> Self {
         let mut circuit_src_rate_limiters = vec![];
         let circuit_rate = config.circuit_rate_limiters.unwrap_or_default();
-        circuit_src_rate_limiters.extend(
-            circuit_rate
-                .per_ip
-                .map(|s| {
-                    s.iter()
-                        .map(|r| RateLimit::PerIp {
-                            limit: r.limit.try_into().expect("greater than zero"),
-                            interval: Duration::from_secs(r.interval),
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or(vec![RateLimit::PerIp {
-                    limit: 32768.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(60 * 2),
-                }]),
-        );
-        circuit_src_rate_limiters.extend(
-            circuit_rate
-                .per_peer
-                .map(|s| {
-                    s.iter()
-                        .map(|r| RateLimit::PerPeer {
-                            limit: r.limit.try_into().expect("greater than zero"),
-                            interval: Duration::from_secs(r.interval),
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or(vec![RateLimit::PerPeer {
-                    limit: 32768.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(30),
-                }]),
-        );
+        circuit_src_rate_limiters.extend(circuit_rate.iter().map(|s| (*s).into()));
 
         let mut reservation_rate_limiters = vec![];
         let reservation_rate = config.reservation_rate_limiters.unwrap_or_default();
-        reservation_rate_limiters.extend(
-            reservation_rate
-                .per_ip
-                .map(|s| {
-                    s.iter()
-                        .map(|r| RateLimit::PerIp {
-                            limit: r.limit.try_into().expect("greater than zero"),
-                            interval: Duration::from_secs(r.interval),
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or(vec![RateLimit::PerIp {
-                    limit: 32768.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(30),
-                }]),
-        );
-        reservation_rate_limiters.extend(
-            reservation_rate
-                .per_peer
-                .map(|s| {
-                    s.iter()
-                        .map(|r| RateLimit::PerPeer {
-                            limit: r.limit.try_into().expect("greater than zero"),
-                            interval: Duration::from_secs(r.interval),
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or(vec![RateLimit::PerPeer {
-                    limit: 32768.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(30),
-                }]),
-        );
+        reservation_rate_limiters.extend(reservation_rate.iter().map(|s| (*s).into()));
 
         RelayConfig {
-            max_circuits: config.max_circuits.unwrap_or(32768) as _,
-            max_circuits_per_peer: config.max_circuits_per_peer.unwrap_or(32768) as _,
-            max_circuit_duration: Duration::from_secs(
-                config.max_circuit_duration.unwrap_or(2 * 60),
-            ),
+            max_circuits: config.max_circuits.unwrap_or(32768),
+            max_circuits_per_peer: config.max_circuits_per_peer.unwrap_or(32768),
+            max_circuit_duration: config
+                .max_circuit_duration
+                .unwrap_or(Duration::from_secs(2 * 60)),
             max_circuit_bytes: config.max_circuit_bytes.unwrap_or(512 * 1024 * 1024),
             circuit_src_rate_limiters,
-            max_reservations_per_peer: config.max_reservations_per_peer.unwrap_or(21768) as _,
-            max_reservations: config.max_reservations.unwrap_or(32768) as _,
-            reservation_duration: Duration::from_secs(
-                config.reservation_duration.unwrap_or(60 * 60) as _,
-            ),
+            max_reservations_per_peer: config.max_reservations_per_peer.unwrap_or(21768),
+            max_reservations: config.max_reservations.unwrap_or(32768),
+            reservation_duration: config
+                .reservation_duration
+                .unwrap_or(Duration::from_secs(60 * 60)),
             reservation_rate_limiters,
         }
     }
