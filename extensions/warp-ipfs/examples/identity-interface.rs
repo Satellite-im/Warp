@@ -31,7 +31,7 @@ struct Opt {
     #[clap(long)]
     upnp: bool,
     #[clap(long)]
-    no_discovery: bool,
+    enable_discovery: bool,
     #[clap(long)]
     discovery_point: Option<Multiaddr>,
     #[clap(long)]
@@ -72,7 +72,7 @@ async fn account(
         None => Config::testing(),
     };
 
-    if !opt.no_discovery {
+    if opt.enable_discovery {
         let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
             (Some(addr), None) => {
                 config.ipfs_setting.bootstrap = false;
@@ -98,27 +98,27 @@ async fn account(
             },
         };
         config.store_setting.discovery = dis_ty;
-    }
-    if opt.disable_relay {
-        config.enable_relay = false;
-    }
-    if opt.upnp {
-        config.ipfs_setting.portmapping = true;
-    }
-    if opt.no_discovery {
+        if let Some(bootstrap) = opt.bootstrap {
+            config.ipfs_setting.bootstrap = bootstrap;
+        }
+    } else {
         config.store_setting.discovery = Discovery::None;
         config.bootstrap = Bootstrap::None;
         config.ipfs_setting.bootstrap = false;
+    }
+
+    if opt.disable_relay {
+        config.enable_relay = false;
+    }
+
+    if opt.upnp {
+        config.ipfs_setting.portmapping = true;
     }
 
     config.store_setting.share_platform = opt.provide_platform_info;
 
     if let Some(oride) = opt.r#override {
         config.store_setting.fetch_over_bitswap = oride;
-    }
-
-    if let Some(bootstrap) = opt.bootstrap {
-        config.ipfs_setting.bootstrap = bootstrap;
     }
 
     config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
