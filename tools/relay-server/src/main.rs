@@ -1,6 +1,6 @@
 mod config;
 
-use std::{path::PathBuf, time::Duration};
+use std::{num::NonZeroU32, path::PathBuf, time::Duration};
 
 use base64::{
     alphabet::STANDARD,
@@ -9,10 +9,11 @@ use base64::{
 };
 use clap::Parser;
 use rust_ipfs::{
-    p2p::{RateLimit, RelayConfig, TransportConfig},
+    p2p::{RateLimit, RelayConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
+use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::config::IpfsConfig;
@@ -29,6 +30,103 @@ fn encode_kp(kp: &Keypair) -> anyhow::Result<String> {
     let engine = GeneralPurpose::new(&STANDARD, PAD);
     let kp_encoded = engine.encode(bytes);
     Ok(kp_encoded)
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct Config {
+    pub max_circuits: Option<usize>,
+    pub max_circuits_per_peer: Option<usize>,
+    pub max_circuit_duration: Option<Duration>,
+    pub max_circuit_bytes: Option<u64>,
+    pub circuit_rate_limiters: Option<Vec<Rate>>,
+    pub max_reservations_per_peer: Option<usize>,
+    pub max_reservations: Option<usize>,
+    pub reservation_duration: Option<Duration>,
+    pub reservation_rate_limiters: Option<Vec<Rate>>,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Rate {
+    PerPeer {
+        limit: NonZeroU32,
+        interval: Duration,
+    },
+    PerIp {
+        limit: NonZeroU32,
+        interval: Duration,
+    },
+}
+
+impl From<Rate> for RateLimit {
+    fn from(rate: Rate) -> Self {
+        match rate {
+            Rate::PerPeer { limit, interval } => RateLimit::PerPeer { limit, interval },
+            Rate::PerIp { limit, interval } => RateLimit::PerIp { limit, interval },
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            max_circuits: Some(32768),
+            max_circuits_per_peer: Some(32768),
+            max_circuit_duration: Some(Duration::from_secs(60 * 2)),
+            max_circuit_bytes: Some(512 * 1024 * 1024),
+            circuit_rate_limiters: Some(vec![
+                Rate::PerPeer {
+                    limit: 32768.try_into().expect("greater than zero"),
+                    interval: Duration::from_secs(60 * 2),
+                },
+                Rate::PerIp {
+                    limit: 32768.try_into().expect("greater than zero"),
+                    interval: Duration::from_secs(30),
+                },
+            ]),
+            max_reservations_per_peer: Some(32768),
+            max_reservations: Some(32768),
+            reservation_duration: Some(Duration::from_secs(60 * 60)),
+            reservation_rate_limiters: Some(vec![
+                Rate::PerPeer {
+                    limit: 32768.try_into().expect("greater than zero"),
+                    interval: Duration::from_secs(30),
+                },
+                Rate::PerIp {
+                    limit: 32768.try_into().expect("greater than zero"),
+                    interval: Duration::from_secs(30),
+                },
+            ]),
+        }
+    }
+}
+
+impl From<Config> for RelayConfig {
+    fn from(config: Config) -> Self {
+        let mut circuit_src_rate_limiters = vec![];
+        let circuit_rate = config.circuit_rate_limiters.unwrap_or_default();
+        circuit_src_rate_limiters.extend(circuit_rate.iter().map(|s| (*s).into()));
+
+        let mut reservation_rate_limiters = vec![];
+        let reservation_rate = config.reservation_rate_limiters.unwrap_or_default();
+        reservation_rate_limiters.extend(reservation_rate.iter().map(|s| (*s).into()));
+
+        RelayConfig {
+            max_circuits: config.max_circuits.unwrap_or(32768),
+            max_circuits_per_peer: config.max_circuits_per_peer.unwrap_or(32768),
+            max_circuit_duration: config
+                .max_circuit_duration
+                .unwrap_or(Duration::from_secs(2 * 60)),
+            max_circuit_bytes: config.max_circuit_bytes.unwrap_or(512 * 1024 * 1024),
+            circuit_src_rate_limiters,
+            max_reservations_per_peer: config.max_reservations_per_peer.unwrap_or(21768),
+            max_reservations: config.max_reservations.unwrap_or(32768),
+            reservation_duration: config
+                .reservation_duration
+                .unwrap_or(Duration::from_secs(60 * 60)),
+            reservation_rate_limiters,
+        }
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -48,6 +146,10 @@ struct Opt {
     /// Path to ipfs config to use existing keypair
     #[clap(long)]
     ipfs_config: Option<PathBuf>,
+
+    /// Path to a configuration file to adjust relay setting
+    #[clap(long)]
+    relay_config: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -84,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         None => {
             if let Some(config) = opts.ipfs_config {
-                let config = IpfsConfig::load(config)?;
+                let config = IpfsConfig::load(config).await?;
                 config.identity.keypair()?
             } else {
                 tracing::info!("Generating keypair");
@@ -93,50 +195,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    let config = match opts
+        .relay_config
+        .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf))
+    {
+        Some(path) => match path.is_file() {
+            true => {
+                let conf = tokio::fs::read_to_string(path).await?;
+                let config: Config = toml::from_str(&conf)?;
+                config
+            }
+            false => {
+                let config = Config::default();
+                let bytes = toml::to_string(&config)?;
+                tokio::fs::write(path, &bytes).await?;
+                config
+            }
+        },
+        None => Config::default(),
+    };
+
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
-
-    let mut uninitialized = UninitializedIpfs::new()
-        .with_identify(None)
-        .with_ping(None)
-        .with_relay_server(Some(RelayConfig {
-            max_circuits: 32768,
-            max_circuits_per_peer: 32768,
-            max_circuit_duration: Duration::from_secs(2 * 60),
-            max_circuit_bytes: 8 * 1024 * 1024,
-            circuit_src_rate_limiters: vec![
-                RateLimit::PerIp {
-                    limit: 256.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(60 * 2),
-                },
-                RateLimit::PerPeer {
-                    limit: 256.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(30),
-                },
-            ],
-            max_reservations_per_peer: 512,
-            max_reservations: 32768,
-            reservation_duration: Duration::from_secs(60 * 60),
-            reservation_rate_limiters: vec![
-                RateLimit::PerIp {
-                    limit: 256.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(30),
-                },
-                RateLimit::PerPeer {
-                    limit: 256.try_into().expect("Greater than 0"),
-                    interval: Duration::from_secs(30),
-                },
-            ],
-        }))
-        .fd_limit(FDLimit::Max)
-        .set_keypair(keypair)
-        .set_idle_connection_timeout(30)
-        .set_transport_configuration(TransportConfig {
-            quic_max_idle_timeout: Duration::from_secs(5),
-            ..Default::default()
-        })
-        .listen_as_external_addr()
-        .with_custom_behaviour(ext_behaviour::Behaviour);
 
     let addrs = match opts.listen_addr.as_slice() {
         [] => vec![
@@ -146,15 +226,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         addrs => addrs.to_vec(),
     };
 
+    let mut uninitialized = UninitializedIpfs::new()
+        .with_identify(None)
+        .with_ping(None)
+        .with_relay_server(Some(config.into()))
+        .fd_limit(FDLimit::Max)
+        .set_keypair(keypair)
+        .set_idle_connection_timeout(30)
+        .listen_as_external_addr()
+        .with_custom_behaviour(ext_behaviour::Behaviour)
+        .set_listening_addrs(addrs);
+
     if let Some(path) = path {
         uninitialized = uninitialized.set_path(path);
     }
 
-    uninitialized = uninitialized.set_listening_addrs(addrs);
-
     let _ipfs = uninitialized.start().await?;
 
     tokio::signal::ctrl_c().await?;
+
+    _ipfs.exit_daemon().await;
 
     Ok(())
 }
