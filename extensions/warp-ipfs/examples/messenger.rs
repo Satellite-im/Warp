@@ -37,8 +37,6 @@ struct Opt {
     with_key: bool,
     #[clap(long)]
     experimental_node: bool,
-    #[clap(long)]
-    stdout_log: bool,
 
     #[clap(long)]
     context: Option<String>,
@@ -142,26 +140,16 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     _ = fdlimit::raise_fd_limit().is_ok();
 
-    let mut _log_guard = None;
+    let file_appender = tracing_appender::rolling::hourly(
+        opt.path.clone().unwrap_or_else(temp_dir),
+        "warp_ipfs_messenger.log",
+    );
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    if !opt.stdout_log {
-        let file_appender = tracing_appender::rolling::hourly(
-            opt.path.clone().unwrap_or_else(temp_dir),
-            "warp_ipfs_messenger.log",
-        );
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-        _log_guard = Some(_guard);
-
-        tracing_subscriber::fmt()
-            .with_writer(non_blocking)
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-    }
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     let password = if opt.with_key {
         rpassword::prompt_password("Enter A Password: ")?
