@@ -99,6 +99,9 @@ async fn setup<P: AsRef<Path>>(
             namespace: opt.context.clone(),
             discovery_type,
         };
+        if let Some(bootstrap) = opt.bootstrap {
+            config.ipfs_setting.bootstrap = bootstrap;
+        }
     } else {
         config.store_setting.discovery = Discovery::None;
         config.bootstrap = Bootstrap::None;
@@ -115,10 +118,6 @@ async fn setup<P: AsRef<Path>>(
 
     if let Some(oride) = opt.r#override {
         config.store_setting.fetch_over_bitswap = oride;
-    }
-
-    if let Some(bootstrap) = opt.bootstrap {
-        config.ipfs_setting.bootstrap = bootstrap;
     }
 
     config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
