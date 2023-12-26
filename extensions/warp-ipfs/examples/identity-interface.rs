@@ -165,10 +165,10 @@ async fn main() -> anyhow::Result<()> {
     _ = fdlimit::raise_fd_limit().is_ok();
 
     let file_appender = match &opt.path {
-        Some(path) => tracing_appender::rolling::hourly(path, "warp_mp_identity_interface.log"),
+        Some(path) => tracing_appender::rolling::hourly(path, "warp_ipfs_identity_interface.log"),
         None => tracing_appender::rolling::hourly(
             std::env::temp_dir(),
-            "warp_mp_identity_interface.log",
+            "warp_ipfs_identity_interface.log",
         ),
     };
 
