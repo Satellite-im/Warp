@@ -16,9 +16,9 @@ pub struct IpfsConfig {
 }
 
 impl IpfsConfig {
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn Error>> {
-        let file = std::fs::File::open(path)?;
-        let config = serde_json::from_reader(file)?;
+    pub async fn load<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn Error>> {
+        let file = tokio::fs::read(path).await?;
+        let config = serde_json::from_slice(&file)?;
         Ok(config)
     }
 }
