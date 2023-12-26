@@ -236,10 +236,7 @@ impl ConversationDocument {
 
             let construct = vec![
                 self.id().into_bytes().to_vec(),
-                match self.conversation_type {
-                    ConversationType::Direct => vec![0x1c, 0xff],
-                    ConversationType::Group => vec![0xdc, 0xfc],
-                },
+                vec![0xdc, 0xfc],
                 creator.to_string().as_bytes().to_vec(),
                 Vec::from_iter(
                     self.recipients
@@ -266,10 +263,7 @@ impl ConversationDocument {
 
             let construct = vec![
                 self.id().into_bytes().to_vec(),
-                match self.conversation_type {
-                    ConversationType::Direct => vec![0x1c, 0xff],
-                    ConversationType::Group => vec![0xdc, 0xfc],
-                },
+                vec![0xdc, 0xfc],
                 creator.to_string().as_bytes().to_vec(),
                 Vec::from_iter(
                     self.recipients

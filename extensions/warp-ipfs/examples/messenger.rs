@@ -4,6 +4,7 @@ use futures::prelude::*;
 use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, SharedWriter};
 use std::collections::HashMap;
+use std::env::temp_dir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -64,7 +65,6 @@ struct Opt {
 async fn setup<P: AsRef<Path>>(
     path: Option<P>,
     passphrase: Zeroizing<String>,
-    _: bool,
     opt: &Opt,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>)> {
     let tesseract = match path.as_ref() {
@@ -148,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
 
     if !opt.stdout_log {
         let file_appender = tracing_appender::rolling::hourly(
-            opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
+            opt.path.clone().unwrap_or_else(|| temp_dir()),
             "warp_rg_ipfs_messenger.log",
         );
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
@@ -172,13 +172,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Creating or obtaining account...");
-    let (new_account, mut chat, _) = setup(
-        opt.path.clone(),
-        Zeroizing::new(password),
-        opt.experimental_node,
-        &opt,
-    )
-    .await?;
+    let (new_account, mut chat, _) =
+        setup(opt.path.clone(), Zeroizing::new(password), &opt).await?;
 
     println!("Obtaining identity....");
     let identity = new_account.get_own_identity().await?;
@@ -299,43 +294,35 @@ async fn main() -> anyhow::Result<()> {
             }
             line = rl.readline().fuse() => match line {
                 Ok(rustyline_async::ReadlineEvent::Line(line)) => {
+                    use Command::*;
                     rl.add_history_entry(line.clone());
-                    let mut cmd_line = line.trim().split(' ');
-                    match cmd_line.next() {
-                        Some("/create") => {
-                            let did: DID = match cmd_line.next() {
-                                Some(did) => match DID::try_from(did.to_string()) {
-                                    Ok(did) => did,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/create <DID>")?;
-                                    continue
-                                }
-                            };
+                    let line = line.trim();
+                    if !line.starts_with('/') {
+                        if !line.is_empty() {
+                            // All commands start with a `/`. Everything else is a message.
+                            if let Err(e) = chat.send(*topic.read(), vec![line.to_string()]).await {
+                                writeln!(stdout, "Error sending message: {e}")?;
+                            }
+                        }
 
+                        continue;
+                    }
+                    let cmd = match Command::from_str(&line) {
+                        Ok(cmd) => cmd,
+                        Err(e) => {
+                            writeln!(stdout, "{e}")?;
+
+                            continue
+                        }
+                    };
+                    match cmd {
+                        CreateConversation(did) => {
                             if let Err(e) = chat.create_conversation(&did).await {
                                 writeln!(stdout, "Error creating conversation: {e}")?;
                                 continue
                             }
                         },
-                        Some("/add-recipient") => {
-                            let did: DID = match cmd_line.next() {
-                                Some(did) => match DID::try_from(did.to_string()) {
-                                    Ok(did) => did,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/add-recipient <DID>")?;
-                                    continue
-                                }
-                            };
+                        AddRecipient(did) => {
                             let local_topic = *topic.read();
                             if let Err(e) = chat.add_recipient(local_topic, &did).await {
                                 writeln!(stdout, "Error adding recipient: {e}")?;
@@ -344,20 +331,7 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{did} has been added")?;
 
                         },
-                        Some("/remove-recipient") => {
-                            let did: DID = match cmd_line.next() {
-                                Some(did) => match DID::try_from(did.to_string()) {
-                                    Ok(did) => did,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/remove-recipient <DID>")?;
-                                    continue
-                                }
-                            };
+                        RemoveRecipient(did) => {
                             let local_topic = *topic.read();
                             if let Err(e) = chat.remove_recipient(local_topic, &did).await {
                                 writeln!(stdout, "Error removing recipient: {e}")?;
@@ -366,39 +340,13 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{did} has been removed")?;
 
                         },
-                        Some("/create-group") => {
-
-                            let mut did_keys = vec![];
-
-                            let name = match cmd_line.next() {
-                                Some(name) => name,
-                                None => {
-                                    writeln!(stdout, "/create-group <name> <DID> ...")?;
-                                    continue
-                                }
-                            };
-
-
-                            for item in cmd_line.by_ref() {
-                                let Ok(did) = DID::try_from(item.to_string()) else {
-                                    continue;
-                                };
-                                did_keys.push(did);
-                            }
-
+                        CreateGroupConversation(name, did_keys) => {
                             if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys).await {
                                 writeln!(stdout, "Error creating conversation: {e}")?;
                                 continue
                             }
                         },
-                        Some("/remove-conversation") => {
-                            let conversation_id = match cmd_line.next() {
-                                Some(id) => id.parse()?,
-                                None => {
-                                    writeln!(stdout, "/remove-conversation <conversation-id>")?;
-                                    continue
-                                }
-                            };
+                        RemoveConversation(conversation_id) => {
                             if let Err(e) = chat.delete(conversation_id, None).await {
                                     writeln!(stdout, "Error deleting conversation: {e}")?;
                                     continue
@@ -406,33 +354,19 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Conversations deleted")?;
                         }
                         //Temporary since topic is set outside
-                        Some("/set-conversation") => {
-                            let conversation_id = match cmd_line.next() {
-                                Some(id) => id.parse()?,
-                                None => {
-                                    writeln!(stdout, "/set <conversation-id>")?;
-                                    continue
-                                }
-                            };
+                        SetConversation(conversation_id) => {
                             *topic.write() = conversation_id;
                             writeln!(stdout, "Conversation is set to {conversation_id}")?;
                         }
-                        Some("/set-conversation-name") => {
-                            let name = match cmd_line.next() {
-                                Some(name) => name,
-                                None => {
-                                    writeln!(stdout, "/set-conversation-name <name>")?;
-                                    continue
-                                }
-                            };
+                        SetConversationName(name) => {
                             let topic = *topic.read();
 
-                            if let Err(e) = chat.update_conversation_name(topic, name).await {
+                            if let Err(e) = chat.update_conversation_name(topic, &name).await {
                                 writeln!(stdout, "Error updating conversation: {e}")?;
                                 continue
                             }
                         }
-                        Some("/list-conversations") => {
+                        ListConversations => {
                             let mut table = Table::new();
                             table.set_header(vec!["Name", "ID", "Created", "Updated", "Recipients"]);
                             let list = chat.list_conversations().await?;
@@ -448,44 +382,8 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{table}")?;
                         },
-                        Some("/list-references") => {
-
+                        ListReferences(opt) => {
                             let local_topic = *topic.read();
-                            let mut lower_range = None;
-                            let mut upper_range = None;
-
-                            if let Some(id) = cmd_line.next() {
-                                match id.parse() {
-                                    Ok(lower) => {
-                                        lower_range = Some(lower);
-                                        if let Some(id) = cmd_line.next() {
-                                            match id.parse() {
-                                                Ok(upper) => {
-                                                    upper_range = Some(upper);
-                                                },
-                                                Err(e) => {
-                                                    writeln!(stdout, "Error parsing upper range: {e}")?;
-                                                    continue
-                                                }
-                                            }
-                                        }
-                                    },
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing lower range: {e}")?;
-                                        continue
-                                    }
-                                }
-                            };
-
-                            let mut opt = MessageOptions::default();
-                            if let Some(lower) = lower_range {
-                                if let Some(upper) = upper_range {
-                                    opt = opt.set_range(lower..upper);
-                                } else {
-                                    opt = opt.set_range(0..lower);
-                                }
-                            }
-
                             let mut messages_stream = match chat.get_message_references(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -510,43 +408,8 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{table}")?
                         }
-                        Some("/list") => {
-
+                        ListMessages(opt) => {
                             let local_topic = *topic.read();
-                            let mut lower_range = None;
-                            let mut upper_range = None;
-
-                            if let Some(id) = cmd_line.next() {
-                                match id.parse() {
-                                    Ok(lower) => {
-                                        lower_range = Some(lower);
-                                        if let Some(id) = cmd_line.next() {
-                                            match id.parse() {
-                                                Ok(upper) => {
-                                                    upper_range = Some(upper);
-                                                },
-                                                Err(e) => {
-                                                    writeln!(stdout, "Error parsing upper range: {e}")?;
-                                                    continue
-                                                }
-                                            }
-                                        }
-                                    },
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing lower range: {e}")?;
-                                        continue
-                                    }
-                                }
-                            };
-
-                            let mut opt = MessageOptions::default();
-                            if let Some(lower) = lower_range {
-                                if let Some(upper) = upper_range {
-                                    opt = opt.set_range(lower..upper);
-                                } else {
-                                    opt = opt.set_range(0..lower);
-                                }
-                            }
 
                             let mut messages_stream = match chat.get_messages(local_topic, opt.set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
                                 Ok(list) => list,
@@ -555,7 +418,6 @@ async fn main() -> anyhow::Result<()> {
                                     continue;
                                 }
                             };
-
 
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
@@ -581,38 +443,8 @@ async fn main() -> anyhow::Result<()> {
 
 
                         },
-                        Some("/list-pages") => {
-
+                        ListPages(opt) => {
                             let local_topic = *topic.read();
-                            let mut page_or_amount: Option<usize> = None;
-                            let mut amount_per_page: Option<usize> = page_or_amount.map(|o| if o == 0 { u8::MAX as _} else { o }).or(Some(10));
-
-                            if let Some(id) = cmd_line.next() {
-                                match id.parse() {
-                                    Ok(a_o_p) => {
-                                        page_or_amount = Some(a_o_p);
-                                    },
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing: {e}")?;
-                                        continue
-                                    }
-                                }
-                            };
-
-                            if let Some(id) = cmd_line.next() {
-                                match id.parse() {
-                                    Ok(amount) => {
-                                        amount_per_page = Some(amount);
-                                    },
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing: {e}")?;
-                                        continue
-                                    }
-                                }
-                            };
-
-                            let opt = MessageOptions::default().set_messages_type(MessagesType::Pages { page: page_or_amount, amount_per_page} );
-
                             let pages = match chat.get_messages(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -651,7 +483,7 @@ async fn main() -> anyhow::Result<()> {
                                 writeln!(stdout, "Total Pages: {total}")?
                             }
                         },
-                        Some("/get-first") => {
+                        GetFirst => {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = *topic.read();
@@ -682,7 +514,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{table}")?;
                         },
-                        Some("/get-last") => {
+                        GetLast => {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = *topic.read();
@@ -714,18 +546,10 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{table}")?;
                         },
-                        Some("/search") => {
+                        Search(keywords) => {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = *topic.read();
-
-                            let mut keywords = vec![];
-
-                            for item in cmd_line.by_ref() {
-                                keywords.push(item.to_string());
-                            }
-
-                            let keywords = keywords.join(" ").to_string();
 
                             let mut messages_stream = match chat.get_messages(local_topic, MessageOptions::default().set_keyword(&keywords).set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
                                 Ok(list) => list,
@@ -755,42 +579,15 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{table}")?;
                         },
-                        Some("/edit") => {
-                            let message_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {e}")?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/edit <message-id> <message>")?;
-                                    continue
-                                }
-                            };
-
-                            let mut messages = vec![];
-
-                            for item in cmd_line.by_ref() {
-                                messages.push(item.to_string());
-                            }
-
-                            let message = vec![messages.join(" ").to_string()];
+                        EditMessage(message_id, message) => {
                             let conversation_id = topic.read().clone();
-                            if let Err(e) = chat.edit(conversation_id, message_id, message).await {
+                            if let Err(e) = chat.edit(conversation_id, message_id, vec![message]).await {
                                 writeln!(stdout, "Error: {e}")?;
                                 continue
                             }
                             writeln!(stdout, "Message edited")?;
                         },
-                        Some("/attach") => {
-                            let mut files = vec![];
-
-                            for item in cmd_line.by_ref() {
-                                files.push(Location::Disk {path:PathBuf::from(item)});
-                            }
-
+                        Attach(files) => {
                             if files.is_empty() {
                                 writeln!(stdout, "/attach <paths>")?;
                                 continue
@@ -831,39 +628,8 @@ async fn main() -> anyhow::Result<()> {
                             });
 
                         },
-                        Some("/download") => {
-                            let message_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {e}")?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
-                                    continue
-                                }
-                            };
-
-                            let file = match cmd_line.next() {
-                                Some(file) => file.to_string(),
-                                None => {
-                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
-                                    continue
-                                }
-                            };
-
-                            let path = match cmd_line.next() {
-                                Some(file) => PathBuf::from(file),
-                                None => {
-                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
-                                    continue
-                                }
-                            };
-
+                        Download(message_id, file, path) => {
                             let conversation_id = topic.read().clone();
-
 
                             writeln!(stdout, "Downloading....")?;
                             let mut stream = match chat.download(conversation_id, message_id, file, path).await {
@@ -915,39 +681,8 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             });
                         },
-                        Some("/react") => {
-                            let state = match cmd_line.next() {
-                                Some("add") => ReactionState::Add,
-                                Some("remove") => ReactionState::Remove,
-                                _ => {
-                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
-                                    continue
-                                }
-                            };
-
+                        React(message_id, state, code) => {
                             let conversation_id = topic.read().clone();
-
-                            let message_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {e}")?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
-                                    continue
-                                }
-                            };
-
-                            let code = match cmd_line.next() {
-                                Some(code) => code.to_string(),
-                                None => {
-                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
-                                    continue
-                                }
-                            };
 
                             if let Err(e) = chat.react(conversation_id, message_id, state, code).await {
                                 writeln!(stdout, "Error: {e}")?;
@@ -956,24 +691,8 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Reacted")?
 
                         }
-                        Some("/status") => {
+                        Status(id) => {
                             let topic = topic.read().clone();
-                            let id = match cmd_line.next() {
-                                Some(id) => {
-                                    match Uuid::from_str(id) {
-                                        Ok(uuid) => uuid,
-                                        Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {e}")?;
-                                            continue
-                                        }
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/status <message_id>")?;
-                                    continue;
-                                }
-                            };
-
                             let status = match chat.message_status(topic, id).await {
                                 Ok(status) => status,
                                 Err(_e) => {
@@ -984,10 +703,10 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "Message Status: {status}")?;
                         }
-                        Some("/pin") => {
+                        Pin(target) => {
                             let topic = topic.read().clone();
-                            match cmd_line.next() {
-                                Some("all") => {
+                            match target {
+                                PinTarget::All => {
                                     tokio::spawn({
                                         let mut chat = chat.clone();
                                         let mut stdout = stdout.clone();
@@ -1004,24 +723,16 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     });
                                 },
-                                Some(id) => {
-                                    let id = match Uuid::from_str(id) {
-                                        Ok(uuid) => uuid,
-                                        Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {e}")?;
-                                            continue
-                                        }
-                                    };
+                                PinTarget::Message(id) => {
                                     if let Err(e) = chat.pin(topic, id, PinState::Pin).await {
                                         writeln!(stdout, "Error pinning message: {e}")?;
                                     }
                                 },
-                                None => { writeln!(stdout, "/pin <id | all>")? }
                             }
                         }
-                        Some("/unpin") => {
-                            match cmd_line.next() {
-                                Some("all") => {
+                        Unpin(target) => {
+                            match target {
+                                PinTarget::All => {
                                     tokio::spawn({
                                         let mut chat = chat.clone();
                                         let mut stdout = stdout.clone();
@@ -1039,52 +750,23 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     });
                                 },
-                                Some(id) => {
-                                    let id = match Uuid::from_str(id) {
-                                        Ok(uuid) => uuid,
-                                        Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {e}")?;
-                                            continue
-                                        }
-                                    };
+                                PinTarget::Message(id) => {
                                     chat.pin(*topic.read(), id, PinState::Unpin).await?;
                                     writeln!(stdout, "Unpinned {id}")?;
                                 },
-                                None => { writeln!(stdout, "/unpin <id | all>")? }
                             }
                         }
-                        Some("/remove-message") => {
+                        RemoveMessage(id) => {
                             let topic = topic.read().clone();
-                            match cmd_line.next() {
-                                Some(id) => {
-                                    let id = match Uuid::from_str(id) {
-                                        Ok(uuid) => uuid,
-                                        Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {e}")?;
-                                            continue
-                                        }
-                                    };
-                                    if let Err(_e) = chat.delete(topic, Some(id)).await {
-
-                                    } else {
-                                        writeln!(stdout, "Message {id} removed")?;
-                                    }
-                                },
-                                None => { writeln!(stdout, "/remove-message <id>")? }
+                            match chat.delete(topic, Some(id)).await {
+                                Ok(_) => writeln!(stdout, "Message {id} removed")?,
+                                Err(e) => writeln!(stdout, "Error removing message: {e}")?,
                             }
                         }
-                        Some("/count") => {
+                        CountMessages => {
                             let amount = chat.get_message_count(*topic.read()).await?;
                             writeln!(stdout, "Conversation contains {amount} messages")?;
                         }
-                        _ => {
-                            if !line.is_empty() {
-                                if let Err(e) = chat.send(*topic.read(), vec![line.to_string()]).await {
-                                    writeln!(stdout, "Error sending message: {e}")?;
-                                    continue
-                                }
-                            }
-                       }
                     }
                 },
                 Ok(rustyline_async::ReadlineEvent::Eof) | Ok(rustyline_async::ReadlineEvent::Interrupted) => break,
@@ -1329,4 +1011,434 @@ async fn message_event_handle(
         }
     }
     Ok(())
+}
+
+#[derive(Debug)]
+enum Command {
+    CreateConversation(DID),
+    AddRecipient(DID),
+    RemoveRecipient(DID),
+    CreateGroupConversation(String, Vec<DID>),
+    RemoveConversation(Uuid),
+    SetConversation(Uuid),
+    SetConversationName(String),
+    ListConversations,
+    ListReferences(MessageOptions),
+    ListMessages(MessageOptions),
+    ListPages(MessageOptions),
+    RemoveMessage(Uuid),
+    GetFirst,
+    GetLast,
+    Search(String),
+    EditMessage(Uuid, String),
+    Attach(Vec<Location>),
+    Download(Uuid, String, PathBuf),
+    React(Uuid, ReactionState, String),
+    Status(Uuid),
+    Pin(PinTarget),
+    Unpin(PinTarget),
+    CountMessages,
+}
+
+impl FromStr for Command {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut cmd_line = s.split(' ');
+        match cmd_line.next() {
+            Some("/create") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/create <DID>"));
+                    }
+                };
+
+                Ok(Command::CreateConversation(did))
+            }
+            Some("/add-recipient") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/add-recipient <DID>"));
+                    }
+                };
+
+                Ok(Command::AddRecipient(did))
+            }
+            Some("/remove-recipient") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/remove-recipient <DID>"));
+                    }
+                };
+
+                Ok(Command::RemoveRecipient(did))
+            }
+            Some("/create-group") => {
+                let mut did_keys = vec![];
+
+                let name = match cmd_line.next() {
+                    Some(name) => name,
+                    None => {
+                        return Err(anyhow::anyhow!("/create-group <name> <DID> ..."));
+                    }
+                };
+
+                for item in cmd_line.by_ref() {
+                    let Ok(did) = DID::try_from(item.to_string()) else {
+                        continue;
+                    };
+                    did_keys.push(did);
+                }
+
+                Ok(Command::CreateGroupConversation(name.to_string(), did_keys))
+            }
+            Some("/remove-conversation") => {
+                let conversation_id = match cmd_line.next() {
+                    Some(id) => id.parse()?,
+                    None => {
+                        return Err(anyhow::anyhow!("/remove-conversation <conversation-id>"));
+                    }
+                };
+                Ok(Command::RemoveConversation(conversation_id))
+            }
+            Some("/set-conversation") => {
+                let conversation_id = match cmd_line.next() {
+                    Some(id) => id.parse()?,
+                    None => {
+                        return Err(anyhow::anyhow!("/set <conversation-id>"));
+                    }
+                };
+                Ok(Command::SetConversation(conversation_id))
+            }
+            Some("/set-conversation-name") => {
+                let name = match cmd_line.next() {
+                    Some(name) => name,
+                    None => {
+                        return Err(anyhow::anyhow!("/set-conversation-name <name>"));
+                    }
+                };
+                Ok(Command::SetConversationName(name.to_string()))
+            }
+            Some("/list-conversations") => Ok(Command::ListConversations),
+            Some("/list-references") => {
+                let mut lower_range = None;
+                let mut upper_range = None;
+
+                if let Some(id) = cmd_line.next() {
+                    match id.parse() {
+                        Ok(lower) => {
+                            lower_range = Some(lower);
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(upper) => {
+                                        upper_range = Some(upper);
+                                    }
+                                    Err(e) => {
+                                        return Err(anyhow::anyhow!(
+                                            "Error parsing upper range: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing lower range: {e}"));
+                        }
+                    }
+                };
+
+                let mut opt = MessageOptions::default();
+                if let Some(lower) = lower_range {
+                    if let Some(upper) = upper_range {
+                        opt = opt.set_range(lower..upper);
+                    } else {
+                        opt = opt.set_range(0..lower);
+                    }
+                }
+
+                Ok(Command::ListReferences(opt))
+            }
+            Some("/list") => {
+                let mut lower_range = None;
+                let mut upper_range = None;
+
+                if let Some(id) = cmd_line.next() {
+                    match id.parse() {
+                        Ok(lower) => {
+                            lower_range = Some(lower);
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(upper) => {
+                                        upper_range = Some(upper);
+                                    }
+                                    Err(e) => {
+                                        return Err(anyhow::anyhow!(
+                                            "Error parsing upper range: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing lower range: {e}"));
+                        }
+                    }
+                };
+
+                let mut opt = MessageOptions::default();
+                if let Some(lower) = lower_range {
+                    if let Some(upper) = upper_range {
+                        opt = opt.set_range(lower..upper);
+                    } else {
+                        opt = opt.set_range(0..lower);
+                    }
+                }
+
+                Ok(Command::ListMessages(opt))
+            }
+            Some("/list-pages") => {
+                let mut page_or_amount: Option<usize> = None;
+                let mut amount_per_page: Option<usize> = page_or_amount
+                    .map(|o| if o == 0 { u8::MAX as _ } else { o })
+                    .or(Some(10));
+
+                if let Some(id) = cmd_line.next() {
+                    match id.parse() {
+                        Ok(a_o_p) => {
+                            page_or_amount = Some(a_o_p);
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing: {e}"));
+                        }
+                    }
+                };
+
+                if let Some(id) = cmd_line.next() {
+                    match id.parse() {
+                        Ok(amount) => {
+                            amount_per_page = Some(amount);
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing: {e}"));
+                        }
+                    }
+                };
+
+                let opt = MessageOptions::default().set_messages_type(MessagesType::Pages {
+                    page: page_or_amount,
+                    amount_per_page,
+                });
+
+                Ok(Command::ListPages(opt))
+            }
+            Some("/get-first") => Ok(Command::GetFirst),
+            Some("/get-last") => Ok(Command::GetLast),
+            Some("/search") => {
+                let mut keywords = vec![];
+
+                for item in cmd_line.by_ref() {
+                    keywords.push(item.to_string());
+                }
+
+                let keywords = keywords.join(" ").to_string();
+
+                Ok(Command::Search(keywords))
+            }
+            Some("/edit") => {
+                let message_id = match cmd_line.next() {
+                    Some(id) => match Uuid::from_str(id) {
+                        Ok(uuid) => uuid,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing ID: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/edit <message-id> <message>"));
+                    }
+                };
+
+                let mut messages = vec![];
+
+                for item in cmd_line.by_ref() {
+                    messages.push(item.to_string());
+                }
+
+                Ok(Command::EditMessage(
+                    message_id,
+                    messages.join(" ").to_string(),
+                ))
+            }
+            Some("/attach") => {
+                let mut files = vec![];
+
+                for item in cmd_line.by_ref() {
+                    files.push(Location::Disk {
+                        path: PathBuf::from(item),
+                    });
+                }
+
+                Ok(Command::Attach(files))
+            }
+            Some("/download") => {
+                let message_id = match cmd_line.next() {
+                    Some(id) => match Uuid::from_str(id) {
+                        Ok(uuid) => uuid,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing ID: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/download <message-id> <name> <path>"));
+                    }
+                };
+
+                let name = match cmd_line.next() {
+                    Some(name) => name.to_string(),
+                    None => {
+                        return Err(anyhow::anyhow!("/download <message-id> <name> <path>"));
+                    }
+                };
+
+                let path = match cmd_line.next() {
+                    Some(path) => PathBuf::from(path),
+                    None => {
+                        return Err(anyhow::anyhow!("/download <message-id> <name> <path>"));
+                    }
+                };
+
+                Ok(Command::Download(message_id, name, path))
+            }
+            Some("/react") => {
+                let message_id = match cmd_line.next() {
+                    Some(id) => match Uuid::from_str(id) {
+                        Ok(uuid) => uuid,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing ID: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!(
+                            "/react <message-id> <add | remove> <emoji>"
+                        ));
+                    }
+                };
+
+                let reaction_state = match cmd_line.next() {
+                    Some(state) => match state {
+                        "add" => ReactionState::Add,
+                        "remove" => ReactionState::Remove,
+                        _ => {
+                            return Err(anyhow::anyhow!(
+                                "/react <message-id> <add | remove> <emoji>"
+                            ));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!(
+                            "/react <message-id> <add | remove> <emoji>"
+                        ));
+                    }
+                };
+
+                let emoji = match cmd_line.next() {
+                    Some(emoji) => emoji.to_string(),
+                    None => {
+                        return Err(anyhow::anyhow!(
+                            "/react <message-id> <add | remove> <emoji>"
+                        ));
+                    }
+                };
+
+                Ok(Command::React(message_id, reaction_state, emoji))
+            }
+            Some("/status") => {
+                let conversation_id = match cmd_line.next() {
+                    Some(id) => match Uuid::from_str(id) {
+                        Ok(uuid) => uuid,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing ID: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/status <conversation-id>"));
+                    }
+                };
+
+                Ok(Command::Status(conversation_id))
+            }
+            Some("/pin") => {
+                let target = match cmd_line.next() {
+                    Some("all") => PinTarget::All,
+                    Some(id) => match Uuid::from_str(id) {
+                        Ok(uuid) => PinTarget::Message(uuid),
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing ID: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/pin <all | message-id>"));
+                    }
+                };
+
+                Ok(Command::Pin(target))
+            }
+            Some("/unpin") => {
+                let target = match cmd_line.next() {
+                    Some("all") => PinTarget::All,
+                    Some(id) => match Uuid::from_str(id) {
+                        Ok(uuid) => PinTarget::Message(uuid),
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing ID: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/unpin <all | message-id>"));
+                    }
+                };
+
+                Ok(Command::Unpin(target))
+            }
+            Some("/remove-message") => {
+                let message_id = match cmd_line.next() {
+                    Some(id) => match Uuid::from_str(id) {
+                        Ok(uuid) => uuid,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing ID: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/remove-message <message-id>"));
+                    }
+                };
+
+                Ok(Command::RemoveMessage(message_id))
+            }
+            Some("/count-messages") => Ok(Command::CountMessages),
+            _ => Err(anyhow::anyhow!("Unknown command")),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum PinTarget {
+    All,
+    Message(Uuid),
 }
