@@ -214,7 +214,6 @@ impl RootStorageTask {
             }
         }
 
-
         tracing::info!(cid = %cid, "storing root");
         self.save(cid).await?;
         tracing::info!(cid = %cid, "root is stored");

@@ -57,7 +57,7 @@ impl FileStore {
         ipfs: Ipfs,
         config: &Config,
         constellation_tx: EventSubscription<ConstellationEventKind>,
-        span: Span
+        span: Span,
     ) -> Result<Self, Error> {
         let mut index_cid = None;
 
