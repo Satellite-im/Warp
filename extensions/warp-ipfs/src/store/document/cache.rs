@@ -303,7 +303,7 @@ impl IdentityCacheTask {
                 let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
                 if !self.ipfs.is_pinned(&cid).await? {
-                    self.ipfs.insert_pin(&cid).recursive().local().await?;
+                    self.ipfs.insert_pin(&cid).recursive().await?;
                 }
 
                 let old_cid = self.list.replace(cid);
@@ -340,7 +340,7 @@ impl IdentityCacheTask {
                 let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
                 if !self.ipfs.is_pinned(&cid).await? {
-                    self.ipfs.insert_pin(&cid).recursive().local().await?;
+                    self.ipfs.insert_pin(&cid).recursive().await?;
                 }
 
                 let old_cid = self.list.replace(cid);
@@ -411,7 +411,7 @@ impl IdentityCacheTask {
         let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
         if !self.ipfs.is_pinned(&cid).await? {
-            self.ipfs.insert_pin(&cid).recursive().local().await?;
+            self.ipfs.insert_pin(&cid).recursive().await?;
         }
 
         let old_cid = self.list.replace(cid);
