@@ -192,7 +192,6 @@ impl RootStorageTask {
             .dag()
             .put()
             .serialize(self.root)?
-            .pin(true)
             .await?;
 
         tracing::info!(cid = %cid, "storing root");
@@ -211,7 +210,6 @@ impl RootStorageTask {
             .dag()
             .put()
             .serialize(self.root)?
-            .pin(true)
             .await?;
         tracing::info!(cid = %cid, "root stored");
 
@@ -230,9 +228,8 @@ impl RootStorageTask {
             .dag()
             .put()
             .serialize(self.root)?
-            .pin(true)
             .await?;
-
+        
         tracing::info!(cid = %cid, "storing root");
         self.save(cid).await?;
         tracing::info!(cid = %cid, "root is stored");
@@ -247,6 +244,10 @@ impl RootStorageTask {
         // .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
         // .await?;
 
+        if !self.ipfs.is_pinned(&cid).await.unwrap_or_default() {
+            _ = self.ipfs.insert_pin(&cid).recursive().await;
+        }
+
         let old_cid = self.cid.replace(cid);
 
         if let Some(old_cid) = old_cid {
@@ -257,12 +258,14 @@ impl RootStorageTask {
                 }
 
                 tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, true)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+                match self.ipfs.remove_block(old_cid, true).await {
+                    Ok(remove_blocks) => {
+                        tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed")
+                    }
+                    Err(e) => {
+                        tracing::warn!(cid = %old_cid, error = %e, "Unable to recursively remove blocks")
+                    }
+                }
             }
         }
 
