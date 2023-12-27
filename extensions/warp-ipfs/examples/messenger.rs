@@ -37,8 +37,6 @@ struct Opt {
     with_key: bool,
     #[clap(long)]
     experimental_node: bool,
-    #[clap(long)]
-    stdout_log: bool,
 
     #[clap(long)]
     context: Option<String>,
@@ -49,7 +47,7 @@ struct Opt {
     #[clap(long)]
     upnp: bool,
     #[clap(long)]
-    no_discovery: bool,
+    enable_discovery: bool,
     #[clap(long)]
     mdns: bool,
     #[clap(long)]
@@ -85,7 +83,7 @@ async fn setup<P: AsRef<Path>>(
         None => warp_ipfs::config::Config::testing(),
     };
 
-    if !opt.no_discovery {
+    if opt.enable_discovery {
         let discovery_type = match &opt.discovery_point {
             Some(addr) => {
                 config.ipfs_setting.bootstrap = false;
@@ -99,6 +97,13 @@ async fn setup<P: AsRef<Path>>(
             namespace: opt.context.clone(),
             discovery_type,
         };
+        if let Some(bootstrap) = opt.bootstrap {
+            config.ipfs_setting.bootstrap = bootstrap;
+        }
+    } else {
+        config.store_setting.discovery = Discovery::None;
+        config.bootstrap = Bootstrap::None;
+        config.ipfs_setting.bootstrap = false;
     }
     if opt.disable_relay {
         config.enable_relay = false;
@@ -106,20 +111,11 @@ async fn setup<P: AsRef<Path>>(
     if opt.upnp {
         config.ipfs_setting.portmapping = true;
     }
-    if opt.no_discovery {
-        config.store_setting.discovery = Discovery::None;
-        config.bootstrap = Bootstrap::None;
-        config.ipfs_setting.bootstrap = false;
-    }
 
     config.store_setting.share_platform = opt.provide_platform_info;
 
     if let Some(oride) = opt.r#override {
         config.store_setting.fetch_over_bitswap = oride;
-    }
-
-    if let Some(bootstrap) = opt.bootstrap {
-        config.ipfs_setting.bootstrap = bootstrap;
     }
 
     config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
@@ -144,26 +140,16 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     _ = fdlimit::raise_fd_limit().is_ok();
 
-    let mut _log_guard = None;
+    let file_appender = tracing_appender::rolling::hourly(
+        opt.path.clone().unwrap_or_else(temp_dir),
+        "warp_ipfs_messenger.log",
+    );
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    if !opt.stdout_log {
-        let file_appender = tracing_appender::rolling::hourly(
-            opt.path.clone().unwrap_or_else(|| temp_dir()),
-            "warp_rg_ipfs_messenger.log",
-        );
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-        _log_guard = Some(_guard);
-
-        tracing_subscriber::fmt()
-            .with_writer(non_blocking)
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-    }
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     let password = if opt.with_key {
         rpassword::prompt_password("Enter A Password: ")?
@@ -307,7 +293,7 @@ async fn main() -> anyhow::Result<()> {
 
                         continue;
                     }
-                    let cmd = match Command::from_str(&line) {
+                    let cmd = match Command::from_str(line) {
                         Ok(cmd) => cmd,
                         Err(e) => {
                             writeln!(stdout, "{e}")?;
