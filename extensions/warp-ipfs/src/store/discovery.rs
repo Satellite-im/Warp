@@ -367,6 +367,9 @@ impl DiscoveryEntry {
             let peer_id = self.peer_id;
             async move {
                 let mut sent_initial_push = false;
+                let mut backoff = false;
+                let mut retry = true;
+
                 if !entry.relays.is_empty() {
                     //Adding relay for peer to address book in case we are connected over common relays
                     for addr in entry.relays.clone() {
@@ -375,6 +378,8 @@ impl DiscoveryEntry {
                 }
                 loop {
                     if ipfs.is_connected(entry.peer_id).await.unwrap_or_default() {
+                        backoff = false;
+                        retry = true;
                         if !sent_initial_push {
                             if let Ok(did) = peer_id.to_did() {
                                 tokio::time::sleep(Duration::from_millis(500)).await;
@@ -395,42 +400,48 @@ impl DiscoveryEntry {
                         tokio::time::sleep(Duration::from_secs(10)).await;
                         continue;
                     }
+                    if !backoff {
+                        match entry.config {
+                            // Used for provider. Doesnt do anything right now
+                            // TODO: Maybe have separate provider query in case
+                            //       Discovery task isnt enabled?
+                            DiscoveryConfig::Namespace {
+                                discovery_type: DiscoveryType::DHT,
+                                ..
+                            } => {}
+                            DiscoveryConfig::Namespace {
+                                discovery_type: DiscoveryType::RzPoint { .. },
+                                ..
+                            } => {
+                                tracing::debug!("Dialing {peer_id}");
 
-                    match entry.config {
-                        // Used for provider. Doesnt do anything right now
-                        // TODO: Maybe have separate provider query in case
-                        //       Discovery task isnt enabled?
-                        DiscoveryConfig::Namespace {
-                            discovery_type: DiscoveryType::DHT,
-                            ..
-                        } => {}
-                        DiscoveryConfig::Namespace {
-                            discovery_type: DiscoveryType::RzPoint { .. },
-                            ..
-                        } => {
-                            tracing::debug!("Dialing {peer_id}");
+                                if let Err(_e) = ipfs.connect(peer_id).await {
+                                    retry = false;
+                                    tracing::error!("Error connecting to {peer_id}: {_e}");
+                                    tokio::time::sleep(Duration::from_secs(10)).await;
+                                    continue;
+                                }
+                            }
+                            //TODO: Possibly obtain peer records from external node
+                            //      of any connected peer, otherwise await on a response for
+                            //      those records to establish a connection
+                            DiscoveryConfig::Shuttle { .. } | DiscoveryConfig::None => {
+                                let opts = DialOpts::peer_id(peer_id)
+                                    .addresses(entry.relays.clone())
+                                    .build();
 
-                            if let Err(_e) = ipfs.connect(peer_id).await {
-                                tracing::error!("Error connecting to {peer_id}: {_e}");
-                                tokio::time::sleep(Duration::from_secs(10)).await;
-                                continue;
+                                tracing::debug!("Dialing {peer_id}");
+
+                                if let Err(_e) = ipfs.connect(opts).await {
+                                    retry = false;
+                                    tracing::error!("Error connecting to {peer_id}: {_e}");
+                                    tokio::time::sleep(Duration::from_secs(10)).await;
+                                    continue;
+                                }
                             }
                         }
-                        //TODO: Possibly obtain peer records from external node
-                        //      of any connected peer, otherwise await on a response for
-                        //      those records to establish a connection
-                        DiscoveryConfig::Shuttle { .. } | DiscoveryConfig::None => {
-                            let opts = DialOpts::peer_id(peer_id)
-                                .addresses(entry.relays.clone())
-                                .build();
-
-                            tracing::debug!("Dialing {peer_id}");
-
-                            if let Err(_e) = ipfs.connect(opts).await {
-                                tracing::error!("Error connecting to {peer_id}: {_e}");
-                                tokio::time::sleep(Duration::from_secs(10)).await;
-                                continue;
-                            }
+                        if !retry {
+                            backoff = true;
                         }
                     }
 
