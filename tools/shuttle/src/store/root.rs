@@ -195,25 +195,6 @@ impl RootStorageTask {
             .pin(false)
             .await?;
 
-        let old_cid = self.cid.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning root block");
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
-
         tracing::info!(cid = %cid, "storing root");
         self.save(cid).await?;
         tracing::info!(cid = %cid, "root is stored");
@@ -234,25 +215,6 @@ impl RootStorageTask {
             .await?;
         tracing::info!(cid = %cid, "root stored");
 
-        let old_cid = self.cid.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning root block");
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
-
         tracing::info!(cid = %cid, "storing root");
         self.save(cid).await?;
         tracing::info!(cid = %cid, "root is stored");
@@ -271,6 +233,20 @@ impl RootStorageTask {
             .pin(false)
             .await?;
 
+        tracing::info!(cid = %cid, "storing root");
+        self.save(cid).await?;
+        tracing::info!(cid = %cid, "root is stored");
+        //TODO: Broadcast root document to nodes
+        Ok(())
+    }
+
+    async fn save(&mut self, cid: Cid) -> std::io::Result<()> {
+        //TODO: Reenable ipns
+        // self.ipfs
+        // .ipns()
+        // .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
+        // .await?;
+
         let old_cid = self.cid.replace(cid);
 
         if let Some(old_cid) = old_cid {
@@ -289,20 +265,6 @@ impl RootStorageTask {
                 tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
             }
         }
-
-        tracing::info!(cid = %cid, "storing root");
-        self.save(cid).await?;
-        tracing::info!(cid = %cid, "root is stored");
-        //TODO: Broadcast root document to nodes
-        Ok(())
-    }
-
-    async fn save(&self, cid: Cid) -> std::io::Result<()> {
-        //TODO: Reenable ipns
-        // self.ipfs
-        // .ipns()
-        // .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
-        // .await?;
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
