@@ -341,35 +341,13 @@ impl IdentityStorageTask {
             return Err(Error::IdentityExist);
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(document.clone())?
-            .pin(false)
-            .await?;
+        let cid = self.ipfs.dag().put().serialize(document.clone())?.await?;
 
         list.insert(did_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        let old_cid = self.list.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
+        self.list.replace(cid);
 
         self.root.set_identity_list(cid).await?;
 
@@ -403,25 +381,10 @@ impl IdentityStorageTask {
 
         list.insert(did.to_string(), pkg_cid);
 
-        let cid = self.ipfs.dag().put().pin(true).serialize(list)?.await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        let old_cid = self.packages.replace(cid);
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity package block");
-                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
-                }
+        self.packages.replace(cid);
 
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, true)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
         self.root.set_package(cid).await?;
 
         Ok(())
@@ -484,53 +447,14 @@ impl IdentityStorageTask {
             return Err(Error::CannotUpdateIdentity);
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(document)?
-            .pin(false)
-            .await?;
+        let cid = self.ipfs.dag().put().serialize(document)?.await?;
 
-        let old_cid = list.insert(did_str, cid);
+        list.insert(did_str, cid);
 
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
+        self.list.replace(cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
-
-        let old_cid = self.list.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
         self.root.set_identity_list(cid).await?;
 
         Ok(())
@@ -713,26 +637,9 @@ impl IdentityStorageTask {
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        let old_cid = self.mailbox.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, true)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
+        self.mailbox.replace(cid);
 
         self.root.set_mailbox(cid).await?;
 
@@ -782,26 +689,9 @@ impl IdentityStorageTask {
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        let old_cid = self.mailbox.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, true)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
+        self.mailbox.replace(cid);
 
         self.root.set_mailbox(cid).await?;
 
