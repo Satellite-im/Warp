@@ -150,31 +150,29 @@ impl ShuttleServer {
         }
 
         if memory_transport {
-            uninitialized = uninitialized
-                .with_custom_transport(Box::new(
-                    |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
-                        let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            uninitialized = uninitialized.with_custom_transport(Box::new(
+                |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
+                    let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-                        let transport = match relay {
-                            Some(relay) => OrTransport::new(relay, MemoryTransport::default())
-                                .upgrade(Version::V1)
-                                .authenticate(noise_config)
-                                .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                                .timeout(Duration::from_secs(20))
-                                .boxed(),
-                            None => MemoryTransport::default()
-                                .upgrade(Version::V1)
-                                .authenticate(noise_config)
-                                .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                                .timeout(Duration::from_secs(20))
-                                .boxed(),
-                        };
+                    let transport = match relay {
+                        Some(relay) => OrTransport::new(relay, MemoryTransport::default())
+                            .upgrade(Version::V1)
+                            .authenticate(noise_config)
+                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                            .timeout(Duration::from_secs(20))
+                            .boxed(),
+                        None => MemoryTransport::default()
+                            .upgrade(Version::V1)
+                            .authenticate(noise_config)
+                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
+                            .timeout(Duration::from_secs(20))
+                            .boxed(),
+                    };
 
-                        Ok(transport)
-                    },
-                ))
-                .listen_as_external_addr();
+                    Ok(transport)
+                },
+            ));
         }
 
         let addrs = match listen_addrs {
@@ -189,9 +187,11 @@ impl ShuttleServer {
             uninitialized = uninitialized.set_path(path);
         }
 
-        uninitialized = uninitialized.set_listening_addrs(addrs);
-
         let ipfs = uninitialized.start().await?;
+
+        for addr in addrs {
+            ipfs.add_listening_address(addr).await?;
+        }
 
         let root = crate::store::root::RootStorage::new(&ipfs, path).await;
         let identity = crate::store::identity::IdentityStorage::new(&ipfs, &root).await;
@@ -217,6 +217,11 @@ impl ShuttleServer {
             ipfs,
             task: Arc::new(task),
         })
+    }
+
+    pub async fn addresses(&self) -> impl Iterator<Item = Multiaddr> {
+        let addresses = self.ipfs.external_addresses().await.unwrap_or_default();
+        addresses.into_iter()
     }
 }
 
