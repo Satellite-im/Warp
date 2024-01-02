@@ -365,11 +365,17 @@ impl WarpIpfs {
                 .relay_client
                 .relay_address
                 .iter()
-                .chain(config.bootstrap.address().iter())
+                .chain(
+                    config
+                        .use_bootstrap_relays
+                        .then_some(config.bootstrap.address())
+                        .unwrap_or_default()
+                        .iter(),
+                )
                 .cloned()
             {
                 if addr.is_relayed() {
-                    warn!("Relay circuits cannot be used as relays");
+                    warn!(address = %addr, "Relay circuits cannot be used as relays");
                     continue;
                 }
 
