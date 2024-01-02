@@ -2,6 +2,7 @@
 pub mod directory;
 pub mod file;
 pub mod item;
+pub mod guard;
 
 use std::path::{Path, PathBuf};
 
