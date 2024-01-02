@@ -101,18 +101,16 @@ pub fn ecdh_decrypt<K: AsRef<[u8]>>(own_did: &DID, sender: &DID, data: K) -> Res
 }
 
 fn _did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<rust_ipfs::libp2p::identity::PublicKey> {
-    let kp = rust_ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(
-        &public_key.public_key_bytes(),
-    )
-    .map_err(anyhow::Error::from)?;
-    rust_ipfs::libp2p::identity::PublicKey::try_from(kp).map_err(anyhow::Error::from)
+    rust_ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(&public_key.public_key_bytes())
+        .map(rust_ipfs::libp2p::identity::PublicKey::from)
+        .map_err(anyhow::Error::from)
 }
 
 fn libp2p_pub_to_did(public_key: &rust_ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
     let pk = match public_key.clone().try_into_ed25519() {
         Ok(pk) => {
             let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
-            did.try_into()?
+            did.into()
         }
         _ => anyhow::bail!(warp::error::Error::PublicKeyInvalid),
     };

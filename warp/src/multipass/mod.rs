@@ -103,7 +103,7 @@ pub trait MultiPass:
     async fn get_own_identity(&self) -> Result<Identity, Error> {
         self.get_identity(Identifier::own())
             .await
-            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))
+            .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))
     }
 
     /// Update your own [`Identity`] using [`IdentityUpdate`]

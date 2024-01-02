@@ -149,7 +149,7 @@ impl IdentityCacheTask {
     pub async fn start(&mut self) {
         // migrate old identity to new
         self.migrate().await;
-        // repin map 
+        // repin map
         self.repin_map().await;
 
         while let Some(command) = self.rx.next().await {

@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         let ident = account_a
             .get_identity(Identifier::from(outgoing))
             .await
-            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+            .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
         println!("To: {}", username(&ident));
         println!();
     }
@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
         let ident = account_b
             .get_identity(Identifier::from(incoming))
             .await
-            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+            .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
 
         println!("From: {}", username(&ident));
         println!();
@@ -119,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
                 let friend = account_a
                     .get_identity(Identifier::did_key(friend))
                     .await
-                    .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+                    .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!("Username: {}", username(&friend));
                 println!("Public Key: {}", friend.did_key());
                 println!();
@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
                 let friend = account_b
                     .get_identity(Identifier::did_key(friend))
                     .await
-                    .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+                    .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!("Username: {}", username(&friend));
                 println!("Public Key: {}", friend.did_key());
                 println!();

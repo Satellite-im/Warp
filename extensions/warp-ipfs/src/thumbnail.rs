@@ -75,8 +75,8 @@ impl ThumbnailGenerator {
                 .map(ExtensionType::from)
                 .unwrap_or(ExtensionType::Other);
 
-            let result = match extension.try_into() {
-                Ok(FileType::Mime(media)) => match media.ty().as_str() {
+            let result = match extension.into() {
+                FileType::Mime(media) => match media.ty().as_str() {
                     "image" => tokio::task::spawn_blocking(move || {
                         let format: ImageFormat = extension.try_into()?;
                         let image = image::open(own_path).map_err(anyhow::Error::from)?;
@@ -143,8 +143,8 @@ impl ThumbnailGenerator {
                 .map(ExtensionType::from)
                 .unwrap_or(ExtensionType::Other);
 
-            let result = match extension.try_into() {
-                Ok(FileType::Mime(media)) => match media.ty().as_str() {
+            let result = match extension.into() {
+                FileType::Mime(media) => match media.ty().as_str() {
                     "image" => tokio::task::spawn_blocking(move || {
                         let format: ImageFormat = extension.try_into()?;
                         let image = ImageReader::new(buffer)
