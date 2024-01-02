@@ -304,7 +304,6 @@ impl File {
 
         let path = Arc::make_mut(&mut self.path);
         *path = new_path;
-        self.signal();
     }
 
     pub(crate) fn set_signal(
