@@ -10,6 +10,7 @@ use std::io::{Read, Seek};
 use uuid::Uuid;
 use warp_derive::FFIFree;
 
+use super::guard::SignalGuard;
 use super::item::FormatType;
 
 /// `FileType` describes all supported file types.
@@ -303,7 +304,6 @@ impl File {
 
         let path = Arc::make_mut(&mut self.path);
         *path = new_path;
-        self.signal();
     }
 
     pub(crate) fn set_signal(
@@ -314,11 +314,21 @@ impl File {
     }
 
     fn signal(&self) {
-        let Some(signal) = self.signal.read().clone() else {
+        let Some(signal) = self.signal.try_read() else {
+            return;
+        };
+        let Some(signal) = signal.clone() else {
             return;
         };
 
-        let _ = signal.unbounded_send(());
+        _ = signal.unbounded_send(());
+    }
+
+    /// Produce a guard that is used to signal change after it has been dropped
+    /// This would return `None` if `rebuild_paths` used or `set_signal` is used until the write has
+    /// been finished, unless a signal has not been set at all
+    pub fn signal_guard(&self) -> Option<SignalGuard> {
+        self.signal.try_write().map(|signal| SignalGuard { signal })
     }
 }
 

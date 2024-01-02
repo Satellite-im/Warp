@@ -11,6 +11,7 @@ use rust_ipfs::{
     Ipfs, IpfsPath,
 };
 
+use tokio::sync::Notify;
 use tokio_util::io::ReaderStream;
 use tracing::Span;
 use warp::{
@@ -49,7 +50,7 @@ pub struct FileStore {
 
     span: Span,
 
-    signal_guard: Arc<tokio::sync::RwLock<()>>,
+    signal_guard: Arc<Notify>,
 }
 
 impl FileStore {
@@ -131,10 +132,10 @@ impl FileStore {
                 });
 
                 while stream_ctx.next().await.is_some() {
-                    let _g = fs.signal_guard.read().await;
                     if let Err(_e) = fs.export().await {
                         tracing::error!("Error exporting index: {_e}");
                     }
+                    fs.signal_guard.notify_waiters();
                 }
             }
         });
@@ -327,10 +328,9 @@ impl FileStore {
 
         let name = name.to_string();
         let fs = self.clone();
-        let guard = self.signal_guard.clone();
 
         let progress_stream = async_stream::stream! {
-
+            let _current_guard = current_directory.signal_guard();
             let mut last_written = 0;
 
             let mut total_written = 0;
@@ -425,7 +425,8 @@ impl FileStore {
                 tokio::spawn(task);
             }
 
-            let _guard = guard.write().await;
+            drop(_current_guard);
+            fs.signal_guard.notified().await;
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
@@ -490,7 +491,11 @@ impl FileStore {
 
         let ipfs = self.ipfs.clone();
 
-        if self.current_directory()?.get_item_by_path(name).is_ok() {
+        let current_directory = self.current_directory()?;
+
+        let _current_guard = current_directory.signal_guard();
+
+        if current_directory.get_item_by_path(name).is_ok() {
             return Err(Error::FileExist);
         }
 
@@ -548,9 +553,10 @@ impl FileStore {
             Err(_e) => {}
         }
 
-        self.current_directory()?.add_item(file)?;
+        current_directory.add_item(file)?;
 
-        let _guard = self.signal_guard.write().await;
+        drop(_current_guard);
+        self.signal_guard.notified().await;
 
         self.constellation_tx
             .emit(ConstellationEventKind::Uploaded {
@@ -612,7 +618,6 @@ impl FileStore {
         let fs = self.clone();
         let name = name.to_string();
         let stream = stream.map(Ok::<_, std::io::Error>).boxed();
-        let guard = self.signal_guard.clone();
 
         let progress_stream = async_stream::stream! {
 
@@ -685,6 +690,8 @@ impl FileStore {
                     }
                 };
 
+            let _current_guard = current_directory.signal_guard();
+
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
@@ -699,7 +706,8 @@ impl FileStore {
                 return;
             }
 
-            let _guard = guard.write().await;
+            drop(_current_guard);
+            fs.signal_guard.notified().await;
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
@@ -771,9 +779,12 @@ impl FileStore {
             ipfs.remove_pin(&cid).recursive().await?;
         }
 
+        let _g = directory.signal_guard();
+
         directory.remove_item(&item.name())?;
 
-        let _guard = self.signal_guard.write().await;
+        drop(_g);
+        self.signal_guard.notified().await;
 
         let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
         tracing::info!(blocks = blocks.len(), "blocks removed");
@@ -795,9 +806,11 @@ impl FileStore {
             return Err(Error::DuplicateName);
         }
 
+        let _g = directory.signal_guard();
         directory.rename_item(current, new)?;
 
-        let _guard = self.signal_guard.write().await;
+        drop(_g);
+        self.signal_guard.notified().await;
 
         self.constellation_tx
             .emit(ConstellationEventKind::Renamed {
@@ -819,10 +832,11 @@ impl FileStore {
         if directory.has_item(name) || directory.get_item_by_path(name).is_ok() {
             return Err(Error::DirectoryExist);
         }
-
+        let _g = directory.signal_guard();
         directory.add_directory(Directory::new(name))?;
 
-        let _guard = self.signal_guard.write().await;
+        drop(_g);
+        self.signal_guard.notified().await;
 
         Ok(())
     }
