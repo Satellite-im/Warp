@@ -77,7 +77,7 @@ fn libp2p_pub_to_did(public_key: &rust_ipfs::libp2p::identity::PublicKey) -> any
     let pk = match public_key.clone().try_into_ed25519() {
         Ok(pk) => {
             let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
-            did.try_into()?
+            did.into()
         }
         _ => anyhow::bail!(warp::error::Error::PublicKeyInvalid),
     };

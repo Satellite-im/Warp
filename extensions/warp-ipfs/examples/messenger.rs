@@ -770,7 +770,7 @@ async fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<S
     let identity = account
         .get_identity(Identifier::did_key(did))
         .await
-        .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+        .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
     Ok(format!("{}#{}", identity.username(), identity.short_id()))
 }
 

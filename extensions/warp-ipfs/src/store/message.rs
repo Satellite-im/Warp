@@ -1957,7 +1957,6 @@ impl MessageStore {
                     .filter(|did| own_did.ne(did))
                     .map(|did| (did.clone(), did))
                     .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
-                    .map(|(did, pk)| (did, pk))
                     .collect::<Vec<_>>();
 
                 let event = serde_json::to_vec(&ConversationEvents::DeleteConversation {
