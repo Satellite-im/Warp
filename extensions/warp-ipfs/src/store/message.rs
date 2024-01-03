@@ -3040,6 +3040,7 @@ impl MessageStore {
                         && thumbnail.len() <= 1024 * 1024
                     {
                         new_file.set_thumbnail(&thumbnail);
+                        new_file.set_thumbnail_format(file.thumbnail_format());
                         total_thumbnail_size += thumbnail.len();
                     }
                     new_file.set_size(file.size());

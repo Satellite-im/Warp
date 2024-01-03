@@ -1,5 +1,6 @@
 #![allow(clippy::result_large_err)]
 use super::file::File;
+use super::guard::SignalGuard;
 use super::item::{FormatType, Item};
 use crate::error::Error;
 use crate::sync::{Arc, RwLock};
@@ -596,11 +597,21 @@ impl Directory {
     }
 
     fn signal(&self) {
-        let Some(signal) = self.signal.read().clone() else {
+        let Some(signal) = self.signal.try_read() else {
+            return;
+        };
+        let Some(signal) = signal.clone() else {
             return;
         };
 
-        let _ = signal.unbounded_send(());
+        _ = signal.unbounded_send(());
+    }
+
+    /// Produce a guard that is used to signal change after it has been dropped
+    /// This would return `None` if `rebuild_paths` used or `set_signal` is used until the write has
+    /// been finished, unless a signal has not been set at all
+    pub fn signal_guard(&self) -> Option<SignalGuard> {
+        self.signal.try_write().map(|signal| SignalGuard { signal })
     }
 }
 
