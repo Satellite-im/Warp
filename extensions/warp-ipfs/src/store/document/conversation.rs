@@ -382,7 +382,7 @@ impl ConversationTask {
     async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
         if let Some(creator) = document.creator.as_ref() {
             if creator.eq(&self.keypair)
-                && matches!(document.conversation_type, ConversationType::Group)
+                && matches!(document.conversation_type, ConversationType::Group { .. })
             {
                 document.sign(&self.keypair)?;
             }

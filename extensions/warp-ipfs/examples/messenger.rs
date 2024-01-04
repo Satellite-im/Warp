@@ -316,8 +316,8 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{did} has been removed")?;
 
                         },
-                        CreateGroupConversation(name, did_keys) => {
-                            if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys).await {
+                        CreateGroupConversation(name, did_keys, open) => {
+                            if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys, open).await {
                                 writeln!(stdout, "Error creating conversation: {e}")?;
                                 continue
                             }
@@ -994,7 +994,7 @@ enum Command {
     CreateConversation(DID),
     AddRecipient(DID),
     RemoveRecipient(DID),
-    CreateGroupConversation(String, Vec<DID>),
+    CreateGroupConversation(String, Vec<DID>, bool),
     RemoveConversation(Uuid),
     SetConversation(Uuid),
     SetConversationName(String),
@@ -1021,7 +1021,7 @@ fn list_commands_and_help() -> String {
         Command::CreateConversation(DID::default()),
         Command::AddRecipient(DID::default()),
         Command::RemoveRecipient(DID::default()),
-        Command::CreateGroupConversation("".into(), vec![]),
+        Command::CreateGroupConversation("".into(), vec![], false),
         Command::RemoveConversation(Uuid::nil()),
         Command::SetConversation(Uuid::nil()),
         Command::SetConversationName("".into()),
@@ -1048,7 +1048,7 @@ fn list_commands_and_help() -> String {
         Command::CreateConversation(_) => "/create <did> - create conversation with another user",
         Command::AddRecipient(_) => "/add-recipient <did> - add recipient to conversation",
         Command::RemoveRecipient(_) => "/remove-recipient <did> - remove recipient from conversation",
-        Command::CreateGroupConversation(_, _) => "/create-group <name> <did> ... - create group conversation with other users",
+        Command::CreateGroupConversation(_, _, _) => "/create-group [--open] <name> <did> ... - create group conversation with other users",
         Command::RemoveConversation(_) => "/remove-conversation - delete current conversation. This will delete it on both ends",
         Command::SetConversation(_) => "/set-conversation <id> - switch to a conversation",
         Command::SetConversationName(_) => "/set-conversation-name <name> - set conversation name",
@@ -1130,11 +1130,11 @@ impl FromStr for Command {
             Some("/create-group") => {
                 let mut did_keys = vec![];
 
-                let name = match cmd_line.next() {
-                    Some(name) => name,
-                    None => {
-                        return Err(anyhow::anyhow!("/create-group <name> <DID> ..."));
-                    }
+                let usage_error_fn = || anyhow::anyhow!("/create-group [--open] <name> <DID> ...");
+                let (name, open) = match cmd_line.next() {
+                    Some("--open") => (cmd_line.next().ok_or_else(usage_error_fn)?, true),
+                    Some(name) => (name, false),
+                    None => return Err(usage_error_fn()),
                 };
 
                 for item in cmd_line.by_ref() {
@@ -1144,7 +1144,11 @@ impl FromStr for Command {
                     did_keys.push(did);
                 }
 
-                Ok(Command::CreateGroupConversation(name.to_string(), did_keys))
+                Ok(Command::CreateGroupConversation(
+                    name.to_string(),
+                    did_keys,
+                    open,
+                ))
             }
             Some("/remove-conversation") => {
                 let conversation_id = match cmd_line.next() {

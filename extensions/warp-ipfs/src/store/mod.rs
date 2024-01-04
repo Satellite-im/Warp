@@ -145,6 +145,7 @@ pub enum ConversationEvents {
         conversation_id: Uuid,
         list: Vec<DID>,
         signature: Option<String>,
+        open: bool,
     },
     LeaveConversation {
         conversation_id: Uuid,

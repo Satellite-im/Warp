@@ -386,7 +386,7 @@ pub enum ConversationType {
     #[display(fmt = "direct")]
     Direct,
     #[display(fmt = "group")]
-    Group,
+    Group { open: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, warp_derive::FFIVec, FFIFree)]
@@ -938,6 +938,7 @@ pub trait RayGun:
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
+        _: bool,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }

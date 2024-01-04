@@ -207,14 +207,19 @@ impl ConversationDocument {
         )
     }
 
-    pub fn new_group(did: &DID, name: Option<String>, recipients: &[DID]) -> Result<Self, Error> {
+    pub fn new_group(
+        did: &DID,
+        name: Option<String>,
+        recipients: &[DID],
+        open: bool,
+    ) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
             did,
             name,
             recipients.to_vec(),
             conversation_id,
-            ConversationType::Group,
+            ConversationType::Group { open },
             None,
             None,
             Some(did.clone()),
@@ -225,32 +230,34 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        if matches!(self.conversation_type, ConversationType::Group) {
+        if let ConversationType::Group { open } = self.conversation_type {
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
 
-            if !creator.eq(did) {
+            if !open && !creator.eq(did) {
                 return Err(Error::PublicKeyInvalid);
             }
 
-            let construct = vec![
+            let mut construct = vec![
                 self.id().into_bytes().to_vec(),
                 vec![0xdc, 0xfc],
                 creator.to_string().as_bytes().to_vec(),
-                Vec::from_iter(
+            ];
+            if !open {
+                construct.push(Vec::from_iter(
                     self.recipients
                         .iter()
                         .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                ),
-            ];
+                ));
+            }
             self.signature = Some(bs58::encode(did.sign(&construct.concat())).into_string());
         }
         Ok(())
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        if matches!(self.conversation_type, ConversationType::Group) {
+        if let ConversationType::Group { open } = self.conversation_type {
             let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -261,16 +268,18 @@ impl ConversationDocument {
 
             let signature = bs58::decode(signature).into_vec()?;
 
-            let construct = vec![
+            let mut construct = vec![
                 self.id().into_bytes().to_vec(),
                 vec![0xdc, 0xfc],
                 creator.to_string().as_bytes().to_vec(),
-                Vec::from_iter(
+            ];
+            if !open {
+                construct.push(Vec::from_iter(
                     self.recipients
                         .iter()
                         .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                ),
-            ];
+                ));
+            }
 
             creator
                 .verify(&construct.concat(), &signature)

@@ -251,7 +251,7 @@ impl MessageStore {
                                 continue;
                             }
                         }
-                        ConversationType::Group => {
+                        ConversationType::Group { .. } => {
                             if conversation.creator != Some((*self.did).clone()) {
                                 continue;
                             }
@@ -280,7 +280,7 @@ impl MessageStore {
                                 continue;
                             }
                         }
-                        ConversationType::Group => {
+                        ConversationType::Group { .. } => {
                             if conversation.creator != Some((*self.did).clone()) {
                                 continue;
                             }
@@ -360,7 +360,7 @@ impl MessageStore {
                                         .ok_or(Error::InvalidConversation)?;
                                     ecdh_decrypt(own_did, Some(&recipient), payload.data())
                                 }
-                                ConversationType::Group => {
+                                ConversationType::Group { .. } => {
                                     let keystore =
                                         store.conversation_keystore(conversation_id).await?;
                                     let key = keystore.get_latest(own_did, &payload.sender())?;
@@ -491,7 +491,7 @@ impl MessageStore {
 
                                 if !matches!(
                                     conversation.conversation_type,
-                                    ConversationType::Group
+                                    ConversationType::Group { .. }
                                 ) {
                                     //Only group conversations support keys
                                     continue;
@@ -624,7 +624,7 @@ impl MessageStore {
 
                                 if !matches!(
                                     conversation.conversation_type,
-                                    ConversationType::Group
+                                    ConversationType::Group { .. }
                                 ) {
                                     //Only group conversations support keys
                                     tracing::error!(id = ?conversation_id, "Invalid conversation type");
@@ -782,7 +782,7 @@ impl MessageStore {
                                         };
                                     ecdh_decrypt(own_did, Some(&recipient), data.data())
                                 }
-                                ConversationType::Group => {
+                                ConversationType::Group { .. } => {
                                     let key = match store.conversation_keystore(conversation_id).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
                                         Ok(key) => key,
                                         Err(e) => {
@@ -847,7 +847,9 @@ impl MessageStore {
 
         let keystore = match document.conversation_type {
             ConversationType::Direct => None,
-            ConversationType::Group => self.conversation_keystore(conversation_id).await.ok(),
+            ConversationType::Group { .. } => {
+                self.conversation_keystore(conversation_id).await.ok()
+            }
         };
 
         match events.clone() {
@@ -1409,6 +1411,7 @@ impl MessageStore {
                 conversation_id,
                 list,
                 signature,
+                open,
             } => {
                 let did = &*self.did;
                 info!("New group conversation event received");
@@ -1430,7 +1433,7 @@ impl MessageStore {
                     name,
                     list.clone(),
                     Some(conversation_id),
-                    ConversationType::Group,
+                    ConversationType::Group { open },
                     None,
                     None,
                     Some(creator),
@@ -1475,7 +1478,10 @@ impl MessageStore {
             } => {
                 let conversation = self.conversations.get(conversation_id).await?;
 
-                if !matches!(conversation.conversation_type, ConversationType::Group) {
+                if !matches!(
+                    conversation.conversation_type,
+                    ConversationType::Group { .. }
+                ) {
                     return Err(anyhow::anyhow!("Can only leave from a group conversation"));
                 }
 
@@ -1557,7 +1563,7 @@ impl MessageStore {
                             )
                             || matches!(
                                 conversation.conversation_type,
-                                ConversationType::Group
+                                ConversationType::Group { .. }
                             ) && matches!(conversation.creator.clone(), Some(creator) if creator.eq(&sender)) =>
                     {
                         conversation
@@ -1774,6 +1780,7 @@ impl MessageStore {
         &mut self,
         name: Option<String>,
         mut recipients: HashSet<DID>,
+        open: bool,
     ) -> Result<Conversation, Error> {
         let own_did = &*(self.did.clone());
 
@@ -1824,7 +1831,7 @@ impl MessageStore {
         }
 
         let conversation =
-            ConversationDocument::new_group(own_did, name, &Vec::from_iter(recipients))?;
+            ConversationDocument::new_group(own_did, name, &Vec::from_iter(recipients), open)?;
 
         let recipient = conversation.recipients();
 
@@ -1858,6 +1865,7 @@ impl MessageStore {
             conversation_id: conversation.id(),
             list: recipient.clone(),
             signature: conversation.signature.clone(),
+            open,
         })?;
 
         for (did, peer_id) in peer_id_list {
@@ -1924,7 +1932,10 @@ impl MessageStore {
 
             let mut can_broadcast = true;
 
-            if matches!(document_type.conversation_type, ConversationType::Group) {
+            if matches!(
+                document_type.conversation_type,
+                ConversationType::Group { .. }
+            ) {
                 let own_did = &*self.did;
                 let creator = document_type
                     .creator
@@ -2161,7 +2172,9 @@ impl MessageStore {
         let conversation = self.conversations.get(conversation_id).await?;
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
-            ConversationType::Group => self.conversation_keystore(conversation.id()).await.ok(),
+            ConversationType::Group { .. } => {
+                self.conversation_keystore(conversation.id()).await.ok()
+            }
         };
         conversation
             .get_message(&self.ipfs, &self.did, message_id, keystore.as_ref())
@@ -2204,7 +2217,10 @@ impl MessageStore {
     ) -> Result<MessageStatus, Error> {
         let conversation = self.conversations.get(conversation_id).await?;
 
-        if matches!(conversation.conversation_type, ConversationType::Group) {
+        if matches!(
+            conversation.conversation_type,
+            ConversationType::Group { .. }
+        ) {
             //TODO: Handle message status for group
             return Err(Error::Unimplemented);
         }
@@ -2251,7 +2267,9 @@ impl MessageStore {
         let conversation = self.conversations.get(conversation).await?;
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
-            ConversationType::Group => self.conversation_keystore(conversation.id()).await.ok(),
+            ConversationType::Group { .. } => {
+                self.conversation_keystore(conversation.id()).await.ok()
+            }
         };
 
         let m_type = opt.messages_type();
@@ -2382,9 +2400,10 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let mut conversation = self.conversations.get(conversation_id).await?;
 
-        if matches!(conversation.conversation_type, ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
-        }
+        let open = match conversation.conversation_type {
+            ConversationType::Group { open } => open,
+            ConversationType::Direct => return Err(Error::InvalidConversation),
+        };
 
         let Some(creator) = conversation.creator.clone() else {
             return Err(Error::InvalidConversation);
@@ -2392,7 +2411,7 @@ impl MessageStore {
 
         let own_did = &*self.did;
 
-        if creator.ne(own_did) {
+        if !open && creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
         }
 
@@ -2432,13 +2451,13 @@ impl MessageStore {
 
         self.publish(conversation_id, None, event, true).await?;
 
-        let own_did = &*self.did;
         let new_event = ConversationEvents::NewGroupConversation {
-            creator: own_did.clone(),
+            creator: creator.clone(),
             name: conversation.name(),
             conversation_id: conversation.id(),
             list: conversation.recipients(),
             signature: Some(signature),
+            open,
         };
 
         self.send_single_conversation_event(did_key, conversation_id, new_event)
@@ -3237,7 +3256,7 @@ impl MessageStore {
                     .ok_or(Error::InvalidConversation)?;
                 ecdh_encrypt(own_did, Some(&recipient), &event)?
             }
-            ConversationType::Group => {
+            ConversationType::Group { .. } => {
                 let keystore = self.conversation_keystore(conversation.id()).await?;
                 let key = keystore.get_latest(own_did, own_did)?;
                 Cipher::direct_encrypt(&event, &key)?
@@ -3290,7 +3309,7 @@ impl MessageStore {
                     .ok_or(Error::InvalidConversation)?;
                 ecdh_encrypt(own_did, Some(&recipient), &event)?
             }
-            ConversationType::Group => {
+            ConversationType::Group { .. } => {
                 let keystore = self.conversation_keystore(conversation.id()).await?;
                 let key = keystore.get_latest(own_did, own_did)?;
                 Cipher::direct_encrypt(&event, &key)?

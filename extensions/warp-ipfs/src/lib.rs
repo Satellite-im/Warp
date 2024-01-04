@@ -1363,9 +1363,10 @@ impl RayGun for WarpIpfs {
         &mut self,
         name: Option<String>,
         recipients: Vec<DID>,
+        open: bool,
     ) -> Result<Conversation, Error> {
         self.messaging_store()?
-            .create_group_conversation(name, HashSet::from_iter(recipients))
+            .create_group_conversation(name, HashSet::from_iter(recipients), open)
             .await
     }
 
