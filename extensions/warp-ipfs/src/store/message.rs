@@ -1387,15 +1387,14 @@ impl MessageStore {
                 let list = [did.clone(), recipient];
                 info!("Creating conversation");
                 let convo = ConversationDocument::new_direct(did, list)?;
-                info!(
-                    "{} conversation created: {}",
-                    convo.conversation_type,
-                    convo.id()
-                );
 
-                self.conversations.set(convo.clone()).await?;
+                info!("{} conversation created: {}", convo.conversation_type, id);
 
-                let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
+                let topic = convo.topic();
+
+                self.conversations.set(convo).await?;
+
+                let stream = match self.ipfs.pubsub_subscribe(topic).await {
                     Ok(stream) => stream,
                     Err(e) => {
                         error!("Error subscribing to conversation: {e}");
@@ -1403,11 +1402,11 @@ impl MessageStore {
                     }
                 };
 
-                self.start_task(convo.id(), stream).await;
+                self.start_task(id, stream).await;
 
                 self.event
                     .emit(RayGunEventKind::ConversationCreated {
-                        conversation_id: convo.id(),
+                        conversation_id: id,
                     })
                     .await;
             }
