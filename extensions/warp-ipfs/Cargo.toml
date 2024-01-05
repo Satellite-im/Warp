@@ -43,6 +43,8 @@ shuttle = { path = "../../tools/shuttle", default-features = false }
 
 [dev-dependencies]
 derive_more.workspace = true
+strum = "0.25"
+strum_macros = "0.25"
 fdlimit = "0.3"
 rustyline-async = "0.4"
 comfy-table = "7.1"

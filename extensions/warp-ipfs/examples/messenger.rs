@@ -3,6 +3,7 @@ use comfy_table::Table;
 use futures::prelude::*;
 use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, SharedWriter};
+use strum::IntoEnumIterator;
 use std::collections::HashMap;
 use std::env::temp_dir;
 use std::io::Write;
@@ -660,7 +661,7 @@ async fn main() -> anyhow::Result<()> {
                         React(message_id, state, code) => {
                             let conversation_id = topic.read().clone();
 
-                            if let Err(e) = chat.react(conversation_id, message_id, state, code).await {
+                            if let Err(e) = chat.react(conversation_id, message_id, state.into(), code).await {
                                 writeln!(stdout, "Error: {e}")?;
                                 continue;
                             }
@@ -989,7 +990,7 @@ async fn message_event_handle(
     Ok(())
 }
 
-#[derive(Debug, derive_more::Display)]
+#[derive(Debug, derive_more::Display, strum_macros::EnumIter)]
 enum Command {
     #[display(fmt = "/create <did> - create conversation with another user")]
     CreateConversation(DID),
@@ -1036,7 +1037,7 @@ enum Command {
     #[display(
         fmt = "/react <add | remove> <message-id> <emoji> - add or remove reaction to a message"
     )]
-    React(Uuid, ReactionState, String),
+    React(Uuid, InnerReactionState, String),
     #[display(fmt = "/status <message-id> - get message status")]
     Status(Uuid),
     #[display(fmt = "/pin <all | message-id> - pin a message in a the conversation.")]
@@ -1048,33 +1049,8 @@ enum Command {
 }
 
 fn list_commands_and_help() -> String {
-    let all_commands = [
-        Command::CreateConversation(DID::default()),
-        Command::AddRecipient(DID::default()),
-        Command::RemoveRecipient(DID::default()),
-        Command::CreateGroupConversation("".into(), vec![]),
-        Command::RemoveConversation(Uuid::nil()),
-        Command::SetConversation(Uuid::nil()),
-        Command::SetConversationName("".into()),
-        Command::ListConversations,
-        Command::ListReferences(MessageOptions::default()),
-        Command::ListMessages(MessageOptions::default()),
-        Command::ListPages(MessageOptions::default()),
-        Command::RemoveMessage(Uuid::nil()),
-        Command::GetFirst,
-        Command::GetLast,
-        Command::Search("".into()),
-        Command::EditMessage(Uuid::nil(), "".into()),
-        Command::Attach(vec![]),
-        Command::Download(Uuid::nil(), "".into(), PathBuf::default()),
-        Command::React(Uuid::nil(), ReactionState::Add, "".into()),
-        Command::Status(Uuid::nil()),
-        Command::Pin(PinTarget::All),
-        Command::Unpin(PinTarget::All),
-        Command::CountMessages,
-    ];
     let mut help = String::from("List of all commands:\n");
-    for cmd in all_commands.iter() {
+    for cmd in Command::iter() {
         help.push('\t');
         help.push_str(cmd.to_string().as_str());
         help.push('\n');
@@ -1410,7 +1386,7 @@ impl FromStr for Command {
                     }
                 };
 
-                Ok(Command::React(message_id, reaction_state, emoji))
+                Ok(Command::React(message_id, reaction_state.into(), emoji))
             }
             Some("/status") => {
                 let conversation_id = match cmd_line.next() {
@@ -1480,8 +1456,36 @@ impl FromStr for Command {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 enum PinTarget {
+    #[default]
     All,
     Message(Uuid),
+}
+
+#[derive(Debug, Default)]
+enum InnerReactionState {
+    #[default]
+    None,
+    Add,
+    Remove,
+}
+
+impl From<InnerReactionState> for ReactionState {
+    fn from(state: InnerReactionState) -> Self {
+        match state {
+            InnerReactionState::None => unreachable!(),
+            InnerReactionState::Add => ReactionState::Add,
+            InnerReactionState::Remove => ReactionState::Remove,
+        }
+    }
+}
+
+impl From<ReactionState> for InnerReactionState {
+    fn from(state: ReactionState) -> Self {
+        match state {
+            ReactionState::Add => InnerReactionState::Add,
+            ReactionState::Remove => InnerReactionState::Remove,
+        }
+    }
 }
