@@ -24,9 +24,18 @@ use crate::store::ecdh_encrypt;
 
 use super::{ecdh_decrypt, keystore::Keystore, verify_serde_sig};
 
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ConversationVersion {
+    #[default]
+    V0,
+    V1,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
     pub id: Uuid,
+    #[serde(default)]
+    pub version: ConversationVersion,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -52,6 +61,7 @@ impl From<&Conversation> for ConversationDocument {
     fn from(conversation: &Conversation) -> Self {
         ConversationDocument {
             id: conversation.id(),
+            version: ConversationVersion::V1,
             name: conversation.name(),
             creator: conversation.creator(),
             created: conversation.created(),
@@ -158,6 +168,7 @@ impl ConversationDocument {
 
         let mut document = Self {
             id,
+            version: ConversationVersion::V1,
             name,
             recipients,
             creator,
@@ -234,17 +245,26 @@ impl ConversationDocument {
                 return Err(Error::PublicKeyInvalid);
             }
 
-            let construct = vec![
-                self.id().into_bytes().to_vec(),
-                vec![0xdc, 0xfc],
-                creator.to_string().as_bytes().to_vec(),
-                Vec::from_iter(
-                    self.recipients
-                        .iter()
-                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                ),
-            ];
-            self.signature = Some(bs58::encode(did.sign(&construct.concat())).into_string());
+            if self.version == ConversationVersion::V0 {
+                self.version = ConversationVersion::V1;
+            }
+
+            let construct = warp::crypto::hash::sha256_iter(
+                [
+                    Some(self.id().into_bytes().to_vec()),
+                    Some(creator.to_string().as_bytes().to_vec()),
+                    Some(Vec::from_iter(
+                        self.recipients
+                            .iter()
+                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                    )),
+                ]
+                .into_iter(),
+                None,
+            );
+
+            let signature = did.sign(&construct);
+            self.signature = Some(bs58::encode(signature).into_string());
         }
         Ok(())
     }
@@ -261,19 +281,35 @@ impl ConversationDocument {
 
             let signature = bs58::decode(signature).into_vec()?;
 
-            let construct = vec![
-                self.id().into_bytes().to_vec(),
-                vec![0xdc, 0xfc],
-                creator.to_string().as_bytes().to_vec(),
-                Vec::from_iter(
-                    self.recipients
-                        .iter()
-                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+            let construct = match self.version {
+                ConversationVersion::V0 => [
+                    self.id().into_bytes().to_vec(),
+                    vec![0xdc, 0xfc],
+                    creator.to_string().as_bytes().to_vec(),
+                    Vec::from_iter(
+                        self.recipients
+                            .iter()
+                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                    ),
+                ]
+                .concat(),
+                ConversationVersion::V1 => warp::crypto::hash::sha256_iter(
+                    [
+                        Some(self.id().into_bytes().to_vec()),
+                        Some(creator.to_string().as_bytes().to_vec()),
+                        Some(Vec::from_iter(
+                            self.recipients
+                                .iter()
+                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                        )),
+                    ]
+                    .into_iter(),
+                    None,
                 ),
-            ];
+            };
 
             creator
-                .verify(&construct.concat(), &signature)
+                .verify(&construct, &signature)
                 .map_err(|e| anyhow::anyhow!("{:?}", e))?;
         }
         Ok(())
