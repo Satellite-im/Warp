@@ -3,20 +3,19 @@ use comfy_table::Table;
 use futures::prelude::*;
 use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, SharedWriter};
-use strum::IntoEnumIterator;
 use std::collections::HashMap;
 use std::env::temp_dir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
+use strum::IntoEnumIterator;
 use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use warp::constellation::{Constellation, Progression};
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
-use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
@@ -350,7 +349,7 @@ async fn main() -> anyhow::Result<()> {
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
+                                    let username = get_username(&*new_account,  recipient).await;
                                     recipients.push(username);
                                 }
                                 let created = convo.created();
@@ -373,7 +372,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Conversation ID", "Date", "Modified", "Sender", "Pinned"]);
                             while let Some(message) = messages_stream.next().await {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account,  message.sender()).await;
                                 table.add_row(vec![
                                     &message.id().to_string(),
                                     &message.conversation_id().to_string(),
@@ -399,7 +398,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             while let Some(message) = messages_stream.next().await {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account,  message.sender()).await;
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -436,7 +435,7 @@ async fn main() -> anyhow::Result<()> {
                                 for page in pages {
                                     let page_id = page.id();
                                     for message in page.messages() {
-                                        let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                        let username = get_username(&*new_account, message.sender()).await;
                                         let mut emojis = vec![];
                                         for reaction in message.reactions() {
                                             emojis.push(reaction.emoji());
@@ -472,7 +471,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account, message.sender()).await;
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -504,7 +503,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account, message.sender()).await;
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -537,7 +536,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             while let Some(message) = messages_stream.next().await {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account, message.sender()).await;
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -757,12 +756,16 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
-    let identity = account
-        .get_identity(Identifier::did_key(did))
+async fn get_username(account: &dyn MultiPass, did: DID) -> String {
+    account
+        .get_identity(Identifier::did_key(did.clone()))
         .await
-        .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
-    Ok(format!("{}#{}", identity.username(), identity.short_id()))
+        .map(|list| {
+            list.first()
+                .map(|identity| format!("{}#{}", identity.username(), identity.short_id()))
+                .unwrap_or(did.to_string())
+        })
+        .unwrap_or(did.to_string())
 }
 
 async fn message_event_handle(
@@ -786,9 +789,7 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
-                        let username = get_username(multipass.clone(), message.sender())
-                            .await
-                            .unwrap_or_else(|_| message.sender().to_string());
+                        let username = get_username(&*multipass, message.sender()).await;
 
                         match message.message_type() {
                             MessageType::Message => match message.metadata().get("is_spam") {
@@ -895,9 +896,7 @@ async fn message_event_handle(
                 reaction,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
-                        .await
-                        .unwrap_or_else(|_| did_key.to_string());
+                    let username = get_username(&*multipass, did_key.clone()).await;
                     writeln!(
                         stdout,
                         "> {username} has reacted to {message_id} with {reaction}"
@@ -911,9 +910,7 @@ async fn message_event_handle(
                 reaction,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
-                        .await
-                        .unwrap_or_else(|_| did_key.to_string());
+                    let username = get_username(&*multipass, did_key.clone()).await;
                     writeln!(
                         stdout,
                         "> {username} has removed reaction {reaction} from {message_id}"
@@ -926,9 +923,7 @@ async fn message_event_handle(
                 event,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
-                        .await
-                        .unwrap_or_else(|_| did_key.to_string());
+                    let username = get_username(&*multipass, did_key.clone()).await;
                     match event {
                         MessageEvent::Typing => {
                             writeln!(stdout, ">>> {username} is typing",)?;
@@ -942,9 +937,7 @@ async fn message_event_handle(
                 event,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
-                        .await
-                        .unwrap_or_else(|_| did_key.to_string());
+                    let username = get_username(&*multipass, did_key.clone()).await;
 
                     match event {
                         MessageEvent::Typing => {
@@ -966,9 +959,7 @@ async fn message_event_handle(
                 recipient,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), recipient.clone())
-                        .await
-                        .unwrap_or_else(|_| recipient.to_string());
+                    let username = get_username(&*multipass, recipient.clone()).await;
 
                     writeln!(stdout, ">>> {username} was added to {conversation_id}")?;
                 }
@@ -978,9 +969,7 @@ async fn message_event_handle(
                 recipient,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), recipient.clone())
-                        .await
-                        .unwrap_or_else(|_| recipient.to_string());
+                    let username = get_username(&*multipass, recipient.clone()).await;
 
                     writeln!(stdout, ">>> {username} was removed from {conversation_id}")?;
                 }
