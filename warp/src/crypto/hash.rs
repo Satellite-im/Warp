@@ -28,7 +28,10 @@ pub fn sha256_hash(data: &[u8], salt: Option<&[u8]>) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
-pub fn sha256_iter(iter: impl Iterator<Item = Option<impl AsRef<[u8]>>>, salt: Option<&[u8]>) -> Vec<u8> {
+pub fn sha256_iter(
+    iter: impl Iterator<Item = Option<impl AsRef<[u8]>>>,
+    salt: Option<&[u8]>,
+) -> Vec<u8> {
     let mut hasher = Sha256::new();
     for data in iter.flatten() {
         hasher.update(data);
