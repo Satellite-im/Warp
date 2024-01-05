@@ -42,6 +42,7 @@ bytes.workspace = true
 shuttle = { path = "../../tools/shuttle", default-features = false }
 
 [dev-dependencies]
+derive_more.workspace = true
 fdlimit = "0.3"
 rustyline-async = "0.4"
 comfy-table = "7.1"
