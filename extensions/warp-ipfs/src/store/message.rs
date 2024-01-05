@@ -46,7 +46,7 @@ use super::event_subscription::EventSubscription;
 use super::files::FileStore;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
-use super::{verify_serde_sig, ConversationEvents, MessagingEvents};
+use super::{verify_serde_sig, ConversationEvents, ConversationUpdateKind, MessagingEvents};
 
 type ConversationSender = Sender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
 
@@ -1215,94 +1215,102 @@ impl MessageStore {
                     }
                 }
             }
-            MessagingEvents::AddRecipient {
-                conversation_id,
-                recipient,
-                list,
-                signature,
+            MessagingEvents::UpdateConversation {
+                mut conversation,
+                kind,
             } => {
-                if document.recipients.contains(&recipient) {
-                    return Err(Error::IdentityExist);
-                }
+                conversation.verify()?;
+                match kind {
+                    ConversationUpdateKind::AddParticipant { did } => {
+                        if document.recipients.contains(&did) {
+                            return Err(Error::IdentityExist);
+                        }
 
-                if !self.discovery.contains(&recipient).await {
-                    let _ = self.discovery.insert(&recipient).await.ok();
-                }
+                        if !self.discovery.contains(&did).await {
+                            let _ = self.discovery.insert(&did).await.ok();
+                        }
 
-                document.recipients = list;
-                document.signature = Some(signature);
-                self.conversations.set(document).await?;
+                        conversation.excluded = document.excluded;
+                        conversation.messages = document.messages;
+                        self.conversations.set(conversation).await?;
 
-                if let Err(e) = self.request_key(conversation_id, &recipient).await {
-                    error!("Error requesting key: {e}");
-                }
+                        if let Err(e) = self.request_key(conversation_id, &did).await {
+                            error!("Error requesting key: {e}");
+                        }
 
-                if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
-                    conversation_id,
-                    recipient,
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            MessagingEvents::RemoveRecipient {
-                conversation_id,
-                recipient,
-                list,
-                signature,
-            } => {
-                if !document.recipients.contains(&recipient) {
-                    return Err(Error::IdentityDoesntExist);
-                }
-
-                let can_emit = !document.excluded.contains_key(&recipient);
-
-                document.recipients = list;
-                document.excluded.remove(&recipient);
-                document.signature = Some(signature);
-                self.conversations.set(document).await?;
-
-                if can_emit {
-                    if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
-                        conversation_id,
-                        recipient,
-                    }) {
-                        error!("Error broadcasting event: {e}");
+                        if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
+                            conversation_id,
+                            recipient: did,
+                        }) {
+                            error!("Error broadcasting event: {e}");
+                        }
                     }
-                }
-            }
+                    ConversationUpdateKind::RemoveParticipant { did } => {
+                        if !document.recipients.contains(&did) {
+                            return Err(Error::IdentityDoesntExist);
+                        }
 
-            MessagingEvents::UpdateConversationName {
-                conversation_id,
-                name,
-                signature,
-            } => {
-                let name = name.trim();
-                let name_length = name.len();
+                        //Maybe remove participant from discovery?
 
-                if name_length > 255 {
-                    return Err(Error::InvalidLength {
-                        context: "name".into(),
-                        current: name_length,
-                        minimum: None,
-                        maximum: Some(255),
-                    });
-                }
-                if let Some(current_name) = document.name() {
-                    if current_name.eq(&name) {
-                        return Ok(());
+                        let can_emit = !document.excluded.contains_key(&did);
+
+                        document.excluded.remove(&did);
+
+                        conversation.excluded = document.excluded;
+                        conversation.messages = document.messages;
+                        self.conversations.set(conversation).await?;
+
+                        if can_emit {
+                            if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
+                                conversation_id,
+                                recipient: did,
+                            }) {
+                                error!("Error broadcasting event: {e}");
+                            }
+                        }
                     }
-                }
+                    ConversationUpdateKind::ChangeName { name: Some(name) } => {
+                        let name = name.trim();
+                        let name_length = name.len();
 
-                document.name = (!name.is_empty()).then_some(name.to_string());
-                document.signature = Some(signature);
+                        if name_length > 255 {
+                            return Err(Error::InvalidLength {
+                                context: "name".into(),
+                                current: name_length,
+                                minimum: None,
+                                maximum: Some(255),
+                            });
+                        }
+                        if let Some(current_name) = document.name() {
+                            if current_name.eq(&name) {
+                                return Ok(());
+                            }
+                        }
 
-                self.conversations.set(document).await?;
+                        conversation.excluded = document.excluded;
+                        conversation.messages = document.messages;
+                        self.conversations.set(conversation).await?;
 
-                if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
-                    conversation_id,
-                    name: name.to_string(),
-                }) {
-                    error!("Error broadcasting event: {e}");
+                        if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
+                            conversation_id,
+                            name: name.to_string(),
+                        }) {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
+
+                    ConversationUpdateKind::ChangeName { name: None } => {
+                        conversation.excluded = document.excluded;
+                        conversation.messages = document.messages;
+                        self.conversations.set(conversation).await?;
+
+                        if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
+                            conversation_id,
+                            name: String::new(),
+                        }) {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
                 }
             }
             _ => {}
@@ -1403,13 +1411,8 @@ impl MessageStore {
                     })
                     .await;
             }
-            ConversationEvents::NewGroupConversation {
-                creator,
-                name,
-                conversation_id,
-                list,
-                signature,
-            } => {
+            ConversationEvents::NewGroupConversation { conversation } => {
+                let conversation_id = conversation.id;
                 let did = &*self.did;
                 info!("New group conversation event received");
 
@@ -1418,36 +1421,29 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                for recipient in &list {
+                if !conversation.recipients.contains(did) {
+                    warn!(%conversation_id, "was added to conversation but never was apart of the conversation.");
+                    return Ok(());
+                }
+
+                for recipient in conversation.recipients.iter() {
                     if !self.discovery.contains(recipient).await {
                         let _ = self.discovery.insert(recipient).await;
                     }
                 }
 
                 info!(%conversation_id, "Creating group conversation");
-                let convo = ConversationDocument::new(
-                    did,
-                    name,
-                    list.clone(),
-                    Some(conversation_id),
-                    ConversationType::Group,
-                    None,
-                    None,
-                    Some(creator),
-                    signature,
-                )?;
 
-                let conversation_type = convo.conversation_type;
+                let conversation_type = conversation.conversation_type;
 
                 let mut keystore = Keystore::new(conversation_id);
                 keystore.insert(did, did, warp::crypto::generate::<64>())?;
 
-                //Although we verify internally, this is just as a precaution
-                convo.verify()?;
+                conversation.verify()?;
 
-                let topic = convo.topic();
+                let topic = conversation.topic();
 
-                self.conversations.set(convo).await?;
+                self.conversations.set(conversation).await?;
 
                 let stream = self.ipfs.pubsub_subscribe(topic).await.expect("msg");
 
@@ -1456,9 +1452,11 @@ impl MessageStore {
 
                 self.start_task(conversation_id, stream).await;
 
+                let conversation = self.conversations.get(conversation_id).await?;
+
                 info!(%conversation_id,"{} conversation created", conversation_type);
 
-                for recipient in list.iter().filter(|d| did.ne(d)) {
+                for recipient in conversation.recipients.iter().filter(|d| did.ne(d)) {
                     if let Err(e) = self.request_key(conversation_id, recipient).await {
                         tracing::warn!("Failed to send exchange request to {recipient}: {e}");
                     }
@@ -1853,11 +1851,7 @@ impl MessageStore {
         let conversation = self.conversations.get(convo_id).await?;
 
         let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
-            creator: own_did.clone(),
-            name: conversation.name(),
-            conversation_id: conversation.id(),
-            list: recipient.clone(),
-            signature: conversation.signature.clone(),
+            conversation: conversation.clone(),
         })?;
 
         for (did, peer_id) in peer_id_list {
@@ -2356,14 +2350,11 @@ impl MessageStore {
 
         let conversation = self.conversations.get(conversation_id).await?;
 
-        let Some(signature) = conversation.signature.clone() else {
-            return Err(Error::InvalidSignature);
-        };
+        let new_name = conversation.name();
 
-        let event = MessagingEvents::UpdateConversationName {
-            conversation_id,
-            name: name.to_string(),
-            signature,
+        let event = MessagingEvents::UpdateConversation {
+            conversation,
+            kind: ConversationUpdateKind::ChangeName { name: new_name },
         };
 
         let tx = self.get_conversation_sender(conversation_id).await?;
@@ -2413,15 +2404,12 @@ impl MessageStore {
         self.conversations.set(conversation).await?;
 
         let conversation = self.conversations.get(conversation_id).await?;
-        let Some(signature) = conversation.signature.clone() else {
-            return Err(Error::InvalidSignature);
-        };
 
-        let event = MessagingEvents::AddRecipient {
-            conversation_id,
-            recipient: did_key.clone(),
-            list: conversation.recipients(),
-            signature: signature.clone(),
+        let event = MessagingEvents::UpdateConversation {
+            conversation: conversation.clone(),
+            kind: ConversationUpdateKind::AddParticipant {
+                did: did_key.clone(),
+            },
         };
 
         let tx = self.get_conversation_sender(conversation_id).await?;
@@ -2432,14 +2420,7 @@ impl MessageStore {
 
         self.publish(conversation_id, None, event, true).await?;
 
-        let own_did = &*self.did;
-        let new_event = ConversationEvents::NewGroupConversation {
-            creator: own_did.clone(),
-            name: conversation.name(),
-            conversation_id: conversation.id(),
-            list: conversation.recipients(),
-            signature: Some(signature),
-        };
+        let new_event = ConversationEvents::NewGroupConversation { conversation };
 
         self.send_single_conversation_event(did_key, conversation_id, new_event)
             .await?;
@@ -2483,15 +2464,11 @@ impl MessageStore {
 
         let conversation = self.conversations.get(conversation_id).await?;
 
-        let Some(signature) = conversation.signature.clone() else {
-            return Err(Error::InvalidSignature);
-        };
-
-        let event = MessagingEvents::RemoveRecipient {
-            conversation_id,
-            recipient: did_key.clone(),
-            list: conversation.recipients(),
-            signature: signature.clone(),
+        let event = MessagingEvents::UpdateConversation {
+            conversation: conversation.clone(),
+            kind: ConversationUpdateKind::RemoveParticipant {
+                did: did_key.clone(),
+            },
         };
 
         let tx = self.get_conversation_sender(conversation_id).await?;
