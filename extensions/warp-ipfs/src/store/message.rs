@@ -816,7 +816,7 @@ impl MessageStore {
                     let result = store
                         .message_event(conversation_id, &event, direction, Default::default())
                         .await.map_err(|e| {
-                            error!(id=%conversation_id, error = %e, "Failure while processing message in conversation");
+                            error!(id=%conversation_id, error = %e, direction = ?direction, "Failure while processing message in conversation");
                             e
                         });
 
