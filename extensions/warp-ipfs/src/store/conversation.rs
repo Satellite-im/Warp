@@ -45,34 +45,12 @@ pub struct ConversationDocument {
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
+    #[serde(default)]
+    pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
-}
-
-impl From<Conversation> for ConversationDocument {
-    fn from(conversation: Conversation) -> Self {
-        ConversationDocument::from(&conversation)
-    }
-}
-
-impl From<&Conversation> for ConversationDocument {
-    fn from(conversation: &Conversation) -> Self {
-        ConversationDocument {
-            id: conversation.id(),
-            version: ConversationVersion::V1,
-            name: conversation.name(),
-            creator: conversation.creator(),
-            created: conversation.created(),
-            modified: conversation.modified(),
-            conversation_type: conversation.conversation_type(),
-            recipients: conversation.recipients(),
-            excluded: Default::default(),
-            messages: Default::default(),
-            signature: None,
-        }
-    }
 }
 
 impl Hash for ConversationDocument {
@@ -178,6 +156,7 @@ impl ConversationDocument {
             excluded,
             messages,
             signature,
+            deleted: false,
         };
 
         if document.signature.is_some() {
@@ -252,6 +231,7 @@ impl ConversationDocument {
             let construct = warp::crypto::hash::sha256_iter(
                 [
                     Some(self.id().into_bytes().to_vec()),
+                    // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
                     Some(creator.to_string().as_bytes().to_vec()),
                     Some(Vec::from_iter(
                         self.recipients
@@ -296,6 +276,7 @@ impl ConversationDocument {
                 ConversationVersion::V1 => warp::crypto::hash::sha256_iter(
                     [
                         Some(self.id().into_bytes().to_vec()),
+                        // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
                         Some(creator.to_string().as_bytes().to_vec()),
                         Some(Vec::from_iter(
                             self.recipients
@@ -607,25 +588,6 @@ impl ConversationDocument {
         self.set_message_list(ipfs, messages).await?;
         Ok(())
     }
-
-    pub async fn delete_all_message(&mut self, ipfs: Ipfs) -> Result<(), Error> {
-        let cid = std::mem::take(&mut self.messages);
-        let (cid, messages): (Cid, BTreeSet<MessageDocument>) = match cid {
-            Some(cid) => (cid, ipfs.get_dag(cid).local().deserialized().await?),
-            None => return Ok(()),
-        };
-
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid).await?;
-        }
-
-        for document in messages {
-            if ipfs.is_pinned(&document.message).await? {
-                ipfs.remove_pin(&document.message).await?;
-            }
-        }
-        Ok(())
-    }
 }
 
 impl From<ConversationDocument> for Conversation {
@@ -654,6 +616,8 @@ pub struct MessageDocument {
     pub conversation_id: Uuid,
     pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reactions: Option<Cid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -731,6 +695,7 @@ impl MessageDocument {
             sender,
             conversation_id,
             date,
+            reactions: None,
             message,
             pinned,
             modified,

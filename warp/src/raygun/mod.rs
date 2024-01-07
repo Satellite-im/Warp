@@ -647,6 +647,10 @@ pub struct Message {
     /// List of the reactions for the `Message`
     reactions: Vec<Reaction>,
 
+    /// List of users public keys mentioned in this message
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    mentions: Vec<DID>,
+
     /// ID of the message being replied to
     #[serde(skip_serializing_if = "Option::is_none")]
     replied: Option<Uuid>,
@@ -677,6 +681,7 @@ impl Default for Message {
             modified: None,
             pinned: false,
             reactions: Vec::new(),
+            mentions: Vec::new(),
             replied: None,
             lines: Vec::new(),
             attachment: Vec::new(),
@@ -738,6 +743,10 @@ impl Message {
         self.reactions.clone()
     }
 
+    pub fn mentions(&self) -> &[DID] {
+        &self.mentions
+    }
+
     pub fn lines(&self) -> Vec<String> {
         self.lines.clone()
     }
@@ -790,6 +799,10 @@ impl Message {
 
     pub fn set_reactions(&mut self, reaction: Vec<Reaction>) {
         self.reactions = reaction
+    }
+
+    pub fn set_mentions(&mut self, mentions: Vec<DID>) {
+        self.mentions = mentions
     }
 
     pub fn set_lines(&mut self, val: Vec<String>) {

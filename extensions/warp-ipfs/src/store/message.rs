@@ -688,14 +688,12 @@ impl MessageStore {
             kind: ConversationRequestKind::Key,
         };
 
-        let mut conversation = self.conversations.get(conversation_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
 
         if !conversation.recipients().contains(did) {
             //TODO: user is not a recipient of the conversation
             return Err(Error::PublicKeyInvalid);
         }
-
-        conversation.recipients.clear();
 
         let own_did = &self.did;
 
@@ -1555,7 +1553,7 @@ impl MessageStore {
                             || matches!(
                                 conversation.conversation_type,
                                 ConversationType::Group
-                            ) && matches!(conversation.creator.clone(), Some(creator) if creator.eq(&sender)) =>
+                            ) && matches!(&conversation.creator, Some(creator) if creator.eq(&sender)) =>
                     {
                         conversation
                     }
@@ -1566,21 +1564,13 @@ impl MessageStore {
 
                 self.end_task(conversation_id).await;
 
-                let mut document: ConversationDocument =
-                    self.conversations.delete(conversation_id).await?;
+                let document = self.conversations.delete(conversation_id).await?;
 
                 let topic = document.topic();
                 self.queue.write().await.remove(&sender);
 
-                tokio::spawn({
-                    let ipfs = self.ipfs.clone();
-                    async move {
-                        let _ = document.delete_all_message(ipfs.clone()).await;
-                    }
-                });
-
                 if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
-                    warn!("topic should have been unsubscribed after dropping conversation.");
+                    warn!(conversation_id = %document.id(), "topic should have been unsubscribed after dropping conversation.");
                 }
 
                 self.event
@@ -1909,8 +1899,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         self.end_task(conversation_id).await;
 
-        let mut document_type: ConversationDocument =
-            self.conversations.delete(conversation_id).await?;
+        let document_type = self.conversations.delete(conversation_id).await?;
 
         if broadcast {
             let recipients = document_type.recipients();
@@ -2012,12 +2001,6 @@ impl MessageStore {
         }
 
         let conversation_id = document_type.id();
-        tokio::spawn({
-            let ipfs = self.ipfs.clone();
-            async move {
-                let _ = document_type.delete_all_message(ipfs).await.is_ok();
-            }
-        });
 
         self.event
             .emit(RayGunEventKind::ConversationDeleted { conversation_id })
