@@ -25,7 +25,7 @@ use crate::store::ecdh_encrypt;
 use super::{ecdh_decrypt, keystore::Keystore, verify_serde_sig};
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all="lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum ConversationVersion {
     #[default]
     V0,
@@ -46,6 +46,8 @@ pub struct ConversationDocument {
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restrict: Vec<DID>,
     #[serde(default)]
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -122,6 +124,7 @@ impl ConversationDocument {
         did: &DID,
         name: Option<String>,
         mut recipients: Vec<DID>,
+        restrict: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
         created: Option<DateTime<Utc>>,
@@ -157,6 +160,7 @@ impl ConversationDocument {
             excluded,
             messages,
             signature,
+            restrict,
             deleted: false,
         };
 
@@ -189,6 +193,7 @@ impl ConversationDocument {
             did,
             None,
             recipients.to_vec(),
+            vec![],
             conversation_id,
             ConversationType::Direct,
             None,
@@ -198,12 +203,18 @@ impl ConversationDocument {
         )
     }
 
-    pub fn new_group(did: &DID, name: Option<String>, recipients: &[DID]) -> Result<Self, Error> {
+    pub fn new_group(
+        did: &DID,
+        name: Option<String>,
+        recipients: &[DID],
+        restrict: &[DID],
+    ) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
             did,
             name,
             recipients.to_vec(),
+            restrict.to_vec(),
             conversation_id,
             ConversationType::Group,
             None,
@@ -234,6 +245,11 @@ impl ConversationDocument {
                     Some(self.id().into_bytes().to_vec()),
                     // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
                     Some(creator.to_string().as_bytes().to_vec()),
+                    Some(Vec::from_iter(
+                        self.restrict
+                            .iter()
+                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                    )),
                     Some(Vec::from_iter(
                         self.recipients
                             .iter()
@@ -279,6 +295,11 @@ impl ConversationDocument {
                         Some(self.id().into_bytes().to_vec()),
                         // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
                         Some(creator.to_string().as_bytes().to_vec()),
+                        Some(Vec::from_iter(
+                            self.restrict
+                                .iter()
+                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                        )),
                         Some(Vec::from_iter(
                             self.recipients
                                 .iter()

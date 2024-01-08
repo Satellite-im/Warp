@@ -246,6 +246,8 @@ pub enum MessagingEvents {
 pub enum ConversationUpdateKind {
     AddParticipant { did: DID },
     RemoveParticipant { did: DID },
+    AddRestricted { did: DID },
+    RemoveRestricted { did: DID },
     ChangeName { name: Option<String> },
 }
 

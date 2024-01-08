@@ -260,8 +260,31 @@ impl MessageStore {
                                 warn!("Failed to remove {did} from conversation {id}: {e}");
                                 continue;
                             }
+
+                            if self.identity.is_blocked(&did).await.unwrap_or_default() {
+                                _ = self.add_restricted(id, &did).await;
+                            }
                         }
                     }
+                }
+            }
+            MultiPassEventKind::Unblocked { did } => {
+                let own_did = (*self.did).clone();
+                let list = self.conversations.list().await?;
+
+                for conversation in list
+                    .iter()
+                    .filter(|c| {
+                        c.creator
+                            .as_ref()
+                            .map(|creator| own_did.eq(creator))
+                            .unwrap_or_default()
+                    })
+                    .filter(|c| c.conversation_type == ConversationType::Group)
+                    .filter(|c| c.restrict.contains(&did))
+                {
+                    let id = conversation.id();
+                    _ = self.remove_restricted(id, &did).await;
                 }
             }
             MultiPassEventKind::FriendRemoved { did } => {
@@ -1309,6 +1332,14 @@ impl MessageStore {
                             error!("Error broadcasting event: {e}");
                         }
                     }
+                    ConversationUpdateKind::AddRestricted { .. }
+                    | ConversationUpdateKind::RemoveRestricted { .. } => {
+                        conversation.excluded = document.excluded;
+                        conversation.messages = document.messages;
+                        self.conversations.set(conversation).await?;
+                        //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
+                        //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
+                    }
                 }
             }
             _ => {}
@@ -1445,7 +1476,11 @@ impl MessageStore {
 
                 self.conversations.set(conversation).await?;
 
-                let stream = self.ipfs.pubsub_subscribe(topic).await.expect("msg");
+                let stream = self
+                    .ipfs
+                    .pubsub_subscribe(topic)
+                    .await
+                    .expect("not subscribed already to topic");
 
                 self.set_conversation_keystore(conversation_id, keystore)
                     .await?;
@@ -1809,8 +1844,14 @@ impl MessageStore {
             }
         }
 
-        let conversation =
-            ConversationDocument::new_group(own_did, name, &Vec::from_iter(recipients))?;
+        let restricted = self.identity.block_list().await.unwrap_or_default();
+
+        let conversation = ConversationDocument::new_group(
+            own_did,
+            name,
+            &Vec::from_iter(recipients),
+            &restricted,
+        )?;
 
         let recipient = conversation.recipients();
 
@@ -2466,6 +2507,103 @@ impl MessageStore {
             self.send_single_conversation_event(did_key, conversation_id, new_event)
                 .await?;
         }
+        Ok(())
+    }
+
+    async fn add_restricted(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<(), Error> {
+        let mut conversation = self.conversations.get(conversation_id).await?;
+
+        if matches!(conversation.conversation_type, ConversationType::Direct) {
+            return Err(Error::InvalidConversation);
+        }
+
+        let Some(creator) = conversation.creator.clone() else {
+            return Err(Error::InvalidConversation);
+        };
+
+        let own_did = &*self.did;
+
+        if creator.ne(own_did) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if creator.eq(did_key) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if !self.identity.is_blocked(did_key).await? {
+            return Err(Error::PublicKeyIsntBlocked);
+        }
+
+        debug_assert!(!conversation.recipients.contains(did_key));
+        debug_assert!(!conversation.restrict.contains(did_key));
+
+        conversation.restrict.push(did_key.clone());
+
+        self.conversations.set(conversation).await?;
+
+        let conversation = self.conversations.get(conversation_id).await?;
+
+        let event = MessagingEvents::UpdateConversation {
+            conversation: conversation.clone(),
+            kind: ConversationUpdateKind::AddRestricted {
+                did: did_key.clone(),
+            },
+        };
+
+        self.publish(conversation_id, None, event, true).await?;
+
+        Ok(())
+    }
+
+    async fn remove_restricted(
+        &mut self,
+        conversation_id: Uuid,
+        did_key: &DID,
+    ) -> Result<(), Error> {
+        let mut conversation = self.conversations.get(conversation_id).await?;
+
+        if matches!(conversation.conversation_type, ConversationType::Direct) {
+            return Err(Error::InvalidConversation);
+        }
+
+        let Some(creator) = conversation.creator.clone() else {
+            return Err(Error::InvalidConversation);
+        };
+
+        let own_did = &*self.did;
+
+        if creator.ne(own_did) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if creator.eq(did_key) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if self.identity.is_blocked(did_key).await? {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
+        debug_assert!(conversation.restrict.contains(did_key));
+
+        conversation
+            .restrict
+            .retain(|restricted| restricted != did_key);
+
+        self.conversations.set(conversation).await?;
+
+        let conversation = self.conversations.get(conversation_id).await?;
+
+        let event = MessagingEvents::UpdateConversation {
+            conversation: conversation.clone(),
+            kind: ConversationUpdateKind::RemoveRestricted {
+                did: did_key.clone(),
+            },
+        };
+
+        self.publish(conversation_id, None, event, true).await?;
+
         Ok(())
     }
 
