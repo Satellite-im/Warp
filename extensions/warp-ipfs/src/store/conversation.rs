@@ -412,13 +412,13 @@ impl ConversationDocument {
             return Ok(stream::empty().boxed());
         }
 
-        let keystore = keystore.cloned();
         let mut messages = Vec::from_iter(message_list);
 
         if option.reverse() {
             messages.reverse()
         }
 
+        let keystore = keystore.cloned();
         if option.first_message() && !messages.is_empty() {
             let message = messages
                 .first()
@@ -497,7 +497,7 @@ impl ConversationDocument {
             });
         }
 
-        let mut messages = Vec::from_iter(message_list.iter());
+        let mut messages = Vec::from_iter(message_list);
 
         if option.reverse() {
             messages.reverse()
