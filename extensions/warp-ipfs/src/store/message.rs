@@ -1500,10 +1500,6 @@ impl MessageStore {
                     self.remove_recipient(conversation_id, &recipient, false)
                         .await?;
                 } else {
-                    //We do this so we can grab a permit to mutate the conversation outside of the set task
-                    //so we can exclude the recipient
-                    drop(conversation);
-
                     {
                         //Small validation context
                         let context = format!("exclude {}", recipient);
