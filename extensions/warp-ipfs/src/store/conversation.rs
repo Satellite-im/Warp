@@ -25,6 +25,7 @@ use crate::store::ecdh_encrypt;
 use super::{ecdh_decrypt, keystore::Keystore, verify_serde_sig};
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all="lowercase")]
 pub enum ConversationVersion {
     #[default]
     V0,
