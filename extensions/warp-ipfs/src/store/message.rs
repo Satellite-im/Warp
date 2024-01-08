@@ -1408,7 +1408,7 @@ impl MessageStore {
                     })
                     .await;
             }
-            ConversationEvents::NewGroupConversation { conversation } => {
+            ConversationEvents::NewGroupConversation { mut conversation } => {
                 let conversation_id = conversation.id;
                 let did = &*self.did;
                 info!("New group conversation event received");
@@ -1439,6 +1439,9 @@ impl MessageStore {
                 conversation.verify()?;
 
                 let topic = conversation.topic();
+
+                //TODO: Resolve message list
+                conversation.messages = None;
 
                 self.conversations.set(conversation).await?;
 
