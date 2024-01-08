@@ -15,8 +15,8 @@ use warp::{
     error::Error,
     logging::tracing::info,
     raygun::{
-        Conversation, ConversationType, Message, MessageOptions, MessagePage, MessageReference,
-        Messages, MessagesType,
+        Conversation, ConversationType, GroupSettings, Message, MessageOptions, MessagePage,
+        MessageReference, Messages, MessagesType,
     },
 };
 
@@ -211,7 +211,7 @@ impl ConversationDocument {
         did: &DID,
         name: Option<String>,
         recipients: &[DID],
-        open: bool,
+        settings: GroupSettings,
     ) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
@@ -219,7 +219,7 @@ impl ConversationDocument {
             name,
             recipients.to_vec(),
             conversation_id,
-            ConversationType::Group { open },
+            ConversationType::Group { settings },
             None,
             None,
             Some(did.clone()),
@@ -230,12 +230,12 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        if let ConversationType::Group { open } = self.conversation_type {
+        if let ConversationType::Group { settings } = self.conversation_type {
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
 
-            if !open && !creator.eq(did) {
+            if !settings.members_can_add_participants() && !creator.eq(did) {
                 return Err(Error::PublicKeyInvalid);
             }
 
@@ -244,7 +244,7 @@ impl ConversationDocument {
                 vec![0xdc, 0xfc],
                 creator.to_string().as_bytes().to_vec(),
             ];
-            if !open {
+            if !settings.members_can_add_participants() {
                 construct.push(Vec::from_iter(
                     self.recipients
                         .iter()
@@ -257,7 +257,7 @@ impl ConversationDocument {
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        if let ConversationType::Group { open } = self.conversation_type {
+        if let ConversationType::Group { settings } = self.conversation_type {
             let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -273,7 +273,7 @@ impl ConversationDocument {
                 vec![0xdc, 0xfc],
                 creator.to_string().as_bytes().to_vec(),
             ];
-            if !open {
+            if !settings.members_can_add_participants() {
                 construct.push(Vec::from_iter(
                     self.recipients
                         .iter()

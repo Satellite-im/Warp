@@ -7,7 +7,7 @@ mod test {
     use futures::StreamExt;
     use warp::{
         multipass::MultiPassEventKind,
-        raygun::{ConversationType, MessageEventKind, RayGunEventKind},
+        raygun::{ConversationType, GroupSettings, MessageEventKind, RayGunEventKind},
     };
 
     #[tokio::test]
@@ -24,7 +24,7 @@ mod test {
         let mut chat_subscribe_a = chat_a.subscribe().await?;
 
         chat_a
-            .create_group_conversation(None, vec![], false)
+            .create_group_conversation(None, vec![], GroupSettings::default())
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(60), async {
@@ -41,7 +41,9 @@ mod test {
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
             conversation.conversation_type(),
-            ConversationType::Group { open: false }
+            ConversationType::Group {
+                settings: GroupSettings::default()
+            }
         );
         assert_eq!(conversation.recipients().len(), 1);
         assert!(conversation.recipients().contains(&did_a));
@@ -63,7 +65,7 @@ mod test {
         let mut chat_subscribe_a = chat_a.subscribe().await?;
 
         chat_a
-            .create_group_conversation(None, vec![], false)
+            .create_group_conversation(None, vec![], GroupSettings::default())
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(60), async {
@@ -135,7 +137,11 @@ mod test {
         let mut chat_subscribe_c = chat_c.subscribe().await?;
 
         chat_a
-            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], false)
+            .create_group_conversation(
+                None,
+                vec![did_b.clone(), did_c.clone()],
+                GroupSettings::default(),
+            )
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(60), async {
@@ -177,7 +183,9 @@ mod test {
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
             conversation.conversation_type(),
-            ConversationType::Group { open: false }
+            ConversationType::Group {
+                settings: GroupSettings::default()
+            }
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -188,15 +196,17 @@ mod test {
 
     #[tokio::test]
     async fn add_recipient_to_conversation() -> anyhow::Result<()> {
-        // Test a closed group.
-        add_recipient_to_conversation_(false).await?;
-        // Now an open group.
-        add_recipient_to_conversation_(true).await?;
+        let mut settings = GroupSettings::default();
+        // Test a group with default settings.
+        add_recipient_to_conversation_(settings).await?;
+        // Now a group which allows members to add participants.
+        settings.set_members_can_add_participants(true);
+        add_recipient_to_conversation_(settings).await?;
 
         Ok(())
     }
 
-    async fn add_recipient_to_conversation_(open: bool) -> anyhow::Result<()> {
+    async fn add_recipient_to_conversation_(settings: GroupSettings) -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
                 None,
@@ -232,7 +242,7 @@ mod test {
         let mut chat_subscribe_d = chat_d.subscribe().await?;
 
         chat_a
-            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], open)
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], settings)
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(60), async {
@@ -273,11 +283,12 @@ mod test {
         let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
 
         let ret = chat_b.add_recipient(id_b, &did_d).await;
-        if open {
-            // Non-owner should be able to add a recipient to an open group.
+        if settings.members_can_add_participants() {
+            // Non-owner should be able to add a recipient.
             ret?;
         } else {
-            // First attempt to add a recipient as a non-onwer should fail since it's a closed group.
+            // First attempt to add a recipient as a non-onwer should fail since the
+            // settings don't allow it.
             assert!(ret.is_err());
             // Second attempt to add a recipient as an onwer should work.
             chat_a.add_recipient(id_a, &did_d).await?;
@@ -343,7 +354,7 @@ mod test {
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
             conversation.conversation_type(),
-            ConversationType::Group { open }
+            ConversationType::Group { settings }
         );
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
@@ -390,7 +401,11 @@ mod test {
         let mut chat_subscribe_d = chat_d.subscribe().await?;
 
         chat_a
-            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], false)
+            .create_group_conversation(
+                None,
+                vec![did_b.clone(), did_c.clone()],
+                GroupSettings::default(),
+            )
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(60), async {
@@ -556,7 +571,9 @@ mod test {
 
         assert_eq!(
             conversation.conversation_type(),
-            ConversationType::Group { open: false }
+            ConversationType::Group {
+                settings: GroupSettings::default()
+            }
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -606,7 +623,7 @@ mod test {
             .create_group_conversation(
                 None,
                 vec![did_b.clone(), did_c.clone(), did_d.clone()],
-                false,
+                GroupSettings::default(),
             )
             .await?;
 
@@ -758,7 +775,11 @@ mod test {
         let mut chat_subscribe_c = chat_c.subscribe().await?;
 
         chat_a
-            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], false)
+            .create_group_conversation(
+                None,
+                vec![did_b.clone(), did_c.clone()],
+                GroupSettings::default(),
+            )
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(60), async {
@@ -800,7 +821,9 @@ mod test {
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
             conversation.conversation_type(),
-            ConversationType::Group { open: false }
+            ConversationType::Group {
+                settings: GroupSettings::default()
+            }
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -912,7 +935,11 @@ mod test {
         let mut chat_subscribe_c = chat_c.subscribe().await?;
 
         chat_a
-            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], false)
+            .create_group_conversation(
+                None,
+                vec![did_b.clone(), did_c.clone()],
+                GroupSettings::default(),
+            )
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(60), async {
@@ -954,7 +981,9 @@ mod test {
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
             conversation.conversation_type(),
-            ConversationType::Group { open: false }
+            ConversationType::Group {
+                settings: GroupSettings::default()
+            }
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));

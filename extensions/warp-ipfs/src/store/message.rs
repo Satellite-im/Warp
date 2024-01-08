@@ -24,10 +24,10 @@ use warp::error::Error;
 use warp::logging::tracing::{error, info, trace, warn};
 use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
-    AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState, Location,
-    Message, MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
-    MessageStream, MessageType, Messages, MessagesType, PinState, RayGunEventKind, Reaction,
-    ReactionState,
+    AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState,
+    GroupSettings, Location, Message, MessageEvent, MessageEventKind, MessageOptions,
+    MessageReference, MessageStatus, MessageStream, MessageType, Messages, MessagesType, PinState,
+    RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sync::Arc;
 
@@ -1411,7 +1411,7 @@ impl MessageStore {
                 conversation_id,
                 list,
                 signature,
-                open,
+                settings,
             } => {
                 let did = &*self.did;
                 info!("New group conversation event received");
@@ -1433,7 +1433,7 @@ impl MessageStore {
                     name,
                     list.clone(),
                     Some(conversation_id),
-                    ConversationType::Group { open },
+                    ConversationType::Group { settings },
                     None,
                     None,
                     Some(creator),
@@ -1780,7 +1780,7 @@ impl MessageStore {
         &mut self,
         name: Option<String>,
         mut recipients: HashSet<DID>,
-        open: bool,
+        settings: GroupSettings,
     ) -> Result<Conversation, Error> {
         let own_did = &*(self.did.clone());
 
@@ -1831,7 +1831,7 @@ impl MessageStore {
         }
 
         let conversation =
-            ConversationDocument::new_group(own_did, name, &Vec::from_iter(recipients), open)?;
+            ConversationDocument::new_group(own_did, name, &Vec::from_iter(recipients), settings)?;
 
         let recipient = conversation.recipients();
 
@@ -1865,7 +1865,7 @@ impl MessageStore {
             conversation_id: conversation.id(),
             list: recipient.clone(),
             signature: conversation.signature.clone(),
-            open,
+            settings,
         })?;
 
         for (did, peer_id) in peer_id_list {
@@ -2400,8 +2400,8 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let mut conversation = self.conversations.get(conversation_id).await?;
 
-        let open = match conversation.conversation_type {
-            ConversationType::Group { open } => open,
+        let settings = match conversation.conversation_type {
+            ConversationType::Group { settings } => settings,
             ConversationType::Direct => return Err(Error::InvalidConversation),
         };
 
@@ -2411,7 +2411,7 @@ impl MessageStore {
 
         let own_did = &*self.did;
 
-        if !open && creator.ne(own_did) {
+        if !settings.members_can_add_participants() && creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
         }
 
@@ -2457,7 +2457,7 @@ impl MessageStore {
             conversation_id: conversation.id(),
             list: conversation.recipients(),
             signature: Some(signature),
-            open,
+            settings,
         };
 
         self.send_single_conversation_event(did_key, conversation_id, new_event)

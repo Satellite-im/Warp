@@ -19,9 +19,9 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    AttachmentKind, Location, Message, MessageEvent, MessageEventKind, MessageEventStream,
-    MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun,
-    ReactionState,
+    AttachmentKind, GroupSettings, Location, Message, MessageEvent, MessageEventKind,
+    MessageEventStream, MessageOptions, MessageStream, MessageType, Messages, MessagesType,
+    PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -317,7 +317,13 @@ async fn main() -> anyhow::Result<()> {
 
                         },
                         CreateGroupConversation(name, did_keys, open) => {
-                            if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys, open).await {
+                            let mut settings = GroupSettings::default();
+                            settings.set_members_can_add_participants(open);
+                            if let Err(e) = chat.create_group_conversation(
+                                Some(name.to_string()),
+                                did_keys,
+                                settings,
+                            ).await {
                                 writeln!(stdout, "Error creating conversation: {e}")?;
                                 continue
                             }

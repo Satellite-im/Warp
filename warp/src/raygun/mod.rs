@@ -386,7 +386,7 @@ pub enum ConversationType {
     #[display(fmt = "direct")]
     Direct,
     #[display(fmt = "group")]
-    Group { open: bool },
+    Group { settings: GroupSettings },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, warp_derive::FFIVec, FFIFree)]
@@ -490,6 +490,31 @@ impl Conversation {
 
     pub fn set_recipients(&mut self, recipients: Vec<DID>) {
         self.recipients = recipients;
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[repr(C)]
+pub struct GroupSettings {
+    // Everyone can add participants, if set to `true``.
+    members_can_add_participants: bool,
+}
+
+impl GroupSettings {
+    pub fn members_can_add_participants(&self) -> bool {
+        self.members_can_add_participants
+    }
+
+    pub fn set_members_can_add_participants(&mut self, val: bool) {
+        self.members_can_add_participants = val;
+    }
+}
+
+impl Default for GroupSettings {
+    fn default() -> Self {
+        Self {
+            members_can_add_participants: false,
+        }
     }
 }
 
@@ -938,7 +963,7 @@ pub trait RayGun:
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
-        _: bool,
+        _: GroupSettings,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }

@@ -28,7 +28,7 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{Message, MessageEvent, PinState, ReactionState},
+    raygun::{GroupSettings, Message, MessageEvent, PinState, ReactionState},
     tesseract::Tesseract,
 };
 
@@ -145,7 +145,7 @@ pub enum ConversationEvents {
         conversation_id: Uuid,
         list: Vec<DID>,
         signature: Option<String>,
-        open: bool,
+        settings: GroupSettings,
     },
     LeaveConversation {
         conversation_id: Uuid,
