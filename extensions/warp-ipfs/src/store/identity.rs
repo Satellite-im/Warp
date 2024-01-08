@@ -527,7 +527,7 @@ impl IdentityStore {
                             };
 
                             //Ignore requesting images if there is a change for now.
-                            if let Err(e) = store.process_message(&from_did, event, true).await {
+                            if let Err(e) = store.process_message(&from_did, event, false).await {
                                 error!("Failed to process identity message from {from_did}: {e}");
                             }
                         }
