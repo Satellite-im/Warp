@@ -1,8 +1,8 @@
-name: Run Warp Test
+name: Run Tests
 on: [push]
 jobs:
   cargo_test:
-    name: Warp Test
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,4 +15,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - run: cargo test -p warp
+      - run: cargo test
