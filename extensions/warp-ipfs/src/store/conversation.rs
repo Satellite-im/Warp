@@ -629,6 +629,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_conversation_type(document.conversation_type);
         conversation.set_recipients(document.recipients());
         conversation.set_created(document.created);
+        conversation.set_settings(document.settings);
         conversation.set_modified(document.modified);
         conversation
     }
