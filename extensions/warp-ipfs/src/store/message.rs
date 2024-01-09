@@ -24,10 +24,10 @@ use warp::error::Error;
 use warp::logging::tracing::{error, info, trace, warn};
 use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
-    AttachmentEventStream, AttachmentKind, Conversation, ConversationType, EmbedState,
-    GroupSettings, Location, Message, MessageEvent, MessageEventKind, MessageOptions,
-    MessageReference, MessageStatus, MessageStream, MessageType, Messages, MessagesType, PinState,
-    RayGunEventKind, Reaction, ReactionState,
+    AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType,
+    DirectConversationSettings, EmbedState, GroupSettings, Location, Message, MessageEvent,
+    MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageStream, MessageType,
+    Messages, MessagesType, PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sync::Arc;
 
@@ -1361,7 +1361,10 @@ impl MessageStore {
         event: ConversationEvents,
     ) -> anyhow::Result<()> {
         match event {
-            ConversationEvents::NewConversation { recipient } => {
+            ConversationEvents::NewConversation {
+                recipient,
+                settings,
+            } => {
                 let did = &*self.did;
                 info!("New conversation event received from {recipient}");
                 let id =
@@ -1380,7 +1383,7 @@ impl MessageStore {
 
                 let list = [did.clone(), recipient];
                 info!("Creating conversation");
-                let convo = ConversationDocument::new_direct(did, list)?;
+                let convo = ConversationDocument::new_direct(did, list, settings)?;
                 info!(
                     "{} conversation created: {}",
                     convo.conversation_type,
@@ -1433,7 +1436,8 @@ impl MessageStore {
                     name,
                     list.clone(),
                     Some(conversation_id),
-                    ConversationType::Group { settings },
+                    ConversationType::Group,
+                    ConversationSettings::Group(settings),
                     None,
                     None,
                     Some(creator),
@@ -1716,8 +1720,12 @@ impl MessageStore {
             self.discovery.insert(did_key).await?;
         }
 
-        let conversation =
-            ConversationDocument::new_direct(own_did, [own_did.clone(), did_key.clone()])?;
+        let settings = DirectConversationSettings::default();
+        let conversation = ConversationDocument::new_direct(
+            own_did,
+            [own_did.clone(), did_key.clone()],
+            settings,
+        )?;
 
         let convo_id = conversation.id();
         let topic = conversation.topic();
@@ -1732,6 +1740,7 @@ impl MessageStore {
 
         let event = ConversationEvents::NewConversation {
             recipient: own_did.clone(),
+            settings,
         };
 
         let bytes = ecdh_encrypt(own_did, Some(did_key), serde_json::to_vec(&event)?)?;
@@ -2400,10 +2409,11 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let mut conversation = self.conversations.get(conversation_id).await?;
 
-        let settings = match conversation.conversation_type {
-            ConversationType::Group { settings } => settings,
-            ConversationType::Direct => return Err(Error::InvalidConversation),
+        let settings = match conversation.settings {
+            ConversationSettings::Group(settings) => settings,
+            ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
         };
+        assert_eq!(conversation.conversation_type, ConversationType::Group);
 
         let Some(creator) = conversation.creator.clone() else {
             return Err(Error::InvalidConversation);

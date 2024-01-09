@@ -15,8 +15,9 @@ use warp::{
     error::Error,
     logging::tracing::info,
     raygun::{
-        Conversation, ConversationType, GroupSettings, Message, MessageOptions, MessagePage,
-        MessageReference, Messages, MessagesType,
+        Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
+        GroupSettings, Message, MessageOptions, MessagePage, MessageReference, Messages,
+        MessagesType,
     },
 };
 
@@ -34,6 +35,7 @@ pub struct ConversationDocument {
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub conversation_type: ConversationType,
+    pub settings: ConversationSettings,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,6 +59,7 @@ impl From<&Conversation> for ConversationDocument {
             created: conversation.created(),
             modified: conversation.modified(),
             conversation_type: conversation.conversation_type(),
+            settings: conversation.settings(),
             recipients: conversation.recipients(),
             excluded: Default::default(),
             messages: Default::default(),
@@ -135,6 +138,7 @@ impl ConversationDocument {
         mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
+        settings: ConversationSettings,
         created: Option<DateTime<Utc>>,
         modified: Option<DateTime<Utc>>,
         creator: Option<DID>,
@@ -164,6 +168,7 @@ impl ConversationDocument {
             created,
             modified,
             conversation_type,
+            settings,
             excluded,
             messages,
             signature,
@@ -182,7 +187,11 @@ impl ConversationDocument {
         Ok(document)
     }
 
-    pub fn new_direct(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
+    pub fn new_direct(
+        did: &DID,
+        recipients: [DID; 2],
+        settings: DirectConversationSettings,
+    ) -> Result<Self, Error> {
         let conversation_id = Some(super::generate_shared_topic(
             did,
             recipients
@@ -200,6 +209,7 @@ impl ConversationDocument {
             recipients.to_vec(),
             conversation_id,
             ConversationType::Direct,
+            ConversationSettings::Direct(settings),
             None,
             None,
             None,
@@ -219,7 +229,8 @@ impl ConversationDocument {
             name,
             recipients.to_vec(),
             conversation_id,
-            ConversationType::Group { settings },
+            ConversationType::Group,
+            ConversationSettings::Group(settings),
             None,
             None,
             Some(did.clone()),
@@ -230,7 +241,8 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        if let ConversationType::Group { settings } = self.conversation_type {
+        if let ConversationSettings::Group(settings) = self.settings {
+            assert_eq!(self.conversation_type, ConversationType::Group);
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -257,7 +269,8 @@ impl ConversationDocument {
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        if let ConversationType::Group { settings } = self.conversation_type {
+        if let ConversationSettings::Group(settings) = self.settings {
+            assert_eq!(self.conversation_type, ConversationType::Group);
             let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid);
             };

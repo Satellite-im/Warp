@@ -7,7 +7,7 @@ mod test {
     use futures::StreamExt;
     use warp::{
         multipass::MultiPassEventKind,
-        raygun::{ConversationType, GroupSettings, MessageEventKind, RayGunEventKind},
+        raygun::{ConversationSettings, GroupSettings, MessageEventKind, RayGunEventKind},
     };
 
     #[tokio::test]
@@ -40,10 +40,8 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.conversation_type(),
-            ConversationType::Group {
-                settings: GroupSettings::default()
-            }
+            conversation.settings(),
+            ConversationSettings::Group(GroupSettings::default()),
         );
         assert_eq!(conversation.recipients().len(), 1);
         assert!(conversation.recipients().contains(&did_a));
@@ -182,10 +180,8 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.conversation_type(),
-            ConversationType::Group {
-                settings: GroupSettings::default()
-            }
+            conversation.settings(),
+            ConversationSettings::Group(GroupSettings::default()),
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -353,8 +349,8 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.conversation_type(),
-            ConversationType::Group { settings }
+            conversation.settings(),
+            ConversationSettings::Group(settings),
         );
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
@@ -570,10 +566,8 @@ mod test {
         let conversation = chat_a.get_conversation(id_a).await?;
 
         assert_eq!(
-            conversation.conversation_type(),
-            ConversationType::Group {
-                settings: GroupSettings::default()
-            }
+            conversation.settings(),
+            ConversationSettings::Group(GroupSettings::default()),
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -820,10 +814,8 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.conversation_type(),
-            ConversationType::Group {
-                settings: GroupSettings::default()
-            }
+            conversation.settings(),
+            ConversationSettings::Group(GroupSettings::default()),
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -980,10 +972,8 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.conversation_type(),
-            ConversationType::Group {
-                settings: GroupSettings::default()
-            }
+            conversation.settings(),
+            ConversationSettings::Group(GroupSettings::default()),
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
