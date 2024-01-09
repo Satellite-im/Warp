@@ -24,7 +24,7 @@ use super::{
 mod encoder_task;
 mod sender_task;
 
-pub struct SourceTrack {
+pub struct AudioSourceTrack {
     // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
     quit_encoder_task: Arc<AtomicBool>,
@@ -35,7 +35,7 @@ pub struct SourceTrack {
     track: Arc<TrackLocalStaticRTP>,
 }
 
-impl Drop for SourceTrack {
+impl Drop for AudioSourceTrack {
     fn drop(&mut self) {
         self.quit_encoder_task.store(true, Ordering::Relaxed);
         self.quit_sender_task.notify_waiters();
@@ -103,7 +103,7 @@ fn create_stream(
         })
 }
 
-impl SourceTrack {
+impl AudioSourceTrack {
     // spawn a std::thread to receive bytes from cpal and encode them
     // spawn a task to send the encoded bytes over rtp
     pub fn new(

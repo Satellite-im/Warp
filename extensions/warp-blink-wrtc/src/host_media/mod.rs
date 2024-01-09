@@ -1,4 +1,5 @@
 mod audio;
+mod video;
 pub mod default_controller;
 mod loopback;
 pub mod loopback_controller;
@@ -13,3 +14,6 @@ pub use default_controller as controller;
 pub use loopback_controller as controller;
 
 pub const AUDIO_SOURCE_ID: &str = "audio";
+
+pub const VIDEO_SOURCE_ID: &str = "video";
+

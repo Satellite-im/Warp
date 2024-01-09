@@ -5,7 +5,7 @@ use super::{
     signaling::{self, ipfs_routes, CallSignal, GossipSubSignal, InitiationSignal, PeerSignal},
 };
 use crate::{
-    host_media::{self, Mp4LoggerConfig, AUDIO_SOURCE_ID},
+    host_media::{self, Mp4LoggerConfig, AUDIO_SOURCE_ID, VIDEO_SOURCE_ID},
     notify_wrapper::NotifyWrapper,
     simple_webrtc::{self, events::WebRtcEventStream, MediaSourceId},
 };
@@ -75,6 +75,8 @@ enum Cmd {
     StopRecording {
         rsp: oneshot::Sender<Result<(), Error>>,
     },
+    EnableCamera,
+    DisableCamera,
 }
 
 #[derive(Clone)]
@@ -212,6 +214,16 @@ impl BlinkController {
             .map_err(|x| Error::OtherWithContext(x.to_string()))?;
         rx.await
             .map_err(|x| Error::OtherWithContext(x.to_string()))?
+    }
+
+    pub async fn enable_camera(&self) -> anyhow::Result<()> {
+        self.ch.send(Cmd::EnableCamera)?;
+        Ok(())
+    }
+
+    pub async fn disable_camera(&self) -> anyhow::Result<()> {
+        self.ch.send(Cmd::DisableCamera)?;
+        Ok(())
     }
 }
 
@@ -590,6 +602,27 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             let _ = rsp.send(Err(Error::CallNotInProgress));
                         }
                     }
+                    Cmd::EnableCamera => {
+                        let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
+                            mime_type: MimeType::AV1.to_string(),
+                            clock_rate: 30,
+                            channels: 1,
+                            ..Default::default()
+                        };
+                        let _ = webrtc_controller
+                            .add_media_source(
+                                VIDEO_SOURCE_ID.into(),
+                                rtc_rtp_codec,
+                            )
+                            .await;
+                    }
+                    Cmd::DisableCamera => {
+                        let _ = webrtc_controller
+                        .remove_media_source(
+                            VIDEO_SOURCE_ID.into(),
+                        )
+                        .await;
+                    }
                 }
             },
             opt = signal_rx.recv() => {
@@ -716,8 +749,11 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                         log::debug!("webrtc: closed, disconnected or connection failed");
 
                         webrtc_controller.hang_up(&peer).await;
-                        if let Err(e) = host_media::controller::remove_sink_track(peer.clone()).await {
-                            log::error!("failed to remove sink track for peer {peer}: {e}");
+                        if let Err(e) = host_media::controller::remove_audio_sink_track(peer.clone()).await {
+                            log::error!("failed to remove audio sink track for peer {peer}: {e}");
+                        }
+                        if let Err(e) = host_media::controller::remove_video_sink_track(peer.clone()).await {
+                            log::error!("failed to remove video sink track for peer {peer}: {e}");
                         }
 
                         if let Some(data) = call_data_map.get_active_mut() {
@@ -764,9 +800,14 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                             log::warn!("dialing without active call");
                         }
                     },
-                    simple_webrtc::events::EmittedEvents::TrackAdded { peer, track } => {
-                        if let Err(e) =   host_media::controller::create_audio_sink_track(peer.clone(), ui_event_ch.clone(), track).await {
-                            log::error!("failed to send media_track command: {e}");
+                    simple_webrtc::events::EmittedEvents::AudioTrackAdded { peer, track } => {
+                        if let Err(e) = host_media::controller::create_audio_sink_track(peer.clone(), ui_event_ch.clone(), track).await {
+                            log::error!("failed to send audio media_track command: {e}");
+                        }
+                    },
+                    simple_webrtc::events::EmittedEvents::VideoTrackAdded { peer, track } => {
+                        if let Err(e) = host_media::controller::create_video_sink_track(peer.clone(), ui_event_ch.clone(), track).await {
+                            log::error!("failed to send video media_track command: {e}");
                         }
                     },
                 }

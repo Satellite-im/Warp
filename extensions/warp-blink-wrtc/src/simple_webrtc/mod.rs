@@ -473,11 +473,21 @@ impl Controller {
         peer.connection.on_track(Box::new(
             move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
                 if let Some(track) = track {
-                    if let Err(e) = tx.send(EmittedEvents::TrackAdded {
-                        peer: dest.clone(),
-                        track,
-                    }) {
-                        log::error!("failed to send track added event for peer {}: {}", &dest, e);
+                    if track.kind() == RTPCodecType::Audio {
+                        if let Err(e) = tx.send(EmittedEvents::AudioTrackAdded {
+                            peer: dest.clone(),
+                            track: track.clone(),
+                        }) {
+                            log::error!("failed to send video track added event for peer {}: {}", &dest, e);
+                        }
+                    } 
+                    if track.kind() == RTPCodecType::Video {
+                        if let Err(e) = tx.send(EmittedEvents::VideoTrackAdded  {
+                            peer: dest.clone(),
+                            track: track.clone(),
+                        }) {
+                            log::error!("failed to send audio track added event for peer {}: {}", &dest, e);
+                        }
                     }
                 }
                 Box::pin(futures::future::ready(()))

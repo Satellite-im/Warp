@@ -41,7 +41,7 @@ impl Drop for ReceiverTask {
     }
 }
 
-pub struct SinkTrackController {
+pub struct AudioSinkTrackController {
     quit_decoder_task: Arc<AtomicBool>,
     silenced: Arc<AtomicBool>,
     num_channels: usize,
@@ -50,7 +50,7 @@ pub struct SinkTrackController {
     receiver_tasks: HashMap<DID, ReceiverTask>,
 }
 
-impl Drop for SinkTrackController {
+impl Drop for AudioSinkTrackController {
     fn drop(&mut self) {
         self.quit_decoder_task.store(true, Ordering::Relaxed);
     }
@@ -106,7 +106,7 @@ fn build_stream(
         })
 }
 
-impl SinkTrackController {
+impl AudioSinkTrackController {
     pub fn new(
         num_channels: usize,
         ui_event_ch: broadcast::Sender<BlinkEventKind>,

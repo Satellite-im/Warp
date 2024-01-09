@@ -51,10 +51,13 @@ pub enum EmittedEvents {
         sdp: Box<RTCSessionDescription>,
     },
 
-    /// a peer added a track. The calling application is responsible for reading from the track
+    /// a peer added an audio track. The calling application is responsible for reading from the track
     /// and processing the output
-    #[display(fmt = "TrackAdded")]
-    TrackAdded { peer: DID, track: Arc<TrackRemote> },
+    #[display(fmt = "AudioTrackAdded")]
+    AudioTrackAdded { peer: DID, track: Arc<TrackRemote> },
+
+    #[display(fmt = "VideoTrackAdded")]
+    VideoTrackAdded { peer: DID, track: Arc<TrackRemote> },
 
     #[display(fmt = "AudioDegradation")]
     AudioDegradation { peer: DID },
