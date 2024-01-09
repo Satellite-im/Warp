@@ -527,7 +527,7 @@ impl IdentityStore {
                             };
 
                             //Ignore requesting images if there is a change for now.
-                            if let Err(e) = store.process_message(&from_did, event, true).await {
+                            if let Err(e) = store.process_message(&from_did, event, false).await {
                                 error!("Failed to process identity message from {from_did}: {e}");
                             }
                         }
@@ -972,7 +972,7 @@ impl IdentityStore {
             UpdateEvents::Enabled
         ) || matches!(
             self.config.store_setting.update_events,
-            UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+            UpdateEvents::FriendsOnly
         ) && is_friend)
             && (!is_blocked && !is_blocked_by);
 
@@ -1188,20 +1188,11 @@ impl IdentityStore {
 
                             let document_did = identity.did.clone();
 
-                            let mut emit = false;
-
-                            if matches!(
-                                self.config.store_setting.update_events,
-                                UpdateEvents::Enabled
-                            ) {
-                                emit = true;
-                            } else if matches!(
-                                self.config.store_setting.update_events,
-                                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-                            ) && self.is_friend(&document_did).await.unwrap_or_default()
-                            {
-                                emit = true;
-                            }
+                            let emit = self.config.store_setting.update_events
+                                == UpdateEvents::Enabled
+                                || (self.config.store_setting.update_events
+                                    == UpdateEvents::FriendsOnly
+                                    && self.is_friend(&document_did).await.unwrap_or_default());
 
                             if emit {
                                 tracing::trace!("Emitting identity update event");
@@ -1243,7 +1234,6 @@ impl IdentityStore {
                                             .expect("Cid is provided");
                                         tokio::spawn({
                                             let ipfs = self.ipfs.clone();
-                                            let emit = emit;
                                             let store = self.clone();
                                             let did = in_did.clone();
                                             async move {
@@ -1301,8 +1291,8 @@ impl IdentityStore {
                                             .await
                                         {
                                             error!(
-                                            "Error requesting profile banner from {in_did}: {e}"
-                                        );
+                                                "Error requesting profile banner from {in_did}: {e}"
+                                            );
                                         }
                                     } else {
                                         let identity_profile_banner = identity
@@ -1311,7 +1301,6 @@ impl IdentityStore {
                                             .expect("Cid is provided");
                                         tokio::spawn({
                                             let ipfs = self.ipfs.clone();
-                                            let emit = emit;
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
@@ -1367,19 +1356,11 @@ impl IdentityStore {
                         }
 
                         if !exclude_images {
-                            let mut emit = false;
-                            if matches!(
-                                self.config.store_setting.update_events,
-                                UpdateEvents::Enabled
-                            ) {
-                                emit = true;
-                            } else if matches!(
-                                self.config.store_setting.update_events,
-                                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-                            ) && self.is_friend(&document_did).await.unwrap_or_default()
-                            {
-                                emit = true;
-                            }
+                            let emit = self.config.store_setting.update_events
+                                == UpdateEvents::Enabled
+                                || (self.config.store_setting.update_events
+                                    == UpdateEvents::FriendsOnly
+                                    && self.is_friend(&document_did).await.unwrap_or_default());
 
                             if emit {
                                 let mut picture = None;
