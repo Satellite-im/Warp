@@ -153,15 +153,13 @@ pub struct IpfsSetting {
     pub disable_quic: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub enum UpdateEvents {
     #[default]
     /// Emit events for all identity updates
     Enabled,
     /// Emit events for identity updates from friends
     FriendsOnly,
-    /// Send events for all identity updates, but only emit with friends
-    EmitFriendsOnly,
     /// Disable events
     Disable,
 }
