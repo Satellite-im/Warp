@@ -24,17 +24,9 @@ use crate::sync::{Arc, RwLock};
 type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
-#[derive(FFIFree)]
+#[derive(FFIFree, Clone)]
 pub struct Tesseract {
-    internal: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-    enc_pass: Arc<RwLock<Vec<u8>>>,
-    file: Arc<RwLock<Option<PathBuf>>>,
-    autosave: Arc<AtomicBool>,
-    check: Arc<AtomicBool>,
-    unlock: Arc<AtomicBool>,
-    soft_unlock: Arc<AtomicBool>,
-    event_tx: async_broadcast::Sender<TesseractEvent>,
-    event_rx: async_broadcast::Receiver<TesseractEvent>,
+    inner: Arc<TesseractInner>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -47,31 +39,17 @@ impl Default for Tesseract {
     fn default() -> Self {
         let (event_tx, event_rx) = async_broadcast::broadcast(1024);
         Tesseract {
-            internal: Arc::new(Default::default()),
-            enc_pass: Arc::new(Default::default()),
-            file: Arc::new(Default::default()),
-            autosave: Arc::new(Default::default()),
-            check: Arc::new(Default::default()),
-            unlock: Arc::new(Default::default()),
-            soft_unlock: Arc::new(Default::default()),
-            event_tx,
-            event_rx,
-        }
-    }
-}
-
-impl Clone for Tesseract {
-    fn clone(&self) -> Self {
-        Tesseract {
-            internal: self.internal.clone(),
-            enc_pass: self.enc_pass.clone(),
-            file: self.file.clone(),
-            autosave: self.autosave.clone(),
-            check: self.check.clone(),
-            unlock: self.unlock.clone(),
-            soft_unlock: self.soft_unlock.clone(),
-            event_rx: self.event_rx.clone(),
-            event_tx: self.event_tx.clone(),
+            inner: Arc::new(TesseractInner {
+                internal: Default::default(),
+                enc_pass: Default::default(),
+                file: Default::default(),
+                autosave: Default::default(),
+                check: Default::default(),
+                unlock: Default::default(),
+                soft_unlock: Default::default(),
+                event_tx,
+                event_rx,
+            }),
         }
     }
 }
@@ -79,28 +57,20 @@ impl Clone for Tesseract {
 impl Debug for Tesseract {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tesseract")
-            .field("internal", &self.internal)
-            .field("file", &self.file)
-            .field("autosave", &self.autosave)
-            .field("unlock", &self.unlock)
+            .field("internal", &self.inner.internal)
+            .field("file", &self.inner.file)
+            .field("autosave", &self.inner.autosave)
+            .field("unlock", &self.inner.unlock)
             .finish()
-    }
-}
-
-impl Drop for Tesseract {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.enc_pass) == 1 && self.is_unlock() {
-            self.lock()
-        }
     }
 }
 
 impl PartialEq for Tesseract {
     fn eq(&self, other: &Self) -> bool {
-        self.autosave.load(Ordering::SeqCst) == other.autosave.load(Ordering::SeqCst)
-            && self.unlock.load(Ordering::SeqCst) == other.unlock.load(Ordering::SeqCst)
-            && *self.internal.read() == *other.internal.read()
-            && *self.enc_pass.read() == *other.enc_pass.read()
+        self.inner.autosave.load(Ordering::SeqCst) == other.inner.autosave.load(Ordering::SeqCst)
+            && self.inner.unlock.load(Ordering::SeqCst) == other.inner.unlock.load(Ordering::SeqCst)
+            && *self.inner.internal.read() == *other.inner.internal.read()
+            && *self.inner.enc_pass.read() == *other.inner.enc_pass.read()
     }
 }
 
@@ -128,7 +98,7 @@ impl Tesseract {
             Ok(tesseract) => Ok(tesseract),
             Err(Error::IoError(e)) if e.kind() == ErrorKind::NotFound => {
                 let tesseract = Tesseract::default();
-                tesseract.check.store(true, Ordering::Relaxed);
+                tesseract.inner.check.store(true, Ordering::Relaxed);
                 let file = std::fs::canonicalize(&path).unwrap_or(path);
                 tesseract.set_file(file);
                 tesseract.set_autosave();
@@ -152,14 +122,14 @@ impl Tesseract {
         if !file.is_file() {
             return Err(std::io::Error::from(std::io::ErrorKind::NotFound).into());
         }
-        let mut store = Tesseract::default();
-        store.check.store(true, Ordering::Relaxed);
+        let store = Tesseract::default();
+        store.inner.check.store(true, Ordering::Relaxed);
         let fs = std::fs::File::open(file)?;
         let data = serde_json::from_reader(fs)?;
         let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
         store.set_file(file);
         store.set_autosave();
-        store.internal = Arc::new(RwLock::new(data));
+        *store.inner.internal.write() = data;
         Ok(store)
     }
 
@@ -175,10 +145,10 @@ impl Tesseract {
     /// let tesseract = Tesseract::from_reader(&mut file).unwrap();
     /// ```
     pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
-        let mut store = Tesseract::default();
-        store.check.store(true, Ordering::Relaxed);
+        let store = Tesseract::default();
+        store.inner.check.store(true, Ordering::Relaxed);
         let data = serde_json::from_reader(reader)?;
-        store.internal = Arc::new(RwLock::new(data));
+        *store.inner.internal.write() = data;
         Ok(store)
     }
 
@@ -194,10 +164,7 @@ impl Tesseract {
     /// tesseract.to_file("test_file").unwrap();
     /// ```
     pub fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
-        let mut fs = std::fs::File::create(path)?;
-        self.to_writer(&mut fs)?;
-        fs.sync_all()?;
-        Ok(())
+        self.inner.to_file(path)
     }
 
     /// Save the keystore from stream
@@ -213,8 +180,7 @@ impl Tesseract {
     /// tesseract.to_writer(&mut file).unwrap();
     /// ```
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
-        serde_json::to_writer(writer, &*self.internal.read())?;
-        Ok(())
+        self.inner.to_writer(writer)
     }
 
     /// Set file for the saving using `Tesseract::save`
@@ -228,10 +194,7 @@ impl Tesseract {
     /// assert!(tesseract.file().is_some());
     /// ```
     pub fn set_file<P: AsRef<Path>>(&self, file: P) {
-        *self.file.write() = Some(file.as_ref().to_path_buf());
-        if !file.as_ref().is_file() {
-            if let Err(_e) = self.to_file(file) {}
-        }
+        self.inner.set_file(file)
     }
 
     /// Internal file handle
@@ -246,27 +209,7 @@ impl Tesseract {
     /// assert!(tesseract.file().is_some());
     /// ```
     pub fn file(&self) -> Option<String> {
-        self.file
-            .read()
-            .as_ref()
-            .map(|s| s.to_string_lossy().to_string())
-    }
-
-    /// To save to file using internal file path.
-    /// Note: Because we do not want to interrupt the functions due to it failing to
-    ///       save for whatever reason, this function will return `Result::Ok`
-    ///       regardless of success or error but would eventually log the error.
-    ///
-    /// TODO: Handle error without subjecting function to `Result::Err`
-    pub fn save(&self) -> Result<()> {
-        if self.autosave_enabled() {
-            if let Some(path) = &self.file() {
-                if let Err(_e) = self.to_file(path) {
-                    //TODO: Logging
-                }
-            }
-        }
-        Ok(())
+        self.inner.file()
     }
 
     /// Import and encrypt a hashmap into tesseract
@@ -304,22 +247,7 @@ impl Tesseract {
     ///  assert_eq!(map.get("API"), Some(&String::from("MYKEY")));
     /// ```
     pub fn export(&self) -> Result<HashMap<String, String>> {
-        if !self.is_unlock() {
-            return Err(Error::TesseractLocked);
-        }
-        let keys = self.internal_keys();
-        let mut map = HashMap::new();
-        for key in keys {
-            let value = match self.retrieve(&key) {
-                Ok(v) => v,
-                Err(e) => match self.is_key_check_enabled() {
-                    true => return Err(e),
-                    false => continue,
-                },
-            };
-            map.insert(key.clone(), value);
-        }
-        Ok(map)
+        self.inner.export()
     }
 }
 
@@ -339,8 +267,7 @@ impl Tesseract {
     /// assert!(tesseract.autosave_enabled());
     /// ```
     pub fn set_autosave(&self) {
-        let autosave = self.autosave_enabled();
-        self.autosave.store(!autosave, Ordering::Relaxed);
+        self.inner.set_autosave();
     }
 
     /// Check to determine if `Tesseract::autosave` is true or false
@@ -352,7 +279,7 @@ impl Tesseract {
     /// assert!(!tesseract.autosave_enabled());
     /// ```
     pub fn autosave_enabled(&self) -> bool {
-        self.autosave.load(Ordering::Relaxed)
+        self.inner.autosave_enabled()
     }
 
     /// Disable the key check to allow any passphrase to be used when unlocking the datastore
@@ -374,7 +301,7 @@ impl Tesseract {
     /// assert!(!tesseract.is_key_check_enabled());
     /// ```
     pub fn disable_key_check(&self) {
-        self.check.store(false, Ordering::Relaxed);
+        self.inner.disable_key_check();
     }
 
     /// Enable the key check to allow any passphrase to be used when unlocking the datastore
@@ -392,7 +319,7 @@ impl Tesseract {
     /// assert!(tesseract.is_key_check_enabled())
     /// ```
     pub fn enable_key_check(&self) {
-        self.check.store(true, Ordering::Relaxed);
+        self.inner.enable_key_check();
     }
 
     /// Check to determine if the key check is enabled
@@ -406,7 +333,7 @@ impl Tesseract {
     /// //TODO: Perform a check with it enabled
     /// ```
     pub fn is_key_check_enabled(&self) -> bool {
-        self.check.load(Ordering::Relaxed)
+        self.inner.is_key_check_enabled()
     }
 
     /// To store a value to be encrypted into the keystore. If the key already exist, it
@@ -421,13 +348,7 @@ impl Tesseract {
     ///  assert_eq!(tesseract.exist("API"), true);
     /// ```
     pub fn set(&self, key: &str, value: &str) -> Result<()> {
-        if !self.is_unlock() {
-            return Err(Error::TesseractLocked);
-        }
-        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
-        let data = Cipher::direct_encrypt(value.as_bytes(), &pkey)?;
-        self.internal.write().insert(key.to_string(), data);
-        self.save()
+        self.inner.set(key, value)
     }
 
     /// Check to see if the key store contains the key
@@ -442,7 +363,7 @@ impl Tesseract {
     ///  assert_eq!(tesseract.exist("NOT_API"), false);
     /// ```
     pub fn exist(&self, key: &str) -> bool {
-        self.internal.read().contains_key(key)
+        self.inner.exist(key)
     }
 
     /// Used to retrieve and decrypt the value stored for the key
@@ -458,6 +379,241 @@ impl Tesseract {
     ///  assert_eq!(val, String::from("MYKEY"));
     /// ```
     pub fn retrieve(&self, key: &str) -> Result<String> {
+        self.inner.retrieve(key)
+    }
+
+    /// Used to update the passphrase to the keystore
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(b"current_phrase").unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  tesseract.update_unlock(b"current_phrase", b"new_phrase").unwrap();
+    ///  let val = tesseract.retrieve("API").unwrap();
+    ///  assert_eq!("MYKEY", val);
+    /// ```
+    pub fn update_unlock(&self, old_passphrase: &[u8], new_passphrase: &[u8]) -> Result<()> {
+        self.inner.update_unlock(old_passphrase, new_passphrase)
+    }
+
+    /// Used to delete the value from the keystore
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), true);
+    ///  tesseract.delete("API").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), false);
+    /// ```
+    pub fn delete(&self, key: &str) -> Result<()> {
+        self.inner.delete(key)
+    }
+
+    /// Used to clear the whole keystore.
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  tesseract.clear();
+    ///  assert_eq!(tesseract.exist("API"), false);
+    /// ```
+    pub fn clear(&self) {
+        self.inner.clear();
+    }
+
+    /// Checks to see if tesseract is secured and not "unlocked"
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  assert!(!tesseract.is_unlock());
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  assert!(tesseract.is_unlock());
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  tesseract.lock();
+    ///  assert!(!tesseract.is_unlock())
+    /// ```
+    pub fn is_unlock(&self) -> bool {
+        self.inner.is_unlock()
+    }
+
+    /// Store password in memory to be used to decrypt contents.
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  assert!(tesseract.is_unlock());
+    /// ```
+    pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
+        self.inner.unlock(passphrase)
+    }
+
+    /// Remove password from memory securely
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  assert!(tesseract.is_unlock());
+    ///  tesseract.lock();
+    ///  assert!(!tesseract.is_unlock());
+    /// ```
+    pub fn lock(&self) {
+        self.inner.lock();
+    }
+
+    /// To save to file using internal file path.
+    /// Note: Because we do not want to interrupt the functions due to it failing to
+    ///       save for whatever reason, this function will return `Result::Ok`
+    ///       regardless of success or error but would eventually log the error.
+    ///
+    /// TODO: Handle error without subjecting function to `Result::Err`
+    pub fn save(&self) -> Result<()> {
+        self.inner.save()
+    }
+}
+
+impl Tesseract {
+    pub fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
+        self.inner.subscribe()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Tesseract {
+    /// Used to load contents from local storage
+    pub fn load_from_storage(&self) -> Result<()> {
+        self.inner.load_from_storage()
+    }
+}
+
+#[derive(FFIFree)]
+struct TesseractInner {
+    internal: RwLock<HashMap<String, Vec<u8>>>,
+    enc_pass: RwLock<Vec<u8>>,
+    file: RwLock<Option<PathBuf>>,
+    autosave: AtomicBool,
+    check: AtomicBool,
+    unlock: AtomicBool,
+    soft_unlock: AtomicBool,
+    event_tx: async_broadcast::Sender<TesseractEvent>,
+    event_rx: async_broadcast::Receiver<TesseractEvent>,
+}
+
+impl Drop for TesseractInner {
+    fn drop(&mut self) {
+        self.lock()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TesseractInner {
+    fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
+        let mut fs = std::fs::File::create(path)?;
+        self.to_writer(&mut fs)?;
+        fs.sync_all()?;
+        Ok(())
+    }
+
+    fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
+        serde_json::to_writer(writer, &*self.internal.read())?;
+        Ok(())
+    }
+
+    fn set_file<P: AsRef<Path>>(&self, file: P) {
+        *self.file.write() = Some(file.as_ref().to_path_buf());
+        if !file.as_ref().is_file() {
+            if let Err(_e) = self.to_file(file) {}
+        }
+    }
+
+    fn file(&self) -> Option<String> {
+        self.file
+            .read()
+            .as_ref()
+            .map(|s| s.to_string_lossy().to_string())
+    }
+
+    fn save(&self) -> Result<()> {
+        if self.autosave_enabled() {
+            if let Some(path) = &self.file() {
+                if let Err(_e) = self.to_file(path) {
+                    //TODO: Logging
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn export(&self) -> Result<HashMap<String, String>> {
+        if !self.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        let keys = self.internal_keys();
+        let mut map = HashMap::new();
+        for key in keys {
+            let value = match self.retrieve(&key) {
+                Ok(v) => v,
+                Err(e) => match self.is_key_check_enabled() {
+                    true => return Err(e),
+                    false => continue,
+                },
+            };
+            map.insert(key.clone(), value);
+        }
+        Ok(map)
+    }
+}
+
+impl TesseractInner {
+    fn set_autosave(&self) {
+        let autosave = self.autosave_enabled();
+        self.autosave.store(!autosave, Ordering::Relaxed);
+    }
+
+    fn autosave_enabled(&self) -> bool {
+        self.autosave.load(Ordering::Relaxed)
+    }
+
+    fn disable_key_check(&self) {
+        self.check.store(false, Ordering::Relaxed);
+    }
+
+    fn enable_key_check(&self) {
+        self.check.store(true, Ordering::Relaxed);
+    }
+
+    fn is_key_check_enabled(&self) -> bool {
+        self.check.load(Ordering::Relaxed)
+    }
+
+    fn set(&self, key: &str, value: &str) -> Result<()> {
+        if !self.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
+        let data = Cipher::direct_encrypt(value.as_bytes(), &pkey)?;
+        self.internal.write().insert(key.to_string(), data);
+        self.save()
+    }
+
+    fn exist(&self, key: &str) -> bool {
+        self.internal.read().contains_key(key)
+    }
+
+    fn retrieve(&self, key: &str) -> Result<String> {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
@@ -478,19 +634,7 @@ impl Tesseract {
         Ok(plain_text)
     }
 
-    /// Used to update the passphrase to the keystore
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(b"current_phrase").unwrap();
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  tesseract.update_unlock(b"current_phrase", b"new_phrase").unwrap();
-    ///  let val = tesseract.retrieve("API").unwrap();
-    ///  assert_eq!("MYKEY", val);
-    /// ```
-    pub fn update_unlock(&self, old_passphrase: &[u8], new_passphrase: &[u8]) -> Result<()> {
+    fn update_unlock(&self, old_passphrase: &[u8], new_passphrase: &[u8]) -> Result<()> {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
@@ -536,19 +680,7 @@ impl Tesseract {
         Ok(())
     }
 
-    /// Used to delete the value from the keystore
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  assert_eq!(tesseract.exist("API"), true);
-    ///  tesseract.delete("API").unwrap();
-    ///  assert_eq!(tesseract.exist("API"), false);
-    /// ```
-    pub fn delete(&self, key: &str) -> Result<()> {
+    fn delete(&self, key: &str) -> Result<()> {
         self.internal
             .write()
             .remove(key)
@@ -557,37 +689,13 @@ impl Tesseract {
         self.save()
     }
 
-    /// Used to clear the whole keystore.
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  tesseract.clear();
-    ///  assert_eq!(tesseract.exist("API"), false);
-    /// ```
-    pub fn clear(&self) {
+    fn clear(&self) {
         self.internal.write().clear();
 
         if self.save().is_ok() {}
     }
 
-    /// Checks to see if tesseract is secured and not "unlocked"
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  assert!(!tesseract.is_unlock());
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  assert!(tesseract.is_unlock());
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  tesseract.lock();
-    ///  assert!(!tesseract.is_unlock())
-    /// ```
-    pub fn is_unlock(&self) -> bool {
+    fn is_unlock(&self) -> bool {
         !self.enc_pass.read().is_empty()
             && self.unlock.load(Ordering::Relaxed)
             && !self.soft_unlock.load(Ordering::Relaxed)
@@ -599,16 +707,7 @@ impl Tesseract {
             && self.soft_unlock.load(Ordering::Relaxed)
     }
 
-    /// Store password in memory to be used to decrypt contents.
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  assert!(tesseract.is_unlock());
-    /// ```
-    pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
+    fn unlock(&self, passphrase: &[u8]) -> Result<()> {
         *self.enc_pass.write() = Cipher::self_encrypt(passphrase)?;
         self.soft_unlock.store(true, Ordering::Relaxed);
         if self.is_key_check_enabled() {
@@ -626,18 +725,7 @@ impl Tesseract {
         Ok(())
     }
 
-    /// Remove password from memory securely
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  assert!(tesseract.is_unlock());
-    ///  tesseract.lock();
-    ///  assert!(!tesseract.is_unlock());
-    /// ```
-    pub fn lock(&self) {
+    fn lock(&self) {
         if self.save().is_ok() {
             //
         }
@@ -646,10 +734,8 @@ impl Tesseract {
         self.soft_unlock.store(false, Ordering::Relaxed);
         let _ = self.event_tx.try_broadcast(TesseractEvent::Locked);
     }
-}
 
-impl Tesseract {
-    pub fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
+    fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
         let mut rx = self.event_rx.clone();
         let stream = async_stream::stream! {
             loop {
@@ -663,18 +749,15 @@ impl Tesseract {
 
         stream.boxed()
     }
-}
 
-impl Tesseract {
     fn internal_keys(&self) -> Vec<String> {
         self.internal.read().keys().cloned().collect::<Vec<_>>()
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-impl Tesseract {
-    /// Used to save contents to local storage
-    pub fn save(&self) -> Result<()> {
+impl TesseractInner {
+    fn save(&self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 
         if self.autosave_enabled() {
@@ -686,8 +769,7 @@ impl Tesseract {
         Ok(())
     }
 
-    /// Used to load contents from local storage
-    pub fn load_from_storage(&self) -> Result<()> {
+    fn load_from_storage(&self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 
         let local_storage = LocalStorage::raw();
