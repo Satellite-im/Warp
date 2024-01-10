@@ -515,17 +515,11 @@ pub enum ConversationSettings {
 
 /// Settings for a direct conversation.
 // Any future direct conversation settings go here.
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[repr(C)]
 pub struct DirectConversationSettings {}
 
-impl Default for DirectConversationSettings {
-    fn default() -> Self {
-        Self {}
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[repr(C)]
 pub struct GroupSettings {
     // Everyone can add participants, if set to `true``.
@@ -539,14 +533,6 @@ impl GroupSettings {
 
     pub fn set_members_can_add_participants(&mut self, val: bool) {
         self.members_can_add_participants = val;
-    }
-}
-
-impl Default for GroupSettings {
-    fn default() -> Self {
-        Self {
-            members_can_add_participants: false,
-        }
     }
 }
 
