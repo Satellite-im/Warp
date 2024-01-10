@@ -24,9 +24,19 @@ use crate::store::ecdh_encrypt;
 
 use super::{ecdh_decrypt, keystore::Keystore, verify_serde_sig};
 
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationVersion {
+    #[default]
+    V0,
+    V1,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
     pub id: Uuid,
+    #[serde(default)]
+    pub version: ConversationVersion,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,33 +46,14 @@ pub struct ConversationDocument {
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restrict: Vec<DID>,
+    #[serde(default)]
+    pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
-}
-
-impl From<Conversation> for ConversationDocument {
-    fn from(conversation: Conversation) -> Self {
-        ConversationDocument::from(&conversation)
-    }
-}
-
-impl From<&Conversation> for ConversationDocument {
-    fn from(conversation: &Conversation) -> Self {
-        ConversationDocument {
-            id: conversation.id(),
-            name: conversation.name(),
-            creator: conversation.creator(),
-            created: conversation.created(),
-            modified: conversation.modified(),
-            conversation_type: conversation.conversation_type(),
-            recipients: conversation.recipients(),
-            excluded: Default::default(),
-            messages: Default::default(),
-            signature: None,
-        }
-    }
 }
 
 impl Hash for ConversationDocument {
@@ -133,6 +124,7 @@ impl ConversationDocument {
         did: &DID,
         name: Option<String>,
         mut recipients: Vec<DID>,
+        restrict: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
         created: Option<DateTime<Utc>>,
@@ -158,6 +150,7 @@ impl ConversationDocument {
 
         let mut document = Self {
             id,
+            version: ConversationVersion::V1,
             name,
             recipients,
             creator,
@@ -167,6 +160,8 @@ impl ConversationDocument {
             excluded,
             messages,
             signature,
+            restrict,
+            deleted: false,
         };
 
         if document.signature.is_some() {
@@ -198,6 +193,7 @@ impl ConversationDocument {
             did,
             None,
             recipients.to_vec(),
+            vec![],
             conversation_id,
             ConversationType::Direct,
             None,
@@ -207,12 +203,18 @@ impl ConversationDocument {
         )
     }
 
-    pub fn new_group(did: &DID, name: Option<String>, recipients: &[DID]) -> Result<Self, Error> {
+    pub fn new_group(
+        did: &DID,
+        name: Option<String>,
+        recipients: &[DID],
+        restrict: &[DID],
+    ) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
             did,
             name,
             recipients.to_vec(),
+            restrict.to_vec(),
             conversation_id,
             ConversationType::Group,
             None,
@@ -234,17 +236,32 @@ impl ConversationDocument {
                 return Err(Error::PublicKeyInvalid);
             }
 
-            let construct = vec![
-                self.id().into_bytes().to_vec(),
-                vec![0xdc, 0xfc],
-                creator.to_string().as_bytes().to_vec(),
-                Vec::from_iter(
-                    self.recipients
-                        .iter()
-                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                ),
-            ];
-            self.signature = Some(bs58::encode(did.sign(&construct.concat())).into_string());
+            if self.version == ConversationVersion::V0 {
+                self.version = ConversationVersion::V1;
+            }
+
+            let construct = warp::crypto::hash::sha256_iter(
+                [
+                    Some(self.id().into_bytes().to_vec()),
+                    // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                    Some(creator.to_string().as_bytes().to_vec()),
+                    Some(Vec::from_iter(
+                        self.restrict
+                            .iter()
+                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                    )),
+                    Some(Vec::from_iter(
+                        self.recipients
+                            .iter()
+                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                    )),
+                ]
+                .into_iter(),
+                None,
+            );
+
+            let signature = did.sign(&construct);
+            self.signature = Some(bs58::encode(signature).into_string());
         }
         Ok(())
     }
@@ -261,19 +278,41 @@ impl ConversationDocument {
 
             let signature = bs58::decode(signature).into_vec()?;
 
-            let construct = vec![
-                self.id().into_bytes().to_vec(),
-                vec![0xdc, 0xfc],
-                creator.to_string().as_bytes().to_vec(),
-                Vec::from_iter(
-                    self.recipients
-                        .iter()
-                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+            let construct = match self.version {
+                ConversationVersion::V0 => [
+                    self.id().into_bytes().to_vec(),
+                    vec![0xdc, 0xfc],
+                    creator.to_string().as_bytes().to_vec(),
+                    Vec::from_iter(
+                        self.recipients
+                            .iter()
+                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                    ),
+                ]
+                .concat(),
+                ConversationVersion::V1 => warp::crypto::hash::sha256_iter(
+                    [
+                        Some(self.id().into_bytes().to_vec()),
+                        // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                        Some(creator.to_string().as_bytes().to_vec()),
+                        Some(Vec::from_iter(
+                            self.restrict
+                                .iter()
+                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                        )),
+                        Some(Vec::from_iter(
+                            self.recipients
+                                .iter()
+                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                        )),
+                    ]
+                    .into_iter(),
+                    None,
                 ),
-            ];
+            };
 
             creator
-                .verify(&construct.concat(), &signature)
+                .verify(&construct, &signature)
                 .map_err(|e| anyhow::anyhow!("{:?}", e))?;
         }
         Ok(())
@@ -394,13 +433,13 @@ impl ConversationDocument {
             return Ok(stream::empty().boxed());
         }
 
-        let keystore = keystore.cloned();
         let mut messages = Vec::from_iter(message_list);
 
         if option.reverse() {
             messages.reverse()
         }
 
+        let keystore = keystore.cloned();
         if option.first_message() && !messages.is_empty() {
             let message = messages
                 .first()
@@ -479,7 +518,7 @@ impl ConversationDocument {
             });
         }
 
-        let mut messages = Vec::from_iter(message_list.iter());
+        let mut messages = Vec::from_iter(message_list);
 
         if option.reverse() {
             messages.reverse()
@@ -571,25 +610,6 @@ impl ConversationDocument {
         self.set_message_list(ipfs, messages).await?;
         Ok(())
     }
-
-    pub async fn delete_all_message(&mut self, ipfs: Ipfs) -> Result<(), Error> {
-        let cid = std::mem::take(&mut self.messages);
-        let (cid, messages): (Cid, BTreeSet<MessageDocument>) = match cid {
-            Some(cid) => (cid, ipfs.get_dag(cid).local().deserialized().await?),
-            None => return Ok(()),
-        };
-
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid).await?;
-        }
-
-        for document in messages {
-            if ipfs.is_pinned(&document.message).await? {
-                ipfs.remove_pin(&document.message).await?;
-            }
-        }
-        Ok(())
-    }
 }
 
 impl From<ConversationDocument> for Conversation {
@@ -618,6 +638,8 @@ pub struct MessageDocument {
     pub conversation_id: Uuid,
     pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reactions: Option<Cid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -695,6 +717,7 @@ impl MessageDocument {
             sender,
             conversation_id,
             date,
+            reactions: None,
             message,
             pinned,
             modified,
