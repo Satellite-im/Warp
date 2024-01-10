@@ -4,6 +4,10 @@ jobs:
   cargo_test:
     name: Test
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+      RUST_BACKTRACE: full
+      RUST_LOG: debug
     steps:
       - uses: actions/checkout@v4
 
