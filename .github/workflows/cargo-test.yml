@@ -1,8 +1,8 @@
-name: Run Warp Test
+name: Run Tests
 on: [push]
 jobs:
   cargo_test:
-    name: Warp Test
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -10,9 +10,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-dev cmake libudev-dev
+          sudo apt-get install -y build-essential pkg-config libssl-dev
+          sudo apt-get install -y librust-alsa-sys-dev libxdo-dev llvm-dev cmake libudev-dev
 
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - run: cargo test -p warp
+      - run: cargo test

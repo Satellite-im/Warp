@@ -9,13 +9,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
+use strum::IntoEnumIterator;
 use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use warp::constellation::{Constellation, Progression};
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
-use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
@@ -355,7 +355,7 @@ async fn main() -> anyhow::Result<()> {
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
+                                    let username = get_username(&*new_account,  recipient).await;
                                     recipients.push(username);
                                 }
                                 let created = convo.created();
@@ -378,7 +378,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Conversation ID", "Date", "Modified", "Sender", "Pinned"]);
                             while let Some(message) = messages_stream.next().await {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account,  message.sender()).await;
                                 table.add_row(vec![
                                     &message.id().to_string(),
                                     &message.conversation_id().to_string(),
@@ -404,7 +404,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             while let Some(message) = messages_stream.next().await {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account,  message.sender()).await;
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -441,7 +441,7 @@ async fn main() -> anyhow::Result<()> {
                                 for page in pages {
                                     let page_id = page.id();
                                     for message in page.messages() {
-                                        let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                        let username = get_username(&*new_account, message.sender()).await;
                                         let mut emojis = vec![];
                                         for reaction in message.reactions() {
                                             emojis.push(reaction.emoji());
@@ -477,7 +477,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account, message.sender()).await;
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -509,7 +509,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account, message.sender()).await;
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -542,7 +542,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             while let Some(message) = messages_stream.next().await {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(&*new_account, message.sender()).await;
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -666,7 +666,7 @@ async fn main() -> anyhow::Result<()> {
                         React(message_id, state, code) => {
                             let conversation_id = topic.read().clone();
 
-                            if let Err(e) = chat.react(conversation_id, message_id, state, code).await {
+                            if let Err(e) = chat.react(conversation_id, message_id, state.into(), code).await {
                                 writeln!(stdout, "Error: {e}")?;
                                 continue;
                             }
@@ -762,12 +762,16 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
-    let identity = account
-        .get_identity(Identifier::did_key(did))
+async fn get_username(account: &dyn MultiPass, did: DID) -> String {
+    account
+        .get_identity(Identifier::did_key(did.clone()))
         .await
-        .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
-    Ok(format!("{}#{}", identity.username(), identity.short_id()))
+        .map(|list| {
+            list.first()
+                .map(|identity| format!("{}#{}", identity.username(), identity.short_id()))
+                .unwrap_or(did.to_string())
+        })
+        .unwrap_or(did.to_string())
 }
 
 async fn message_event_handle(
@@ -791,9 +795,7 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
-                        let username = get_username(multipass.clone(), message.sender())
-                            .await
-                            .unwrap_or_else(|_| message.sender().to_string());
+                        let username = get_username(&*multipass, message.sender()).await;
 
                         match message.message_type() {
                             MessageType::Message => match message.metadata().get("is_spam") {
@@ -900,9 +902,7 @@ async fn message_event_handle(
                 reaction,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
-                        .await
-                        .unwrap_or_else(|_| did_key.to_string());
+                    let username = get_username(&*multipass, did_key.clone()).await;
                     writeln!(
                         stdout,
                         "> {username} has reacted to {message_id} with {reaction}"
@@ -916,9 +916,7 @@ async fn message_event_handle(
                 reaction,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
-                        .await
-                        .unwrap_or_else(|_| did_key.to_string());
+                    let username = get_username(&*multipass, did_key.clone()).await;
                     writeln!(
                         stdout,
                         "> {username} has removed reaction {reaction} from {message_id}"
@@ -931,9 +929,7 @@ async fn message_event_handle(
                 event,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
-                        .await
-                        .unwrap_or_else(|_| did_key.to_string());
+                    let username = get_username(&*multipass, did_key.clone()).await;
                     match event {
                         MessageEvent::Typing => {
                             writeln!(stdout, ">>> {username} is typing",)?;
@@ -947,9 +943,7 @@ async fn message_event_handle(
                 event,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
-                        .await
-                        .unwrap_or_else(|_| did_key.to_string());
+                    let username = get_username(&*multipass, did_key.clone()).await;
 
                     match event {
                         MessageEvent::Typing => {
@@ -971,9 +965,7 @@ async fn message_event_handle(
                 recipient,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), recipient.clone())
-                        .await
-                        .unwrap_or_else(|_| recipient.to_string());
+                    let username = get_username(&*multipass, recipient.clone()).await;
 
                     writeln!(stdout, ">>> {username} was added to {conversation_id}")?;
                 }
@@ -983,9 +975,7 @@ async fn message_event_handle(
                 recipient,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), recipient.clone())
-                        .await
-                        .unwrap_or_else(|_| recipient.to_string());
+                    let username = get_username(&*multipass, recipient.clone()).await;
 
                     writeln!(stdout, ">>> {username} was removed from {conversation_id}")?;
                 }
@@ -995,87 +985,69 @@ async fn message_event_handle(
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display, strum_macros::EnumIter)]
 enum Command {
+    #[display(fmt = "/create <did> - create conversation with another user")]
     CreateConversation(DID),
+    #[display(fmt = "/add-recipient <did> - add recipient to conversation")]
     AddRecipient(DID),
+    #[display(fmt = "/remove-recipient <did> - remove recipient from conversation")]
     RemoveRecipient(DID),
+    #[display(fmt = "/create-group [--open] <name> <did> ... - create group conversation with other users")]
     CreateGroupConversation(String, Vec<DID>, bool),
+    #[display(
+        fmt = "/remove-conversation - delete current conversation. This will delete it on both ends"
+    )]
     RemoveConversation(Uuid),
+    #[display(fmt = "/set-conversation <id> - switch to a conversation")]
     SetConversation(Uuid),
+    #[display(fmt = "/set-conversation-name <name> - set conversation name")]
     SetConversationName(String),
+    #[display(fmt = "/list-conversations - list all active conversations")]
     ListConversations,
+    #[display(
+        fmt = "/list-references <lower-range> <upper-range> - list all messages in the conversation. This provides more info"
+    )]
     ListReferences(MessageOptions),
+    #[display(fmt = "/list <lower-range> <upper-range> - list all messages in the conversation")]
     ListMessages(MessageOptions),
+    #[display(
+        fmt = "/list-pages <lower-range> <upper-range> - list all messages in the conversation. This provides more info"
+    )]
     ListPages(MessageOptions),
+    #[display(fmt = "/remove-message <message-id> - remove message from conversation")]
     RemoveMessage(Uuid),
+    #[display(fmt = "/get-first - get first message in conversation")]
     GetFirst,
+    #[display(fmt = "/get-last - get last message in conversation")]
     GetLast,
+    #[display(fmt = "/search <keywords> - search for messages in conversation")]
     Search(String),
+    #[display(fmt = "/edit <message-id> <message> - edit message in the conversation")]
     EditMessage(Uuid, String),
+    #[display(fmt = "/attach <path> ... - attach files to conversation")]
     Attach(Vec<Location>),
+    #[display(fmt = "/download <message-id> <file> <path> - download file from conversation")]
     Download(Uuid, String, PathBuf),
-    React(Uuid, ReactionState, String),
+    #[display(
+        fmt = "/react <add | remove> <message-id> <emoji> - add or remove reaction to a message"
+    )]
+    React(Uuid, InnerReactionState, String),
+    #[display(fmt = "/status <message-id> - get message status")]
     Status(Uuid),
+    #[display(fmt = "/pin <all | message-id> - pin a message in a the conversation.")]
     Pin(PinTarget),
+    #[display(fmt = "/unpin <all | message-id> - unpin a message in the conversation.")]
     Unpin(PinTarget),
+    #[display(fmt = "/count-messages - count messages in the conversation")]
     CountMessages,
 }
 
 fn list_commands_and_help() -> String {
-    let all_commands = [
-        Command::CreateConversation(DID::default()),
-        Command::AddRecipient(DID::default()),
-        Command::RemoveRecipient(DID::default()),
-        Command::CreateGroupConversation("".into(), vec![], false),
-        Command::RemoveConversation(Uuid::nil()),
-        Command::SetConversation(Uuid::nil()),
-        Command::SetConversationName("".into()),
-        Command::ListConversations,
-        Command::ListReferences(MessageOptions::default()),
-        Command::ListMessages(MessageOptions::default()),
-        Command::ListPages(MessageOptions::default()),
-        Command::RemoveMessage(Uuid::nil()),
-        Command::GetFirst,
-        Command::GetLast,
-        Command::Search("".into()),
-        Command::EditMessage(Uuid::nil(), "".into()),
-        Command::Attach(vec![]),
-        Command::Download(Uuid::nil(), "".into(), PathBuf::default()),
-        Command::React(Uuid::nil(), ReactionState::Add, "".into()),
-        Command::Status(Uuid::nil()),
-        Command::Pin(PinTarget::All),
-        Command::Unpin(PinTarget::All),
-        Command::CountMessages,
-    ];
     let mut help = String::from("List of all commands:\n");
-    for cmd in all_commands.iter() {
-        let cmd_help = match cmd {
-        Command::CreateConversation(_) => "/create <did> - create conversation with another user",
-        Command::AddRecipient(_) => "/add-recipient <did> - add recipient to conversation",
-        Command::RemoveRecipient(_) => "/remove-recipient <did> - remove recipient from conversation",
-        Command::CreateGroupConversation(_, _, _) => "/create-group [--open] <name> <did> ... - create group conversation with other users",
-        Command::RemoveConversation(_) => "/remove-conversation - delete current conversation. This will delete it on both ends",
-        Command::SetConversation(_) => "/set-conversation <id> - switch to a conversation",
-        Command::SetConversationName(_) => "/set-conversation-name <name> - set conversation name",
-        Command::ListConversations => "/list-conversations - list all active conversations",
-        Command::ListReferences(_) => "/list-references <lower-range> <upper-range> - list all messages in the conversation. This provides more info",
-        Command::ListMessages(_) => "/list <lower-range> <upper-range> - list all messages in the conversation. This provides more info",
-        Command::ListPages(_) => "/list-pages <lower-range> <upper-range> - list all messages in the conversation. This provides more info",
-        Command::RemoveMessage(_) => "/remove-message <message-id> - remove message from conversation",
-        Command::GetFirst => "/get-first - get first message in conversation",
-        Command::GetLast => "/get-last - get last message in conversation",
-        Command::Search(_) => "/search <keywords> - search for messages in conversation",
-        Command::EditMessage(_, _) => "/edit <message-id> <message> - edit message in the conversation",
-        Command::Attach(_) => "/attach <paths> - attach files to conversation",
-        Command::Download(_, _, _) => "/download <message-id> <file> <path> - download file from conversation",
-        Command::React(_, _, _) => "/react <add | remove> <message-id> <emoji> - add or remove reaction to a message",
-        Command::Status(_) => "/status <message-id> - get message status",
-        Command::Pin(_) => "/pin <all | message-id> - pin a message in a the conversation.",
-        Command::Unpin(_) => "/unpin <all | message-id> - unpin a message in the conversation.",
-        Command::CountMessages => "/count-messages - count messages in the conversation",
-    };
-        help.push_str(cmd_help);
+    for cmd in Command::iter() {
+        help.push('\t');
+        help.push_str(cmd.to_string().as_str());
         help.push('\n');
     }
 
@@ -1413,7 +1385,7 @@ impl FromStr for Command {
                     }
                 };
 
-                Ok(Command::React(message_id, reaction_state, emoji))
+                Ok(Command::React(message_id, reaction_state.into(), emoji))
             }
             Some("/status") => {
                 let conversation_id = match cmd_line.next() {
@@ -1483,8 +1455,36 @@ impl FromStr for Command {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 enum PinTarget {
+    #[default]
     All,
     Message(Uuid),
+}
+
+#[derive(Debug, Default)]
+enum InnerReactionState {
+    #[default]
+    None,
+    Add,
+    Remove,
+}
+
+impl From<InnerReactionState> for ReactionState {
+    fn from(state: InnerReactionState) -> Self {
+        match state {
+            InnerReactionState::None => unreachable!(),
+            InnerReactionState::Add => ReactionState::Add,
+            InnerReactionState::Remove => ReactionState::Remove,
+        }
+    }
+}
+
+impl From<ReactionState> for InnerReactionState {
+    fn from(state: ReactionState) -> Self {
+        match state {
+            ReactionState::Add => InnerReactionState::Add,
+            ReactionState::Remove => InnerReactionState::Remove,
+        }
+    }
 }
