@@ -24,7 +24,7 @@ use crate::sync::{Arc, RwLock};
 type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
-#[derive(FFIFree)]
+#[derive(FFIFree, Clone)]
 pub struct Tesseract {
     internal: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     enc_pass: Arc<RwLock<Vec<u8>>>,
@@ -56,22 +56,6 @@ impl Default for Tesseract {
             soft_unlock: Arc::new(Default::default()),
             event_tx,
             event_rx,
-        }
-    }
-}
-
-impl Clone for Tesseract {
-    fn clone(&self) -> Self {
-        Tesseract {
-            internal: self.internal.clone(),
-            enc_pass: self.enc_pass.clone(),
-            file: self.file.clone(),
-            autosave: self.autosave.clone(),
-            check: self.check.clone(),
-            unlock: self.unlock.clone(),
-            soft_unlock: self.soft_unlock.clone(),
-            event_rx: self.event_rx.clone(),
-            event_tx: self.event_tx.clone(),
         }
     }
 }
