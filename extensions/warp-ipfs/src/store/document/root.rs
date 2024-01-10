@@ -7,6 +7,8 @@ use futures::{
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
+use tokio::select;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use uuid::Uuid;
 use warp::{crypto::DID, error::Error, multipass::identity::IdentityStatus};
 
@@ -96,15 +98,7 @@ pub enum RootDocumentCommand {
 #[derive(Debug, Clone)]
 pub struct RootDocumentMap {
     tx: futures::channel::mpsc::Sender<RootDocumentCommand>,
-    task: Arc<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for RootDocumentMap {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.task) == 1 && !self.task.is_finished() {
-            self.task.abort();
-        }
-    }
+    _task_cancellation: Arc<DropGuard>,
 }
 
 impl RootDocumentMap {
@@ -128,13 +122,18 @@ impl RootDocumentMap {
             rx,
         };
 
-        let handle = tokio::spawn(async move {
-            task.start().await;
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+        tokio::spawn(async move {
+            select! {
+                _ = token.cancelled() => {}
+                _ = task.run() => {}
+            }
         });
 
         Self {
             tx,
-            task: Arc::new(handle),
+            _task_cancellation: Arc::new(drop_guard),
         }
     }
 
@@ -394,7 +393,7 @@ struct RootDocumentTask {
 }
 
 impl RootDocumentTask {
-    pub async fn start(&mut self) {
+    pub async fn run(&mut self) {
         self.migrate().await;
 
         while let Some(command) = self.rx.next().await {
