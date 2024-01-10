@@ -190,20 +190,10 @@ async fn main() -> anyhow::Result<()> {
             - If a new conversation is created, the client will automatically switch to it
             - When setting a path to save data, it will resume the last conversation upon loading
             - If you have multiple conversation, use `/set-conversation <id>` to switch conversation
-
-        list of commands:
-            /create <did> - create conversation with another user
-            /remove-conversation - delete current conversation. This will delete it on both ends
-            /set-conversation <id> - switch to a conversation
-            /list-conversations - list all active conversations
-            /list - list all messages in the conversation. This provides more info
-            /edit <message-id> <message> - edit message in the conversation
-            /react <add | remove> <message-id> <emoji> - add or remove reaction to a message
-            /pin <all | message-id> - pin a message in a the conversation.
-            /unpin <all | message-id> - unpin a message in the conversation.
     "#;
 
     writeln!(stdout, "{message}")?;
+    writeln!(stdout, "\n{}", list_commands_and_help())?;
     writeln!(stdout, "DID: {}", identity.did_key())?;
 
     // loads all conversations into their own task to process events
@@ -1024,6 +1014,66 @@ enum Command {
     Pin(PinTarget),
     Unpin(PinTarget),
     CountMessages,
+}
+
+fn list_commands_and_help() -> String {
+    let all_commands = [
+        Command::CreateConversation(DID::default()),
+        Command::AddRecipient(DID::default()),
+        Command::RemoveRecipient(DID::default()),
+        Command::CreateGroupConversation("".into(), vec![]),
+        Command::RemoveConversation(Uuid::nil()),
+        Command::SetConversation(Uuid::nil()),
+        Command::SetConversationName("".into()),
+        Command::ListConversations,
+        Command::ListReferences(MessageOptions::default()),
+        Command::ListMessages(MessageOptions::default()),
+        Command::ListPages(MessageOptions::default()),
+        Command::RemoveMessage(Uuid::nil()),
+        Command::GetFirst,
+        Command::GetLast,
+        Command::Search("".into()),
+        Command::EditMessage(Uuid::nil(), "".into()),
+        Command::Attach(vec![]),
+        Command::Download(Uuid::nil(), "".into(), PathBuf::default()),
+        Command::React(Uuid::nil(), ReactionState::Add, "".into()),
+        Command::Status(Uuid::nil()),
+        Command::Pin(PinTarget::All),
+        Command::Unpin(PinTarget::All),
+        Command::CountMessages,
+    ];
+    let mut help = String::from("List of all commands:\n");
+    for cmd in all_commands.iter() {
+        let cmd_help = match cmd {
+        Command::CreateConversation(_) => "/create <did> - create conversation with another user",
+        Command::AddRecipient(_) => "/add-recipient <did> - add recipient to conversation",
+        Command::RemoveRecipient(_) => "/remove-recipient <did> - remove recipient from conversation",
+        Command::CreateGroupConversation(_, _) => "/create-group <name> <did> ... - create group conversation with other users",
+        Command::RemoveConversation(_) => "/remove-conversation - delete current conversation. This will delete it on both ends",
+        Command::SetConversation(_) => "/set-conversation <id> - switch to a conversation",
+        Command::SetConversationName(_) => "/set-conversation-name <name> - set conversation name",
+        Command::ListConversations => "/list-conversations - list all active conversations",
+        Command::ListReferences(_) => "/list-references <lower-range> <upper-range> - list all messages in the conversation. This provides more info",
+        Command::ListMessages(_) => "/list <lower-range> <upper-range> - list all messages in the conversation. This provides more info",
+        Command::ListPages(_) => "/list-pages <lower-range> <upper-range> - list all messages in the conversation. This provides more info",
+        Command::RemoveMessage(_) => "/remove-message <message-id> - remove message from conversation",
+        Command::GetFirst => "/get-first - get first message in conversation",
+        Command::GetLast => "/get-last - get last message in conversation",
+        Command::Search(_) => "/search <keywords> - search for messages in conversation",
+        Command::EditMessage(_, _) => "/edit <message-id> <message> - edit message in the conversation",
+        Command::Attach(_) => "/attach <paths> - attach files to conversation",
+        Command::Download(_, _, _) => "/download <message-id> <file> <path> - download file from conversation",
+        Command::React(_, _, _) => "/react <add | remove> <message-id> <emoji> - add or remove reaction to a message",
+        Command::Status(_) => "/status <message-id> - get message status",
+        Command::Pin(_) => "/pin <all | message-id> - pin a message in a the conversation.",
+        Command::Unpin(_) => "/unpin <all | message-id> - unpin a message in the conversation.",
+        Command::CountMessages => "/count-messages - count messages in the conversation",
+    };
+        help.push_str(cmd_help);
+        help.push('\n');
+    }
+
+    help
 }
 
 impl FromStr for Command {
