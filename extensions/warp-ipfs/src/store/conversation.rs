@@ -248,21 +248,6 @@ impl ConversationDocument {
                 return Err(Error::PublicKeyInvalid);
             }
 
-            // <<<<<<< HEAD
-            //             let mut construct = vec![
-            //                 self.id().into_bytes().to_vec(),
-            //                 vec![0xdc, 0xfc],
-            //                 creator.to_string().as_bytes().to_vec(),
-            //             ];
-            //             if !settings.members_can_add_participants() {
-            //                 construct.push(Vec::from_iter(
-            //                     self.recipients
-            //                         .iter()
-            //                         .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-            //                 ));
-            //             }
-            //             self.signature = Some(bs58::encode(did.sign(&construct.concat())).into_string());
-            // =======
             if self.version == ConversationVersion::V0 {
                 self.version = ConversationVersion::V1;
             }
