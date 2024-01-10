@@ -1,7 +1,31 @@
-name: Run Tests
+name: Lint and Tests
 on: [push]
 jobs:
-  cargo_test:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev
+          sudo apt-get install -y librust-alsa-sys-dev libxdo-dev llvm-dev cmake libudev-dev
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt -- --check
+      - name: Catch common mistakes and unwrap calls
+        run: cargo clippy -- -D warnings
+
+  test:
     name: Test
     runs-on: ubuntu-latest
     env:
