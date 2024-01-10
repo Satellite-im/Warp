@@ -993,7 +993,9 @@ enum Command {
     AddRecipient(DID),
     #[display(fmt = "/remove-recipient <did> - remove recipient from conversation")]
     RemoveRecipient(DID),
-    #[display(fmt = "/create-group [--open] <name> <did> ... - create group conversation with other users")]
+    #[display(
+        fmt = "/create-group [--open] <name> <did> ... - create group conversation with other users"
+    )]
     CreateGroupConversation(String, Vec<DID>, bool),
     #[display(
         fmt = "/remove-conversation - delete current conversation. This will delete it on both ends"
