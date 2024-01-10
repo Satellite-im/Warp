@@ -15,8 +15,9 @@ use warp::{
     error::Error,
     logging::tracing::info,
     raygun::{
-        Conversation, ConversationType, Message, MessageOptions, MessagePage, MessageReference,
-        Messages, MessagesType,
+        Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
+        GroupSettings, Message, MessageOptions, MessagePage, MessageReference, Messages,
+        MessagesType,
     },
 };
 
@@ -44,6 +45,7 @@ pub struct ConversationDocument {
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub conversation_type: ConversationType,
+    pub settings: ConversationSettings,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -127,6 +129,7 @@ impl ConversationDocument {
         restrict: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
+        settings: ConversationSettings,
         created: Option<DateTime<Utc>>,
         modified: Option<DateTime<Utc>>,
         creator: Option<DID>,
@@ -157,6 +160,7 @@ impl ConversationDocument {
             created,
             modified,
             conversation_type,
+            settings,
             excluded,
             messages,
             signature,
@@ -177,7 +181,11 @@ impl ConversationDocument {
         Ok(document)
     }
 
-    pub fn new_direct(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
+    pub fn new_direct(
+        did: &DID,
+        recipients: [DID; 2],
+        settings: DirectConversationSettings,
+    ) -> Result<Self, Error> {
         let conversation_id = Some(super::generate_shared_topic(
             did,
             recipients
@@ -196,6 +204,7 @@ impl ConversationDocument {
             vec![],
             conversation_id,
             ConversationType::Direct,
+            ConversationSettings::Direct(settings),
             None,
             None,
             None,
@@ -208,6 +217,7 @@ impl ConversationDocument {
         name: Option<String>,
         recipients: &[DID],
         restrict: &[DID],
+        settings: GroupSettings,
     ) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
@@ -217,6 +227,7 @@ impl ConversationDocument {
             restrict.to_vec(),
             conversation_id,
             ConversationType::Group,
+            ConversationSettings::Group(settings),
             None,
             None,
             Some(did.clone()),
@@ -227,12 +238,13 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        if matches!(self.conversation_type, ConversationType::Group) {
+        if let ConversationSettings::Group(settings) = self.settings {
+            assert_eq!(self.conversation_type, ConversationType::Group);
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
 
-            if !creator.eq(did) {
+            if !settings.members_can_add_participants() && !creator.eq(did) {
                 return Err(Error::PublicKeyInvalid);
             }
 
@@ -250,7 +262,7 @@ impl ConversationDocument {
                             .iter()
                             .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                     )),
-                    Some(Vec::from_iter(
+                    (!settings.members_can_add_participants()).then_some(Vec::from_iter(
                         self.recipients
                             .iter()
                             .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
@@ -267,7 +279,8 @@ impl ConversationDocument {
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        if matches!(self.conversation_type, ConversationType::Group) {
+        if let ConversationSettings::Group(settings) = self.settings {
+            assert_eq!(self.conversation_type, ConversationType::Group);
             let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -300,7 +313,7 @@ impl ConversationDocument {
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                         )),
-                        Some(Vec::from_iter(
+                        (!settings.members_can_add_participants()).then_some(Vec::from_iter(
                             self.recipients
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
@@ -627,6 +640,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_conversation_type(document.conversation_type);
         conversation.set_recipients(document.recipients());
         conversation.set_created(document.created);
+        conversation.set_settings(document.settings);
         conversation.set_modified(document.modified);
         conversation
     }

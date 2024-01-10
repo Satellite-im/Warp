@@ -28,7 +28,7 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{Message, MessageEvent, PinState, ReactionState},
+    raygun::{DirectConversationSettings, Message, MessageEvent, PinState, ReactionState},
     tesseract::Tesseract,
 };
 
@@ -140,6 +140,7 @@ where
 pub enum ConversationEvents {
     NewConversation {
         recipient: DID,
+        settings: DirectConversationSettings,
     },
     NewGroupConversation {
         conversation: ConversationDocument,

@@ -398,6 +398,7 @@ pub struct Conversation {
     created: DateTime<Utc>,
     modified: DateTime<Utc>,
     conversation_type: ConversationType,
+    settings: ConversationSettings,
     recipients: Vec<DID>,
 }
 
@@ -428,6 +429,7 @@ impl Default for Conversation {
             created: timestamp,
             modified: timestamp,
             conversation_type,
+            settings: ConversationSettings::Direct(DirectConversationSettings::default()),
             recipients,
         }
     }
@@ -456,6 +458,10 @@ impl Conversation {
 
     pub fn conversation_type(&self) -> ConversationType {
         self.conversation_type
+    }
+
+    pub fn settings(&self) -> ConversationSettings {
+        self.settings
     }
 
     pub fn recipients(&self) -> Vec<DID> {
@@ -488,8 +494,45 @@ impl Conversation {
         self.conversation_type = conversation_type;
     }
 
+    pub fn set_settings(&mut self, settings: ConversationSettings) {
+        self.settings = settings;
+    }
+
     pub fn set_recipients(&mut self, recipients: Vec<DID>) {
         self.recipients = recipients;
+    }
+}
+
+#[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+#[repr(C)]
+pub enum ConversationSettings {
+    #[display(fmt = "direct {_0}")]
+    Direct(DirectConversationSettings),
+    #[display(fmt = "group {_0}")]
+    Group(GroupSettings),
+}
+
+/// Settings for a direct conversation.
+// Any future direct conversation settings go here.
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
+#[repr(C)]
+pub struct DirectConversationSettings {}
+
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
+#[repr(C)]
+pub struct GroupSettings {
+    // Everyone can add participants, if set to `true``.
+    members_can_add_participants: bool,
+}
+
+impl GroupSettings {
+    pub fn members_can_add_participants(&self) -> bool {
+        self.members_can_add_participants
+    }
+
+    pub fn set_members_can_add_participants(&mut self, val: bool) {
+        self.members_can_add_participants = val;
     }
 }
 
@@ -951,6 +994,7 @@ pub trait RayGun:
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
+        _: GroupSettings,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }

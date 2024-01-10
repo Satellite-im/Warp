@@ -19,9 +19,9 @@ use warp::crypto::DID;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    AttachmentKind, Location, Message, MessageEvent, MessageEventKind, MessageEventStream,
-    MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun,
-    ReactionState,
+    AttachmentKind, GroupSettings, Location, Message, MessageEvent, MessageEventKind,
+    MessageEventStream, MessageOptions, MessageStream, MessageType, Messages, MessagesType,
+    PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -316,8 +316,14 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{did} has been removed")?;
 
                         },
-                        CreateGroupConversation(name, did_keys) => {
-                            if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys).await {
+                        CreateGroupConversation(name, did_keys, open) => {
+                            let mut settings = GroupSettings::default();
+                            settings.set_members_can_add_participants(open);
+                            if let Err(e) = chat.create_group_conversation(
+                                Some(name.to_string()),
+                                did_keys,
+                                settings,
+                            ).await {
                                 writeln!(stdout, "Error creating conversation: {e}")?;
                                 continue
                             }
@@ -987,8 +993,10 @@ enum Command {
     AddRecipient(DID),
     #[display(fmt = "/remove-recipient <did> - remove recipient from conversation")]
     RemoveRecipient(DID),
-    #[display(fmt = "/create-group <name> <did> ... - create group conversation with other users")]
-    CreateGroupConversation(String, Vec<DID>),
+    #[display(
+        fmt = "/create-group [--open] <name> <did> ... - create group conversation with other users"
+    )]
+    CreateGroupConversation(String, Vec<DID>, bool),
     #[display(
         fmt = "/remove-conversation - delete current conversation. This will delete it on both ends"
     )]
@@ -1102,11 +1110,11 @@ impl FromStr for Command {
             Some("/create-group") => {
                 let mut did_keys = vec![];
 
-                let name = match cmd_line.next() {
-                    Some(name) => name,
-                    None => {
-                        return Err(anyhow::anyhow!("/create-group <name> <DID> ..."));
-                    }
+                let usage_error_fn = || anyhow::anyhow!("/create-group [--open] <name> <DID> ...");
+                let (name, open) = match cmd_line.next() {
+                    Some("--open") => (cmd_line.next().ok_or_else(usage_error_fn)?, true),
+                    Some(name) => (name, false),
+                    None => return Err(usage_error_fn()),
                 };
 
                 for item in cmd_line.by_ref() {
@@ -1116,7 +1124,11 @@ impl FromStr for Command {
                     did_keys.push(did);
                 }
 
-                Ok(Command::CreateGroupConversation(name.to_string(), did_keys))
+                Ok(Command::CreateGroupConversation(
+                    name.to_string(),
+                    did_keys,
+                    open,
+                ))
             }
             Some("/remove-conversation") => {
                 let conversation_id = match cmd_line.next() {
