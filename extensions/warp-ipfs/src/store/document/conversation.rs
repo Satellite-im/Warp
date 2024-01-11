@@ -8,10 +8,12 @@ use std::{
 use futures::{
     channel::{mpsc, oneshot},
     stream::FuturesUnordered,
-    SinkExt, StreamExt,
+    SinkExt, Stream, StreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
+use tokio::select;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::warn;
 use uuid::Uuid;
 use warp::{
@@ -63,15 +65,7 @@ enum ConversationCommand {
 #[derive(Debug, Clone)]
 pub struct Conversations {
     tx: mpsc::Sender<ConversationCommand>,
-    task: Arc<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for Conversations {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.task) == 1 && !self.task.is_finished() {
-            self.task.abort();
-        }
-    }
+    _task_cancellation: Arc<DropGuard>,
 }
 
 impl Conversations {
@@ -102,13 +96,18 @@ impl Conversations {
             root,
         };
 
-        let handle = tokio::spawn(async move {
-            task.start().await;
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+        tokio::spawn(async move {
+            select! {
+                _ = token.cancelled() => {}
+                _ = task.run() => {}
+            }
         });
 
         Self {
             tx,
-            task: Arc::new(handle),
+            _task_cancellation: Arc::new(drop_guard),
         }
     }
 
@@ -214,7 +213,7 @@ struct ConversationTask {
 }
 
 impl ConversationTask {
-    async fn start(&mut self) {
+    async fn run(&mut self) {
         while let Some(command) = self.rx.next().await {
             match command {
                 ConversationCommand::GetDocument { id, response } => {
@@ -224,7 +223,7 @@ impl ConversationTask {
                     let _ = response.send(self.set_document(document).await);
                 }
                 ConversationCommand::List { response } => {
-                    let _ = response.send(self.list().await);
+                    let _ = response.send(Ok(self.list().await));
                 }
                 ConversationCommand::Delete { id, response } => {
                     let _ = response.send(self.delete(id).await);
@@ -257,8 +256,18 @@ impl ConversationTask {
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
 
-        let document: ConversationDocument = self.ipfs.get_dag(path).local().deserialized().await?;
+        let document: ConversationDocument =
+            match self.ipfs.get_dag(path).local().deserialized().await {
+                Ok(d) => d,
+                Err(_) => return Err(Error::InvalidConversation),
+            };
+
         document.verify()?;
+
+        if document.deleted {
+            return Err(Error::InvalidConversation);
+        }
+
         Ok(document)
     }
 
@@ -286,72 +295,79 @@ impl ConversationTask {
     }
 
     async fn delete(&mut self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let cid = match self.cid {
-            Some(cid) => cid,
-            None => return Err(Error::InvalidConversation),
-        };
+        if !self.contains(id).await {
+            return Err(Error::InvalidConversation);
+        }
 
-        let mut conversation_map: BTreeMap<String, Cid> =
-            self.ipfs.get_dag(cid).local().deserialized().await?;
+        let mut conversation = self.get(id).await?;
 
-        let document_cid = match conversation_map.remove(&id.to_string()) {
-            Some(cid) => cid,
-            None => return Err(Error::InvalidConversation),
-        };
+        if conversation.deleted {
+            return Err(Error::InvalidConversation);
+        }
 
-        self.set_map(conversation_map).await?;
+        let list = conversation.messages.take();
+        conversation.deleted = true;
+
+        self.set_document(conversation.clone()).await?;
 
         if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
             if ks_map.remove(&id.to_string()).is_some() {
                 if let Err(e) = self.set_keystore_map(ks_map).await {
-                    warn!("Failed to remove keystore for {id}: {e}");
+                    warn!(conversation_id = %id, "Failed to remove keystore: {e}");
                 }
             }
         }
 
-        let document: ConversationDocument = self
-            .ipfs
-            .get_dag(document_cid)
-            .local()
-            .deserialized()
-            .await?;
-        Ok(document)
+        if let Some(cid) = list {
+            let _ = self.ipfs.remove_block(cid, true).await;
+        }
+
+        Ok(conversation)
     }
 
-    async fn list(&self) -> Result<Vec<ConversationDocument>, Error> {
+    async fn list(&self) -> Vec<ConversationDocument> {
+        self.list_stream().collect::<Vec<_>>().await
+    }
+
+    fn list_stream(&self) -> impl Stream<Item = ConversationDocument> + Unpin {
         let cid = match self.cid {
             Some(cid) => cid,
-            None => return Ok(Vec::new()),
+            None => return futures::stream::empty().boxed(),
         };
 
-        let conversation_map: BTreeMap<String, Cid> =
-            self.ipfs.get_dag(cid).local().deserialized().await?;
+        let ipfs = self.ipfs.clone();
 
-        let list = FuturesUnordered::from_iter(
-            conversation_map
-                .values()
-                .map(|cid| self.ipfs.get_dag(*cid).local().deserialized().into_future()),
-        )
-        .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
-        .collect::<Vec<_>>()
-        .await;
+        let stream = async_stream::stream! {
+            let conversation_map: BTreeMap<String, Cid> = ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default();
 
-        Ok(list)
+            let unordered = FuturesUnordered::from_iter(
+                                conversation_map
+                                    .values()
+                                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
+                            )
+                            .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
+                            .filter(|document| {
+                                let deleted = document.deleted;
+                                async move { !deleted }
+                            });
+
+            for await conversation in unordered {
+                yield conversation;
+            }
+        };
+
+        stream.boxed()
     }
 
     async fn contains(&self, id: Uuid) -> bool {
-        let cid = match self.cid {
-            Some(cid) => cid,
-            None => return false,
-        };
-
-        let conversation_map: BTreeMap<String, Cid> =
-            match self.ipfs.get_dag(cid).local().deserialized().await {
-                Ok(document) => document,
-                Err(_) => return false,
-            };
-
-        conversation_map.contains_key(&id.to_string())
+        self.list_stream()
+            .any(|conversation| async move { conversation.id() == id })
+            .await
     }
 
     async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
@@ -382,7 +398,7 @@ impl ConversationTask {
     async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
         if let Some(creator) = document.creator.as_ref() {
             if creator.eq(&self.keypair)
-                && matches!(document.conversation_type, ConversationType::Group)
+                && matches!(document.conversation_type, ConversationType::Group { .. })
             {
                 document.sign(&self.keypair)?;
             }
