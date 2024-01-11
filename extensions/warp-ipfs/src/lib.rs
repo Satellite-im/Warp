@@ -43,9 +43,9 @@ use warp::constellation::{
 use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
 use warp::raygun::{
-    AttachmentEventStream, Conversation, EmbedState, Location, Message, MessageEvent,
-    MessageEventStream, MessageOptions, MessageReference, MessageStatus, Messages, PinState,
-    RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
+    AttachmentEventStream, Conversation, EmbedState, GroupSettings, Location, Message,
+    MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus, Messages,
+    PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
     RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
@@ -1363,9 +1363,10 @@ impl RayGun for WarpIpfs {
         &mut self,
         name: Option<String>,
         recipients: Vec<DID>,
+        settings: GroupSettings,
     ) -> Result<Conversation, Error> {
         self.messaging_store()?
-            .create_group_conversation(name, HashSet::from_iter(recipients))
+            .create_group_conversation(name, HashSet::from_iter(recipients), settings)
             .await
     }
 

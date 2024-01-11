@@ -9,6 +9,8 @@ use futures::{
 use std::fmt::Debug;
 use std::task::{Poll, Waker};
 use std::{collections::VecDeque, sync::Arc};
+use tokio::select;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::error::Error;
 
 #[allow(clippy::large_enum_variant)]
@@ -24,7 +26,7 @@ enum Command<T: Clone + Debug + Send + 'static> {
 #[derive(Clone, Debug)]
 pub struct EventSubscription<T: Clone + Debug + Send + 'static> {
     tx: Sender<Command<T>>,
-    task: Arc<tokio::task::JoinHandle<()>>,
+    _task_cancellation: Arc<DropGuard>,
 }
 
 impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
@@ -39,13 +41,18 @@ impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
             rx,
         };
 
-        let handle = tokio::spawn(async move {
-            task.start().await;
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+        tokio::spawn(async move {
+            select! {
+                _ = token.cancelled() => {}
+                _ = task.run() => {}
+            }
         });
 
         Self {
             tx,
-            task: Arc::new(handle),
+            _task_cancellation: Arc::new(drop_guard),
         }
     }
 
@@ -70,14 +77,6 @@ impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
     }
 }
 
-impl<T: Clone + Debug + Send + 'static> Drop for EventSubscription<T> {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.task) == 1 && !self.task.is_finished() {
-            self.task.abort();
-        }
-    }
-}
-
 struct EventSubscriptionTask<T: Clone + Send + Debug + 'static> {
     senders: Vec<Sender<T>>,
     queue: VecDeque<T>,
@@ -86,7 +85,7 @@ struct EventSubscriptionTask<T: Clone + Send + Debug + 'static> {
 }
 
 impl<T: Clone + Send + 'static + Debug> EventSubscriptionTask<T> {
-    pub async fn start(&mut self) {
+    pub async fn run(&mut self) {
         loop {
             tokio::select! {
                 _ = futures::future::poll_fn(|cx|  -> Poll<T> {

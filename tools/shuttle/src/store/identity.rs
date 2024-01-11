@@ -10,6 +10,8 @@ use futures::{
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
+use tokio::select;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::{crypto::DID, error::Error};
 
 use crate::identity::{document::IdentityDocument, protocol::Lookup, RequestPayload};
@@ -60,15 +62,7 @@ enum IdentityStorageCommand {
 #[derive(Debug, Clone)]
 pub struct IdentityStorage {
     tx: Sender<IdentityStorageCommand>,
-    task: Arc<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for IdentityStorage {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.task) == 1 && !self.task.is_finished() {
-            self.task.abort();
-        }
-    }
+    _task_cancellation: Arc<DropGuard>,
 }
 
 impl IdentityStorage {
@@ -90,13 +84,18 @@ impl IdentityStorage {
             rx,
         };
 
-        let handle = tokio::spawn(async move {
-            task.start().await;
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+        tokio::spawn(async move {
+            select! {
+                _ = token.cancelled() => {}
+                _ = task.run() => {}
+            }
         });
 
         Self {
             tx,
-            task: Arc::new(handle),
+            _task_cancellation: Arc::new(drop_guard),
         }
     }
 
@@ -267,7 +266,7 @@ struct IdentityStorageTask {
 }
 
 impl IdentityStorageTask {
-    pub async fn start(&mut self) {
+    pub async fn run(&mut self) {
         while let Some(command) = self.rx.next().await {
             match command {
                 IdentityStorageCommand::Register { document, response } => {
