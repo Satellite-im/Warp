@@ -1193,6 +1193,10 @@ impl MessageStore {
                             BTreeEntry::Occupied(mut e) => {
                                 let list = e.get_mut();
 
+                                if !list.contains(&reactor) {
+                                    return Err(Error::ReactionDoesntExist);
+                                }
+
                                 list.retain(|did| did != &reactor);
                                 if list.is_empty() {
                                     e.remove();
