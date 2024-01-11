@@ -1,3 +1,4 @@
+use std::collections::btree_map::Entry as BTreeEntry;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -27,7 +28,7 @@ use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType,
     DirectConversationSettings, EmbedState, GroupSettings, Location, Message, MessageEvent,
     MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageStream, MessageType,
-    Messages, MessagesType, PinState, RayGunEventKind, Reaction, ReactionState,
+    Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
 };
 use warp::sync::Arc;
 
@@ -1162,21 +1163,13 @@ impl MessageStore {
 
                 match state {
                     ReactionState::Add => {
-                        match reactions
-                            .iter()
-                            .position(|reaction| reaction.emoji().eq(&emoji))
-                            .and_then(|index| reactions.get_mut(index))
-                        {
-                            Some(reaction) => {
-                                reaction.users_mut().push(reactor.clone());
-                            }
-                            None => {
-                                let mut reaction = Reaction::default();
-                                reaction.set_emoji(&emoji);
-                                reaction.set_users(vec![reactor.clone()]);
-                                reactions.push(reaction);
-                            }
-                        };
+                        let entry = reactions.entry(emoji.clone()).or_default();
+
+                        if entry.contains(&reactor) {
+                            return Err(Error::ReactionExist);
+                        }
+
+                        entry.push(reactor.clone());
 
                         message_document
                             .update(&self.ipfs, &self.did, message, keystore.as_ref())
@@ -1196,27 +1189,21 @@ impl MessageStore {
                         }
                     }
                     ReactionState::Remove => {
-                        let index = reactions
-                            .iter()
-                            .position(|reaction| {
-                                reaction.users().contains(&reactor) && reaction.emoji().eq(&emoji)
-                            })
-                            .ok_or(Error::MessageNotFound)?;
+                        match reactions.entry(emoji.clone()) {
+                            BTreeEntry::Occupied(mut e) => {
+                                let list = e.get_mut();
 
-                        let reaction = reactions.get_mut(index).ok_or(Error::MessageNotFound)?;
+                                if !list.contains(&reactor) {
+                                    return Err(Error::ReactionDoesntExist);
+                                }
 
-                        let user_index = reaction
-                            .users()
-                            .iter()
-                            .position(|reaction_sender| reaction_sender.eq(&reactor))
-                            .ok_or(Error::MessageNotFound)?;
-
-                        reaction.users_mut().remove(user_index);
-
-                        if reaction.users().is_empty() {
-                            //Since there is no users listed under the emoji, the reaction should be removed from the message
-                            reactions.remove(index);
-                        }
+                                list.retain(|did| did != &reactor);
+                                if list.is_empty() {
+                                    e.remove();
+                                }
+                            }
+                            BTreeEntry::Vacant(_) => return Err(Error::ReactionDoesntExist),
+                        };
 
                         message_document
                             .update(&self.ipfs, &self.did, message, keystore.as_ref())

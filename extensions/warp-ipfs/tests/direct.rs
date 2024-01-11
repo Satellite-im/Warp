@@ -460,13 +460,11 @@ mod test {
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
-                    let reactions = message
-                        .reactions()
-                        .first()
-                        .cloned()
-                        .expect("Reaction exist");
-                    assert!(reactions.users().contains(&did_a));
-                    assert_eq!(reactions.emoji(), ":smile:");
+                    let reactions = message.reactions();
+
+                    let reactors = reactions.get(":smile:").expect("Reaction exist");
+                    assert!(reactors.contains(&did_a));
+                    assert!(reactions.contains_key(":smile:"));
                     break;
                 }
             }
@@ -491,13 +489,11 @@ mod test {
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
-                    let reactions = message
-                        .reactions()
-                        .first()
-                        .cloned()
-                        .expect("Reaction exist");
-                    assert!(reactions.users().contains(&did_a));
-                    assert_eq!(reactions.emoji(), ":smile:");
+                    let reactions = message.reactions();
+
+                    let reactors = reactions.get(":smile:").expect("Reaction exist");
+                    assert!(reactors.contains(&did_a));
+                    assert!(reactions.contains_key(":smile:"));
                     break;
                 }
             }

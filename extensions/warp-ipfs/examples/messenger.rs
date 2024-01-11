@@ -404,11 +404,10 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             while let Some(message) = messages_stream.next().await {
-                                let username = get_username(&*new_account,  message.sender()).await;
-                                let mut emojis = vec![];
-                                for reaction in message.reactions() {
-                                    emojis.push(reaction.emoji());
-                                }
+
+                                let username = get_username(&*new_account, message.sender()).await;
+                                let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
+
                                 table.add_row(vec![
                                     &message.id().to_string(),
                                     &message.message_type().to_string(),
@@ -441,11 +440,10 @@ async fn main() -> anyhow::Result<()> {
                                 for page in pages {
                                     let page_id = page.id();
                                     for message in page.messages() {
+
                                         let username = get_username(&*new_account, message.sender()).await;
-                                        let mut emojis = vec![];
-                                        for reaction in message.reactions() {
-                                            emojis.push(reaction.emoji());
-                                        }
+                                        let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
+
                                         table.add_row(vec![
                                             &format!("{}", page_id),
                                             &message.id().to_string(),
@@ -478,10 +476,8 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for message in messages.iter() {
                                 let username = get_username(&*new_account, message.sender()).await;
-                                let mut emojis = vec![];
-                                for reaction in message.reactions() {
-                                    emojis.push(reaction.emoji());
-                                }
+                                let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
+
                                 table.add_row(vec![
                                     &message.id().to_string(),
                                     &message.message_type().to_string(),
@@ -510,10 +506,8 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for message in messages.iter() {
                                 let username = get_username(&*new_account, message.sender()).await;
-                                let mut emojis = vec![];
-                                for reaction in message.reactions() {
-                                    emojis.push(reaction.emoji());
-                                }
+                                let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
+
                                 table.add_row(vec![
                                     &message.id().to_string(),
                                     &message.message_type().to_string(),
@@ -542,11 +536,10 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             while let Some(message) = messages_stream.next().await {
+
                                 let username = get_username(&*new_account, message.sender()).await;
-                                let mut emojis = vec![];
-                                for reaction in message.reactions() {
-                                    emojis.push(reaction.emoji());
-                                }
+                                let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
+
                                 table.add_row(vec![
                                     &message.id().to_string(),
                                     &message.message_type().to_string(),
