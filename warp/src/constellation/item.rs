@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use uuid::Uuid;
 
 use super::directory::Directory;
-use super::file::File;
+use super::file::{File, FileType};
 use crate::error::Error;
 use derive_more::Display;
 use warp_derive::FFIFree;
@@ -28,6 +28,15 @@ pub enum FormatType {
     Generic,
     #[display(fmt = "{}", _0)]
     Mime(mediatype::MediaTypeBuf),
+}
+
+impl From<FormatType> for FileType {
+    fn from(ty: FormatType) -> Self {
+        match ty {
+            FormatType::Generic => FileType::Generic,
+            FormatType::Mime(mime) => FileType::Mime(mime)
+        }
+    }
 }
 
 /// The type that `Item` represents

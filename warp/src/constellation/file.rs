@@ -28,6 +28,15 @@ pub enum FileType {
     Mime(mediatype::MediaTypeBuf),
 }
 
+impl From<FileType> for FormatType {
+    fn from(ty: FileType) -> Self {
+        match ty {
+            FileType::Generic => FormatType::Generic,
+            FileType::Mime(mime) => FormatType::Mime(mime),
+        }
+    }
+}
+
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
 #[derive(Clone, Deserialize, Serialize, warp_derive::FFIVec, FFIFree)]
 pub struct File {
@@ -47,6 +56,9 @@ pub struct File {
 
     /// Format of the thumbnail
     thumbnail_format: Arc<RwLock<FormatType>>,
+
+    /// External reference pointing to the thumbnail
+    thumbnail_reference: Arc<RwLock<Option<String>>>,
 
     /// Favorite File
     favorite: Arc<RwLock<bool>>,
@@ -115,6 +127,7 @@ impl Default for File {
             size: Default::default(),
             thumbnail: Default::default(),
             thumbnail_format: Default::default(),
+            thumbnail_reference: Default::default(),
             favorite: Default::default(),
             creation: Arc::new(RwLock::new(timestamp)),
             modified: Arc::new(RwLock::new(timestamp)),
@@ -240,8 +253,18 @@ impl File {
         self.signal();
     }
 
+    pub fn set_thumbnail_reference(&self, reference: &str) {
+        *self.thumbnail_reference.write() = Some(reference.to_string());
+        *self.modified.write() = Utc::now();
+        self.signal();
+    }
+
     pub fn reference(&self) -> Option<String> {
         self.reference.read().clone()
+    }
+
+    pub fn thumbnail_reference(&self) -> Option<String> {
+        self.thumbnail_reference.read().clone()
     }
 
     pub fn size(&self) -> usize {

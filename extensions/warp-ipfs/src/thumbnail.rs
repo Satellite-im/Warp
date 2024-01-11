@@ -12,13 +12,15 @@ use std::{
     time::Instant,
 };
 
+use futures::StreamExt;
 use image::io::Reader as ImageReader;
 use image::ImageFormat;
+use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use warp::{constellation::file::FileType, error::Error};
 
-use crate::utils::ExtensionType;
+use crate::{store::document::image_dag::ImageDag, utils::ExtensionType};
 
 static GLOBAL_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -44,13 +46,23 @@ impl Default for ThumbnailId {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct ThumbnailGenerator {
-    task: Arc<Mutex<BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, Vec<u8>), Error>>>>>,
+    ipfs: Ipfs,
+    task: Arc<
+        Mutex<BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, IpfsPath, Vec<u8>), Error>>>>,
+    >,
 }
 
 impl ThumbnailGenerator {
+    pub fn new(ipfs: Ipfs) -> Self {
+        Self {
+            ipfs,
+            task: Arc::default(),
+        }
+    }
+
     pub async fn insert<P: AsRef<Path>>(
         &self,
         path: P,
@@ -65,6 +77,7 @@ impl ThumbnailGenerator {
 
         let own_path = path.to_path_buf();
         let id = ThumbnailId::default();
+        let ipfs = self.ipfs.clone();
 
         let task = tokio::spawn(async move {
             let instance = Instant::now();
@@ -112,7 +125,24 @@ impl ThumbnailGenerator {
             let stop = instance.elapsed();
 
             tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
-            result
+
+            let (ty, data) = result?;
+
+            let path = ipfs
+                .add_unixfs(futures::stream::once(async { Ok(data.clone()) }).boxed())
+                .await?;
+
+            let link = *path.root().cid().expect("valid cid");
+
+            let image_dag = ImageDag {
+                link,
+                size: data.len() as _,
+                mime: ty.into(),
+            };
+
+            let cid = ipfs.dag().put().serialize(image_dag)?.pin(true).await?;
+
+            Ok((ty, IpfsPath::from(cid), data))
         });
 
         self.task.lock().await.insert(id, task);
@@ -134,6 +164,7 @@ impl ThumbnailGenerator {
 
         let id = ThumbnailId::default();
 
+        let ipfs = self.ipfs.clone();
         let task = tokio::spawn(async move {
             let instance = Instant::now();
 
@@ -182,7 +213,24 @@ impl ThumbnailGenerator {
             let stop = instance.elapsed();
 
             tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
-            result
+
+            let (ty, data) = result?;
+
+            let path = ipfs
+                .add_unixfs(futures::stream::once(async { Ok(data.clone()) }).boxed())
+                .await?;
+
+            let link = *path.root().cid().expect("valid cid");
+
+            let image_dag = ImageDag {
+                link,
+                size: data.len() as _,
+                mime: ty.into(),
+            };
+
+            let cid = ipfs.dag().put().serialize(image_dag)?.pin(true).await?;
+
+            Ok((ty, IpfsPath::from(cid), data))
         });
 
         self.task.lock().await.insert(id, task);
@@ -198,7 +246,7 @@ impl ThumbnailGenerator {
         }
     }
 
-    pub async fn get(&self, id: ThumbnailId) -> Result<(ExtensionType, Vec<u8>), Error> {
+    pub async fn get(&self, id: ThumbnailId) -> Result<(ExtensionType, IpfsPath, Vec<u8>), Error> {
         let task = self.task.lock().await.remove(&id);
         let task = task.ok_or(Error::Other)?;
         task.await.map_err(anyhow::Error::from)?
