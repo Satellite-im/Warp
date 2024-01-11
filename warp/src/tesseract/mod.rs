@@ -37,7 +37,8 @@ pub enum TesseractEvent {
 
 impl Default for Tesseract {
     fn default() -> Self {
-        let (event_tx, event_rx) = async_broadcast::broadcast(1024);
+        let (mut event_tx, event_rx) = async_broadcast::broadcast(1);
+        event_tx.set_overflow(true);
         Tesseract {
             inner: Arc::new(TesseractInner {
                 internal: Default::default(),
@@ -721,9 +722,9 @@ impl TesseractInner {
         }
         self.soft_unlock.store(false, Ordering::Relaxed);
         self.unlock.store(true, Ordering::Relaxed);
-        if self.event_tx.receiver_count() > 1 {
-            let _ = self.event_tx.try_broadcast(TesseractEvent::Unlocked);
-        }
+
+        let _ = self.event_tx.try_broadcast(TesseractEvent::Unlocked);
+
         Ok(())
     }
 
@@ -734,9 +735,9 @@ impl TesseractInner {
         self.enc_pass.write().zeroize();
         self.unlock.store(false, Ordering::Relaxed);
         self.soft_unlock.store(false, Ordering::Relaxed);
-        if self.event_tx.receiver_count() > 1 {
-            let _ = self.event_tx.try_broadcast(TesseractEvent::Locked);
-        }
+
+        let _ = self.event_tx.try_broadcast(TesseractEvent::Locked);
+  
     }
 
     fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
