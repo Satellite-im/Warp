@@ -737,7 +737,6 @@ impl TesseractInner {
         self.soft_unlock.store(false, Ordering::Relaxed);
 
         let _ = self.event_tx.try_broadcast(TesseractEvent::Locked);
-  
     }
 
     fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
