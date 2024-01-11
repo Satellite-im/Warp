@@ -10,6 +10,8 @@ use futures::{
 use libipld::Cid;
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
+use tokio::select;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::error::Error;
 
 #[derive(Default, Serialize, Deserialize, Clone, Copy, Debug)]
@@ -45,15 +47,7 @@ enum RootCommand {
 #[derive(Debug, Clone)]
 pub struct RootStorage {
     tx: Sender<RootCommand>,
-    task: Arc<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for RootStorage {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.task) == 1 && !self.task.is_finished() {
-            self.task.abort();
-        }
-    }
+    _task_cancellation: Arc<DropGuard>,
 }
 
 impl RootStorage {
@@ -89,13 +83,18 @@ impl RootStorage {
             rx,
         };
 
-        let handle = tokio::spawn(async move {
-            task.start().await;
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+        tokio::spawn(async move {
+            select! {
+                _ = token.cancelled() => {}
+                _ = task.run() => {}
+            }
         });
 
         Self {
             tx,
-            task: Arc::new(handle),
+            _task_cancellation: Arc::new(drop_guard),
         }
     }
 
@@ -166,7 +165,7 @@ struct RootStorageTask {
 }
 
 impl RootStorageTask {
-    pub async fn start(&mut self) {
+    pub async fn run(&mut self) {
         while let Some(command) = self.rx.next().await {
             match command {
                 RootCommand::SetIdentityList { link, response } => {

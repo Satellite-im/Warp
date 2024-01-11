@@ -12,6 +12,8 @@ use futures::{
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
+use tokio::select;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::warn;
 use uuid::Uuid;
 use warp::{
@@ -63,15 +65,7 @@ enum ConversationCommand {
 #[derive(Debug, Clone)]
 pub struct Conversations {
     tx: mpsc::Sender<ConversationCommand>,
-    task: Arc<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for Conversations {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.task) == 1 && !self.task.is_finished() {
-            self.task.abort();
-        }
-    }
+    _task_cancellation: Arc<DropGuard>,
 }
 
 impl Conversations {
@@ -102,13 +96,18 @@ impl Conversations {
             root,
         };
 
-        let handle = tokio::spawn(async move {
-            task.start().await;
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+        tokio::spawn(async move {
+            select! {
+                _ = token.cancelled() => {}
+                _ = task.run() => {}
+            }
         });
 
         Self {
             tx,
-            task: Arc::new(handle),
+            _task_cancellation: Arc::new(drop_guard),
         }
     }
 
@@ -214,7 +213,7 @@ struct ConversationTask {
 }
 
 impl ConversationTask {
-    async fn start(&mut self) {
+    async fn run(&mut self) {
         while let Some(command) = self.rx.next().await {
             match command {
                 ConversationCommand::GetDocument { id, response } => {
