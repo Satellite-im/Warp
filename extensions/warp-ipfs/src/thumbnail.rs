@@ -50,7 +50,7 @@ impl Default for ThumbnailId {
 #[allow(clippy::type_complexity)]
 pub struct ThumbnailGenerator {
     ipfs: Ipfs,
-    task: Arc<
+    tasks: Arc<
         Mutex<BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, IpfsPath, Vec<u8>), Error>>>>,
     >,
 }
@@ -59,7 +59,7 @@ impl ThumbnailGenerator {
     pub fn new(ipfs: Ipfs) -> Self {
         Self {
             ipfs,
-            task: Arc::default(),
+            tasks: Arc::default(),
         }
     }
 
@@ -145,7 +145,7 @@ impl ThumbnailGenerator {
             Ok((ty, IpfsPath::from(cid), data))
         });
 
-        self.task.lock().await.insert(id, task);
+        self.tasks.lock().await.insert(id, task);
 
         Ok(id)
     }
@@ -233,28 +233,28 @@ impl ThumbnailGenerator {
             Ok((ty, IpfsPath::from(cid), data))
         });
 
-        self.task.lock().await.insert(id, task);
+        self.tasks.lock().await.insert(id, task);
 
         id
     }
 
     #[allow(dead_code)]
     pub async fn cancel(&self, id: ThumbnailId) {
-        let task = self.task.lock().await.remove(&id);
+        let task = self.tasks.lock().await.remove(&id);
         if let Some(task) = task {
             task.abort();
         }
     }
 
     pub async fn get(&self, id: ThumbnailId) -> Result<(ExtensionType, IpfsPath, Vec<u8>), Error> {
-        let task = self.task.lock().await.remove(&id);
+        let task = self.tasks.lock().await.remove(&id);
         let task = task.ok_or(Error::Other)?;
         task.await.map_err(anyhow::Error::from)?
     }
 
     #[allow(dead_code)]
     pub async fn is_finished(&self, id: ThumbnailId) -> Result<bool, Error> {
-        if let Some(task) = self.task.lock().await.get(&id) {
+        if let Some(task) = self.tasks.lock().await.get(&id) {
             return Ok(task.is_finished());
         }
         Err(Error::Other)
