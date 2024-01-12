@@ -35,7 +35,6 @@ use super::{
 pub struct FileStore {
     index: Directory,
     path: Arc<RwLock<PathBuf>>,
-    modified: DateTime<Utc>,
     thumbnail_store: ThumbnailGenerator,
     root: RootDocumentMap,
 
@@ -69,7 +68,6 @@ impl FileStore {
 
         let index = Directory::new("root");
         let path = Arc::default();
-        let modified = Utc::now();
         let thumbnail_store = ThumbnailGenerator::new(ipfs.clone());
 
         let (tx, mut rx) = futures::channel::mpsc::unbounded();
@@ -77,7 +75,6 @@ impl FileStore {
         let mut store = FileStore {
             index,
             path,
-            modified,
             root,
             thumbnail_store,
             ipfs,
@@ -204,7 +201,7 @@ impl FileStore {
 
 impl FileStore {
     pub fn modified(&self) -> DateTime<Utc> {
-        self.modified
+        self.index.modified()
     }
 
     pub fn root_directory(&self) -> Directory {
