@@ -289,7 +289,7 @@ mod test {
         event: &EventSubscription<ConstellationEventKind>,
     ) -> Result<FileStore, Error> {
         let key = ipfs.keypair().and_then(get_keypair_did)?;
-        
+
         let root_document = RootDocumentMap::new(ipfs, Arc::new(key), None).await;
         let store = FileStore::new(
             ipfs.clone(),
