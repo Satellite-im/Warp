@@ -1,10 +1,7 @@
 use std::{ffi::OsStr, path::PathBuf, sync::Arc, task::Poll};
 
 use chrono::{DateTime, Utc};
-use futures::{
-    stream::{self, BoxStream},
-    StreamExt,
-};
+use futures::{stream::BoxStream, StreamExt};
 use libipld::Cid;
 use rust_ipfs::{
     unixfs::{AddOption, UnixfsStatus},
@@ -28,7 +25,10 @@ use crate::{
     to_file_type,
 };
 
-use super::{ecdh_decrypt, ecdh_encrypt, event_subscription::EventSubscription, get_keypair_did};
+use super::{
+    document::root::RootDocumentMap, ecdh_decrypt, event_subscription::EventSubscription,
+    get_keypair_did,
+};
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -36,10 +36,8 @@ pub struct FileStore {
     index: Directory,
     path: Arc<RwLock<PathBuf>>,
     modified: DateTime<Utc>,
-    index_cid: Arc<RwLock<Option<Cid>>>,
     thumbnail_store: ThumbnailGenerator,
-
-    location_path: Option<PathBuf>,
+    root: RootDocumentMap,
 
     ipfs: Ipfs,
     constellation_tx: EventSubscription<ConstellationEventKind>,
@@ -56,27 +54,14 @@ pub struct FileStore {
 impl FileStore {
     pub async fn new(
         ipfs: Ipfs,
+        root: RootDocumentMap,
         config: &Config,
         constellation_tx: EventSubscription<ConstellationEventKind>,
         span: Span,
     ) -> Result<Self, Error> {
-        let mut index_cid = None;
-
         if let Some(path) = config.path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
-            }
-
-            if let Ok(cid) = tokio::fs::read(path.join(".index_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .and_then(|cid_str| {
-                    cid_str
-                        .parse::<Cid>()
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                })
-            {
-                index_cid = Some(cid);
             }
         }
 
@@ -85,10 +70,7 @@ impl FileStore {
         let index = Directory::new("root");
         let path = Arc::default();
         let modified = Utc::now();
-        let index_cid = Arc::new(RwLock::new(index_cid));
         let thumbnail_store = ThumbnailGenerator::new(ipfs.clone());
-
-        let location_path = config.path.clone();
 
         let (tx, mut rx) = futures::channel::mpsc::unbounded();
 
@@ -96,9 +78,8 @@ impl FileStore {
             index,
             path,
             modified,
-            index_cid,
+            root,
             thumbnail_store,
-            location_path,
             ipfs,
             constellation_tx,
             config,
@@ -107,9 +88,16 @@ impl FileStore {
             span,
         };
 
-        if let Err(e) = store.import().await {
-            tracing::error!("Error importing index: {e}");
+        if let Some(p) = store.config.path.as_ref() {
+            let index_file = p.join("index_id");
+            if index_file.is_file() {
+                if let Err(e) = store.import().await {
+                    tracing::error!("Error importing index: {e}");
+                }
+            }
         }
+
+        if let Err(_e) = store.import_v0().await {}
 
         let signal = Some(store.signal.clone());
         store.index.rebuild_paths(&signal);
@@ -148,27 +136,53 @@ impl FileStore {
             return Ok(());
         }
 
+        let path = match self.config.path.as_ref() {
+            Some(path) => path,
+            None => return Ok(()),
+        };
+
         tracing::info!("Importing index");
-        let cid = (*self.index_cid.read()).ok_or(Error::Other)?;
 
-        tracing::info!(cid = %cid, "Index located");
-
-        let data = self
-            .ipfs
-            .unixfs()
-            .cat(cid, None, &[], true, None)
+        if let Ok(cid) = tokio::fs::read(path.join(".index_id"))
             .await
-            .map_err(anyhow::Error::from)?;
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| {
+                cid_str
+                    .parse::<Cid>()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })
+        {
+            let data = self
+                .ipfs
+                .unixfs()
+                .cat(cid, None, &[], true, None)
+                .await
+                .map_err(anyhow::Error::from)?;
 
-        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+            let key = self.ipfs.keypair().and_then(get_keypair_did)?;
 
-        let index_bytes = ecdh_decrypt(&key, None, data)?;
+            let index_bytes = ecdh_decrypt(&key, None, data)?;
 
-        let directory_index: Directory = serde_json::from_slice(&index_bytes)?;
-        self.index.set_items(directory_index.get_items());
+            let directory_index: Directory = serde_json::from_slice(&index_bytes)?;
 
-        tracing::info!(cid = %cid, "Index imported");
+            self.index.set_items(directory_index.get_items());
 
+            _ = self.export().await;
+
+            if self.ipfs.is_pinned(&cid).await? {
+                self.ipfs.remove_pin(&cid).recursive().await?;
+            }
+
+            self.ipfs.remove_block(cid, true).await?;
+            _ = tokio::fs::remove_file(".index_id").await;
+        }
+
+        Ok(())
+    }
+
+    async fn import_v0(&self) -> Result<(), Error> {
+        let index = self.root.get_root_index().await?;
+        self.index.set_items(index.get_items());
         Ok(())
     }
 
@@ -181,58 +195,9 @@ impl FileStore {
 
         index.rebuild_paths(&signal);
 
-        let index = serde_json::to_string(&self.index)?;
+        self.root.set_root_index(index).await?;
 
-        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
-
-        //TODO: Disable encryption of the index but instead store it all as a dag object.
-        //      possibly even building an internal graph of the index instead
-        let data = ecdh_encrypt(&key, None, index.as_bytes())?;
-
-        let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
-
-        let ipfs_path = self
-            .ipfs
-            .unixfs()
-            .add(
-                data_stream,
-                Some(AddOption {
-                    pin: true,
-                    ..Default::default()
-                }),
-            )
-            .await?;
-
-        tracing::trace!(path = %ipfs_path, "Index exported");
-
-        let cid = ipfs_path
-            .root()
-            .cid()
-            .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
-
-        let last_cid = self.index_cid.write().replace(*cid);
-
-        if let Some(path) = self.config.path.as_ref() {
-            if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
-                tracing::error!(cid = %cid, "Error writing index: {_e}");
-            }
-        }
-
-        if let Some(last_cid) = last_cid {
-            if *cid != last_cid {
-                if self.ipfs.is_pinned(&last_cid).await? {
-                    tracing::trace!(cid = %last_cid, "Unpinning block");
-                    self.ipfs.remove_pin(&last_cid).recursive().await?;
-                    tracing::trace!(cid = %last_cid, "Block unpinned");
-                }
-
-                tracing::trace!(cid = %last_cid, "Removing block");
-                let b = self.ipfs.remove_block(last_cid, true).await?;
-                tracing::trace!(cid = %last_cid, amount_removed = b.len(), "Blocks removed");
-            }
-        }
-
-        tracing::trace!(cid = %cid, "Index exported");
+        tracing::trace!("Index exported");
         Ok(())
     }
 }
