@@ -38,6 +38,9 @@ pub struct Directory {
     /// Format of the thumbnail
     thumbnail_format: Arc<RwLock<FormatType>>,
 
+    /// External reference pointing to the thumbnail
+    thumbnail_reference: Arc<RwLock<Option<String>>>,
+
     /// Favorite Directory
     favorite: Arc<RwLock<bool>>,
 
@@ -99,6 +102,7 @@ impl Default for Directory {
             description: Default::default(),
             thumbnail: Default::default(),
             thumbnail_format: Default::default(),
+            thumbnail_reference: Default::default(),
             favorite: Default::default(),
             creation: Arc::new(RwLock::new(timestamp)),
             modified: Arc::new(RwLock::new(timestamp)),
@@ -550,6 +554,16 @@ impl Directory {
 
     pub fn thumbnail(&self) -> Vec<u8> {
         self.thumbnail.read().to_vec()
+    }
+
+    pub fn set_thumbnail_reference(&self, reference: &str) {
+        *self.thumbnail_reference.write() = Some(reference.to_string());
+        *self.modified.write() = Utc::now();
+        self.signal();
+    }
+
+    pub fn thumbnail_reference(&self) -> Option<String> {
+        self.thumbnail_reference.read().clone()
     }
 
     pub fn set_favorite(&self, fav: bool) {
