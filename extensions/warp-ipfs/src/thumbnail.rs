@@ -46,13 +46,12 @@ impl Default for ThumbnailId {
     }
 }
 
+type TaskMap = BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, IpfsPath, Vec<u8>), Error>>>;
+
 #[derive(Clone)]
-#[allow(clippy::type_complexity)]
 pub struct ThumbnailGenerator {
     ipfs: Ipfs,
-    tasks: Arc<
-        Mutex<BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, IpfsPath, Vec<u8>), Error>>>>,
-    >,
+    tasks: Arc<Mutex<TaskMap>>,
 }
 
 impl ThumbnailGenerator {
