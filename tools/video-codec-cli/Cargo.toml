@@ -10,7 +10,4 @@ anyhow = { workspace = true }
 clap = { version = "4.0", features=["derive"] }
 tokio = { workspace = true, features=["full"] }
 
-av-data = { workspace = true }
 eye = { workspace = true }
-libaom = { workspace = true }
-

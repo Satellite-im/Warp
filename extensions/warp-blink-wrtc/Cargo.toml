@@ -2,6 +2,7 @@
 name = "warp-blink-wrtc"
 version = "0.1.0"
 edition = "2021"
+warnings = "clippy::all"
 
 [lib]
 crate-type = ["cdylib", "rlib", "staticlib"]
@@ -17,6 +18,8 @@ bytes = { workspace = true }
 byteorder = "*"
 bs58 = { workspace = true }
 derive_more = { workspace = true }
+eye = { workspace = true }
+eye-hal = "0.2.0"
 futures = { workspace = true }
 rust-ipfs = { workspace = true }
 libipld = { workspace = true }
@@ -29,8 +32,9 @@ rand = { workspace = true }
 ringbuf = "0.3"
 serde = { workspace = true, features = ["derive"] }
 serde_cbor = { workspace = true }
+openh264 = "0.5.0"
 tokio = { workspace = true }
-warp.workspace = true
+warp = { workspace = true }
 webrtc = "0.6.0"
 rayon = "1.8"
 

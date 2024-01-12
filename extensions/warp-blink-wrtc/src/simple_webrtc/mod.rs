@@ -478,7 +478,7 @@ impl Controller {
                             peer: dest.clone(),
                             track: track.clone(),
                         }) {
-                            log::error!("failed to send video track added event for peer {}: {}", &dest, e);
+                            log::error!("failed to send audio track added event for peer {}: {}", &dest, e);
                         }
                     } 
                     if track.kind() == RTPCodecType::Video {
@@ -486,7 +486,7 @@ impl Controller {
                             peer: dest.clone(),
                             track: track.clone(),
                         }) {
-                            log::error!("failed to send audio track added event for peer {}: {}", &dest, e);
+                            log::error!("failed to send video track added event for peer {}: {}", &dest, e);
                         }
                     }
                 }

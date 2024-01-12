@@ -12,6 +12,14 @@ use warp::crypto::DID;
 use warp::error::Error;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
+use eye::{
+    colorconvert::Device,
+    hal::{
+        format::PixelFormat,
+        traits::{Context as _, Device as _, Stream as _},
+        PlatformContext,
+    },
+};
 
 use super::audio::sink::AudioSinkTrackController;
 use super::audio::source::AudioSourceTrack;
@@ -39,8 +47,7 @@ struct AudioData {
 }
 
 struct VideoData {
-    video_input_device: Option<cpal::Device>,
-    video_output_device: Option<cpal::Device>,
+    video_input_device: Option<eye::hal::traits::Device>,
     video_source_channels: usize,
     video_sink_channels: usize,
     video_source_track: Option<VideoSourceTrack>,
@@ -51,6 +58,14 @@ struct VideoData {
 static LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static mut DATA: Lazy<Data> = Lazy::new(|| {
     let cpal_host = cpal::platform::default_host();
+
+    let ctx = PlatformContext::all()
+        .next()
+        .ok_or(anyhow::anyhow!("No platform context available"))?;
+
+    let video_devices_availables = ctx.devices()?;
+    let video_device = ctx.open_device(&video_devices_availables[0].uri)?;
+    let video_device = Device::new(video_device)?;
     Data {
         audio_data: AudioData {
             audio_input_device: cpal_host.default_input_device(),
@@ -63,8 +78,7 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
             deafened: false,
         },
         video_data: VideoData {
-            video_input_device: cpal_host.default_input_device(),
-            video_output_device: cpal_host.default_output_device(),
+            video_input_device: video_device,
             video_source_channels: 1,
             video_sink_channels: 1,
             video_source_track: None,
@@ -75,12 +89,12 @@ static mut DATA: Lazy<Data> = Lazy::new(|| {
     }
 });
 
-pub async fn get_input_device_name() -> Option<String> {
+pub async fn get_audio_input_device_name() -> Option<String> {
     let _lock = LOCK.lock().await;
     unsafe { DATA.audio_data.audio_input_device.as_ref().and_then(|x| x.name().ok()) }
 }
 
-pub async fn get_output_device_name() -> Option<String> {
+pub async fn get_audio_output_device_name() -> Option<String> {
     let _lock = LOCK.lock().await;
     unsafe {
         DATA.audio_data.audio_output_device
@@ -194,7 +208,7 @@ pub async fn change_audio_input(
             source.mute();
             let track = source.get_track();
             drop(source);
-            DATA.audio_data.audio_source_track.replace(SourceTrack::new(
+            DATA.audio_data.audio_source_track.replace(AudioSourceTrack::new(
                 own_id,
                 track,
                 &device,
@@ -293,32 +307,32 @@ pub async fn create_video_source_track(
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
     track: Arc<TrackLocalStaticRTP>,
 ) -> Result<(), Error> {
-    // let _lock = LOCK.lock().await;
-    // let input_device = match unsafe { DATA.audio_input_device.as_ref() } {
-    //     Some(d) => d,
-    //     None => return Err(Error::MicrophoneMissing),
-    // };
+    let _lock = LOCK.lock().await;
+    let input_device = match unsafe { DATA.video_data.video_input_device } {
+        Some(d) => d,
+        None => return Err(Error::CameraMissing),
+    };
 
-    // // drop the source track, causing it to clean itself up.
-    // unsafe {
-    //     DATA.audio_source_track.take();
-    // }
+    // drop the source track, causing it to clean itself up.
+    unsafe {
+        DATA.video_data.video_source_track.take();
+    }
 
-    // let num_channels = unsafe { DATA.audio_source_channels };
-    // let source_track = VideoSourceTrack::new(own_id, track, input_device, num_channels, ui_event_ch)?;
+    let num_channels = unsafe { DATA.video_data.video_source_track };
+    let source_track = VideoSourceTrack::new(own_id, track, input_device,  ui_event_ch)?;
 
-    // unsafe {
-    //     DATA.audio_source_track.replace(source_track);
-    // }
+    unsafe {
+        DATA.video_data.video_source_track.replace(source_track);
+    }
 
     Ok(())
 }
 
 pub async fn remove_video_source_track() -> anyhow::Result<()> {
-    // let _lock = LOCK.lock().await;
-    // unsafe {
-    //     DATA.audio_source_track.take();
-    // }
+    let _lock = LOCK.lock().await;
+    unsafe {
+        DATA.video_data.video_source_track.take();
+    }
     Ok(())
 }
 

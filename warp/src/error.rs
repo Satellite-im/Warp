@@ -242,6 +242,10 @@ pub enum Error {
     MicrophoneMissing,
     #[error("SpeakerMissing")]
     SpeakerMissing,
+    #[error("CameraMissing")]
+    CameraMissing,
+    #[error("Video device not found")]
+    VideoDeviceNotFound,
 
     //Misc
     #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]
