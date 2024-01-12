@@ -294,7 +294,7 @@ mod test {
         Ok(store)
     }
 
-    //TODO: Write test with a larger index and build and resolve graph
+    // TODO: Write test with a larger index and build and resolve graph
 
     #[tokio::test]
     async fn document_resolve_test() -> anyhow::Result<()> {
