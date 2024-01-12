@@ -289,9 +289,13 @@ impl File {
         self.signal();
     }
 
-    pub fn set_modified(&self) {
-        *self.modified.write() = Utc::now();
-        self.signal();
+    pub fn set_creation(&self, creation: DateTime<Utc>) {
+        *self.creation.write() = creation
+    }
+
+    pub fn set_modified(&self, modified: Option<DateTime<Utc>>) {
+        *self.modified.write() = modified.unwrap_or(Utc::now());
+        self.signal()
     }
 
     pub fn hash(&self) -> Hash {
