@@ -47,7 +47,7 @@ struct AudioData {
 }
 
 struct VideoData {
-    video_input_device: Option<eye::hal::traits::Device>,
+    video_input_device: Option<eye::hal::platform::Device<'static>>,
     video_source_channels: usize,
     video_sink_channels: usize,
     video_source_track: Option<VideoSourceTrack>,

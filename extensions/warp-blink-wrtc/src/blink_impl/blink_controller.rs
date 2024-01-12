@@ -75,9 +75,13 @@ enum Cmd {
     StopRecording {
         rsp: oneshot::Sender<Result<(), Error>>,
     },
-    EnableCamera,
-    DisableCamera,
-}
+    EnableCamera {
+        rsp: oneshot::Sender<Result<(), Error>>,
+    },
+    DisableCamera {
+        rsp: oneshot::Sender<Result<(), Error>>,
+    },
+} 
 
 #[derive(Clone)]
 pub struct BlinkController {
@@ -604,7 +608,7 @@ async fn run(args: Args, mut cmd_rx: UnboundedReceiver<Cmd>, notify: Arc<Notify>
                     }
                     Cmd::EnableCamera => {
                         let rtc_rtp_codec: RTCRtpCodecCapability = RTCRtpCodecCapability {
-                            mime_type: MimeType::AV1.to_string(),
+                            mime_type: MimeType::H264.to_string(),
                             clock_rate: 30,
                             channels: 1,
                             ..Default::default()

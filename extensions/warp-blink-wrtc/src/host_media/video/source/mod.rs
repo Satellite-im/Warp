@@ -1,38 +1,22 @@
-use crate::utils::yuv::*;
 use std::{sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
-}, io::{BufWriter, Write}, fs::OpenOptions, time::{Instant, Duration}};
+}};
 
 use anyhow::bail;
-use av_data::{frame::FrameType, timeinfo::TimeInfo};
-use cpal::{
-    traits::{DeviceTrait, StreamTrait},
-    BuildStreamError,
-};
-use libaom::encoder::{AV1EncoderConfig, AomUsage, AOMPacket};
-use ringbuf::HeapRb;
-use std::sync::mpsc as std_mpsc;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::{broadcast, mpsc, Notify};
+use tokio::sync::{broadcast, Notify};
 use warp::error::Error;
 use warp::{blink::BlinkEventKind, crypto::DID};
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use openh264::decoder::Decoder;
-use openh264::nal_units;
 use openh264::{
-    decoder::DecodedYUV,
     encoder::{Encoder, EncoderConfig},
-    formats::YUVBuffer,
     OpenH264API,
 };
 
-use eye::{colorconvert::Device, hal::{stream::Descriptor, traits::Stream as _}};
+use eye::{ hal::{stream::Descriptor}};
 use eye_hal::format::PixelFormat;
-use eye_hal::traits::{Context as _, Device as _, Stream as _};
-use eye_hal::{Error, ErrorKind, PlatformContext, Result};
-
-use crate::host_media::mp4_logger;
+use eye_hal::traits::{Device as _};
+use eye_hal::{PlatformContext, Result};
 
 use super::{
     FRAME_HEIGHT, FRAME_WIDTH,
@@ -56,7 +40,7 @@ impl Drop for VideoSourceTrack {
 }
 
 fn create_stream(
-    source_device: &eye::hal::traits::Device<'static>,
+    source_device: &eye::hal::platform::Device<'static>,
 ) -> Result<(eye_hal::platform::Stream<'static>, eye_hal::stream::Descriptor), Error> {
     let ctx: PlatformContext<'static> = PlatformContext::all();
     
@@ -95,7 +79,7 @@ impl VideoSourceTrack {
     pub fn new(
         own_id: &DID,
         track: Arc<TrackLocalStaticRTP>,
-        source_device: &eye::hal::traits::Device<'static>,
+        source_device: &eye::hal::platform::Device<'static>,
         ui_event_ch: broadcast::Sender<BlinkEventKind>,
     ) -> Result<Self, Error> {
         let quit_encoder_task = Arc::new(AtomicBool::new(false));

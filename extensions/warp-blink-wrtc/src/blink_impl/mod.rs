@@ -339,10 +339,10 @@ impl Blink for BlinkImpl {
     }
 
     async fn enable_camera(&mut self) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        self.blink_controller.enable_camera().await
     }
     async fn disable_camera(&mut self) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        self.blink_controller.disable_camera().await
     }
     async fn record_call(&mut self, output_dir: &str) -> Result<(), Error> {
         self.blink_controller.record_call(output_dir.into()).await

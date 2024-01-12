@@ -1,14 +1,5 @@
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use crate::host_media::{video::{FRAME_HEIGHT, FRAME_WIDTH}};
 
-use crate::host_media::{audio::AudioConsumer, video::{FRAME_HEIGHT, FRAME_WIDTH}};
-
-use eye::hal::traits::Device;
 use eye_hal::traits::Stream;
 use openh264::{formats::YUVBuffer, encoder::{EncoderConfig, Encoder}, OpenH264API};
 use tokio::sync::mpsc::UnboundedSender;
@@ -46,7 +37,7 @@ pub fn run(args: Args) {
                     }
                 },
                 None => {
-                    log::error!("error reading frame: {e}");
+                    log::error!("error reading frame");
                     break;
                 }
             };

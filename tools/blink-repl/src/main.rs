@@ -107,6 +107,8 @@ enum Repl {
         peer: DID,
         multiplier: u32,
     },
+    EnableCamera,
+    DisableCamera,
     Quit,
     /// shorthand for quit
     Q,
@@ -288,6 +290,8 @@ async fn handle_command(
         Repl::SetGain { peer, multiplier } => {
             blink.set_peer_audio_gain(peer, multiplier as f32).await?
         }
+        Repl::EnableCamera => blink.enable_camera().await?,
+        Repl::DisableCamera => blink.disable_camera().await?,
     }
     Ok(())
 }
