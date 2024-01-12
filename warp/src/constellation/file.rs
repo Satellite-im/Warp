@@ -95,6 +95,7 @@ impl std::fmt::Debug for File {
             .field("name", &self.name())
             .field("description", &self.description())
             .field("thumbnail", &self.thumbnail_format())
+            .field("reference", &self.reference())
             .field("favorite", &self.favorite())
             .field("creation", &self.creation())
             .field("modified", &self.modified())
