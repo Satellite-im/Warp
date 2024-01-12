@@ -34,7 +34,7 @@ impl From<FormatType> for FileType {
     fn from(ty: FormatType) -> Self {
         match ty {
             FormatType::Generic => FileType::Generic,
-            FormatType::Mime(mime) => FileType::Mime(mime)
+            FormatType::Mime(mime) => FileType::Mime(mime),
         }
     }
 }

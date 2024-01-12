@@ -1,9 +1,9 @@
 pub mod cache;
 pub mod conversation;
+pub mod files;
 pub mod identity;
 pub mod image_dag;
 pub mod root;
-pub mod files;
 
 use chrono::{DateTime, Utc};
 use futures::{stream::BoxStream, StreamExt, TryFutureExt};
