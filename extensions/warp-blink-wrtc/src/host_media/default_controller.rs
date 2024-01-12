@@ -15,8 +15,7 @@ use webrtc::track::track_remote::TrackRemote;
 use eye::{
     colorconvert::Device,
     hal::{
-        format::PixelFormat,
-        traits::{Context as _, Device as _, Stream as _},
+        traits::{Context as _,  Stream as _},
         PlatformContext,
     },
 };
@@ -319,7 +318,7 @@ pub async fn create_video_source_track(
     }
 
     let num_channels = unsafe { DATA.video_data.video_source_track };
-    let source_track = VideoSourceTrack::new(own_id, track, input_device,  ui_event_ch)?;
+    let source_track = VideoSourceTrack::new(own_id, track, &input_device,  ui_event_ch)?;
 
     unsafe {
         DATA.video_data.video_source_track.replace(source_track);

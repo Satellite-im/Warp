@@ -1,4 +1,4 @@
-use crate::host_media::{video::{FRAME_HEIGHT, FRAME_WIDTH}};
+use crate::host_media::video::{FRAME_HEIGHT, FRAME_WIDTH};
 
 use eye_hal::traits::Stream;
 use openh264::{formats::YUVBuffer, encoder::{EncoderConfig, Encoder}, OpenH264API};
@@ -13,7 +13,7 @@ pub struct Args {
 
 pub fn run(args: Args) {
     let Args {
-        stream,
+        mut stream,
         stream_descriptor,
         tx,
     } = args;

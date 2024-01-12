@@ -1,7 +1,7 @@
-use std::{sync::{
+use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
-}};
+};
 
 use anyhow::bail;
 use tokio::sync::{broadcast, Notify};
@@ -13,10 +13,10 @@ use openh264::{
     OpenH264API,
 };
 
-use eye::{ hal::{stream::Descriptor}};
+use eye::hal::stream::Descriptor;
 use eye_hal::format::PixelFormat;
-use eye_hal::traits::{Device as _};
-use eye_hal::{PlatformContext, Result};
+use eye_hal::traits::Device as _;
+use eye_hal::PlatformContext;
 
 use super::{
     FRAME_HEIGHT, FRAME_WIDTH,
@@ -41,7 +41,7 @@ impl Drop for VideoSourceTrack {
 
 fn create_stream(
     source_device: &eye::hal::platform::Device<'static>,
-) -> Result<(eye_hal::platform::Stream<'static>, eye_hal::stream::Descriptor), Error> {
+) -> Result<(eye_hal::platform::Stream<'static>, eye_hal::stream::Descriptor), warp::error::Error> {
     let ctx: PlatformContext<'static> = PlatformContext::all();
     
     let stream_descr: Descriptor = source_device
@@ -76,10 +76,10 @@ fn create_stream(
 impl VideoSourceTrack {
     // spawn a std::thread to receive bytes from cpal and encode them
     // spawn a task to send the encoded bytes over rtp
-    pub fn new(
+    pub fn new<'a>(
         own_id: &DID,
         track: Arc<TrackLocalStaticRTP>,
-        source_device: &eye::hal::platform::Device<'static>,
+        source_device: &eye::hal::platform::Device<'a>,
         ui_event_ch: broadcast::Sender<BlinkEventKind>,
     ) -> Result<Self, Error> {
         let quit_encoder_task = Arc::new(AtomicBool::new(false));
