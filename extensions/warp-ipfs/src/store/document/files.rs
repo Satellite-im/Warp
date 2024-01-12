@@ -23,6 +23,7 @@ pub struct DirectoryDocument {
     pub favorite: bool,
     pub creation: DateTime<Utc>,
     pub modified: DateTime<Utc>,
+    pub thumbnail: Option<Cid>,
     pub items: Option<Cid>,
 }
 
@@ -35,6 +36,7 @@ impl DirectoryDocument {
             favorite: root.favorite(),
             creation: root.creation(),
             modified: root.modified(),
+            thumbnail: None,
             items: None,
         };
 
@@ -50,6 +52,19 @@ impl DirectoryDocument {
         let cid = ipfs.dag().put().serialize(items)?.await?;
 
         document.items = Some(cid);
+
+        if let Some(cid) = root
+            .thumbnail_reference()
+            .and_then(|refs| refs.parse::<IpfsPath>().ok())
+            .and_then(|path| path.root().cid().copied())
+        {
+            document.thumbnail = ipfs
+                .repo()
+                .contains(&cid)
+                .await
+                .unwrap_or_default()
+                .then_some(cid)
+        }
 
         Ok(document)
     }
@@ -81,6 +96,25 @@ impl DirectoryDocument {
                 _ = directory.add_item(item);
             }
         }
+
+        if let Some(cid) = self.thumbnail {
+            let image: ImageDag = ipfs
+                .get_dag(cid)
+                .timeout(Duration::from_secs(10))
+                .deserialized()
+                .await?;
+
+            directory.set_thumbnail_format(image.mime.into());
+
+            let data = ipfs
+                .unixfs()
+                .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
+                .await
+                .unwrap_or_default();
+
+            directory.set_thumbnail(&data);
+        }
+
         directory.rebuild_paths(&None);
         Ok(directory)
     }
@@ -223,6 +257,11 @@ impl FileDocument {
                 .unwrap_or_default();
 
             file.set_thumbnail(&data);
+        }
+
+        if let Some(cid) = self.reference {
+            let path = IpfsPath::from(cid);
+            file.set_reference(&path.to_string());
         }
 
         Ok(file)
