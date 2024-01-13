@@ -6,14 +6,18 @@ pub mod image_dag;
 pub mod root;
 
 use chrono::{DateTime, Utc};
-use futures::TryFutureExt;
-use ipfs::Ipfs;
+use futures::{stream::BoxStream, StreamExt, TryFutureExt};
+use ipfs::{Ipfs, PeerId};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 use uuid::Uuid;
 use warp::{
+    constellation::{
+        file::{File, FileType},
+        Progression,
+    },
     crypto::{did_key::CoreSign, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus},
@@ -21,7 +25,7 @@ use warp::{
 
 use crate::store::get_keypair_did;
 
-use self::identity::IdentityDocument;
+use self::{files::FileDocument, identity::IdentityDocument, image_dag::ImageDag};
 
 use super::{identity::Request, keystore::Keystore};
 
@@ -281,92 +285,93 @@ impl RootDocument {
     }
 }
 
-// #[derive(Clone, Deserialize, Serialize)]
-// pub struct FileAttachmentDocument {
-//     pub name: String,
-//     pub size: usize,
-//     pub thumbnail: Cid,
-//     pub file_type: FileType,
-//     pub data: Cid,
-// }
+#[derive(Clone, Deserialize, Serialize)]
+pub struct FileAttachmentDocument {
+    pub name: String,
+    pub size: usize,
+    pub thumbnail: Option<Cid>,
+    pub file_type: FileType,
+    pub data: Cid,
+}
 
-// impl FileAttachmentDocument {
-//     pub async fn resolve_to_file(&self, ipfs: &Ipfs) -> Result<File, Error> {
-//         let file = File::new(&self.name);
-//         file.set_size(self.size);
-//         file.set_file_type(self.file_type.clone());
+impl FileAttachmentDocument {
+    pub async fn new(ipfs: &Ipfs, file: &File) -> Result<Self, Error> {
+        let file_document = FileDocument::new(ipfs, file).await?;
+        file_document.to_attachment()
+    }
 
-//         let image: ImageDag = ipfs
-//             .get_dag(self.thumbnail)
-//             .timeout(Duration::from_secs(10))
-//             .deserialized()
-//             .await?;
+    pub async fn resolve_to_file(&self, ipfs: &Ipfs, local: bool) -> Result<File, Error> {
+        let file = File::new(&self.name);
+        file.set_size(self.size);
+        file.set_file_type(self.file_type.clone());
 
-//         file.set_thumbnail_format(image.mime.into());
+        if let Some(cid) = self.thumbnail {
+            let mut dag_builder = ipfs.get_dag(cid).timeout(Duration::from_secs(10));
+            if local {
+                dag_builder = dag_builder.local()
+            }
+            let image: ImageDag = dag_builder.deserialized().await?;
 
-//         let data = ipfs
-//             .unixfs()
-//             .cat(
-//                 self.thumbnail,
-//                 None,
-//                 &[],
-//                 false,
-//                 Some(Duration::from_secs(10)),
-//             )
-//             .await
-//             .unwrap_or_default();
+            file.set_thumbnail_format(image.mime.into());
 
-//         file.set_thumbnail(&data);
+            let data = ipfs
+                .unixfs()
+                .cat(image.link, None, &[], local, Some(Duration::from_secs(10)))
+                .await
+                .unwrap_or_default();
 
-//         Ok(file)
-//     }
+            file.set_thumbnail(&data);
+        }
 
-//     pub fn download<'a, P: AsRef<Path>>(
-//         &'a self,
-//         ipfs: &'a Ipfs,
-//         path: P,
-//         members: &'a [PeerId],
-//         timeout: Option<Duration>,
-//     ) -> BoxStream<'a, Progression> {
-//         let path = path.as_ref().to_path_buf();
-//         let progress_stream = async_stream::stream! {
-//             yield Progression::CurrentProgress {
-//                 name: self.name.clone(),
-//                 current: 0,
-//                 total: Some(self.size),
-//             };
+        Ok(file)
+    }
 
-//             let stream = ipfs.unixfs().get(self.data.into(), &path, members, false, timeout);
+    pub fn download<'a, P: AsRef<Path>>(
+        &'a self,
+        ipfs: &'a Ipfs,
+        path: P,
+        members: &'a [PeerId],
+        timeout: Option<Duration>,
+    ) -> BoxStream<'a, Progression> {
+        let path = path.as_ref().to_path_buf();
+        let progress_stream = async_stream::stream! {
+            yield Progression::CurrentProgress {
+                name: self.name.clone(),
+                current: 0,
+                total: Some(self.size),
+            };
 
-//             for await event in stream {
-//                 match event {
-//                     rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
-//                         yield Progression::CurrentProgress {
-//                             name: self.name.clone(),
-//                             current: written,
-//                             total: total_size
-//                         };
-//                     },
-//                     rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
-//                         yield Progression::ProgressComplete {
-//                             name: self.name.clone(),
-//                             total: total_size,
-//                         };
-//                     },
-//                     rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
-//                         if let Err(e) = tokio::fs::remove_file(&path).await {
-//                             tracing::error!("Error removing file: {e}");
-//                         }
-//                         yield Progression::ProgressFailed {
-//                             name: self.name.clone(),
-//                             last_size: Some(written),
-//                             error: error.map(|e| e.to_string()),
-//                         };
-//                     },
-//                 }
-//             }
-//         };
+            let stream = ipfs.unixfs().get(self.data.into(), &path, members, false, timeout);
 
-//         progress_stream.boxed()
-//     }
-// }
+            for await event in stream {
+                match event {
+                    rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
+                        yield Progression::CurrentProgress {
+                            name: self.name.clone(),
+                            current: written,
+                            total: total_size
+                        };
+                    },
+                    rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
+                        yield Progression::ProgressComplete {
+                            name: self.name.clone(),
+                            total: total_size,
+                        };
+                    },
+                    rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
+                        if let Err(e) = tokio::fs::remove_file(&path).await {
+                            tracing::error!("Error removing file: {e}");
+                        }
+                        yield Progression::ProgressFailed {
+                            name: self.name.clone(),
+                            last_size: Some(written),
+                            error: error.map(|e| e.to_string()),
+                        };
+                    },
+                }
+            }
+        };
+
+        progress_stream.boxed()
+    }
+}

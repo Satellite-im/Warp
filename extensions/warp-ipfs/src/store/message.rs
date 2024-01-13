@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
+use either::Either;
 use futures::channel::mpsc::{channel, Sender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::{BoxStream, SelectAll};
@@ -868,27 +869,45 @@ impl MessageStore {
         let mut document = self.conversations.get(conversation_id).await?;
 
         let keystore = match document.conversation_type {
-            ConversationType::Direct => None,
+            ConversationType::Direct => Either::Left({
+                let own_did = &*self.did;
+                document
+                    .recipients()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .first()
+                    .cloned()
+                    .expect("Valid recipient")
+            }),
             ConversationType::Group { .. } => {
-                self.conversation_keystore(conversation_id).await.ok()
+                Either::Right(self.conversation_keystore(conversation_id).await?)
             }
         };
 
         match events.clone() {
-            MessagingEvents::New { mut message } => {
+            MessagingEvents::New { message } => {
+                if !message.verify() {
+                    return Err(Error::InvalidMessage);
+                }
+
                 let mut messages = document.get_message_list(&self.ipfs).await?;
                 if messages
                     .iter()
-                    .any(|message_document| message_document.id == message.id())
+                    .any(|message_document| message_document.id == message.id)
                 {
                     return Err(Error::MessageFound);
                 }
-
-                if !document.recipients().contains(&message.sender()) {
+                if !document.recipients().contains(&message.sender.to_did()) {
                     return Err(Error::IdentityDoesntExist);
                 }
 
-                let lines_value_length: usize = message
+                let resolved_message = message
+                    .resolve(&self.ipfs, &self.did, false, keystore.as_ref())
+                    .await?;
+
+                let lines_value_length: usize = resolved_message
                     .lines()
                     .iter()
                     .map(|s| s.trim())
@@ -909,34 +928,16 @@ impl MessageStore {
                     });
                 }
 
-                {
-                    let signature = message.signature();
-                    let sender = message.sender();
-                    let construct = [
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        sender.to_string().as_bytes().to_vec(),
-                        message
-                            .lines()
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
-                    verify_serde_sig(sender, &construct, &signature)?;
-                }
+                // spam_check(&mut message, self.spam_filter.clone())?;
+                let conversation_id = message.conversation_id;
 
-                spam_check(&mut message, self.spam_filter.clone())?;
-                let conversation_id = message.conversation_id();
+                let message_id = message.id;
 
-                let message_id = message.id();
+                // let message_document =
+                //     MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
+                //         .await?;
 
-                let message_document =
-                    MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
-                        .await?;
-
-                messages.insert(message_document);
+                messages.insert(message);
                 document.set_message_list(&self.ipfs, messages).await?;
                 self.conversations.set(document).await?;
 
@@ -973,68 +974,22 @@ impl MessageStore {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .resolve(&self.ipfs, &self.did, true, keystore.as_ref())
                     .await?;
 
-                let lines_value_length: usize = lines
-                    .iter()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.chars().count())
-                    .sum();
-
-                if lines_value_length == 0 && lines_value_length > 4096 {
-                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
-                    return Err(Error::InvalidLength {
-                        context: "message".into(),
-                        current: lines_value_length,
-                        minimum: Some(1),
-                        maximum: Some(4096),
-                    });
-                }
-
-                let sender = message.sender();
-                //Validate the original message
-                {
-                    let signature = message.signature();
-                    let construct = [
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        sender.to_string().as_bytes().to_vec(),
-                        message
-                            .lines()
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
-                    verify_serde_sig(sender.clone(), &construct, &signature)?;
-                }
-
-                //Validate the edit message
-                {
-                    let construct = [
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        sender.to_string().as_bytes().to_vec(),
-                        lines
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
-                    verify_serde_sig(sender, &construct, &signature)?;
-                }
-
-                message.set_signature(Some(signature));
                 *message.lines_mut() = lines;
                 message.set_modified(modified);
 
                 message_document
-                    .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                    .update(
+                        &self.ipfs,
+                        &self.did,
+                        message,
+                        Some(signature),
+                        keystore.as_ref(),
+                    )
                     .await?;
+
                 list.replace(message_document);
                 document.set_message_list(&self.ipfs, list).await?;
                 self.conversations.set(document).await?;
@@ -1056,24 +1011,12 @@ impl MessageStore {
                         .await?;
 
                     let message = message_document
-                        .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                        .resolve(&self.ipfs, &self.did, true, keystore.as_ref())
                         .await?;
 
-                    let signature = message.signature();
-                    let sender = message.sender();
-                    let construct = [
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        sender.to_string().as_bytes().to_vec(),
-                        message
-                            .lines()
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
-                    verify_serde_sig(sender, &construct, &signature)?;
+                    if message.sender() == *self.did {
+                        return Ok(());
+                    }
                 }
 
                 document.delete_message(&self.ipfs, message_id).await?;
@@ -1100,7 +1043,7 @@ impl MessageStore {
                     .await?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .resolve(&self.ipfs, &self.did, true, keystore.as_ref())
                     .await?;
 
                 let event = match state {
@@ -1127,7 +1070,7 @@ impl MessageStore {
                 };
 
                 message_document
-                    .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                    .update(&self.ipfs, &self.did, message, None, keystore.as_ref())
                     .await?;
 
                 list.replace(message_document);
@@ -1156,7 +1099,7 @@ impl MessageStore {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .resolve(&self.ipfs, &self.did, true, keystore.as_ref())
                     .await?;
 
                 let reactions = message.reactions_mut();
@@ -1172,7 +1115,7 @@ impl MessageStore {
                         entry.push(reactor.clone());
 
                         message_document
-                            .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                            .update(&self.ipfs, &self.did, message, None, keystore.as_ref())
                             .await?;
 
                         list.replace(message_document);
@@ -1206,7 +1149,7 @@ impl MessageStore {
                         };
 
                         message_document
-                            .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                            .update(&self.ipfs, &self.did, message, None, keystore.as_ref())
                             .await?;
 
                         list.replace(message_document);
@@ -2182,11 +2125,23 @@ impl MessageStore {
     ) -> Result<Message, Error> {
         let conversation = self.conversations.get(conversation_id).await?;
         let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
+            ConversationType::Direct => Either::Left({
+                let own_did = &*self.did;
+                conversation
+                    .recipients()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .first()
+                    .cloned()
+                    .expect("Valid recipient")
+            }),
             ConversationType::Group { .. } => {
-                self.conversation_keystore(conversation.id()).await.ok()
+                Either::Right(self.conversation_keystore(conversation_id).await?)
             }
         };
+
         conversation
             .get_message(&self.ipfs, &self.did, message_id, keystore.as_ref())
             .await
@@ -2277,9 +2232,20 @@ impl MessageStore {
     ) -> Result<Messages, Error> {
         let conversation = self.conversations.get(conversation).await?;
         let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
+            ConversationType::Direct => Either::Left({
+                let own_did = &*self.did;
+                conversation
+                    .recipients()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .first()
+                    .cloned()
+                    .expect("Valid recipient")
+            }),
             ConversationType::Group { .. } => {
-                self.conversation_keystore(conversation.id()).await.ok()
+                Either::Right(self.conversation_keystore(conversation.id()).await?)
             }
         };
 
@@ -2287,13 +2253,13 @@ impl MessageStore {
         match m_type {
             MessagesType::Stream => {
                 let stream = conversation
-                    .get_messages_stream(&self.ipfs, self.did.clone(), opt, keystore.as_ref())
+                    .get_messages_stream(&self.ipfs, self.did.clone(), opt, keystore)
                     .await?;
                 Ok(Messages::Stream(MessageStream(stream)))
             }
             MessagesType::List => {
                 let list = conversation
-                    .get_messages(&self.ipfs, self.did.clone(), opt, keystore.as_ref())
+                    .get_messages(&self.ipfs, self.did.clone(), opt, keystore)
                     .await?;
                 Ok(Messages::List(list))
             }
@@ -2704,23 +2670,27 @@ impl MessageStore {
         message.set_sender(own_did.clone());
         message.set_lines(messages.clone());
 
-        let construct = [
-            message.id().into_bytes().to_vec(),
-            message.conversation_id().into_bytes().to_vec(),
-            own_did.to_string().as_bytes().to_vec(),
-            message
-                .lines()
-                .iter()
-                .map(|s| s.as_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        ]
-        .concat();
-
-        let signature = super::sign_serde(own_did, &construct)?;
-        message.set_signature(Some(signature));
-
         let message_id = message.id();
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => Either::Left({
+                let own_did = &*self.did;
+                conversation
+                    .recipients()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .first()
+                    .cloned()
+                    .expect("Valid recipient")
+            }),
+            ConversationType::Group { .. } => {
+                Either::Right(self.conversation_keystore(conversation.id()).await?)
+            }
+        };
+
+        let message =
+            MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref()).await?;
 
         let event = MessagingEvents::New { message };
 
@@ -2837,21 +2807,26 @@ impl MessageStore {
         message.set_lines(messages);
         message.set_replied(Some(message_id));
 
-        let construct = [
-            message.id().into_bytes().to_vec(),
-            message.conversation_id().into_bytes().to_vec(),
-            own_did.to_string().as_bytes().to_vec(),
-            message
-                .lines()
-                .iter()
-                .map(|s| s.as_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        ]
-        .concat();
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => Either::Left({
+                let own_did = &*self.did;
+                conversation
+                    .recipients()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .first()
+                    .cloned()
+                    .expect("Valid recipient")
+            }),
+            ConversationType::Group { .. } => {
+                Either::Right(self.conversation_keystore(conversation.id()).await?)
+            }
+        };
 
-        let signature = super::sign_serde(own_did, &construct)?;
-        message.set_signature(Some(signature));
+        let message =
+            MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref()).await?;
 
         let event = MessagingEvents::New { message };
 
@@ -3178,21 +3153,27 @@ impl MessageStore {
                     message.set_attachment(attachments);
                     message.set_lines(messages.clone());
                     message.set_replied(message_id);
-                    let construct = [
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        own_did.to_string().as_bytes().to_vec(),
-                        message
-                            .lines()
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
 
-                    let signature = super::sign_serde(own_did, &construct)?;
-                    message.set_signature(Some(signature));
+                    let keystore = match conversation.conversation_type {
+                        ConversationType::Direct => Either::Left({
+                            let own_did = &*store.did;
+                            conversation
+                                .recipients()
+                                .iter()
+                                .filter(|did| own_did.ne(did))
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .first()
+                                .cloned()
+                                .expect("Valid recipient")
+                        }),
+                        ConversationType::Group { .. } => {
+                            Either::Right(store.conversation_keystore(conversation.id()).await?)
+                        }
+                    };
+
+                    let message =
+                        MessageDocument::new(&store.ipfs, store.did.clone(), message, keystore.as_ref()).await?;
 
                     let event = MessagingEvents::New { message };
                     let (one_tx, one_rx) = oneshot::channel();

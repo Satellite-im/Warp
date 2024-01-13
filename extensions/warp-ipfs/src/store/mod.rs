@@ -28,11 +28,11 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{DirectConversationSettings, Message, MessageEvent, PinState, ReactionState},
+    raygun::{DirectConversationSettings, MessageEvent, PinState, ReactionState},
     tesseract::Tesseract,
 };
 
-use self::conversation::ConversationDocument;
+use self::conversation::{ConversationDocument, MessageDocument};
 
 pub trait PeerTopic: Display {
     fn inbox(&self) -> String {
@@ -204,7 +204,7 @@ impl std::fmt::Debug for ConversationResponseKind {
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum MessagingEvents {
     New {
-        message: Message,
+        message: MessageDocument,
     },
     Edit {
         conversation_id: Uuid,

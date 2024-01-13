@@ -16,6 +16,8 @@ use warp::constellation::{
 
 use crate::store::document::image_dag::ImageDag;
 
+use super::FileAttachmentDocument;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DirectoryDocument {
     pub name: String,
@@ -229,6 +231,17 @@ impl FileDocument {
         }
 
         Ok(document)
+    }
+
+    pub fn to_attachment(&self) -> Result<FileAttachmentDocument, Error> {
+        let data = self.reference.ok_or(Error::FileNotFound)?;
+        Ok(FileAttachmentDocument {
+            name: self.name.clone(),
+            size: self.size,
+            thumbnail: self.thumbnail,
+            file_type: self.file_type.clone(),
+            data,
+        })
     }
 
     pub async fn resolve(&self, ipfs: &Ipfs) -> Result<File, Error> {
