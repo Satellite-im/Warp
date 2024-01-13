@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod conversation;
+pub mod files;
 pub mod identity;
 pub mod image_dag;
 pub mod root;
@@ -279,3 +280,93 @@ impl RootDocument {
         Ok(root_document)
     }
 }
+
+// #[derive(Clone, Deserialize, Serialize)]
+// pub struct FileAttachmentDocument {
+//     pub name: String,
+//     pub size: usize,
+//     pub thumbnail: Cid,
+//     pub file_type: FileType,
+//     pub data: Cid,
+// }
+
+// impl FileAttachmentDocument {
+//     pub async fn resolve_to_file(&self, ipfs: &Ipfs) -> Result<File, Error> {
+//         let file = File::new(&self.name);
+//         file.set_size(self.size);
+//         file.set_file_type(self.file_type.clone());
+
+//         let image: ImageDag = ipfs
+//             .get_dag(self.thumbnail)
+//             .timeout(Duration::from_secs(10))
+//             .deserialized()
+//             .await?;
+
+//         file.set_thumbnail_format(image.mime.into());
+
+//         let data = ipfs
+//             .unixfs()
+//             .cat(
+//                 self.thumbnail,
+//                 None,
+//                 &[],
+//                 false,
+//                 Some(Duration::from_secs(10)),
+//             )
+//             .await
+//             .unwrap_or_default();
+
+//         file.set_thumbnail(&data);
+
+//         Ok(file)
+//     }
+
+//     pub fn download<'a, P: AsRef<Path>>(
+//         &'a self,
+//         ipfs: &'a Ipfs,
+//         path: P,
+//         members: &'a [PeerId],
+//         timeout: Option<Duration>,
+//     ) -> BoxStream<'a, Progression> {
+//         let path = path.as_ref().to_path_buf();
+//         let progress_stream = async_stream::stream! {
+//             yield Progression::CurrentProgress {
+//                 name: self.name.clone(),
+//                 current: 0,
+//                 total: Some(self.size),
+//             };
+
+//             let stream = ipfs.unixfs().get(self.data.into(), &path, members, false, timeout);
+
+//             for await event in stream {
+//                 match event {
+//                     rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
+//                         yield Progression::CurrentProgress {
+//                             name: self.name.clone(),
+//                             current: written,
+//                             total: total_size
+//                         };
+//                     },
+//                     rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
+//                         yield Progression::ProgressComplete {
+//                             name: self.name.clone(),
+//                             total: total_size,
+//                         };
+//                     },
+//                     rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
+//                         if let Err(e) = tokio::fs::remove_file(&path).await {
+//                             tracing::error!("Error removing file: {e}");
+//                         }
+//                         yield Progression::ProgressFailed {
+//                             name: self.name.clone(),
+//                             last_size: Some(written),
+//                             error: error.map(|e| e.to_string()),
+//                         };
+//                     },
+//                 }
+//             }
+//         };
+
+//         progress_stream.boxed()
+//     }
+// }
