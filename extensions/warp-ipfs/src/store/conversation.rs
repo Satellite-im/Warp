@@ -16,7 +16,7 @@ use std::{
 use uuid::Uuid;
 use warp::{
     crypto::{
-        cipher::Cipher, did_key::CoreSign, hash::sha256_iter, DIDKey, Ed25519KeyPair, Fingerprint,
+        cipher::Cipher, did_key::CoreSign, hash::sha256_iter, DIDKey, Ed25519KeyPair,
         KeyMaterial, DID,
     },
     error::Error,
@@ -806,7 +806,7 @@ impl MessageDocument {
             [
                 Some(self.conversation_id.as_bytes().to_vec()),
                 Some(self.id.as_bytes().to_vec()),
-                Some(sender.fingerprint().into_bytes()),
+                Some(sender.public_key_bytes()),
                 Some(self.date.to_string().into_bytes()),
                 self.modified.map(|time| time.to_string().into_bytes()),
                 self.replied.map(|id| id.as_bytes().to_vec()),
@@ -833,7 +833,7 @@ impl MessageDocument {
             [
                 Some(self.conversation_id.as_bytes().to_vec()),
                 Some(self.id.as_bytes().to_vec()),
-                Some(sender.fingerprint().into_bytes()),
+                Some(sender.public_key_bytes()),
                 Some(self.date.to_string().into_bytes()),
                 self.modified.map(|time| time.to_string().into_bytes()),
                 self.replied.map(|id| id.as_bytes().to_vec()),
@@ -845,6 +845,19 @@ impl MessageDocument {
         );
 
         sender.verify(&hash, signature.as_ref()).is_ok()
+    }
+
+    pub async fn attachments(&self, ipfs: &Ipfs) -> Vec<FileAttachmentDocument> {
+        let cid = match self.attachments {
+            Some(cid) => cid,
+            None => return vec![],
+        };
+
+        ipfs.get_dag(cid)
+            .local()
+            .deserialized()
+            .await
+            .unwrap_or_default()
     }
 
     // pub async fn remove(&self, ipfs: &Ipfs) -> Result<(), Error> {
@@ -921,8 +934,21 @@ impl MessageDocument {
             let message = ipfs.dag().put().serialize(data)?.await?;
 
             self.message.replace(message);
-            self.signature =
-                signature.and_then(|signature| MessageSignature::try_from(signature).ok());
+
+            match (sender.eq(did), signature) {
+                (true, None) => {
+                    *self = self.sign(did)?;
+                }
+                (false, Some(sig)) => {
+                    let new_signature = MessageSignature::try_from(sig)?;
+                    let old_sig = self.signature.replace(new_signature);
+                    println!("{:?} - {:?}", old_sig, new_signature);
+                    if !self.verify() {
+                        return Err(Error::InvalidSignature);
+                    }
+                }
+                _ => unreachable!(),
+            };
         }
 
         info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
@@ -942,6 +968,7 @@ impl MessageDocument {
         let message_cid = self.message.ok_or(Error::MessageNotFound)?;
         let mut message = Message::default();
         message.set_id(self.id);
+        message.set_message_type(self.message_type);
         message.set_conversation_id(self.conversation_id);
         message.set_sender(self.sender.to_did());
         message.set_date(self.date);
@@ -1094,6 +1121,12 @@ impl From<[u8; 64]> for MessageSignature {
 impl AsRef<[u8]> for MessageSignature {
     fn as_ref(&self) -> &[u8] {
         &self.0[..]
+    }
+}
+
+impl From<MessageSignature> for Vec<u8> {
+    fn from(sig: MessageSignature) -> Self {
+        sig.0.to_vec()
     }
 }
 
