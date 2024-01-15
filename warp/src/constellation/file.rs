@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek};
 use uuid::Uuid;
-use warp_derive::FFIFree;
 
 use super::guard::SignalGuard;
 use super::item::FormatType;
@@ -18,7 +17,7 @@ use super::item::FormatType;
 /// if we don't have a supported file type, we can just default to generic.
 ///
 /// TODO: Use mime to define the filetype
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum FileType {
     #[display(fmt = "generic")]
@@ -29,7 +28,7 @@ pub enum FileType {
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
-#[derive(Clone, Deserialize, Serialize, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct File {
     /// ID of the `File`
     id: Arc<Uuid>,
@@ -486,26 +485,5 @@ mod test {
         assert!(long_file.name().len() == 256);
         assert_eq!(long_file.name(), &long_name[..256]);
         assert_ne!(long_file.name(), &long_name[..255]);
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod ffi {
-    use crate::constellation::file::File;
-    use std::ffi::CStr;
-    #[allow(unused)]
-    use std::ffi::{c_void, CString};
-    #[allow(unused)]
-    use std::os::raw::{c_char, c_int};
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn file_new(name: *const c_char) -> *mut File {
-        let name = match name.is_null() {
-            true => "unused".to_string(),
-            false => CStr::from_ptr(name).to_string_lossy().to_string(),
-        };
-        let file = Box::new(File::new(name.as_str()));
-        Box::into_raw(file)
     }
 }
