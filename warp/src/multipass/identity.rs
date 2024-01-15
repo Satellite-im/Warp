@@ -185,9 +185,7 @@ impl Display for ShortId {
     }
 }
 
-#[derive(
-    Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq,
-)]
+#[derive(Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
     /// Username of the identity
     username: String,

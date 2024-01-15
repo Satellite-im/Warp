@@ -184,8 +184,6 @@ impl Data {
     }
 }
 
-
-
 #[cfg(test)]
 mod test {
     use super::{Data, DataType};

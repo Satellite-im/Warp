@@ -163,4 +163,3 @@ pub fn generate<const N: usize>() -> [u8; N] {
     getrandom::getrandom(&mut buf).unwrap();
     buf
 }
-

@@ -730,4 +730,3 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
     }
     Ok(list)
 }
-

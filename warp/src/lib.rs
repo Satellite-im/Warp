@@ -131,4 +131,3 @@ pub fn async_block_in_place<F: futures::Future>(fut: F) -> std::io::Result<F::Ou
 pub fn async_block_in_place_uncheck<F: futures::Future>(fut: F) -> F::Output {
     async_block_in_place(fut).expect("Unexpected error")
 }
-
