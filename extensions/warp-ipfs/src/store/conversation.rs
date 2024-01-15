@@ -16,8 +16,8 @@ use std::{
 use uuid::Uuid;
 use warp::{
     crypto::{
-        cipher::Cipher, did_key::CoreSign, hash::sha256_iter, DIDKey, Ed25519KeyPair,
-        KeyMaterial, DID,
+        cipher::Cipher, did_key::CoreSign, hash::sha256_iter, DIDKey, Ed25519KeyPair, KeyMaterial,
+        DID,
     },
     error::Error,
     logging::tracing::info,
@@ -28,7 +28,7 @@ use warp::{
     },
 };
 
-use crate::store::ecdh_encrypt;
+use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce};
 
 use super::{document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, verify_serde_sig};
 
@@ -847,6 +847,19 @@ impl MessageDocument {
         sender.verify(&hash, signature.as_ref()).is_ok()
     }
 
+    pub async fn raw_encrypted_message(&self, ipfs: &Ipfs) -> Result<Vec<u8>, Error> {
+        let cid = self.message.ok_or(Error::MessageNotFound)?;
+
+        let bytes: Vec<u8> = ipfs
+            .get_dag(cid)
+            .local()
+            .timeout(Duration::from_secs(10))
+            .deserialized()
+            .await?;
+
+        Ok(bytes)
+    }
+
     pub async fn attachments(&self, ipfs: &Ipfs) -> Vec<FileAttachmentDocument> {
         let cid = match self.attachments {
             Some(cid) => cid,
@@ -877,6 +890,7 @@ impl MessageDocument {
         message: Message,
         signature: Option<Vec<u8>>,
         key: Either<&DID, &Keystore>,
+        nonce: Option<&[u8]>,
     ) -> Result<(), Error> {
         info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
         let old_message = self.resolve(ipfs, did, true, key).await?;
@@ -921,14 +935,23 @@ impl MessageDocument {
                 }
             }
 
+            //TODO: Compare nonce and prevent the same nonce from being used in current message
+
             let bytes = serde_json::to_vec(&lines)?;
 
-            let data = match key {
-                Either::Right(keystore) => {
+            let data = match (key, nonce) {
+                (Either::Right(keystore), Some(nonce)) => {
+                    let key = keystore.get_latest(did, &sender)?;
+                    Cipher::direct_encrypt_with_nonce(&bytes, &key, nonce)?
+                }
+                (Either::Left(key), Some(nonce)) => {
+                    ecdh_encrypt_with_nonce(did, Some(key), &bytes, nonce)?
+                }
+                (Either::Right(keystore), None) => {
                     let key = keystore.get_latest(did, &sender)?;
                     Cipher::direct_encrypt(&bytes, &key)?
                 }
-                Either::Left(key) => ecdh_encrypt(did, Some(key), &bytes)?,
+                (Either::Left(key), None) => ecdh_encrypt(did, Some(key), &bytes)?,
             };
 
             let message = ipfs.dag().put().serialize(data)?.await?;
@@ -941,7 +964,7 @@ impl MessageDocument {
                 }
                 (false, Some(sig)) => {
                     let new_signature = MessageSignature::try_from(sig)?;
-                    let old_sig = self.signature.replace(new_signature);
+                    self.signature.replace(new_signature);
                     if !self.verify() {
                         return Err(Error::InvalidSignature);
                     }

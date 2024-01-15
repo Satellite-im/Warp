@@ -47,7 +47,10 @@ use super::event_subscription::EventSubscription;
 use super::files::FileStore;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
-use super::{verify_serde_sig, ConversationEvents, ConversationUpdateKind, MessagingEvents};
+use super::{
+    extract_data_slice, verify_serde_sig, ConversationEvents, ConversationUpdateKind,
+    MessagingEvents,
+};
 
 type ConversationSender = Sender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
 
@@ -955,6 +958,7 @@ impl MessageStore {
                 message_id,
                 modified,
                 lines,
+                nonce,
                 signature,
             } => {
                 let mut list = document.get_message_list(&self.ipfs).await?;
@@ -971,6 +975,8 @@ impl MessageStore {
                     .resolve(&self.ipfs, &self.did, true, keystore.as_ref())
                     .await?;
 
+                let sender = message.sender();
+
                 *message.lines_mut() = lines;
                 message.set_modified(modified);
 
@@ -979,8 +985,9 @@ impl MessageStore {
                         &self.ipfs,
                         &self.did,
                         message,
-                        Some(signature),
+                        (!signature.is_empty() && sender.ne(&self.did)).then_some(signature),
                         keystore.as_ref(),
+                        nonce.as_deref(),
                     )
                     .await?;
 
@@ -1064,7 +1071,14 @@ impl MessageStore {
                 };
 
                 message_document
-                    .update(&self.ipfs, &self.did, message, None, keystore.as_ref())
+                    .update(
+                        &self.ipfs,
+                        &self.did,
+                        message,
+                        None,
+                        keystore.as_ref(),
+                        None,
+                    )
                     .await?;
 
                 list.replace(message_document);
@@ -1109,7 +1123,14 @@ impl MessageStore {
                         entry.push(reactor.clone());
 
                         message_document
-                            .update(&self.ipfs, &self.did, message, None, keystore.as_ref())
+                            .update(
+                                &self.ipfs,
+                                &self.did,
+                                message,
+                                None,
+                                keystore.as_ref(),
+                                None,
+                            )
                             .await?;
 
                         list.replace(message_document);
@@ -1143,7 +1164,14 @@ impl MessageStore {
                         };
 
                         message_document
-                            .update(&self.ipfs, &self.did, message, None, keystore.as_ref())
+                            .update(
+                                &self.ipfs,
+                                &self.did,
+                                message,
+                                None,
+                                keystore.as_ref(),
+                                None,
+                            )
                             .await?;
 
                         list.replace(message_document);
@@ -2711,8 +2739,10 @@ impl MessageStore {
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let conversation = self.conversations.get(conversation_id).await?;
-        let mut tx = self.conversation_tx(conversation_id).await?;
+        if !self.conversations.contains(conversation_id).await? {
+            return Err(Error::InvalidConversation);
+        }
+
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
         }
@@ -2734,36 +2764,43 @@ impl MessageStore {
             });
         }
 
-        let own_did = &*self.did.clone();
-
-        let construct = [
-            message_id.into_bytes().to_vec(),
-            conversation.id().into_bytes().to_vec(),
-            own_did.to_string().as_bytes().to_vec(),
-            messages
-                .iter()
-                .map(|s| s.as_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        ]
-        .concat();
-
-        let signature = super::sign_serde(&self.did, &construct)?;
-
-        let event = MessagingEvents::Edit {
-            conversation_id: conversation.id(),
+        let inner_event = MessagingEvents::Edit {
+            conversation_id,
             message_id,
             modified: Utc::now(),
-            lines: messages,
-            signature,
+            lines: messages.clone(),
+            nonce: None, // an nonce will be generated in task and fetched later from the raw encrypted message
+            signature: Vec::new(), // message will be signed in task with signature fetched later
         };
 
+        let mut tx = self.conversation_tx(conversation_id).await?;
+
         let (one_tx, one_rx) = oneshot::channel();
-        tx.send((event.clone(), Some(one_tx)))
+        tx.send((inner_event, Some(one_tx)))
             .await
             .map_err(anyhow::Error::from)?;
 
         one_rx.await.map_err(anyhow::Error::from)??;
+
+        let message_document = self
+            .get_message_document(conversation_id, message_id)
+            .await?;
+
+        let raw_enc_message = message_document.raw_encrypted_message(&self.ipfs).await?;
+
+        // extract nonce to provide in event
+        let (nonce, _) = extract_data_slice::<12>(&raw_enc_message);
+
+        let signature = message_document.signature.expect("message to be signed");
+
+        let event = MessagingEvents::Edit {
+            conversation_id,
+            message_id,
+            modified: message_document.modified.expect("message to be modified"),
+            lines: messages,
+            nonce: Some(nonce.to_vec()),
+            signature: signature.into(),
+        };
 
         self.publish(conversation_id, None, event, true).await
     }
