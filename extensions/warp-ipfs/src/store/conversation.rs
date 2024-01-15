@@ -942,7 +942,6 @@ impl MessageDocument {
                 (false, Some(sig)) => {
                     let new_signature = MessageSignature::try_from(sig)?;
                     let old_sig = self.signature.replace(new_signature);
-                    println!("{:?} - {:?}", old_sig, new_signature);
                     if !self.verify() {
                         return Err(Error::InvalidSignature);
                     }

@@ -3,7 +3,6 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -928,14 +927,9 @@ impl MessageStore {
                     });
                 }
 
-                // spam_check(&mut message, self.spam_filter.clone())?;
                 let conversation_id = message.conversation_id;
 
                 let message_id = message.id;
-
-                // let message_document =
-                //     MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
-                //         .await?;
 
                 messages.insert(message);
                 document.set_message_list(&self.ipfs, messages).await?;
@@ -1640,7 +1634,7 @@ impl MessageStore {
             return Err(Error::PublicKeyIsBlocked);
         }
 
-        let own_did = &*(self.did.clone());
+        let own_did = &*self.did;
 
         if did_key == own_did {
             return Err(Error::CannotCreateConversation);
@@ -1677,14 +1671,14 @@ impl MessageStore {
             settings,
         )?;
 
-        let convo_id = conversation.id();
+        let conversation_id = conversation.id();
         let topic = conversation.topic();
 
-        self.conversations.set(conversation.clone()).await?;
+        self.conversations.set(conversation).await?;
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
-        self.start_task(convo_id, stream).await;
+        self.start_task(conversation_id, stream).await;
 
         let peer_id = did_key.to_peer_id()?;
 
@@ -1713,7 +1707,7 @@ impl MessageStore {
                 .queue_event(
                     did_key.clone(),
                     Queue::direct(
-                        convo_id,
+                        conversation_id,
                         None,
                         peer_id,
                         did_key.messaging(),
@@ -1727,12 +1721,10 @@ impl MessageStore {
         }
 
         self.event
-            .emit(RayGunEventKind::ConversationCreated {
-                conversation_id: convo_id,
-            })
+            .emit(RayGunEventKind::ConversationCreated { conversation_id })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        self.get_conversation(conversation_id).await
     }
 
     pub async fn create_group_conversation(
@@ -1789,31 +1781,29 @@ impl MessageStore {
             }
         }
 
+        let recipients = Vec::from_iter(recipients);
+
         let restricted = self.identity.block_list().await.unwrap_or_default();
 
-        let conversation = ConversationDocument::new_group(
-            own_did,
-            name,
-            &Vec::from_iter(recipients),
-            &restricted,
-            settings,
-        )?;
+        let conversation =
+            ConversationDocument::new_group(own_did, name, &recipients, &restricted, settings)?;
 
         let recipient = conversation.recipients();
 
-        let convo_id = conversation.id();
+        let conversation_id = conversation.id();
         let topic = conversation.topic();
 
         self.conversations.set(conversation).await?;
 
-        let mut keystore = Keystore::new(convo_id);
+        let mut keystore = Keystore::new(conversation_id);
         keystore.insert(own_did, own_did, warp::crypto::generate::<64>())?;
 
-        self.set_conversation_keystore(convo_id, keystore).await?;
+        self.set_conversation_keystore(conversation_id, keystore)
+            .await?;
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
-        self.start_task(convo_id, stream).await;
+        self.start_task(conversation_id, stream).await;
 
         let peer_id_list = recipient
             .clone()
@@ -1823,7 +1813,7 @@ impl MessageStore {
             .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
 
-        let conversation = self.conversations.get(convo_id).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
 
         let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
             conversation: conversation.clone(),
@@ -1849,7 +1839,7 @@ impl MessageStore {
                     .queue_event(
                         did.clone(),
                         Queue::direct(
-                            convo_id,
+                            conversation_id,
                             None,
                             peer_id,
                             did.messaging(),
@@ -1864,18 +1854,16 @@ impl MessageStore {
         }
 
         for recipient in recipient.iter().filter(|d| own_did.ne(d)) {
-            if let Err(e) = self.request_key(conversation.id(), recipient).await {
+            if let Err(e) = self.request_key(conversation_id, recipient).await {
                 tracing::warn!("Failed to send exchange request to {recipient}: {e}");
             }
         }
 
         self.event
-            .emit(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            })
+            .emit(RayGunEventKind::ConversationCreated { conversation_id })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        self.get_conversation(conversation_id).await
     }
 
     pub async fn delete_conversation(
@@ -1885,19 +1873,19 @@ impl MessageStore {
     ) -> Result<(), Error> {
         self.end_task(conversation_id).await;
 
-        let document_type = self.conversations.delete(conversation_id).await?;
+        let conversation_document = self.conversations.delete(conversation_id).await?;
 
         if broadcast {
-            let recipients = document_type.recipients();
+            let recipients = conversation_document.recipients();
 
             let mut can_broadcast = true;
 
             if matches!(
-                document_type.conversation_type,
+                conversation_document.conversation_type,
                 ConversationType::Group { .. }
             ) {
                 let own_did = &*self.did;
-                let creator = document_type
+                let creator = conversation_document
                     .creator
                     .as_ref()
                     .ok_or(Error::InvalidConversation)?;
@@ -1931,7 +1919,7 @@ impl MessageStore {
                     .collect::<Vec<_>>();
 
                 let event = serde_json::to_vec(&ConversationEvents::DeleteConversation {
-                    conversation_id: document_type.id(),
+                    conversation_id,
                 })?;
 
                 let main_timer = Instant::now();
@@ -1961,7 +1949,7 @@ impl MessageStore {
                             .queue_event(
                                 recipient.clone(),
                                 Queue::direct(
-                                    document_type.id(),
+                                    conversation_id,
                                     None,
                                     peer_id,
                                     recipient.messaging(),
@@ -1988,8 +1976,6 @@ impl MessageStore {
                 );
             }
         }
-
-        let conversation_id = document_type.id();
 
         self.event
             .emit(RayGunEventKind::ConversationDeleted { conversation_id })
@@ -2154,8 +2140,9 @@ impl MessageStore {
             }
         };
 
-        conversation
-            .get_message(&self.ipfs, &self.did, message_id, keystore.as_ref())
+        self.get_message_document(conversation_id, message_id)
+            .await?
+            .resolve(&self.ipfs, &self.did, true, keystore.as_ref())
             .await
     }
 
