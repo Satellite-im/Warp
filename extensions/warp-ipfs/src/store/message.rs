@@ -2977,12 +2977,12 @@ impl MessageStore {
         locations: Vec<Location>,
         messages: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
-        if locations.len() > 8 {
+        if locations.len() > 32 {
             return Err(Error::InvalidLength {
                 context: "files".into(),
                 current: locations.len(),
                 minimum: Some(1),
-                maximum: Some(8),
+                maximum: Some(32),
             });
         }
 
