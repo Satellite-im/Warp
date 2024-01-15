@@ -1009,6 +1009,15 @@ impl MessageDocument {
             let documents: Vec<FileAttachmentDocument> =
                 dag_builder.deserialized().await.unwrap_or_default();
 
+            if documents.len() > 32 {
+                return Err(Error::InvalidLength {
+                    context: "attachments".into(),
+                    current: documents.len(),
+                    minimum: Some(1),
+                    maximum: Some(32),
+                });
+            }
+
             let files = FuturesUnordered::from_iter(
                 documents
                     .iter()
