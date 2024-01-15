@@ -9,7 +9,6 @@ use crate::{Extension, SingleHandle};
 use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
-use futures::Stream;
 
 use chrono::{DateTime, Utc};
 use core::ops::Range;
@@ -29,20 +28,7 @@ pub enum RayGunEventKind {
     ConversationDeleted { conversation_id: Uuid },
 }
 
-pub struct RayGunEventStream(pub BoxStream<'static, RayGunEventKind>);
-
-impl core::ops::Deref for RayGunEventStream {
-    type Target = BoxStream<'static, RayGunEventKind>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for RayGunEventStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+pub type RayGunEventStream = BoxStream<'static, RayGunEventKind>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -121,47 +107,11 @@ pub enum AttachmentKind {
     Pending(Result<(), Error>),
 }
 
-pub struct AttachmentEventStream(pub BoxStream<'static, AttachmentKind>);
+pub type AttachmentEventStream = BoxStream<'static, AttachmentKind>;
 
-impl Stream for AttachmentEventStream {
-    type Item = AttachmentKind;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.0.as_mut().poll_next(cx)
-    }
-}
+pub type MessageEventStream = BoxStream<'static, MessageEventKind>;
 
-pub struct MessageEventStream(pub BoxStream<'static, MessageEventKind>);
-
-impl Stream for MessageEventStream {
-    type Item = MessageEventKind;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.0.as_mut().poll_next(cx)
-    }
-}
-
-pub struct MessageStream(pub BoxStream<'static, Message>);
-
-impl Debug for MessageStream {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MessageStream")
-    }
-}
-
-impl Stream for MessageStream {
-    type Item = Message;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.0.as_mut().poll_next(cx)
-    }
-}
+pub type MessageStream = BoxStream<'static, Message>;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
@@ -291,7 +241,6 @@ pub enum MessagesType {
     },
 }
 
-#[derive(Debug)]
 pub enum Messages {
     /// List of messages
     List(Vec<Message>),
@@ -306,6 +255,16 @@ pub enum Messages {
         /// Amount of pages
         total: usize,
     },
+}
+
+impl Debug for Messages {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Messages::List(_) => write!(f, "Messages::List"),
+            Messages::Stream(_) => write!(f, "Messages::Stream"),
+            Messages::Page { .. } => write!(f, "Messages::Page"),
+        }
+    }
 }
 
 impl TryFrom<Messages> for Vec<Message> {

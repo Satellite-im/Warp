@@ -81,17 +81,7 @@ pub enum Progression {
     },
 }
 
-pub struct ConstellationProgressStream(pub BoxStream<'static, Progression>);
-
-impl Stream for ConstellationProgressStream {
-    type Item = Progression;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.0.as_mut().poll_next(cx)
-    }
-}
+pub type ConstellationProgressStream = BoxStream<'static, Progression>;
 
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
