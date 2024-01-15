@@ -19,9 +19,9 @@ use warp::crypto::DID;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    AttachmentKind, GroupSettings, Location, Message, MessageEvent, MessageEventKind,
-    MessageEventStream, MessageOptions, MessageStream, MessageType, Messages, MessagesType,
-    PinState, RayGun, ReactionState,
+    AttachmentKind, ConversationSettings, GroupSettings, Location, Message, MessageEvent,
+    MessageEventKind, MessageEventStream, MessageOptions, MessageStream, MessageType, Messages,
+    MessagesType, PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -363,6 +363,15 @@ async fn main() -> anyhow::Result<()> {
                                 table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), created.to_string(), modified.to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{table}")?;
+                        },
+                        SetGroupOpen(open) => {
+                            let topic = *topic.read();
+                            let mut settings = GroupSettings::default();
+                            settings.set_members_can_add_participants(open);
+                            if let Err(e) = chat.update_conversation_settings(topic, ConversationSettings::Group(settings)).await {
+                                writeln!(stdout, "Error updating group settings: {e}")?;
+                                continue
+                            }
                         },
                         ListReferences(opt) => {
                             let local_topic = *topic.read();
@@ -973,6 +982,14 @@ async fn message_event_handle(
                     writeln!(stdout, ">>> {username} was removed from {conversation_id}")?;
                 }
             }
+            MessageEventKind::ConversationSettingsUpdated {
+                conversation_id,
+                settings,
+            } => {
+                if *topic.read() == conversation_id {
+                    writeln!(stdout, ">>> Conversation settings updated: {settings}")?;
+                }
+            }
         }
     }
     Ok(())
@@ -998,6 +1015,8 @@ enum Command {
     SetConversation(Uuid),
     #[display(fmt = "/set-conversation-name <name> - set conversation name")]
     SetConversationName(String),
+    #[display(fmt = "/set-group-open 0|1 - change group open status")]
+    SetGroupOpen(bool),
     #[display(fmt = "/list-conversations - list all active conversations")]
     ListConversations,
     #[display(
@@ -1149,6 +1168,14 @@ impl FromStr for Command {
                     }
                 };
                 Ok(Command::SetConversationName(name.to_string()))
+            }
+            Some("/set-group-open") => {
+                let open: u8 = cmd_line
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("/set-group-open <0|1>"))
+                    .and_then(|s| s.parse().map_err(Into::into))?;
+                let open = open != 0;
+                Ok(Command::SetGroupOpen(open))
             }
             Some("/list-conversations") => Ok(Command::ListConversations),
             Some("/list-references") => {
