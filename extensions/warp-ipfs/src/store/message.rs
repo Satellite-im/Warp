@@ -2992,7 +2992,6 @@ impl MessageStore {
             let mut in_stack = vec![];
 
             let mut attachments = vec![];
-            let mut total_thumbnail_size = 0;
 
             let mut streams: SelectAll<_> = SelectAll::new();
 
@@ -3116,23 +3115,7 @@ impl MessageStore {
             for await (progress, file) in streams {
                 yield AttachmentKind::AttachedProgress(progress);
                 if let Some(file) = file {
-                    // We reconstruct it to avoid out any metadata that was apart of the `File` structure that we dont want to share
-                    let new_file = warp::constellation::file::File::new(&file.name());
-
-                    let thumbnail = file.thumbnail();
-
-                    if total_thumbnail_size < 3 * 1024 * 1024
-                        && !thumbnail.is_empty()
-                        && thumbnail.len() <= 1024 * 1024
-                    {
-                        new_file.set_thumbnail(&thumbnail);
-                        new_file.set_thumbnail_format(file.thumbnail_format());
-                        total_thumbnail_size += thumbnail.len();
-                    }
-                    new_file.set_size(file.size());
-                    new_file.set_hash(file.hash());
-                    new_file.set_reference(&file.reference().unwrap_or_default());
-                    attachments.push(new_file);
+                    attachments.push(file);
                 }
             }
 
