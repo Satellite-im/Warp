@@ -13,7 +13,7 @@ use futures::channel::mpsc::{channel, Sender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::{BoxStream, SelectAll};
 use futures::{SinkExt, Stream, StreamExt};
-use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
+use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
@@ -2118,6 +2118,18 @@ impl MessageStore {
         Ok(())
     }
 
+    pub async fn get_message_document(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageDocument, Error> {
+        let conversation = self.conversations.get(conversation_id).await?;
+
+        conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await
+    }
+
     pub async fn get_message(
         &self,
         conversation_id: Uuid,
@@ -3176,78 +3188,41 @@ impl MessageStore {
 
     pub async fn download(
         &self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
         path: PathBuf,
         _: bool,
     ) -> Result<ConstellationProgressStream, Error> {
-        let constellation = self.filesystem.clone();
+        let conversation = self.conversations.get(conversation_id).await?;
 
-        let members = self.get_conversation(conversation).await.map(|c| {
-            c.recipients()
-                .iter()
-                .filter_map(|did| did.to_peer_id().ok())
-                .collect::<Vec<_>>()
-        })?;
+        let members = conversation
+            .recipients()
+            .iter()
+            .filter_map(|did| did.to_peer_id().ok())
+            .collect::<Vec<_>>();
 
-        let message = self.get_message(conversation, message_id).await?;
+        let message = self
+            .get_message_document(conversation_id, message_id)
+            .await?;
 
-        if message.message_type() != MessageType::Attachment {
+        if message.message_type != MessageType::Attachment {
             return Err(Error::InvalidMessage);
         }
 
         let attachment = message
-            .attachments()
+            .attachments(&self.ipfs)
+            .await
             .iter()
-            .find(|attachment| attachment.name() == file)
+            .find(|attachment| attachment.name == file)
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let _root = constellation.root_directory();
-
-        let reference = attachment
-            .reference()
-            .and_then(|reference| IpfsPath::from_str(&reference).ok())
-            .ok_or(Error::FileNotFound)?;
-
         let ipfs = self.ipfs.clone();
-        let _constellation = constellation.clone();
         let progress_stream = async_stream::stream! {
-            yield Progression::CurrentProgress {
-                name: attachment.name(),
-                current: 0,
-                total: Some(attachment.size()),
-            };
-
-            let stream = ipfs.unixfs().get(reference, &path, &members, false, None);
-
+            let stream = attachment.download(&ipfs, path, &members, None);
             for await event in stream {
-                match event {
-                    rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
-                        yield Progression::CurrentProgress {
-                            name: attachment.name(),
-                            current: written,
-                            total: total_size
-                        };
-                    },
-                    rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
-                        yield Progression::ProgressComplete {
-                            name: attachment.name(),
-                            total: total_size,
-                        };
-                    },
-                    rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
-                        if let Err(e) = tokio::fs::remove_file(&path).await {
-                            error!("Error removing file: {e}");
-                        }
-                        yield Progression::ProgressFailed {
-                            name: attachment.name(),
-                            last_size: Some(written),
-                            error: error.map(|e| e.to_string()),
-                        };
-                    },
-                }
+                yield event;
             }
         };
 
