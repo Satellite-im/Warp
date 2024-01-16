@@ -1330,7 +1330,6 @@ impl MessageStore {
                         //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                     }
                     ConversationUpdateKind::ChangeSettings { settings } => {
-                        conversation.settings = settings;
                         conversation.excluded = document.excluded;
                         conversation.messages = document.messages;
                         self.conversations.set(conversation).await?;
