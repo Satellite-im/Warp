@@ -31,7 +31,7 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
       RUST_BACKTRACE: full
-      RUST_LOG: warp,warp_ipfs,warp_blink_wrtc=error
+      RUST_LOG: warp_ipfs=error,warp_blink_wrtc=error
     steps:
       - uses: actions/checkout@v4
 
