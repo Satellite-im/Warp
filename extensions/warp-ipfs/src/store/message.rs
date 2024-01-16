@@ -32,7 +32,6 @@ use warp::raygun::{
 };
 use warp::sync::Arc;
 
-use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;
 use crate::store::{
     connected_to_peer, ecdh_decrypt, ecdh_encrypt, get_keypair_did, sign_serde,
@@ -91,8 +90,6 @@ pub struct MessageStore {
     // Event
     event: EventSubscription<RayGunEventKind>,
 
-    spam_filter: Arc<Option<SpamFilter>>,
-
     with_friends: Arc<AtomicBool>,
     span: Span,
 }
@@ -109,7 +106,7 @@ impl MessageStore {
         interval_ms: u64,
         event: EventSubscription<RayGunEventKind>,
         span: Span,
-        (check_spam, with_friends): (bool, bool),
+        with_friends: bool,
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
 
@@ -121,7 +118,6 @@ impl MessageStore {
 
         let queue = Arc::new(Default::default());
         let did = Arc::new(get_keypair_did(ipfs.keypair()?)?);
-        let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());
         let with_friends = Arc::new(AtomicBool::new(with_friends));
@@ -147,7 +143,6 @@ impl MessageStore {
             queue,
             did,
             event,
-            spam_filter,
             with_friends,
             stream_conversation_task,
             span,
@@ -3508,15 +3503,4 @@ impl Queue {
             sent: false,
         }
     }
-}
-
-pub fn spam_check(message: &mut Message, filter: Arc<Option<SpamFilter>>) -> anyhow::Result<()> {
-    if let Some(filter) = filter.as_ref() {
-        if filter.process(&message.lines().join(" "))? {
-            message
-                .metadata_mut()
-                .insert("is_spam".to_owned(), "true".to_owned());
-        }
-    }
-    Ok(())
 }

@@ -1,6 +1,5 @@
 mod behaviour;
 pub mod config;
-mod spam_filter;
 pub mod store;
 mod thumbnail;
 mod utils;
@@ -571,10 +570,8 @@ impl WarpIpfs {
             1000,
             self.raygun_tx.clone(),
             span.clone(),
-            (
-                config.store_setting.check_spam,
-                config.store_setting.with_friends,
-            ),
+
+            config.store_setting.with_friends,
         )
         .await?;
 
