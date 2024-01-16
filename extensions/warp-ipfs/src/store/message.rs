@@ -1329,6 +1329,18 @@ impl MessageStore {
                         //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                         //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                     }
+                    ConversationUpdateKind::ChangeSettings { settings } => {
+                        conversation.excluded = document.excluded;
+                        conversation.messages = document.messages;
+                        self.conversations.set(conversation).await?;
+
+                        if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
+                            conversation_id,
+                            settings,
+                        }) {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
                 }
             }
             _ => {}
@@ -3470,6 +3482,40 @@ impl MessageStore {
         }
 
         Ok(())
+    }
+
+    pub async fn update_conversation_settings(
+        &mut self,
+        conversation_id: Uuid,
+        settings: ConversationSettings,
+    ) -> Result<(), Error> {
+        let mut conversation = self.conversations.get(conversation_id).await?;
+        let own_did = &*self.did;
+        let Some(creator) = &conversation.creator else {
+            return Err(Error::InvalidConversation);
+        };
+        if creator != own_did {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        conversation.settings = settings;
+        self.conversations.set(conversation).await?;
+
+        let conversation = self.conversations.get(conversation_id).await?;
+        let event = MessagingEvents::UpdateConversation {
+            conversation: conversation.clone(),
+            kind: ConversationUpdateKind::ChangeSettings {
+                settings: conversation.settings,
+            },
+        };
+
+        let tx = self.get_conversation_sender(conversation_id).await?;
+        let _ = tx.send(MessageEventKind::ConversationSettingsUpdated {
+            conversation_id,
+            settings: conversation.settings,
+        });
+
+        self.publish(conversation_id, None, event, true).await
     }
 
     async fn queue_event(&self, did: DID, queue: Queue) -> Result<(), Error> {
