@@ -107,6 +107,10 @@ pub enum MessageEventKind {
         did_key: DID,
         event: MessageEvent,
     },
+    ConversationSettingsUpdated {
+        conversation_id: Uuid,
+        settings: ConversationSettings,
+    },
 }
 
 #[derive(
@@ -507,9 +511,9 @@ impl Conversation {
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
 pub enum ConversationSettings {
-    #[display(fmt = "direct {_0}")]
+    #[display(fmt = "direct settings {{ {_0} }}")]
     Direct(DirectConversationSettings),
-    #[display(fmt = "group {_0}")]
+    #[display(fmt = "group settings {{ {_0} }}")]
     Group(GroupSettings),
 }
 
@@ -520,6 +524,10 @@ pub enum ConversationSettings {
 pub struct DirectConversationSettings {}
 
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
+#[display(
+    fmt = "Everyone can add participants: {}",
+    "if self.members_can_add_participants {\"✅\"} else {\"❌\"}"
+)]
 #[repr(C)]
 pub struct GroupSettings {
     // Everyone can add participants, if set to `true``.
@@ -1056,6 +1064,13 @@ pub trait RayGun:
         conversation_id: Uuid,
         message_id: Uuid,
         state: EmbedState,
+    ) -> Result<(), Error>;
+
+    /// Update conversation settings
+    async fn update_conversation_settings(
+        &mut self,
+        conversation_id: Uuid,
+        settings: ConversationSettings,
     ) -> Result<(), Error>;
 }
 
