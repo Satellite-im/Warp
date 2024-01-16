@@ -38,6 +38,9 @@ pub struct Directory {
     /// Format of the thumbnail
     thumbnail_format: Arc<RwLock<FormatType>>,
 
+    /// External reference pointing to the thumbnail
+    thumbnail_reference: Arc<RwLock<Option<String>>>,
+
     /// Favorite Directory
     favorite: Arc<RwLock<bool>>,
 
@@ -99,6 +102,7 @@ impl Default for Directory {
             description: Default::default(),
             thumbnail: Default::default(),
             thumbnail_format: Default::default(),
+            thumbnail_reference: Default::default(),
             favorite: Default::default(),
             creation: Arc::new(RwLock::new(timestamp)),
             modified: Arc::new(RwLock::new(timestamp)),
@@ -185,7 +189,7 @@ impl Directory {
             return Err(Error::DuplicateName);
         }
         self.items.write().push(Item::new_file(file));
-        self.set_modified();
+        self.set_modified(None);
         Ok(())
     }
 
@@ -200,7 +204,7 @@ impl Directory {
         }
 
         self.items.write().push(Item::new_directory(directory));
-        self.set_modified();
+        self.set_modified(None);
         Ok(())
     }
 
@@ -272,7 +276,7 @@ impl Directory {
         }
         let index = self.get_item_index(item_name)?;
         let item = self.items.write().remove(index);
-        self.set_modified();
+        self.set_modified(None);
         Ok(item)
     }
 
@@ -552,9 +556,19 @@ impl Directory {
         self.thumbnail.read().to_vec()
     }
 
+    pub fn set_thumbnail_reference(&self, reference: &str) {
+        *self.thumbnail_reference.write() = Some(reference.to_string());
+        *self.modified.write() = Utc::now();
+        self.signal();
+    }
+
+    pub fn thumbnail_reference(&self) -> Option<String> {
+        self.thumbnail_reference.read().clone()
+    }
+
     pub fn set_favorite(&self, fav: bool) {
         *self.favorite.write() = fav;
-        self.set_modified();
+        self.set_modified(None);
         self.signal();
     }
 
@@ -575,8 +589,12 @@ impl Directory {
         self.get_items().iter().map(Item::size).sum()
     }
 
-    pub fn set_modified(&self) {
-        *self.modified.write() = Utc::now()
+    pub fn set_creation(&self, creation: DateTime<Utc>) {
+        *self.creation.write() = creation
+    }
+
+    pub fn set_modified(&self, modified: Option<DateTime<Utc>>) {
+        *self.modified.write() = modified.unwrap_or(Utc::now())
     }
 
     pub fn path(&self) -> &str {
