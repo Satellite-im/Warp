@@ -86,7 +86,7 @@ impl FileStore {
         let path = Arc::default();
         let modified = Utc::now();
         let index_cid = Arc::new(RwLock::new(index_cid));
-        let thumbnail_store = ThumbnailGenerator::default();
+        let thumbnail_store = ThumbnailGenerator::new(ipfs.clone());
 
         let location_path = config.path.clone();
 
@@ -410,9 +410,10 @@ impl FileStore {
                 let file = file.clone();
                 async move {
                     match store.get(ticket).await {
-                        Ok((extension_type, thumbnail)) => {
+                        Ok((extension_type, path, thumbnail)) => {
                             file.set_thumbnail(&thumbnail);
                             file.set_thumbnail_format(extension_type.into());
+                            file.set_thumbnail_reference(&path.to_string());
                         }
                         Err(_e) => {}
                     }
@@ -439,7 +440,7 @@ impl FileStore {
             }).await;
         };
 
-        Ok(ConstellationProgressStream(progress_stream.boxed()))
+        Ok(progress_stream.boxed())
     }
 
     pub async fn get(&self, name: &str, path: &str) -> Result<(), Error> {
@@ -546,9 +547,10 @@ impl FileStore {
         file.hash_mut().hash_from_slice(buffer)?;
 
         match self.thumbnail_store.get(ticket).await {
-            Ok((extension_type, thumbnail)) => {
+            Ok((extension_type, path, thumbnail)) => {
                 file.set_thumbnail(&thumbnail);
-                file.set_thumbnail_format(extension_type.into())
+                file.set_thumbnail_format(extension_type.into());
+                file.set_thumbnail_reference(&path.to_string());
             }
             Err(_e) => {}
         }
@@ -720,7 +722,7 @@ impl FileStore {
             }).await;
         };
 
-        Ok(ConstellationProgressStream(progress_stream.boxed()))
+        Ok(progress_stream.boxed())
     }
 
     /// Used to download data from the filesystem using a stream
@@ -867,9 +869,10 @@ impl FileStore {
             .insert_buffer(file.name(), &buffer, width, height, exact)
             .await;
 
-        if let Ok((extension_type, thumbnail)) = self.thumbnail_store.get(id).await {
+        if let Ok((extension_type, path, thumbnail)) = self.thumbnail_store.get(id).await {
             file.set_thumbnail(&thumbnail);
-            file.set_thumbnail_format(extension_type.into())
+            file.set_thumbnail_format(extension_type.into());
+            file.set_thumbnail_reference(&path.to_string());
         }
 
         Ok(())

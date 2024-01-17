@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek};
 use uuid::Uuid;
-use warp_derive::FFIFree;
 
 use super::guard::SignalGuard;
 use super::item::FormatType;
@@ -18,7 +17,7 @@ use super::item::FormatType;
 /// if we don't have a supported file type, we can just default to generic.
 ///
 /// TODO: Use mime to define the filetype
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum FileType {
     #[display(fmt = "generic")]
@@ -28,8 +27,17 @@ pub enum FileType {
     Mime(mediatype::MediaTypeBuf),
 }
 
+impl From<FileType> for FormatType {
+    fn from(ty: FileType) -> Self {
+        match ty {
+            FileType::Generic => FormatType::Generic,
+            FileType::Mime(mime) => FormatType::Mime(mime),
+        }
+    }
+}
+
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
-#[derive(Clone, Deserialize, Serialize, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct File {
     /// ID of the `File`
     id: Arc<Uuid>,
@@ -47,6 +55,9 @@ pub struct File {
 
     /// Format of the thumbnail
     thumbnail_format: Arc<RwLock<FormatType>>,
+
+    /// External reference pointing to the thumbnail
+    thumbnail_reference: Arc<RwLock<Option<String>>>,
 
     /// Favorite File
     favorite: Arc<RwLock<bool>>,
@@ -83,6 +94,7 @@ impl std::fmt::Debug for File {
             .field("name", &self.name())
             .field("description", &self.description())
             .field("thumbnail", &self.thumbnail_format())
+            .field("reference", &self.reference())
             .field("favorite", &self.favorite())
             .field("creation", &self.creation())
             .field("modified", &self.modified())
@@ -115,6 +127,7 @@ impl Default for File {
             size: Default::default(),
             thumbnail: Default::default(),
             thumbnail_format: Default::default(),
+            thumbnail_reference: Default::default(),
             favorite: Default::default(),
             creation: Arc::new(RwLock::new(timestamp)),
             modified: Arc::new(RwLock::new(timestamp)),
@@ -240,8 +253,18 @@ impl File {
         self.signal();
     }
 
+    pub fn set_thumbnail_reference(&self, reference: &str) {
+        *self.thumbnail_reference.write() = Some(reference.to_string());
+        *self.modified.write() = Utc::now();
+        self.signal();
+    }
+
     pub fn reference(&self) -> Option<String> {
         self.reference.read().clone()
+    }
+
+    pub fn thumbnail_reference(&self) -> Option<String> {
+        self.thumbnail_reference.read().clone()
     }
 
     pub fn size(&self) -> usize {
@@ -266,9 +289,13 @@ impl File {
         self.signal();
     }
 
-    pub fn set_modified(&self) {
-        *self.modified.write() = Utc::now();
-        self.signal();
+    pub fn set_creation(&self, creation: DateTime<Utc>) {
+        *self.creation.write() = creation
+    }
+
+    pub fn set_modified(&self, modified: Option<DateTime<Utc>>) {
+        *self.modified.write() = modified.unwrap_or(Utc::now());
+        self.signal()
     }
 
     pub fn hash(&self) -> Hash {
@@ -486,26 +513,5 @@ mod test {
         assert!(long_file.name().len() == 256);
         assert_eq!(long_file.name(), &long_name[..256]);
         assert_ne!(long_file.name(), &long_name[..255]);
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod ffi {
-    use crate::constellation::file::File;
-    use std::ffi::CStr;
-    #[allow(unused)]
-    use std::ffi::{c_void, CString};
-    #[allow(unused)]
-    use std::os::raw::{c_char, c_int};
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn file_new(name: *const c_char) -> *mut File {
-        let name = match name.is_null() {
-            true => "unused".to_string(),
-            false => CStr::from_ptr(name).to_string_lossy().to_string(),
-        };
-        let file = Box::new(File::new(name.as_str()));
-        Box::into_raw(file)
     }
 }

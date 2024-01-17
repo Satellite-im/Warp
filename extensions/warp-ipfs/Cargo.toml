@@ -27,6 +27,8 @@ bs58 = "0.4"
 
 tracing = "0.1"
 
+async-recursion = "1"
+
 chrono = { workspace = true, features = ["serde"] }
 
 void.workspace = true
