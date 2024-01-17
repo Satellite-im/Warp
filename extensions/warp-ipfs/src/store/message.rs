@@ -507,27 +507,39 @@ impl MessageStore {
                             kind,
                         } => match kind {
                             ConversationRequestKind::Key => {
-                                let conversation = store
-                                    .conversations
-                                    .get(conversation_id)
-                                    .await
-                                    .expect("Conversation exist");
+                                let mut retry = 5;
+                                let conversation = loop {
+                                    let conversation = store
+                                        .conversations
+                                        .get(conversation_id)
+                                        .await
+                                        .expect("Conversation exist");
 
-                                if !matches!(
-                                    conversation.conversation_type,
-                                    ConversationType::Group { .. }
-                                ) {
-                                    //Only group conversations support keys
-                                    continue;
-                                }
+                                    if !matches!(
+                                        conversation.conversation_type,
+                                        ConversationType::Group { .. }
+                                    ) {
+                                        //Only group conversations support keys
+                                        break Err(Error::InvalidConversation);
+                                    }
 
-                                if !conversation.recipients().contains(&payload.sender()) {
-                                    warn!(
-                                        "{} is not apart of conversation {conversation_id}",
-                                        payload.sender()
-                                    );
-                                    continue;
-                                }
+                                    if !conversation.recipients().contains(&payload.sender()) {
+                                        if retry == 0 {
+                                            error!(conversation_id = %conversation_id, sender = %payload.sender(), "not apart of conversation");
+                                            break Err(Error::IdentityDoesntExist);
+                                        }
+                                        tokio::time::sleep(Duration::from_millis(500)).await;
+                                        retry -= 1;
+                                        continue;
+                                    }
+
+                                    break Ok(conversation);
+                                };
+
+                                let conversation = match conversation {
+                                    Ok(conversation) => conversation,
+                                    Err(_e) => continue,
+                                };
 
                                 let mut keystore =
                                     match store.conversation_keystore(conversation_id).await {
@@ -805,12 +817,23 @@ impl MessageStore {
                                     ecdh_decrypt(own_did, Some(&recipient), data.data())
                                 }
                                 ConversationType::Group { .. } => {
-                                    let key = match store.conversation_keystore(conversation_id).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
-                                        Ok(key) => key,
-                                        Err(e) => {
-                                            tracing::warn!(id = %conversation_id, sender = %data.sender(), error = %e, "Failed to obtain key");
-                                            continue;
-                                        }
+                                    let mut sent = false;
+                                    let key = loop {
+                                        let keystore = store.conversation_keystore(conversation_id).await.expect("keystore is already created for group prior to polling stream");
+
+                                        let key = match keystore.get_latest(own_did, &data.sender()) {
+                                            Ok(key) => key,
+                                            Err(_) => {
+                                                if !sent {
+                                                    _ = store.request_key(conversation_id, &data.sender()).await;
+                                                    sent = true;
+                                                }
+                                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                                continue;
+                                            }
+                                        };
+
+                                        break key;
                                     };
 
                                     Cipher::direct_decrypt(data.data(), &key)
@@ -1481,14 +1504,14 @@ impl MessageStore {
 
                 self.conversations.set(conversation).await?;
 
+                self.set_conversation_keystore(conversation_id, keystore)
+                    .await?;
+
                 let stream = self
                     .ipfs
                     .pubsub_subscribe(topic)
                     .await
                     .expect("not subscribed already to topic");
-
-                self.set_conversation_keystore(conversation_id, keystore)
-                    .await?;
 
                 self.start_task(conversation_id, stream).await;
 
@@ -2469,12 +2492,13 @@ impl MessageStore {
 
         self.publish(conversation_id, None, event, true).await?;
 
+        if let Err(_e) = self.request_key(conversation_id, did_key).await {}
+
         let new_event = ConversationEvents::NewGroupConversation { conversation };
 
         self.send_single_conversation_event(did_key, conversation_id, new_event)
             .await?;
 
-        if let Err(_e) = self.request_key(conversation_id, did_key).await {}
         Ok(())
     }
 
