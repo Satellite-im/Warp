@@ -774,7 +774,7 @@ impl MultiPass for WarpIpfs {
             }
             IdentityUpdate::Picture(data) => {
                 let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if !(0..=2 * 1024 * 1024).contains(&len) {
                     return Err(Error::InvalidLength {
                         context: "profile picture".into(),
                         current: len,
@@ -842,7 +842,7 @@ impl MultiPass for WarpIpfs {
 
                 let len = metadata.len() as _;
 
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if !(0..=2 * 1024 * 1024).contains(&len) {
                     return Err(Error::InvalidLength {
                         context: "profile picture".into(),
                         current: len,
@@ -913,7 +913,7 @@ impl MultiPass for WarpIpfs {
             }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if !(0..=2 * 1024 * 1024).contains(&len) {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
@@ -981,7 +981,7 @@ impl MultiPass for WarpIpfs {
 
                 let len = metadata.len() as _;
 
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if !(0..=2 * 1024 * 1024).contains(&len) {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
@@ -1053,7 +1053,7 @@ impl MultiPass for WarpIpfs {
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.as_ref() {
                     let len = status.chars().count();
-                    if len == 0 || len > 512 {
+                    if !(0..512).contains(&len) {
                         return Err(Error::InvalidLength {
                             context: "status".into(),
                             current: len,
