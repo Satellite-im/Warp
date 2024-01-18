@@ -440,7 +440,7 @@ impl FileStore {
             }).await;
         };
 
-        Ok(ConstellationProgressStream(progress_stream.boxed()))
+        Ok(progress_stream.boxed())
     }
 
     pub async fn get(&self, name: &str, path: &str) -> Result<(), Error> {
@@ -722,7 +722,7 @@ impl FileStore {
             }).await;
         };
 
-        Ok(ConstellationProgressStream(progress_stream.boxed()))
+        Ok(progress_stream.boxed())
     }
 
     /// Used to download data from the filesystem using a stream

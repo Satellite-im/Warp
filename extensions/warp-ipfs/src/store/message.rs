@@ -27,8 +27,8 @@ use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType,
     DirectConversationSettings, EmbedState, GroupSettings, Location, Message, MessageEvent,
-    MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageStream, MessageType,
-    Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
+    MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
+    MessagesType, PinState, RayGunEventKind, ReactionState,
 };
 use warp::sync::Arc;
 
@@ -2324,7 +2324,7 @@ impl MessageStore {
                 let stream = conversation
                     .get_messages_stream(&self.ipfs, self.did.clone(), opt, keystore.as_ref())
                     .await?;
-                Ok(Messages::Stream(MessageStream(stream)))
+                Ok(Messages::Stream(stream))
             }
             MessagesType::List => {
                 let list = conversation
@@ -3243,7 +3243,7 @@ impl MessageStore {
             yield AttachmentKind::Pending(final_results.await)
         };
 
-        Ok(AttachmentEventStream(stream.boxed()))
+        Ok(stream.boxed())
     }
 
     pub async fn download(
@@ -3323,7 +3323,7 @@ impl MessageStore {
             }
         };
 
-        Ok(ConstellationProgressStream(progress_stream.boxed()))
+        Ok(progress_stream.boxed())
     }
 
     pub async fn send_event(
