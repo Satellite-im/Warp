@@ -1051,7 +1051,7 @@ impl MultiPass for WarpIpfs {
                 store.identity_update(identity).await?;
             }
             IdentityUpdate::StatusMessage(status) => {
-                if let Some(status) = status.clone() {
+                if let Some(status) = status.as_ref() {
                     let len = status.chars().count();
                     if len == 0 || len > 512 {
                         return Err(Error::InvalidLength {
