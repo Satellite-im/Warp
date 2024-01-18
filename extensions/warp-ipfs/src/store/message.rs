@@ -2988,6 +2988,25 @@ impl MessageStore {
 
                         in_stack.push(filename.clone());
 
+                        match constellation.open_directory("/chats_media") {
+                            Ok(_) => (),
+                            Err(_) => {
+                                let _ = constellation.create_directory("/chats_media", true).await;
+                                let _ = constellation.open_directory("/chats_media");
+                            }
+                        };
+
+
+                        match constellation.open_directory(&conversation.id().to_string()) {
+                            Ok(_) => (),
+                            Err(_) => {
+                                let _ = constellation.create_directory(&conversation.id().to_string(), true).await;
+                                let _ = constellation.open_directory(&conversation.id().to_string());
+
+                            }
+                        };
+                        
+
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
                             Err(e) => {
