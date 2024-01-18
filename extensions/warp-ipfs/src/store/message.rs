@@ -2445,6 +2445,10 @@ impl MessageStore {
             return Err(Error::PublicKeyIsBlocked);
         }
 
+        if conversation.restrict.contains(did_key) {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
         if conversation.recipients.contains(did_key) {
             return Err(Error::IdentityExist);
         }
