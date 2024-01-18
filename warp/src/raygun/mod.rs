@@ -384,7 +384,7 @@ impl Default for Conversation {
             created: timestamp,
             modified: timestamp,
             conversation_type,
-            settings: ConversationSettings::Direct(DirectConversationSettings::default()),
+            settings: ConversationSettings::default(),
             recipients,
         }
     }
@@ -466,6 +466,12 @@ pub enum ConversationSettings {
     Direct(DirectConversationSettings),
     #[display(fmt = "group settings {{ {_0} }}")]
     Group(GroupSettings),
+}
+
+impl Default for ConversationSettings {
+    fn default() -> Self {
+        Self::Direct(DirectConversationSettings::default())
+    }
 }
 
 /// Settings for a direct conversation.
