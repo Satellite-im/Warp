@@ -1941,7 +1941,7 @@ impl IdentityStore {
         };
 
         if let Some(cid) = old_cid {
-            if let Err(e) = self.delete_photo(cid).await {
+            if let Err(e) = super::document::image_dag::delete_image(&self.ipfs, cid).await {
                 error!("Error deleting picture: {e}");
             }
         }
@@ -2624,17 +2624,6 @@ impl IdentityStore {
         }
 
         Err(Error::InvalidIdentityBanner)
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
-        let ipfs = &self.ipfs;
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid).recursive().await?;
-        }
-        let blocks = ipfs.remove_block(cid, true).await?;
-        tracing::info!("{} blocks removed.", blocks.len());
-        Ok(())
     }
 
     pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {

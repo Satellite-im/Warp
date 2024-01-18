@@ -128,3 +128,13 @@ pub async fn get_image(
 
     Ok(id_img)
 }
+
+#[tracing::instrument]
+pub async fn delete_image(ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
+    if ipfs.is_pinned(&cid).await? {
+        ipfs.remove_pin(&cid).recursive().await?;
+    }
+    let blocks = ipfs.remove_block(cid, true).await?;
+    tracing::info!("{} blocks removed.", blocks.len());
+    Ok(())
+}
