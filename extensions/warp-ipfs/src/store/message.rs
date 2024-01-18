@@ -2988,47 +2988,32 @@ impl MessageStore {
 
                         in_stack.push(filename.clone());
 
-                        let current_path = PathBuf::from(
-                            constellation
-                                .get_path()
-                                .join("chats_media")
-                                .to_string_lossy()
-                                .replace('\\', "/"),
-                        );
-
-                        if let Err(_) =  constellation.open_directory(&current_path
+                        let current_path = constellation
+                            .get_path()
+                            .join("chats_media")
                             .to_string_lossy()
-                            .replace('\\', "/")) {
-                            let _ = constellation.create_directory(&current_path
-                                .to_string_lossy()
-                                .replace('\\', "/"), true).await;
+                            .replace('\\', "/");
+
+                        if let Err(_) =  constellation.root_directory().get_item_by_path(&current_path) {
+                            let _ = constellation.create_directory(&current_path, true).await;
                         }
 
                         // constellation.set_path(current_path);
 
-                        let current_path = PathBuf::from(
-                            constellation
-                                .get_path()
-                                .join(&conversation.id().to_string())
-                                .join(&filename)
-                                .to_string_lossy()
-                                .replace('\\', "/"),
-                        );
-
-                        if let Err(_) =  constellation.open_directory(&current_path
+                        let current_path = constellation
+                            .get_path()
+                            .join("chats_media")
+                            .join(&conversation.id().to_string())
                             .to_string_lossy()
-                            .replace('\\', "/")) {
-                            let _ = constellation.create_directory(&current_path
-                                .to_string_lossy()
-                                .replace('\\', "/"), true).await;
+                            .replace('\\', "/");
+
+                        if let Err(_) =  constellation.root_directory().get_item_by_path(&current_path) {
+                            let _ = constellation.create_directory(&current_path, true).await;
                         }
 
-                        // constellation.set_path(current_path);
+                        // constellation.set_path(current_path);                        
 
-                        let mut progress = match constellation.put(&current_path
-                            .to_string_lossy()
-                            .replace('\\', "/"), 
-                            &file).await {
+                        let mut progress = match constellation.put(&filename, &current_path).await {
                                 Ok(stream) => stream,
                                 Err(e) => {
                                     error!("Error uploading {filename}: {e}");
@@ -3042,6 +3027,8 @@ impl MessageStore {
 
                         let current_directory = current_directory.clone();
                         let filename = filename.to_string();
+
+                      
 
                         let stream = async_stream::stream! {
                             while let Some(item) = progress.next().await {
