@@ -770,7 +770,6 @@ impl MultiPass for WarpIpfs {
                 }
 
                 identity.username = username;
-                store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::Picture(data) => {
                 let len = data.len();
@@ -827,7 +826,6 @@ impl MultiPass for WarpIpfs {
                 }
 
                 identity.metadata.profile_picture = Some(cid);
-                store.identity_update(identity).await?;
             }
             IdentityUpdate::PicturePath(path) => {
                 if !path.is_file() {
@@ -902,14 +900,12 @@ impl MultiPass for WarpIpfs {
                 }
 
                 identity.metadata.profile_picture = Some(cid);
-                store.identity_update(identity).await?;
             }
             IdentityUpdate::ClearPicture => {
                 let document = identity.metadata.profile_picture.take();
                 if let Some(cid) = document {
                     old_cid = Some(cid);
                 }
-                store.identity_update(identity).await?;
             }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
@@ -966,7 +962,6 @@ impl MultiPass for WarpIpfs {
                 }
 
                 identity.metadata.profile_banner = Some(cid);
-                store.identity_update(identity).await?;
             }
             IdentityUpdate::BannerPath(path) => {
                 if !path.is_file() {
@@ -1041,14 +1036,12 @@ impl MultiPass for WarpIpfs {
                 }
 
                 identity.metadata.profile_banner = Some(cid);
-                store.identity_update(identity).await?;
             }
             IdentityUpdate::ClearBanner => {
                 let document = identity.metadata.profile_banner.take();
                 if let Some(cid) = document {
                     old_cid = Some(cid);
                 }
-                store.identity_update(identity).await?;
             }
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.as_ref() {
@@ -1063,11 +1056,9 @@ impl MultiPass for WarpIpfs {
                     }
                 }
                 identity.status_message = status;
-                store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::ClearStatusMessage => {
                 identity.status_message = None;
-                store.identity_update(identity.clone()).await?;
             }
         };
 
@@ -1076,6 +1067,8 @@ impl MultiPass for WarpIpfs {
                 error!("Error deleting picture: {e}");
             }
         }
+
+        store.identity_update(identity).await?;
 
         store.push_to_all().await;
 
