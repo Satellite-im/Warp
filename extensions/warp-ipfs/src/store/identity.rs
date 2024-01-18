@@ -1,13 +1,14 @@
 use crate::{
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
+    utils::ExtensionType,
 };
 use chrono::{DateTime, Utc};
 
 use futures::{
     channel::oneshot::{self, Canceled},
     stream::SelectAll,
-    SinkExt, StreamExt,
+    AsyncReadExt, SinkExt, StreamExt,
 };
 
 use ipfs::{Ipfs, Keypair};
@@ -18,9 +19,11 @@ use serde::{Deserialize, Serialize};
 use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsStr,
     path::PathBuf,
     time::{Duration, Instant},
 };
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 use tokio::sync::RwLock;
 use tracing::{error, warn, Span};
@@ -28,7 +31,7 @@ use tracing::{error, warn, Span};
 use warp::{
     constellation::file::FileType,
     crypto::{did_key::CoreSign, zeroize::Zeroizing},
-    multipass::identity::{IdentityImage, Platform},
+    multipass::identity::{IdentityImage, IdentityUpdate, Platform},
 };
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
@@ -1626,6 +1629,328 @@ impl IdentityStore {
         let identity = identity.resolve()?;
         _ = self.announce_identity_to_mesh().await;
         Ok(identity)
+    }
+
+    pub async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
+        let mut identity = self.own_identity_document().await?;
+
+        let mut old_cid = None;
+        match option {
+            IdentityUpdate::Username(username) => {
+                let len = username.chars().count();
+                if !(4..=64).contains(&len) {
+                    return Err(Error::InvalidLength {
+                        context: "username".into(),
+                        current: len,
+                        minimum: Some(4),
+                        maximum: Some(64),
+                    });
+                }
+
+                identity.username = username;
+            }
+            IdentityUpdate::Picture(data) => {
+                let len = data.len();
+                if !(0..=2 * 1024 * 1024).contains(&len) {
+                    return Err(Error::InvalidLength {
+                        context: "profile picture".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                tracing::trace!("image size = {}", len);
+
+                let (data, format) = tokio::task::spawn_blocking(move || {
+                    let cursor = std::io::Cursor::new(data);
+
+                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                    let format = image
+                        .format()
+                        .and_then(|format| ExtensionType::try_from(format).ok())
+                        .unwrap_or(ExtensionType::Other);
+
+                    let inner = image.into_inner();
+
+                    let data = inner.into_inner();
+                    Ok::<_, Error>((data, format))
+                })
+                .await
+                .map_err(anyhow::Error::from)??;
+
+                let cid = super::document::image_dag::store_photo(
+                    &self.ipfs,
+                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                    format.into(),
+                    Some(2 * 1024 * 1024),
+                )
+                .await?;
+
+                tracing::debug!("Image cid: {cid}");
+
+                if let Some(picture_cid) = identity.metadata.profile_picture {
+                    if picture_cid == cid {
+                        tracing::debug!("Picture is already on document. Not updating identity");
+                        return Ok(());
+                    }
+
+                    if let Some(banner_cid) = identity.metadata.profile_banner {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(picture_cid);
+                        }
+                    }
+                }
+
+                identity.metadata.profile_picture = Some(cid);
+            }
+            IdentityUpdate::PicturePath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(&path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if !(0..=2 * 1024 * 1024).contains(&len) {
+                    return Err(Error::InvalidLength {
+                        context: "profile picture".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let extension = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
+
+                tracing::trace!("image size = {}", len);
+
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                let cid = super::document::image_dag::store_photo(
+                    &self.ipfs,
+                    stream.boxed(),
+                    extension.into(),
+                    Some(2 * 1024 * 1024),
+                )
+                .await?;
+
+                tracing::debug!("Image cid: {cid}");
+
+                if let Some(picture_cid) = identity.metadata.profile_picture {
+                    if picture_cid == cid {
+                        tracing::debug!("Picture is already on document. Not updating identity");
+                        return Ok(());
+                    }
+
+                    if let Some(banner_cid) = identity.metadata.profile_banner {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(picture_cid);
+                        }
+                    }
+                }
+
+                identity.metadata.profile_picture = Some(cid);
+            }
+            IdentityUpdate::ClearPicture => {
+                let document = identity.metadata.profile_picture.take();
+                if let Some(cid) = document {
+                    old_cid = Some(cid);
+                }
+            }
+            IdentityUpdate::Banner(data) => {
+                let len = data.len();
+                if !(0..=2 * 1024 * 1024).contains(&len) {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                tracing::trace!("image size = {}", len);
+
+                let (data, format) = tokio::task::spawn_blocking(move || {
+                    let cursor = std::io::Cursor::new(data);
+
+                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                    let format = image
+                        .format()
+                        .and_then(|format| ExtensionType::try_from(format).ok())
+                        .unwrap_or(ExtensionType::Other);
+
+                    let inner = image.into_inner();
+
+                    let data = inner.into_inner();
+                    Ok::<_, Error>((data, format))
+                })
+                .await
+                .map_err(anyhow::Error::from)??;
+
+                let cid = super::document::image_dag::store_photo(
+                    &self.ipfs,
+                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                    format.into(),
+                    Some(2 * 1024 * 1024),
+                )
+                .await?;
+
+                tracing::debug!("Image cid: {cid}");
+
+                if let Some(banner_cid) = identity.metadata.profile_banner {
+                    if banner_cid == cid {
+                        tracing::debug!("Banner is already on document. Not updating identity");
+                        return Ok(());
+                    }
+
+                    if let Some(picture_cid) = identity.metadata.profile_picture {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(banner_cid);
+                        }
+                    }
+                }
+
+                identity.metadata.profile_banner = Some(cid);
+            }
+            IdentityUpdate::BannerPath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(&path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if !(0..=2 * 1024 * 1024).contains(&len) {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let extension = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
+
+                tracing::trace!("image size = {}", len);
+
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(std::mem::take(&mut buffer)),
+                            Ok(_n) => {
+                                yield Ok(buffer);
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                let cid = super::document::image_dag::store_photo(
+                    &self.ipfs,
+                    stream.boxed(),
+                    extension.into(),
+                    Some(2 * 1024 * 1024),
+                )
+                .await?;
+
+                tracing::debug!("Image cid: {cid}");
+
+                if let Some(banner_cid) = identity.metadata.profile_banner {
+                    if banner_cid == cid {
+                        tracing::debug!("Banner is already on document. Not updating identity");
+                        return Ok(());
+                    }
+
+                    if let Some(picture_cid) = identity.metadata.profile_picture {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(banner_cid);
+                        }
+                    }
+                }
+
+                identity.metadata.profile_banner = Some(cid);
+            }
+            IdentityUpdate::ClearBanner => {
+                let document = identity.metadata.profile_banner.take();
+                if let Some(cid) = document {
+                    old_cid = Some(cid);
+                }
+            }
+            IdentityUpdate::StatusMessage(status) => {
+                if let Some(status) = status.as_ref() {
+                    let len = status.chars().count();
+                    if !(0..512).contains(&len) {
+                        return Err(Error::InvalidLength {
+                            context: "status".into(),
+                            current: len,
+                            minimum: Some(1),
+                            maximum: Some(512),
+                        });
+                    }
+                }
+                identity.status_message = status;
+            }
+            IdentityUpdate::ClearStatusMessage => {
+                identity.status_message = None;
+            }
+        };
+
+        if let Some(cid) = old_cid {
+            if let Err(e) = self.delete_photo(cid).await {
+                error!("Error deleting picture: {e}");
+            }
+        }
+
+        self.identity_update(identity).await?;
+
+        self.push_to_all().await;
+
+        Ok(())
     }
 
     pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
