@@ -2254,9 +2254,11 @@ impl IdentityStore {
                 .map_err(|_| Error::InvalidIdentityPicture);
         }
 
-        if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
+        if let Some(cb) = self.config.store_setting.default_profile_picture.clone() {
             let identity = document.resolve()?;
-            let (picture, ty) = cb(&identity)?;
+            let (picture, ty) = tokio::task::spawn_blocking(move || cb(&identity))
+                .await
+                .map_err(anyhow::Error::from)??;
             let mut image = IdentityImage::default();
             image.set_data(picture);
             image.set_image_type(ty);
