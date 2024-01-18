@@ -998,9 +998,9 @@ impl MultiPass for WarpIpfs {
                     let mut buffer = vec![0u8; 512];
                     loop {
                         match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(512) => yield Ok(std::mem::take(&mut buffer)),
                             Ok(_n) => {
-                                yield Ok(buffer.clone());
+                                yield Ok(buffer);
                                 break;
                             },
                             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
