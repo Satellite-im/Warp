@@ -2996,8 +2996,12 @@ impl MessageStore {
                                 .replace('\\', "/"),
                         );
 
-                        if let Err(_) =  constellation.open_directory("/chats_media") {
-                            let _ = constellation.create_directory("/chats_media", true).await;
+                        if let Err(_) =  constellation.open_directory(&current_path
+                            .to_string_lossy()
+                            .replace('\\', "/")) {
+                            let _ = constellation.create_directory(&current_path
+                                .to_string_lossy()
+                                .replace('\\', "/"), true).await;
                         }
 
                         // constellation.set_path(current_path);
@@ -3011,8 +3015,12 @@ impl MessageStore {
                                 .replace('\\', "/"),
                         );
 
-                        if let Err(_) =  constellation.open_directory(&conversation.id().to_string()) {
-                            let _ = constellation.create_directory(&conversation.id().to_string(), true).await;
+                        if let Err(_) =  constellation.open_directory(&current_path
+                            .to_string_lossy()
+                            .replace('\\', "/")) {
+                            let _ = constellation.create_directory(&current_path
+                                .to_string_lossy()
+                                .replace('\\', "/"), true).await;
                         }
 
                         // constellation.set_path(current_path);
