@@ -2988,24 +2988,37 @@ impl MessageStore {
 
                         in_stack.push(filename.clone());
 
-                        match constellation.set_path("/chats_media") {
-                            Ok(_) => (),
-                            Err(_) => {
-                                let _ = constellation.create_directory("/chats_media", true).await;
-                                let _ = constellation.set_path("/chats_media");
-                            }
-                        };
+                        let current_path = PathBuf::from(
+                            constellation
+                                .get_path()
+                                .join("chats_media")
+                                .to_string_lossy()
+                                .replace('\\', "/"),
+                        );
 
+                        if let Err(_) =  constellation.open_directory("/chats_media") {
+                            let _ = constellation.create_directory("/chats_media", true).await;
+                        }
 
-                        match constellation.set_path(&conversation.id().to_string()) {
-                            Ok(_) => (),
-                            Err(_) => {
-                                let _ = constellation.create_directory(&conversation.id().to_string(), true).await;
-                                let _ = constellation.set_path(&conversation.id().to_string());
+                        constellation.set_path(current_path);
 
-                            }
-                        };
-                        
+                        println!("###### 1 - Current Dir Warp: {}", constellation.current_directory().unwrap().path().to_string());
+
+                        let current_path = PathBuf::from(
+                            constellation
+                                .get_path()
+                                .join(&conversation.id().to_string())
+                                .to_string_lossy()
+                                .replace('\\', "/"),
+                        );
+
+                        if let Err(_) =  constellation.open_directory(&conversation.id().to_string()) {
+                            let _ = constellation.create_directory(&conversation.id().to_string(), true).await;
+                        }
+
+                        constellation.set_path(current_path);
+
+                        println!("###### 2 - Current Dir Warp: {}", constellation.current_directory().unwrap().path().to_string());
 
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
