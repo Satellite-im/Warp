@@ -70,15 +70,13 @@ impl Constellation for MemorySystem {
 
         let name = name.to_string();
 
-        let stream = ConstellationProgressStream(
-            futures::stream::once(async move {
-                Progression::ProgressComplete {
-                    name,
-                    total: Some(bytes as _),
-                }
-            })
-            .boxed(),
-        );
+        let stream = futures::stream::once(async move {
+            Progression::ProgressComplete {
+                name,
+                total: Some(bytes as _),
+            }
+        })
+        .boxed();
 
         Ok(stream)
     }
