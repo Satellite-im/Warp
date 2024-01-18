@@ -3111,6 +3111,38 @@ impl MessageStore {
 
                         in_stack.push(filename.clone());
 
+                        // async fn open_or_create_directory(filesystem: FileStore, path: String) {
+                        //     let path2 = path.clone();
+                        //     let path3 = path.clone();
+                        //     match filesystem.clone().open_directory(&path3) {
+                        //         Ok(_) => (),
+                        //         Err(_) => {
+                        //             filesystem.clone().create_directory(&path2, true).await;
+                        //         }
+                        //     }
+                        // }
+
+                        // open_or_create_directory(self.filesystem.clone(), "/chats_media".to_string()).await;
+                        // open_or_create_directory(self.filesystem.clone(), conversation.id().to_string()).await;
+
+                        match constellation.open_directory("/chats_media") {
+                            Ok(_) => (),
+                            Err(_) => {
+                                let _ = constellation.create_directory("/chats_media", true).await;
+                                let _ = constellation.open_directory("/chats_media");
+                            }
+                        };
+
+
+                        match constellation.open_directory(&conversation.id().to_string()) {
+                            Ok(_) => (),
+                            Err(_) => {
+                                let _ = constellation.create_directory(&conversation.id().to_string(), true).await;
+                                let _ = constellation.open_directory(&conversation.id().to_string());
+
+                            }
+                        };
+                        
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
                             Err(e) => {
