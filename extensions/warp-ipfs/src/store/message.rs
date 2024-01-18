@@ -3000,14 +3000,13 @@ impl MessageStore {
                             let _ = constellation.create_directory("/chats_media", true).await;
                         }
 
-                        constellation.set_path(current_path);
-
-                        println!("###### 1 - Current Dir Warp: {}", constellation.current_directory().unwrap().path().to_string());
+                        // constellation.set_path(current_path);
 
                         let current_path = PathBuf::from(
                             constellation
                                 .get_path()
                                 .join(&conversation.id().to_string())
+                                .join(&filename)
                                 .to_string_lossy()
                                 .replace('\\', "/"),
                         );
@@ -3016,20 +3015,21 @@ impl MessageStore {
                             let _ = constellation.create_directory(&conversation.id().to_string(), true).await;
                         }
 
-                        constellation.set_path(current_path);
+                        // constellation.set_path(current_path);
 
-                        println!("###### 2 - Current Dir Warp: {}", constellation.current_directory().unwrap().path().to_string());
-
-                        let mut progress = match constellation.put(&filename, &file).await {
-                            Ok(stream) => stream,
-                            Err(e) => {
-                                error!("Error uploading {filename}: {e}");
-                                let stream = async_stream::stream! {
-                                    yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
-                                };
-                                streams.push(stream.boxed());
-                                continue;
-                            }
+                        let mut progress = match constellation.put(&current_path
+                            .to_string_lossy()
+                            .replace('\\', "/"), 
+                            &file).await {
+                                Ok(stream) => stream,
+                                Err(e) => {
+                                    error!("Error uploading {filename}: {e}");
+                                    let stream = async_stream::stream! {
+                                        yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
+                                    };
+                                    streams.push(stream.boxed());
+                                    continue;
+                                }
                         };
 
                         let current_directory = current_directory.clone();
