@@ -2988,20 +2988,20 @@ impl MessageStore {
 
                         in_stack.push(filename.clone());
 
-                        match constellation.open_directory("/chats_media") {
+                        match constellation.set_path("/chats_media") {
                             Ok(_) => (),
                             Err(_) => {
                                 let _ = constellation.create_directory("/chats_media", true).await;
-                                let _ = constellation.open_directory("/chats_media");
+                                let _ = constellation.set_path("/chats_media");
                             }
                         };
 
 
-                        match constellation.open_directory(&conversation.id().to_string()) {
+                        match constellation.set_path(&conversation.id().to_string()) {
                             Ok(_) => (),
                             Err(_) => {
                                 let _ = constellation.create_directory(&conversation.id().to_string(), true).await;
-                                let _ = constellation.open_directory(&conversation.id().to_string());
+                                let _ = constellation.set_path(&conversation.id().to_string());
 
                             }
                         };
