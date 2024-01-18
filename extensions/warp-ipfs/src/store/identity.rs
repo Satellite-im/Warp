@@ -2259,6 +2259,18 @@ impl IdentityStore {
             let (picture, ty) = tokio::task::spawn_blocking(move || cb(&identity))
                 .await
                 .map_err(anyhow::Error::from)??;
+
+            let len = picture.len();
+
+            if !(0..=2 * 1024 * 1024).contains(&len) {
+                return Err(Error::InvalidLength {
+                    context: "profile banner".into(),
+                    current: len,
+                    minimum: Some(1),
+                    maximum: Some(2 * 1024 * 1024),
+                });
+            }
+
             let mut image = IdentityImage::default();
             image.set_data(picture);
             image.set_image_type(ty);
