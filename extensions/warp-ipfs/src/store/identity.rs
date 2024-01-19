@@ -37,9 +37,10 @@ use warp::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
         MultiPassEventKind,
     },
-    sync::Arc,
     tesseract::Tesseract,
 };
+
+use std::sync::Arc;
 
 use super::{
     connected_to_peer, did_keypair,

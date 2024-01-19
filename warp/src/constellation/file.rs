@@ -1,12 +1,13 @@
 #![allow(clippy::result_large_err)]
 use crate::error::Error;
-use crate::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use mediatype;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use super::guard::SignalGuard;
@@ -360,7 +361,7 @@ impl File {
 }
 
 impl File {
-    pub fn hash_mut(&self) -> crate::sync::RwLockWriteGuard<Hash> {
+    pub fn hash_mut(&self) -> parking_lot::RwLockWriteGuard<Hash> {
         self.hash.write()
     }
 }

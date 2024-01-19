@@ -20,7 +20,7 @@ futures.workspace = true
 thiserror.workspace = true
 dyn-clone.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
-
+parking_lot.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["full"] }

@@ -37,7 +37,7 @@ use self::gossipsub_sender::GossipSubSender;
 #[derive(Clone)]
 pub struct BlinkImpl {
     // the DID generated from Multipass. has been cloned. doesn't contain the private key anymore.
-    own_id: Arc<warp::sync::RwLock<Option<DID>>>,
+    own_id: Arc<parking_lot::RwLock<Option<DID>>>,
     ui_event_ch: broadcast::Sender<BlinkEventKind>,
 
     gossipsub_listener: GossipSubListener,
@@ -64,8 +64,8 @@ impl BlinkImpl {
         let (ui_event_ch, _rx) = broadcast::channel(1024);
         let (gossipsub_tx, gossipsub_rx) = mpsc::unbounded_channel();
 
-        let ipfs = Arc::new(warp::sync::RwLock::new(None));
-        let own_id_private = Arc::new(warp::sync::RwLock::new(None));
+        let ipfs = Arc::new(parking_lot::RwLock::new(None));
+        let own_id_private = Arc::new(parking_lot::RwLock::new(None));
         let gossipsub_sender = GossipSubSender::new(own_id_private.clone(), ipfs.clone());
         let gossipsub_listener =
             GossipSubListener::new(ipfs.clone(), gossipsub_tx, gossipsub_sender.clone());
@@ -82,7 +82,7 @@ impl BlinkImpl {
         });
 
         let blink_impl = Self {
-            own_id: Arc::new(warp::sync::RwLock::new(None)),
+            own_id: Arc::new(parking_lot::RwLock::new(None)),
             ui_event_ch: ui_event_ch.clone(),
             gossipsub_sender,
             gossipsub_listener,

@@ -13,9 +13,9 @@ use std::io::prelude::*;
 
 use std::path::PathBuf;
 
-use std::sync::atomic::AtomicBool;
+use std::sync::{atomic::AtomicBool, Arc};
 
-use crate::sync::{Arc, RwLock};
+use parking_lot::RwLock;
 
 type Result<T> = std::result::Result<T, Error>;
 

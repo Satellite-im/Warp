@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use warp::error::Error;
 
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::Arc;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::constellation::directory::Directory;
 use warp::module::Module;
