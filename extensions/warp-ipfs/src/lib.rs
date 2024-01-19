@@ -42,9 +42,9 @@ use warp::constellation::{
 use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
 use warp::raygun::{
-    AttachmentEventStream, Conversation, EmbedState, GroupSettings, Location, Message,
-    MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus, Messages,
-    PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
+    AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
+    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
+    Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
     RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
@@ -1297,7 +1297,7 @@ impl Friends for WarpIpfs {
 impl FriendsEvent for WarpIpfs {
     async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let store = self.identity_store(true).await?;
-        store.subscribe().await.map(MultiPassEventStream)
+        store.subscribe().await
     }
 }
 
@@ -1503,6 +1503,16 @@ impl RayGun for WarpIpfs {
             .embeds(conversation_id, message_id, state)
             .await
     }
+
+    async fn update_conversation_settings(
+        &mut self,
+        conversation_id: Uuid,
+        settings: ConversationSettings,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .update_conversation_settings(conversation_id, settings)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -1565,7 +1575,7 @@ impl RayGunGroupConversation for WarpIpfs {
 impl RayGunStream for WarpIpfs {
     async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         let rx = self.raygun_tx.subscribe().await?;
-        Ok(RayGunEventStream(rx))
+        Ok(rx)
     }
     async fn get_conversation_stream(
         &mut self,
@@ -1573,7 +1583,7 @@ impl RayGunStream for WarpIpfs {
     ) -> Result<MessageEventStream, Error> {
         let store = self.messaging_store()?;
         let stream = store.get_conversation_stream(conversation_id).await?;
-        Ok(MessageEventStream(stream.boxed()))
+        Ok(stream.boxed())
     }
 }
 

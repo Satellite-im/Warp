@@ -28,7 +28,9 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{DirectConversationSettings, MessageEvent, PinState, ReactionState},
+    raygun::{
+        ConversationSettings, DirectConversationSettings, MessageEvent, PinState, ReactionState,
+    },
     tesseract::Tesseract,
 };
 
@@ -251,6 +253,7 @@ pub enum ConversationUpdateKind {
     AddRestricted { did: DID },
     RemoveRestricted { did: DID },
     ChangeName { name: Option<String> },
+    ChangeSettings { settings: ConversationSettings },
 }
 
 // Note that this are temporary
