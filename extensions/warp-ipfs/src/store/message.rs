@@ -17,12 +17,12 @@ use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tracing::Span;
+use tracing::{error, info, trace, warn};
 use uuid::Uuid;
 use warp::constellation::{ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
 use warp::error::Error;
-use warp::logging::tracing::{error, info, trace, warn};
 use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType,
@@ -30,7 +30,8 @@ use warp::raygun::{
     MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
     MessagesType, PinState, RayGunEventKind, ReactionState,
 };
-use warp::sync::Arc;
+
+use std::sync::Arc;
 
 use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;

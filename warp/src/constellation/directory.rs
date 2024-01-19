@@ -3,10 +3,11 @@ use super::file::File;
 use super::guard::SignalGuard;
 use super::item::{FormatType, Item};
 use crate::error::Error;
-use crate::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
 use derive_more::Display;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// `DirectoryType` handles the supported types for the directory.

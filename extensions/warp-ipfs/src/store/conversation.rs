@@ -13,7 +13,6 @@ use uuid::Uuid;
 use warp::{
     crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
-    logging::tracing::info,
     raygun::{
         Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
         GroupSettings, Message, MessageOptions, MessagePage, MessageReference, Messages,
@@ -758,13 +757,13 @@ impl MessageDocument {
         message: Message,
         keystore: Option<&Keystore>,
     ) -> Result<(), Error> {
-        info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
+        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
         let old_message = self.resolve(ipfs, did, keystore).await?;
 
         if old_message.id() != message.id()
             || old_message.conversation_id() != message.conversation_id()
         {
-            info!(id = %self.conversation_id, message_id = %self.id, "Message does not match document");
+            tracing::info!(id = %self.conversation_id, message_id = %self.id, "Message does not match document");
             //TODO: Maybe remove message from this point?
             return Err(Error::InvalidMessage);
         }
@@ -784,9 +783,9 @@ impl MessageDocument {
 
         let message_cid = ipfs.dag().put().serialize(data)?.await?;
 
-        info!(id = %self.conversation_id, message_id = %self.id, "Setting Message to document");
+        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Setting Message to document");
         self.message = message_cid;
-        info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
+        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
         Ok(())
     }
 

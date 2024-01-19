@@ -19,8 +19,9 @@ use warp::{
         directory::Directory, ConstellationEventKind, ConstellationProgressStream, Progression,
     },
     error::Error,
-    sync::RwLock,
 };
+
+use parking_lot::RwLock;
 
 use crate::{
     config::{self, Config},
