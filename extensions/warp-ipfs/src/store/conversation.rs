@@ -20,7 +20,6 @@ use warp::{
         DID,
     },
     error::Error,
-    logging::tracing::info,
     raygun::{
         Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
         GroupSettings, Message, MessageOptions, MessagePage, MessageReference, MessageType,
@@ -892,7 +891,7 @@ impl MessageDocument {
         key: Either<&DID, &Keystore>,
         nonce: Option<&[u8]>,
     ) -> Result<(), Error> {
-        info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
+        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
         let old_message = self.resolve(ipfs, did, true, key).await?;
 
         let sender = self.sender.to_did();
@@ -973,7 +972,7 @@ impl MessageDocument {
             };
         }
 
-        info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
+        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
         Ok(())
     }
 

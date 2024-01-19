@@ -9,21 +9,21 @@ use mp4::{
     TrexBox, WriteBox,
 };
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use std::{
     collections::{HashMap, VecDeque},
     fs::{self, create_dir_all, File, OpenOptions},
     io::{BufWriter, Read, Seek, SeekFrom, Write},
     path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Instant,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
-
-use warp::{
-    crypto::DID,
-    sync::{Arc, RwLock},
-};
+use warp::crypto::DID;
 
 static MP4_LOGGER: Lazy<RwLock<Option<Mp4Logger>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(None));

@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use warp::error::Error;
 
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::Arc;
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::constellation::directory::Directory;
 use warp::module::Module;

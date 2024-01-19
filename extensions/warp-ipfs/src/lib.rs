@@ -17,12 +17,14 @@ use ipfs::p2p::{
     IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
 };
 
+use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use store::document::ExtractedRootDocument;
 use store::event_subscription::EventSubscription;
@@ -41,15 +43,13 @@ use warp::constellation::{
 };
 use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
+use warp::module::Module;
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
     Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
     RayGunGroupConversation, RayGunStream, ReactionState,
 };
-use warp::sync::{Arc, RwLock};
-
-use warp::module::Module;
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
