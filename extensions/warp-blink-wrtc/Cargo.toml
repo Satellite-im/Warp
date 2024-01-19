@@ -33,6 +33,7 @@ tokio = { workspace = true }
 warp.workspace = true
 webrtc = "0.6.0"
 rayon = "1.8"
+parking_lot.workspace = true
 
 # media 
 cpal = "0.15.0"

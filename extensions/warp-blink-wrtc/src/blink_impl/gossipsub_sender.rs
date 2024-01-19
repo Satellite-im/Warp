@@ -5,7 +5,9 @@ use std::{
     time::Duration,
 };
 
+use super::store::{ecdh_decrypt, ecdh_encrypt};
 use futures::channel::oneshot;
+use parking_lot::RwLock;
 use rust_ipfs::Ipfs;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::{
@@ -15,12 +17,7 @@ use tokio::{
     },
     time::Instant,
 };
-use warp::{
-    crypto::{cipher::Cipher, DID},
-    sync::RwLock,
-};
-
-use super::store::{ecdh_decrypt, ecdh_encrypt};
+use warp::crypto::{cipher::Cipher, DID};
 
 use crate::notify_wrapper::NotifyWrapper;
 

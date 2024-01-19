@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures::StreamExt;
+use parking_lot::RwLock;
 use rust_ipfs::Ipfs;
 use tokio::{
     sync::{
@@ -10,7 +11,7 @@ use tokio::{
     time::Instant,
 };
 use uuid::Uuid;
-use warp::{crypto::DID, sync::RwLock};
+use warp::crypto::DID;
 
 use super::{
     signaling::{
