@@ -7,15 +7,17 @@ use std::{
     fs::OpenOptions,
     io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use uuid::Uuid;
 use warp::{error::Error, libipld::Ipld, SingleHandle};
 use warp::{
     libipld::Cid,
     sata::{Sata, State},
-    sync::{Arc, RwLock},
     Extension,
 };
+
+use parking_lot::RwLock;
 
 use warp::data::DataType;
 use warp::module::Module;
