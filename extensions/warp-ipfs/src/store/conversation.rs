@@ -910,9 +910,8 @@ impl MessageDocument {
 
         let reactions = message.reactions();
 
-        self.reactions = (!reactions.is_empty())
-            .then_some(ipfs.dag().put().serialize(reactions)?.await.ok())
-            .flatten();
+        self.reactions =
+            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions)?.await?);
 
         if message.lines() != old_message.lines() {
             let lines = message.lines();
