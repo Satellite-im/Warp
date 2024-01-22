@@ -91,8 +91,6 @@ impl Constellation for MemorySystem {
             .cloned()
             .map_err(anyhow::Error::from)?;
 
-        
-
         tokio::fs::write(path, internal_file.data().as_slice()).await?;
 
         let name = name.to_string();
