@@ -859,6 +859,13 @@ impl MessageDocument {
         Ok(bytes)
     }
 
+    pub async fn nonce_from_message(&self, ipfs: &Ipfs) -> Result<[u8; 12], Error> {
+        let raw_encrypted_message = self.raw_encrypted_message(ipfs).await?;
+        let (nonce, _) = super::extract_data_slice::<12>(&raw_encrypted_message);
+        let nonce: [u8; 12] = nonce.try_into().map_err(anyhow::Error::from)?;
+        Ok(nonce)
+    }
+
     pub async fn attachments(&self, ipfs: &Ipfs) -> Vec<FileAttachmentDocument> {
         let cid = match self.attachments {
             Some(cid) => cid,
@@ -933,7 +940,15 @@ impl MessageDocument {
                 }
             }
 
-            //TODO: Compare nonce and prevent the same nonce from being used in current message
+            let current_nonce = self.nonce_from_message(ipfs).await?;
+
+            if matches!(nonce, Some(nonce) if nonce.eq(&current_nonce)) {
+                // Since the nonce from the current message matches the new one sent,
+                // we would consider this as an invalid message as a nonce should
+                // NOT be reused
+                // TODO: Maybe track previous nonces?
+                return Err(Error::InvalidMessage);
+            }
 
             let bytes = serde_json::to_vec(&lines)?;
 

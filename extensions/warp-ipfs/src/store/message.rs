@@ -2794,10 +2794,8 @@ impl MessageStore {
             .get_message_document(conversation_id, message_id)
             .await?;
 
-        let raw_enc_message = message_document.raw_encrypted_message(&self.ipfs).await?;
-
         // extract nonce to provide in event
-        let (nonce, _) = extract_data_slice::<12>(&raw_enc_message);
+        let nonce = message_document.nonce_from_message(&self.ipfs).await?;
 
         let signature = message_document.signature.expect("message to be signed");
 
