@@ -162,7 +162,7 @@ pub trait Constellation:
     }
 
     /// Used to download a file from the filesystem
-    async fn get(&self, _: &str, _: &str) -> Result<(), Error> {
+    async fn get(&self, _: &str, _: &str) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 
