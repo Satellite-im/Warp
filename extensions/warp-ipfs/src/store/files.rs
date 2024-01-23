@@ -406,31 +406,57 @@ impl FileStore {
         Ok(progress_stream.boxed())
     }
 
-    pub async fn get(&self, name: &str, path: &str) -> Result<(), Error> {
+    pub async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         let ipfs = self.ipfs.clone();
 
+        let path = PathBuf::from(path);
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
-        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
+        let reference = file.reference().ok_or(Error::Other)?.parse::<IpfsPath>()?; //Reference not found
+        let fs_tx = self.constellation_tx.clone();
+        let name = name.to_string();
 
-        let mut stream = ipfs.get_unixfs(reference.parse::<IpfsPath>()?, path);
-
-        while let Some(status) = stream.next().await {
-            if let UnixfsStatus::FailedStatus { error, .. } = status {
-                return Err(error.map(Error::Any).unwrap_or(Error::Other));
+        let stream = async_stream::stream! {
+            let mut stream = ipfs.get_unixfs(reference, &path);
+            while let Some(status) = stream.next().await {
+                match status {
+                    UnixfsStatus::CompletedStatus { total_size, .. } => {
+                        yield Progression::ProgressComplete {
+                            name: name.to_string(),
+                            total: total_size,
+                        };
+                    }
+                    UnixfsStatus::FailedStatus {
+                        written, error, ..
+                    } => {
+                        yield Progression::ProgressFailed {
+                            name: name.to_string(),
+                            last_size: Some(written),
+                            error: error.map(|e| e.to_string()),
+                        };
+                        return;
+                    }
+                    UnixfsStatus::ProgressStatus { written, total_size } => {
+                        yield Progression::CurrentProgress {
+                            name: name.to_string(),
+                            current: written,
+                            total: total_size,
+                        };
+                    }
+                }
             }
-        }
 
-        //TODO: Validate file against the hashed reference
-        self.constellation_tx
-            .emit(ConstellationEventKind::Downloaded {
-                filename: file.name(),
-                size: Some(file.size()),
-                location: Some(PathBuf::from(path)),
-            })
-            .await;
+            fs_tx
+                .emit(ConstellationEventKind::Downloaded {
+                    filename: file.name(),
+                    size: Some(file.size()),
+                    location: Some(path),
+                })
+                .await;
 
-        Ok(())
+        };
+
+        Ok(stream.boxed())
     }
 
     pub async fn put_buffer(&mut self, name: &str, buffer: &[u8]) -> Result<(), Error> {
