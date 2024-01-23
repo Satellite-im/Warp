@@ -426,7 +426,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
                                     &message.lines().join("\n"),
-                                    &format!("{}", message.pinned()),
+                                    &format!("{}", message.pinned().is_some()),
                                     &emojis.join(" ")
                                 ]);
                             }
@@ -463,7 +463,7 @@ async fn main() -> anyhow::Result<()> {
                                             &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                             &username,
                                             &message.lines().join("\n"),
-                                            &format!("{}", message.pinned()),
+                                            &format!("{}", message.pinned().is_some()),
                                             &emojis.join(" ")
                                         ]);
                                     }
@@ -496,7 +496,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
                                     &message.lines().join("\n"),
-                                    &format!("{}", message.pinned()),
+                                    &format!("{}", message.pinned().is_some()),
                                     &emojis.join(" ")
                                 ]);
                             }
@@ -526,7 +526,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
                                     &message.lines().join("\n"),
-                                    &format!("{}", message.pinned()),
+                                    &format!("{}", message.pinned().is_some()),
                                     &emojis.join(" ")
                                 ]);
                             }
@@ -558,7 +558,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
                                     &message.lines().join("\n"),
-                                    &format!("{}", message.pinned()),
+                                    &format!("{}", message.pinned().is_some()),
                                     &emojis.join(" ")
                                 ]);
                             }

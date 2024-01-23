@@ -27,8 +27,8 @@ use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType,
     DirectConversationSettings, EmbedState, GroupSettings, Location, Message, MessageEvent,
-    MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
-    MessagesType, PinState, RayGunEventKind, ReactionState,
+    MessageEventKind, MessageOptions, MessagePin, MessageReference, MessageStatus, MessageType,
+    Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
 };
 
 use std::sync::Arc;
@@ -1092,7 +1092,7 @@ impl MessageStore {
                 conversation_id,
                 message_id,
                 state,
-                ..
+                member,
             } => {
                 let mut list = document.get_message_list(&self.ipfs).await?;
 
@@ -1106,20 +1106,23 @@ impl MessageStore {
 
                 let event = match state {
                     PinState::Pin => {
-                        if message.pinned() {
+                        if message.pinned().is_some() {
                             return Ok(());
                         }
-                        *message.pinned_mut() = true;
+
+                        let pinned = MessagePin::new(member, Utc::now());
+
+                        *message.pinned_mut() = Some(pinned);
                         MessageEventKind::MessagePinned {
                             conversation_id,
                             message_id,
                         }
                     }
                     PinState::Unpin => {
-                        if !message.pinned() {
+                        if message.pinned().is_none() {
                             return Ok(());
                         }
-                        *message.pinned_mut() = false;
+                        *message.pinned_mut() = None;
                         MessageEventKind::MessageUnpinned {
                             conversation_id,
                             message_id,

@@ -648,7 +648,7 @@ mod test {
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
-                    assert!(message.pinned());
+                    assert!(message.pinned().is_some());
                     break;
                 }
             }
@@ -668,7 +668,7 @@ mod test {
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
-                    assert!(message.pinned());
+                    assert!(message.pinned().is_some());
                     break;
                 }
             }
@@ -690,7 +690,7 @@ mod test {
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
-                    assert!(!message.pinned());
+                    assert!(message.pinned().is_none());
                     break;
                 }
             }
@@ -710,7 +710,7 @@ mod test {
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
-                    assert!(!message.pinned());
+                    assert!(message.pinned().is_none());
                     break;
                 }
             }

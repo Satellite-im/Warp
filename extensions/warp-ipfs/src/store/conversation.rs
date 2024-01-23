@@ -15,8 +15,8 @@ use warp::{
     error::Error,
     raygun::{
         Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
-        GroupSettings, Message, MessageOptions, MessagePage, MessageReference, Messages,
-        MessagesType,
+        GroupSettings, Message, MessageOptions, MessagePage, MessagePin, MessageReference,
+        Messages, MessagesType,
     },
 };
 
@@ -417,7 +417,7 @@ impl ConversationDocument {
                     }
                 }
 
-                if option.pinned() && !document.pinned {
+                if option.pinned() && document.pinned.is_none() {
                     continue;
                 }
 
@@ -488,7 +488,7 @@ impl ConversationDocument {
                     }
                 }
 
-                if option.pinned() && !document.pinned {
+                if option.pinned() && document.pinned.is_none() {
                     continue;
                 }
 
@@ -569,7 +569,7 @@ impl ConversationDocument {
             let mut messages = vec![];
             for document in chunk.iter() {
                 if let Ok(message) = document.resolve(ipfs, did, keystore).await {
-                    if option.pinned() && !message.pinned() {
+                    if option.pinned() && message.pinned().is_some() {
                         continue;
                     }
                     messages.push(message);
@@ -646,6 +646,28 @@ impl From<&ConversationDocument> for Conversation {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessagePinDocument {
+    pub pinner: DIDEd25519Reference,
+    pub date: DateTime<Utc>,
+}
+
+impl From<&MessagePin> for MessagePinDocument {
+    fn from(pinned: &MessagePin) -> Self {
+        let pinner = DIDEd25519Reference::from(pinned.pinner());
+        let date = pinned.date();
+        Self { pinner, date }
+    }
+}
+
+impl From<MessagePinDocument> for MessagePin {
+    fn from(pinned: MessagePinDocument) -> Self {
+        let pinner = pinned.pinner.to_did();
+        let date = pinned.date;
+        Self::new(pinner, date)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageDocument {
     pub id: Uuid,
     pub conversation_id: Uuid,
@@ -656,7 +678,7 @@ pub struct MessageDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<DateTime<Utc>>,
     #[serde(default)]
-    pub pinned: bool,
+    pub pinned: Option<MessagePinDocument>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replied: Option<Uuid>,
     pub message: Cid,
@@ -677,7 +699,7 @@ impl From<&MessageDocument> for MessageReference {
         if let Some(modified) = document.modified {
             reference.set_modified(modified);
         }
-        reference.set_pinned(document.pinned);
+        // reference.set_pinned(document.pinned);
         reference.set_replied(document.replied);
         reference.set_sender(document.sender.to_did());
         reference
@@ -707,7 +729,7 @@ impl MessageDocument {
         let conversation_id = message.conversation_id();
         let date = message.date();
         let sender = message.sender();
-        let pinned = message.pinned();
+        let pinned = message.pinned().map(MessagePinDocument::from);
         let modified = message.modified();
         let replied = message.replied();
 
@@ -778,7 +800,7 @@ impl MessageDocument {
             None => ecdh_encrypt(did, Some(&self.sender.to_did()), &bytes)?,
         };
 
-        self.pinned = message.pinned();
+        self.pinned = message.pinned().map(MessagePinDocument::from);
         self.modified = message.modified();
 
         let message_cid = ipfs.dag().put().serialize(data)?.await?;

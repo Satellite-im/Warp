@@ -628,6 +628,29 @@ impl MessageReference {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+pub struct MessagePin {
+    /// Public key of the identity who pinned the message
+    pinner: DID,
+
+    /// Date of when the message was pinned
+    date: DateTime<Utc>,
+}
+
+impl MessagePin {
+    pub fn new(pinner: DID, date: DateTime<Utc>) -> Self {
+        Self { pinner, date }
+    }
+
+    pub fn pinner(&self) -> &DID {
+        &self.pinner
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Message {
     /// ID of the Message
     id: Uuid,
@@ -649,8 +672,9 @@ pub struct Message {
     ///       related to being pinned, reacted, etc.
     modified: Option<DateTime<Utc>>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     /// Pin a message over other messages
-    pinned: bool,
+    pinned: Option<MessagePin>,
 
     /// List of the reactions for the `Message`
     reactions: BTreeMap<String, Vec<DID>>,
@@ -667,6 +691,7 @@ pub struct Message {
     lines: Vec<String>,
 
     /// List of Attachment
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attachment: Vec<File>,
 
     /// Signature of the message
@@ -687,7 +712,7 @@ impl Default for Message {
             sender: Default::default(),
             date: Utc::now(),
             modified: None,
-            pinned: false,
+            pinned: None,
             reactions: BTreeMap::new(),
             mentions: Vec::new(),
             replied: None,
@@ -743,8 +768,8 @@ impl Message {
         self.modified
     }
 
-    pub fn pinned(&self) -> bool {
-        self.pinned
+    pub fn pinned(&self) -> Option<&MessagePin> {
+        self.pinned.as_ref()
     }
 
     pub fn reactions(&self) -> BTreeMap<String, Vec<DID>> {
@@ -801,10 +826,6 @@ impl Message {
         self.modified = Some(date)
     }
 
-    pub fn set_pinned(&mut self, pin: bool) {
-        self.pinned = pin
-    }
-
     pub fn set_reactions(&mut self, reaction: BTreeMap<String, Vec<DID>>) {
         self.reactions = reaction
     }
@@ -836,7 +857,7 @@ impl Message {
 
 // Mutable functions
 impl Message {
-    pub fn pinned_mut(&mut self) -> &mut bool {
+    pub fn pinned_mut(&mut self) -> &mut Option<MessagePin> {
         &mut self.pinned
     }
 
