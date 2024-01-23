@@ -47,10 +47,7 @@ use super::event_subscription::EventSubscription;
 use super::files::FileStore;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
-use super::{
-    extract_data_slice, verify_serde_sig, ConversationEvents, ConversationUpdateKind,
-    MessagingEvents,
-};
+use super::{verify_serde_sig, ConversationEvents, ConversationUpdateKind, MessagingEvents};
 
 type ConversationSender = Sender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
 
