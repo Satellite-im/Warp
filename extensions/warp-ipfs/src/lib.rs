@@ -1637,7 +1637,7 @@ impl Constellation for WarpIpfs {
         self.file_store()?.put(name, path).await
     }
 
-    async fn get(&self, name: &str, path: &str) -> Result<(), Error> {
+    async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?.get(name, path).await
     }
 
