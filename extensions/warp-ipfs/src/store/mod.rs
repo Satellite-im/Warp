@@ -12,6 +12,7 @@ pub mod queue;
 pub mod request;
 
 use chrono::{DateTime, Utc};
+use either::Either;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -29,12 +30,17 @@ use warp::{
     error::Error,
     multipass::identity::IdentityStatus,
     raygun::{
-        ConversationSettings, DirectConversationSettings, MessageEvent, PinState, ReactionState,
+        ConversationSettings, ConversationType, DirectConversationSettings, MessageEvent, PinState,
+        ReactionState,
     },
     tesseract::Tesseract,
 };
 
-use self::conversation::{ConversationDocument, MessageDocument};
+use self::{
+    conversation::{ConversationDocument, MessageDocument},
+    document::conversation::Conversations,
+    keystore::Keystore,
+};
 
 pub trait PeerTopic: Display {
     fn inbox(&self) -> String {
@@ -427,6 +433,30 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
+}
+
+pub async fn pubkey_or_keystore(
+    conversation: &Conversations,
+    conversation_id: Uuid,
+    keypair: &DID,
+) -> Result<Either<DID, Keystore>, Error> {
+    let document = conversation.get(conversation_id).await?;
+    let keystore = match document.conversation_type {
+        ConversationType::Direct => Either::Left({
+            document
+                .recipients()
+                .iter()
+                .filter(|did| keypair.ne(did))
+                .cloned()
+                .collect::<Vec<_>>()
+                .first()
+                .cloned()
+                .expect("Valid recipient")
+        }),
+        ConversationType::Group => Either::Right(conversation.get_keystore(conversation_id).await?),
+    };
+
+    Ok(keystore)
 }
 
 pub fn extract_data_slice<const N: usize>(data: &[u8]) -> (&[u8], &[u8]) {

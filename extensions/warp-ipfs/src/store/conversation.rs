@@ -711,7 +711,7 @@ impl Ord for MessageDocument {
 impl MessageDocument {
     pub async fn new(
         ipfs: &Ipfs,
-        did: Arc<DID>,
+        keypair: &DID,
         message: Message,
         key: Either<&DID, &Keystore>,
     ) -> Result<Self, Error> {
@@ -735,15 +735,13 @@ impl MessageDocument {
         .collect::<Vec<_>>()
         .await;
 
-        let attachments = (!attachments.is_empty())
-            .then_some(ipfs.dag().put().serialize(attachments)?.await.ok())
-            .flatten();
+        let attachments =
+            (!attachments.is_empty()).then_some(ipfs.dag().put().serialize(attachments)?.await?);
 
         let reactions = message.reactions();
 
-        let reactions = (!reactions.is_empty())
-            .then_some(ipfs.dag().put().serialize(reactions)?.await.ok())
-            .flatten();
+        let reactions =
+            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions)?.await?);
 
         if !lines.is_empty() {
             let lines_value_length: usize = lines
@@ -767,10 +765,10 @@ impl MessageDocument {
 
         let data = match key {
             Either::Right(keystore) => {
-                let key = keystore.get_latest(&did, &sender)?;
+                let key = keystore.get_latest(keypair, &sender)?;
                 Cipher::direct_encrypt(&bytes, &key)?
             }
-            Either::Left(key) => ecdh_encrypt(&did, Some(key), &bytes)?,
+            Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?,
         };
 
         let message = Some(ipfs.dag().put().serialize(data)?.await?);
@@ -792,7 +790,7 @@ impl MessageDocument {
             signature: None,
         };
 
-        document.sign(&did)
+        document.sign(keypair)
     }
 
     fn sign(mut self, keypair: &DID) -> Result<MessageDocument, Error> {

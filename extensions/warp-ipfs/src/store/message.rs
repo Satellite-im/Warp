@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use either::Either;
 use futures::channel::mpsc::{channel, Sender};
 use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::{BoxStream, SelectAll};
@@ -863,23 +862,8 @@ impl MessageStore {
 
         let mut document = self.conversations.get(conversation_id).await?;
 
-        let keystore = match document.conversation_type {
-            ConversationType::Direct => Either::Left({
-                let own_did = &*self.did;
-                document
-                    .recipients()
-                    .iter()
-                    .filter(|did| own_did.ne(did))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .first()
-                    .cloned()
-                    .expect("Valid recipient")
-            }),
-            ConversationType::Group { .. } => {
-                Either::Right(self.conversation_keystore(conversation_id).await?)
-            }
-        };
+        let keystore =
+            super::pubkey_or_keystore(&self.conversations, conversation_id, &self.did).await?;
 
         match events.clone() {
             MessagingEvents::New { message } => {
@@ -2154,24 +2138,8 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<Message, Error> {
-        let conversation = self.conversations.get(conversation_id).await?;
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => Either::Left({
-                let own_did = &*self.did;
-                conversation
-                    .recipients()
-                    .iter()
-                    .filter(|did| own_did.ne(did))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .first()
-                    .cloned()
-                    .expect("Valid recipient")
-            }),
-            ConversationType::Group { .. } => {
-                Either::Right(self.conversation_keystore(conversation_id).await?)
-            }
-        };
+        let keystore =
+            super::pubkey_or_keystore(&self.conversations, conversation_id, &self.did).await?;
 
         self.get_message_document(conversation_id, message_id)
             .await?
@@ -2259,27 +2227,12 @@ impl MessageStore {
 
     pub async fn get_messages(
         &self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         opt: MessageOptions,
     ) -> Result<Messages, Error> {
-        let conversation = self.conversations.get(conversation).await?;
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => Either::Left({
-                let own_did = &*self.did;
-                conversation
-                    .recipients()
-                    .iter()
-                    .filter(|did| own_did.ne(did))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .first()
-                    .cloned()
-                    .expect("Valid recipient")
-            }),
-            ConversationType::Group { .. } => {
-                Either::Right(self.conversation_keystore(conversation.id()).await?)
-            }
-        };
+        let conversation = self.conversations.get(conversation_id).await?;
+        let keystore =
+            super::pubkey_or_keystore(&self.conversations, conversation_id, &self.did).await?;
 
         let m_type = opt.messages_type();
         match m_type {
@@ -2703,26 +2656,11 @@ impl MessageStore {
         message.set_lines(messages.clone());
 
         let message_id = message.id();
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => Either::Left({
-                let own_did = &*self.did;
-                conversation
-                    .recipients()
-                    .iter()
-                    .filter(|did| own_did.ne(did))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .first()
-                    .cloned()
-                    .expect("Valid recipient")
-            }),
-            ConversationType::Group { .. } => {
-                Either::Right(self.conversation_keystore(conversation.id()).await?)
-            }
-        };
+        let keystore =
+            super::pubkey_or_keystore(&self.conversations, conversation.id(), &self.did).await?;
 
         let message =
-            MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref()).await?;
+            MessageDocument::new(&self.ipfs, &self.did, message, keystore.as_ref()).await?;
 
         let event = MessagingEvents::New { message };
 
@@ -2846,26 +2784,11 @@ impl MessageStore {
         message.set_lines(messages);
         message.set_replied(Some(message_id));
 
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => Either::Left({
-                let own_did = &*self.did;
-                conversation
-                    .recipients()
-                    .iter()
-                    .filter(|did| own_did.ne(did))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .first()
-                    .cloned()
-                    .expect("Valid recipient")
-            }),
-            ConversationType::Group { .. } => {
-                Either::Right(self.conversation_keystore(conversation.id()).await?)
-            }
-        };
+        let keystore =
+            super::pubkey_or_keystore(&self.conversations, conversation.id(), &self.did).await?;
 
         let message =
-            MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref()).await?;
+            MessageDocument::new(&self.ipfs, &self.did, message, keystore.as_ref()).await?;
 
         let event = MessagingEvents::New { message };
 
@@ -3176,26 +3099,11 @@ impl MessageStore {
                     message.set_lines(messages.clone());
                     message.set_replied(message_id);
 
-                    let keystore = match conversation.conversation_type {
-                        ConversationType::Direct => Either::Left({
-                            let own_did = &*store.did;
-                            conversation
-                                .recipients()
-                                .iter()
-                                .filter(|did| own_did.ne(did))
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .first()
-                                .cloned()
-                                .expect("Valid recipient")
-                        }),
-                        ConversationType::Group { .. } => {
-                            Either::Right(store.conversation_keystore(conversation.id()).await?)
-                        }
-                    };
+                    let keystore =
+                        super::pubkey_or_keystore(&store.conversations, conversation.id(), &store.did).await?;
 
                     let message =
-                        MessageDocument::new(&store.ipfs, store.did.clone(), message, keystore.as_ref()).await?;
+                        MessageDocument::new(&store.ipfs, &store.did, message, keystore.as_ref()).await?;
 
                     let event = MessagingEvents::New { message };
                     let (one_tx, one_rx) = oneshot::channel();
