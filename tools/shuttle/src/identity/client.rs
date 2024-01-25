@@ -156,6 +156,11 @@ impl Behaviour {
             let peer_id = addr.extract_peer_id()?;
             Some((peer_id, addr))
         }) {
+            client
+                .addresses
+                .entry(peer_id)
+                .or_default()
+                .insert(addr.clone());
             client.inner.add_address(&peer_id, addr);
         }
 
