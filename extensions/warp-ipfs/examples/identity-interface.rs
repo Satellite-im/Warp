@@ -1,10 +1,8 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
-use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::Multiaddr;
 use rustyline_async::Readline;
-use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -86,11 +84,7 @@ async fn account(
 
         let dis_ty = match &opt.shuttle_point {
             Some(addr) => Discovery::Shuttle {
-                addresses: {
-                    let mut addr = addr.clone();
-                    let peer_id = addr.extract_peer_id().expect("Peer Id");
-                    HashMap::from([(peer_id, HashSet::from_iter(vec![addr]))])
-                },
+                addresses: { vec![addr.clone()] },
             },
             None => Discovery::Namespace {
                 namespace: opt.context.clone(),

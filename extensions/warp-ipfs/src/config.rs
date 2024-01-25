@@ -1,8 +1,7 @@
-use ipfs::{Multiaddr, PeerId};
+use ipfs::Multiaddr;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
@@ -22,7 +21,7 @@ pub enum Bootstrap {
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
     Shuttle {
-        addresses: HashMap<PeerId, HashSet<Multiaddr>>,
+        addresses: Vec<Multiaddr>,
     },
     /// Uses to find and connect to peers using the same namespace
     Namespace {

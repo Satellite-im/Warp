@@ -14,6 +14,7 @@ use rust_ipfs::{
             THandlerInEvent, THandlerOutEvent, ToSwarm,
         },
     },
+    p2p::MultiaddrExt,
     Keypair, Multiaddr, NetworkBehaviour, PeerId,
 };
 
@@ -129,7 +130,7 @@ impl Behaviour {
         keypair: &Keypair,
         primary_keypair: Option<&Keypair>,
         process_command: futures::channel::mpsc::Receiver<IdentityCommand>,
-        addresses: HashMap<PeerId, HashSet<Multiaddr>>,
+        addresses: Vec<Multiaddr>,
     ) -> Self {
         let mut client = Self {
             inner: request_response::json::Behaviour::new(
@@ -144,16 +145,23 @@ impl Behaviour {
             keypair: keypair.clone(),
             primary_keypair: primary_keypair.cloned(),
             process_command,
-            addresses,
+            addresses: HashMap::new(),
             waiting_on_response: Default::default(),
             external_addresses: ExternalAddresses::default(),
             pending_internal_response: Default::default(),
         };
 
-        for (peer_id, addrs) in &client.addresses {
-            for addr in addrs {
-                client.inner.add_address(peer_id, addr.clone());
-            }
+        for (peer_id, addr) in addresses.iter().filter_map(|addr| {
+            let mut addr = addr.clone();
+            let peer_id = addr.extract_peer_id()?;
+            Some((peer_id, addr))
+        }) {
+            client
+                .addresses
+                .entry(peer_id)
+                .or_default()
+                .insert(addr.clone());
+            client.inner.add_address(&peer_id, addr);
         }
 
         client
