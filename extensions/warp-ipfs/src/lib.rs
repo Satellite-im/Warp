@@ -246,9 +246,7 @@ impl WarpIpfs {
 
         let behaviour = behaviour::Behaviour {
             shuttle_identity: enable
-                .then_some(shuttle::identity::client::Behaviour::new(
-                    &keypair, None, id_sh_rx, nodes,
-                ))
+                .then(|| shuttle::identity::client::Behaviour::new(&keypair, None, id_sh_rx, nodes))
                 .into(),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
