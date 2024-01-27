@@ -483,6 +483,52 @@ impl Directory {
         list
     }
 
+    /// Get last `Directory` from a path and will fail if no valid directory is found
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///     use warp::constellation::{directory::Directory, file::File};
+    ///     let mut root = Directory::new("Test Directory");
+    ///     let mut sub0 = Directory::new("Sub Directory 1");
+    ///     let mut sub1 = Directory::new("Sub Directory 2");
+    ///     let sub2 = Directory::new("Sub Directory 3");
+    ///     let f1 = File::new("Test File");
+    ///     
+    ///     sub2.add_item(f1).unwrap();
+    ///     sub1.add_item(sub2).unwrap();
+    ///     sub0.add_item(sub1).unwrap();
+    ///     root.add_item(sub0).unwrap();
+    ///
+    ///     assert_eq!(root.get_last_directory_from_path("/Sub Directory 1/").is_ok(), true);
+    ///     assert_eq!(root.get_last_directory_from_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
+    ///     assert_eq!(root.get_last_directory_from_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
+    ///     assert_eq!(root.get_last_directory_from_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3/Test File").unwrap().name(), "Sub Directory 3");
+    ///     assert_eq!(root.get_last_directory_from_path("/Sub Directory 1/Sub Directory 2/Sub Directory3/Test File").unwrap().name(), "Sub Directory 2");
+    /// ```
+    pub fn get_last_directory_from_path(&self, path: &str) -> Result<Directory, Error> {
+        let mut path = path
+            .split('/')
+            .filter(|&s| !s.is_empty())
+            .collect::<Vec<_>>();
+        if path.is_empty() {
+            return Err(Error::InvalidPath);
+        }
+        let name = path.remove(0);
+        let item = self.get_item(name)?;
+        return match item {
+            Item::Directory(dir) => {
+                if path.is_empty() {
+                    return Ok(dir);
+                }
+                return Ok(dir
+                    .get_last_directory_from_path(path.join("/").as_str())
+                    .unwrap_or(dir));
+            }
+            _ => Err(Error::DirectoryNotFound),
+        };
+    }
+
     /// Get an `Item` from a path
     ///
     /// # Examples
@@ -512,14 +558,14 @@ impl Directory {
         }
         let name = path.remove(0);
         let item = self.get_item(name)?;
-        return if !path.is_empty() {
-            if let Ok(dir) = item.get_directory() {
-                dir.get_item_by_path(path.join("/").as_str())
-            } else {
-                Ok(item)
+        return match &item {
+            Item::Directory(dir) => {
+                if path.is_empty() {
+                    return Ok(item);
+                }
+                return dir.get_item_by_path(path.join("/").as_str());
             }
-        } else {
-            Ok(item)
+            _ => Ok(item),
         };
     }
 }
