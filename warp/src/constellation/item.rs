@@ -258,10 +258,10 @@ impl Item {
     }
 
     /// Path to the `File` or `Directory
-    pub fn path(&self) -> &str {
+    pub fn path(&self) -> String {
         match self {
             Item::File(file) => file.path(),
-            Item::Directory(directory) => directory.path(),
+            Item::Directory(directory) => directory.path().to_string(),
         }
     }
 

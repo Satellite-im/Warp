@@ -40,53 +40,58 @@ impl From<FileType> for FormatType {
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
 #[derive(Clone, Deserialize, Serialize)]
 pub struct File {
+    inner: Arc<FileInner>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct FileInner {
     /// ID of the `File`
-    id: Arc<Uuid>,
+    id: Uuid,
 
     /// Name of the `File`
-    name: Arc<RwLock<String>>,
+    name: RwLock<String>,
 
     /// Size of the `File`.
-    size: Arc<RwLock<usize>>,
+    size: RwLock<usize>,
 
     /// Thumbnail of the `File`
     /// Note: This should be set if the file is an image, unless
     ///       one plans to add a generic thumbnail for the file
-    thumbnail: Arc<RwLock<Vec<u8>>>,
+    thumbnail: RwLock<Vec<u8>>,
 
     /// Format of the thumbnail
-    thumbnail_format: Arc<RwLock<FormatType>>,
+    thumbnail_format: RwLock<FormatType>,
 
     /// External reference pointing to the thumbnail
-    thumbnail_reference: Arc<RwLock<Option<String>>>,
+    thumbnail_reference: RwLock<Option<String>>,
 
     /// Favorite File
-    favorite: Arc<RwLock<bool>>,
+    favorite: RwLock<bool>,
 
     /// Description of the `File`. TODO: Make this optional
-    description: Arc<RwLock<String>>,
+    description: RwLock<String>,
 
     /// Timestamp of the creation of the `File`
-    creation: Arc<RwLock<DateTime<Utc>>>,
+    creation: RwLock<DateTime<Utc>>,
 
     /// Timestamp of the `File` when it is modified
-    modified: Arc<RwLock<DateTime<Utc>>>,
+    modified: RwLock<DateTime<Utc>>,
 
     /// Type of the `File`.
-    file_type: Arc<RwLock<FileType>>,
+    file_type: RwLock<FileType>,
 
     /// Hash of the `File`
-    hash: Arc<RwLock<Hash>>,
+    hash: RwLock<Hash>,
 
     /// External reference pointing to the source of the file
-    reference: Arc<RwLock<Option<String>>>,
+    reference: RwLock<Option<String>>,
 
     /// Path to file
     #[serde(default)]
-    path: Arc<String>,
+    path: RwLock<String>,
 
     #[serde(skip)]
-    signal: Arc<RwLock<Option<futures::channel::mpsc::UnboundedSender<()>>>>,
+    signal: RwLock<Option<futures::channel::mpsc::UnboundedSender<()>>>,
 }
 
 impl std::fmt::Debug for File {
@@ -120,23 +125,30 @@ impl Eq for File {}
 
 impl Default for File {
     fn default() -> Self {
+        let inner = Arc::new(FileInner::default());
+        Self { inner }
+    }
+}
+
+impl Default for FileInner {
+    fn default() -> Self {
         let timestamp = Utc::now();
         Self {
-            id: Arc::new(Uuid::new_v4()),
-            name: Arc::new(RwLock::new(String::from("un-named file"))),
+            id: Uuid::new_v4(),
+            name: RwLock::new(String::from("un-named file")),
             description: Default::default(),
             size: Default::default(),
             thumbnail: Default::default(),
             thumbnail_format: Default::default(),
             thumbnail_reference: Default::default(),
             favorite: Default::default(),
-            creation: Arc::new(RwLock::new(timestamp)),
-            modified: Arc::new(RwLock::new(timestamp)),
+            creation: RwLock::new(timestamp),
+            modified: RwLock::new(timestamp),
             file_type: Default::default(),
             hash: Default::default(),
             reference: Default::default(),
-            path: Arc::new("/".into()),
-            signal: Arc::default(),
+            path: RwLock::new("/".into()),
+            signal: Default::default(),
         }
     }
 }
@@ -160,13 +172,13 @@ impl File {
             name = &name[..256];
         }
         if !name.is_empty() {
-            *file.name.write() = name.to_string();
+            *file.inner.name.write() = name.to_string();
         }
         file
     }
 
     pub fn name(&self) -> String {
-        self.name.read().to_owned()
+        self.inner.name.read().to_owned()
     }
 
     pub fn set_name(&self, name: &str) {
@@ -174,13 +186,13 @@ impl File {
         if name.len() > 256 {
             name = &name[..256];
         }
-        *self.name.write() = name.to_string();
-        *self.modified.write() = Utc::now();
+        *self.inner.name.write() = name.to_string();
+        *self.inner.modified.write() = Utc::now();
         self.signal();
     }
 
     pub fn description(&self) -> String {
-        self.description.read().to_owned()
+        self.inner.description.read().to_owned()
     }
 
     /// Set the description of the file
@@ -196,43 +208,43 @@ impl File {
     /// assert_eq!(file.description().as_str(), "test file");
     /// ```
     pub fn set_description(&self, desc: &str) {
-        *self.description.write() = desc.to_string();
-        *self.modified.write() = Utc::now();
+        *self.inner.description.write() = desc.to_string();
+        *self.inner.modified.write() = Utc::now();
         self.signal();
     }
 
     /// Set thumbnail format
     pub fn set_thumbnail_format(&self, format: FormatType) {
-        *self.thumbnail_format.write() = format;
-        *self.modified.write() = Utc::now();
+        *self.inner.thumbnail_format.write() = format;
+        *self.inner.modified.write() = Utc::now();
         self.signal();
     }
 
     /// Get the thumbnail format
     pub fn thumbnail_format(&self) -> FormatType {
-        self.thumbnail_format.read().clone()
+        self.inner.thumbnail_format.read().clone()
     }
 
     /// Set the thumbnail to the file
     pub fn set_thumbnail(&self, data: &[u8]) {
-        *self.thumbnail.write() = data.to_vec();
-        *self.modified.write() = Utc::now();
+        *self.inner.thumbnail.write() = data.to_vec();
+        *self.inner.modified.write() = Utc::now();
         self.signal();
     }
 
     /// Get the thumbnail from the file
     pub fn thumbnail(&self) -> Vec<u8> {
-        self.thumbnail.read().clone()
+        self.inner.thumbnail.read().clone()
     }
 
     pub fn set_favorite(&self, fav: bool) {
-        *self.favorite.write() = fav;
-        *self.modified.write() = Utc::now();
+        *self.inner.favorite.write() = fav;
+        *self.inner.modified.write() = Utc::now();
         self.signal();
     }
 
     pub fn favorite(&self) -> bool {
-        *self.favorite.read()
+        *self.inner.favorite.read()
     }
 
     /// Set the reference of the file
@@ -249,27 +261,27 @@ impl File {
     /// assert_eq!(file.reference().unwrap().as_str(), "test_file.txt");
     /// ```
     pub fn set_reference(&self, reference: &str) {
-        *self.reference.write() = Some(reference.to_string());
-        *self.modified.write() = Utc::now();
+        *self.inner.reference.write() = Some(reference.to_string());
+        *self.inner.modified.write() = Utc::now();
         self.signal();
     }
 
     pub fn set_thumbnail_reference(&self, reference: &str) {
-        *self.thumbnail_reference.write() = Some(reference.to_string());
-        *self.modified.write() = Utc::now();
+        *self.inner.thumbnail_reference.write() = Some(reference.to_string());
+        *self.inner.modified.write() = Utc::now();
         self.signal();
     }
 
     pub fn reference(&self) -> Option<String> {
-        self.reference.read().clone()
+        self.inner.reference.read().clone()
     }
 
     pub fn thumbnail_reference(&self) -> Option<String> {
-        self.thumbnail_reference.read().clone()
+        self.inner.thumbnail_reference.read().clone()
     }
 
     pub fn size(&self) -> usize {
-        *self.size.read()
+        *self.inner.size.read()
     }
 
     /// Set the size the file
@@ -285,42 +297,42 @@ impl File {
     /// assert_eq!(Item::from(file).size(), 100000);
     /// ```
     pub fn set_size(&self, size: usize) {
-        *self.size.write() = size;
-        *self.modified.write() = Utc::now();
+        *self.inner.size.write() = size;
+        *self.inner.modified.write() = Utc::now();
         self.signal();
     }
 
     pub fn set_creation(&self, creation: DateTime<Utc>) {
-        *self.creation.write() = creation
+        *self.inner.creation.write() = creation
     }
 
     pub fn set_modified(&self, modified: Option<DateTime<Utc>>) {
-        *self.modified.write() = modified.unwrap_or(Utc::now());
+        *self.inner.modified.write() = modified.unwrap_or(Utc::now());
         self.signal()
     }
 
     pub fn hash(&self) -> Hash {
-        self.hash.read().clone()
+        self.inner.hash.read().clone()
     }
 
     pub fn set_hash(&self, hash: Hash) {
-        *self.hash.write() = hash;
+        *self.inner.hash.write() = hash;
     }
 
     pub fn set_file_type(&self, file_type: FileType) {
-        *self.file_type.write() = file_type;
+        *self.inner.file_type.write() = file_type;
         self.signal();
     }
 
     pub fn file_type(&self) -> FileType {
-        self.file_type.read().clone()
+        self.inner.file_type.read().clone()
     }
 
-    pub fn path(&self) -> &str {
-        &self.path
+    pub fn path(&self) -> String {
+        self.inner.path.read().clone()
     }
 
-    pub fn set_path(&mut self, new_path: &str) {
+    pub fn set_path(&self, new_path: &str) {
         let mut new_path = new_path.trim().to_string();
         if !new_path.ends_with('/') {
             new_path.push('/');
@@ -330,19 +342,18 @@ impl File {
 
         new_path.push_str(&name);
 
-        let path = Arc::make_mut(&mut self.path);
-        *path = new_path;
+        *self.inner.path.write() = new_path;
     }
 
     pub(crate) fn set_signal(
         &mut self,
         signal: Option<futures::channel::mpsc::UnboundedSender<()>>,
     ) {
-        *self.signal.write() = signal;
+        *self.inner.signal.write() = signal;
     }
 
     fn signal(&self) {
-        let Some(signal) = self.signal.try_read() else {
+        let Some(signal) = self.inner.signal.try_read() else {
             return;
         };
         let Some(signal) = signal.clone() else {
@@ -356,32 +367,35 @@ impl File {
     /// This would return `None` if `rebuild_paths` used or `set_signal` is used until the write has
     /// been finished, unless a signal has not been set at all
     pub fn signal_guard(&self) -> Option<SignalGuard> {
-        self.signal.try_write().map(|signal| SignalGuard { signal })
+        self.inner
+            .signal
+            .try_write()
+            .map(|signal| SignalGuard { signal })
     }
 }
 
 impl File {
     pub fn hash_mut(&self) -> parking_lot::RwLockWriteGuard<Hash> {
-        self.hash.write()
+        self.inner.hash.write()
     }
 }
 
 impl File {
     pub fn id(&self) -> Uuid {
-        *self.id
+        self.inner.id
     }
 
     pub fn creation(&self) -> DateTime<Utc> {
-        *self.creation.read()
+        *self.inner.creation.read()
     }
 
     pub fn modified(&self) -> DateTime<Utc> {
-        *self.modified.read()
+        *self.inner.modified.read()
     }
 
     pub fn update<F: Fn(File)>(&self, f: F) {
         f(self.clone());
-        *self.modified.write() = Utc::now()
+        *self.inner.modified.write() = Utc::now()
     }
 }
 
