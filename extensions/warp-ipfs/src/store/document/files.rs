@@ -338,6 +338,10 @@ mod test {
 
         assert_eq!(image_file.name(), resolved_file.name());
         assert_eq!(image_file.thumbnail(), resolved_file.thumbnail());
+        assert!(image_file.reference().is_some());
+        assert!(image_file.thumbnail_reference().is_some());
+        assert!(resolved_file.reference().is_some());
+        assert!(resolved_file.thumbnail_reference().is_some());
 
         Ok(())
     }
