@@ -7,7 +7,7 @@ pub mod root;
 
 use chrono::{DateTime, Utc};
 use futures::TryFutureExt;
-use ipfs::Ipfs;
+use ipfs::{Ipfs, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
@@ -131,7 +131,11 @@ impl RootDocument {
     }
 
     #[tracing::instrument(skip(self, ipfs))]
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {
+    pub async fn resolve(
+        &self,
+        ipfs: &Ipfs,
+        keypair: Option<&Keypair>,
+    ) -> Result<ExtractedRootDocument, Error> {
         let document: IdentityDocument = ipfs
             .get_dag(self.identity)
             .local()
@@ -230,7 +234,7 @@ impl RootDocument {
         };
 
         let bytes = serde_json::to_vec(&exported)?;
-        let kp = ipfs.keypair()?;
+        let kp = keypair.unwrap_or_else(|| ipfs.keypair().expect("doesnt error"));
         let signature = kp.sign(&bytes).map_err(anyhow::Error::from)?;
 
         exported.signature = Some(signature);
