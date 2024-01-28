@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, path::PathBuf, sync::Arc, task::Poll};
+use std::{collections::VecDeque, ffi::OsStr, path::PathBuf, sync::Arc, task::Poll};
 
 use chrono::{DateTime, Utc};
 use futures::{
@@ -277,15 +277,7 @@ impl FileStore {
         name: &str,
         path: &str,
     ) -> Result<ConstellationProgressStream, Error> {
-        let name = name.trim();
-        if name.len() < 2 || name.len() > 256 {
-            return Err(Error::InvalidLength {
-                context: "name".into(),
-                current: name.len(),
-                minimum: Some(2),
-                maximum: Some(256),
-            });
-        }
+        let (name, dest_path) = split_file_from_path(name)?;
 
         let ipfs = self.ipfs.clone();
 
@@ -309,9 +301,12 @@ impl FileStore {
             });
         }
 
-        let current_directory = self.current_directory()?;
+        let current_directory = match dest_path {
+            Some(dest) => self.root_directory().get_last_directory_from_path(&dest)?,
+            None => self.current_directory()?,
+        };
 
-        if current_directory.get_item_by_path(name).is_ok() {
+        if current_directory.get_item(name).is_ok() {
             return Err(Error::FileExist);
         }
 
@@ -498,15 +493,7 @@ impl FileStore {
     }
 
     pub async fn put_buffer(&mut self, name: &str, buffer: &[u8]) -> Result<(), Error> {
-        let name = name.trim();
-        if name.len() < 2 || name.len() > 256 {
-            return Err(Error::InvalidLength {
-                context: "name".into(),
-                current: name.len(),
-                minimum: Some(2),
-                maximum: Some(256),
-            });
-        }
+        let (name, dest_path) = split_file_from_path(name)?;
 
         if self.current_size() + buffer.len() >= self.max_size() {
             return Err(Error::InvalidLength {
@@ -519,7 +506,10 @@ impl FileStore {
 
         let ipfs = self.ipfs.clone();
 
-        let current_directory = self.current_directory()?;
+        let current_directory = match dest_path {
+            Some(dest) => self.root_directory().get_last_directory_from_path(&dest)?,
+            None => self.current_directory()?,
+        };
 
         let _current_guard = current_directory.signal_guard();
 
@@ -626,19 +616,14 @@ impl FileStore {
         total_size: Option<usize>,
         stream: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream, Error> {
-        let name = name.trim();
-        if name.len() < 2 || name.len() > 256 {
-            return Err(Error::InvalidLength {
-                context: "name".into(),
-                current: name.len(),
-                minimum: Some(2),
-                maximum: Some(256),
-            });
-        }
+        let (name, dest_path) = split_file_from_path(name)?;
 
         let ipfs = self.ipfs.clone();
 
-        let current_directory = self.current_directory()?;
+        let current_directory = match dest_path {
+            Some(dest) => self.root_directory().get_last_directory_from_path(&dest)?,
+            None => self.current_directory()?,
+        };
 
         if current_directory.get_item_by_path(name).is_ok() {
             return Err(Error::FileExist);
@@ -912,4 +897,30 @@ impl FileStore {
     pub fn get_path(&self) -> PathBuf {
         PathBuf::from(self.path.read().to_string_lossy().replace('\\', "/"))
     }
+}
+
+fn split_file_from_path(name: &str) -> Result<(&str, Option<String>), Error> {
+    let mut split_path = name.split('/').collect::<VecDeque<_>>();
+    if split_path.is_empty() {
+        return Err(Error::InvalidLength {
+            context: "name".into(),
+            current: 0,
+            minimum: Some(2),
+            maximum: Some(256),
+        });
+    }
+
+    // get expected filename
+    let name = split_path.pop_back().expect("valid name").trim();
+    let split_path = Vec::from_iter(split_path);
+    if name.len() < 2 || name.len() > 256 {
+        return Err(Error::InvalidLength {
+            context: "name".into(),
+            current: name.len(),
+            minimum: Some(2),
+            maximum: Some(256),
+        });
+    }
+    let dest_path = (!split_path.is_empty()).then(|| split_path.join("/"));
+    Ok((name, dest_path))
 }
