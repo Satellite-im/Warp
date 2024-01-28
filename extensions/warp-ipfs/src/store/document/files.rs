@@ -98,6 +98,8 @@ impl DirectoryDocument {
         }
 
         if let Some(cid) = self.thumbnail {
+            directory.set_thumbnail_reference(&IpfsPath::from(cid).to_string());
+
             let image: ImageDag = ipfs
                 .get_dag(cid)
                 .timeout(Duration::from_secs(10))
@@ -242,6 +244,8 @@ impl FileDocument {
         file.set_file_type(self.file_type.clone());
 
         if let Some(cid) = self.thumbnail {
+            file.set_thumbnail_reference(&IpfsPath::from(cid).to_string());
+
             let image: ImageDag = ipfs
                 .get_dag(cid)
                 .timeout(Duration::from_secs(10))
