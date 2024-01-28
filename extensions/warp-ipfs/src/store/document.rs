@@ -212,7 +212,7 @@ impl RootDocument {
                     .await
                     .map_err(Error::from)
             })
-            .and_then(|document| async move { document.resolve(ipfs).await })
+            .and_then(|document| async move { document.resolve(ipfs, false).await })
             .await
             .ok();
 

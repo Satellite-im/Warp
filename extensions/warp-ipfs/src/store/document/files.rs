@@ -70,7 +70,7 @@ impl DirectoryDocument {
     }
 
     #[async_recursion::async_recursion]
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<Directory, Error> {
+    pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<Directory, Error> {
         let mut directory = Directory::new(&self.name);
         directory.set_description(&self.description);
         directory.set_favorite(self.favorite);
@@ -86,7 +86,8 @@ impl DirectoryDocument {
                 .unwrap_or_default();
 
             let items_resolved = FuturesUnordered::from_iter(
-                list.iter().map(|item| item.resolve(ipfs).into_future()),
+                list.iter()
+                    .map(|item| item.resolve(ipfs, resolve_thumbnail).into_future()),
             )
             .filter_map(|item| async { item.ok() });
 
@@ -99,7 +100,6 @@ impl DirectoryDocument {
 
         if let Some(cid) = self.thumbnail {
             directory.set_thumbnail_reference(&IpfsPath::from(cid).to_string());
-
             let image: ImageDag = ipfs
                 .get_dag(cid)
                 .timeout(Duration::from_secs(10))
@@ -108,13 +108,15 @@ impl DirectoryDocument {
 
             directory.set_thumbnail_format(image.mime.into());
 
-            let data = ipfs
-                .unixfs()
-                .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
-                .await
-                .unwrap_or_default();
+            if resolve_thumbnail {
+                let data = ipfs
+                    .unixfs()
+                    .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
+                    .await
+                    .unwrap_or_default();
 
-            directory.set_thumbnail(&data);
+                directory.set_thumbnail(&data);
+            }
         }
 
         directory.rebuild_paths(&None);
@@ -147,7 +149,7 @@ impl ItemDocument {
         Ok(document)
     }
 
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<Item, Error> {
+    pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<Item, Error> {
         let item = match *self {
             ItemDocument::Directory(cid) => {
                 let document: DirectoryDocument = ipfs
@@ -156,7 +158,7 @@ impl ItemDocument {
                     .await
                     .map_err(anyhow::Error::from)?;
 
-                let directory = document.resolve(ipfs).await?;
+                let directory = document.resolve(ipfs, resolve_thumbnail).await?;
                 Item::Directory(directory)
             }
             ItemDocument::File(cid) => {
@@ -166,7 +168,7 @@ impl ItemDocument {
                     .await
                     .map_err(anyhow::Error::from)?;
 
-                let file = document.resolve(ipfs).await?;
+                let file = document.resolve(ipfs, resolve_thumbnail).await?;
                 Item::File(file)
             }
         };
@@ -233,7 +235,7 @@ impl FileDocument {
         Ok(document)
     }
 
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<File, Error> {
+    pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<File, Error> {
         let file = File::new(&self.name);
         file.set_description(&self.description);
         file.set_size(self.size);
@@ -245,7 +247,6 @@ impl FileDocument {
 
         if let Some(cid) = self.thumbnail {
             file.set_thumbnail_reference(&IpfsPath::from(cid).to_string());
-
             let image: ImageDag = ipfs
                 .get_dag(cid)
                 .timeout(Duration::from_secs(10))
@@ -254,13 +255,15 @@ impl FileDocument {
 
             file.set_thumbnail_format(image.mime.into());
 
-            let data = ipfs
-                .unixfs()
-                .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
-                .await
-                .unwrap_or_default();
+            if resolve_thumbnail {
+                let data = ipfs
+                    .unixfs()
+                    .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
+                    .await
+                    .unwrap_or_default();
 
-            file.set_thumbnail(&data);
+                file.set_thumbnail(&data);
+            }
         }
 
         if let Some(cid) = self.reference {
@@ -330,7 +333,7 @@ mod test {
             .and_then(|i| i.get_file())?;
 
         let document = DirectoryDocument::new(&ipfs, &directory).await?;
-        let resolved_document = document.resolve(&ipfs).await?;
+        let resolved_document = document.resolve(&ipfs, true).await?;
 
         let resolved_file = resolved_document
             .get_item_by_path("/storage/image.png")

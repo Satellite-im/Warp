@@ -764,7 +764,7 @@ impl RootDocumentTask {
             .deserialized::<DirectoryDocument>()
             .await?;
 
-        let root = document.resolve(&self.ipfs).await?;
+        let root = document.resolve(&self.ipfs, true).await?;
 
         Ok(root)
     }
