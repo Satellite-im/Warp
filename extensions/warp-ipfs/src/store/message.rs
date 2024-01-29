@@ -3303,6 +3303,51 @@ impl MessageStore {
         Ok(progress_stream.boxed())
     }
 
+    pub async fn download_stream(
+        &self,
+        conversation: Uuid,
+        message_id: Uuid,
+        file: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+        let members = self.get_conversation(conversation).await.map(|c| {
+            c.recipients()
+                .iter()
+                .filter_map(|did| did.to_peer_id().ok())
+                .collect::<Vec<_>>()
+        })?;
+
+        let message = self.get_message(conversation, message_id).await?;
+
+        if message.message_type() != MessageType::Attachment {
+            return Err(Error::InvalidMessage);
+        }
+
+        let attachment = message
+            .attachments()
+            .iter()
+            .find(|attachment| attachment.name() == file)
+            .cloned()
+            .ok_or(Error::FileNotFound)?;
+
+        let reference = attachment
+            .reference()
+            .and_then(|reference| IpfsPath::from_str(&reference).ok())
+            .ok_or(Error::FileNotFound)?;
+
+        let ipfs = self.ipfs.clone();
+
+        let stream = async_stream::stream! {
+            let stream = ipfs.unixfs().cat(reference, None, &members, false, None);
+
+            for await result in stream {
+                let result = result.map_err(anyhow::Error::from).map_err(Error::from);
+                yield result;
+            }
+        };
+
+        Ok(stream.boxed())
+    }
+
     pub async fn send_event(
         &mut self,
         conversation_id: Uuid,
