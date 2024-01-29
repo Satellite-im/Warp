@@ -5,14 +5,15 @@ mod test {
     use futures::StreamExt;
     use std::time::Duration;
     use warp::{
+        constellation::Progression,
         multipass::MultiPassEventKind,
         raygun::{
-            ConversationType, MessageEvent, MessageEventKind, PinState, RayGunEventKind,
-            ReactionState,
+            AttachmentKind, ConversationType, Location, MessageEvent, MessageEventKind,
+            MessageType, PinState, RayGunEventKind, ReactionState,
         },
     };
 
-    use crate::common::create_accounts_and_chat;
+    use crate::common::{create_accounts_and_chat, PROFILE_IMAGE};
 
     #[tokio::test]
     async fn create_conversation() -> anyhow::Result<()> {
@@ -22,8 +23,8 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, did_a, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -78,8 +79,8 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -144,6 +145,121 @@ mod test {
     }
 
     #[tokio::test]
+    async fn send_and_download_attachment_in_conversation() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::send_and_download_attachment_in_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::send_and_download_attachment_in_conversation".into()),
+            ),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, mut fs_a, _, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+
+        chat_a.create_conversation(&did_b).await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
+        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+
+        //upload file to constellation to attach file from constellation
+
+        fs_a.put_buffer("image.png", PROFILE_IMAGE).await?;
+
+        let mut stream = chat_a
+            .attach(
+                id_a,
+                None,
+                vec![Location::Constellation {
+                    path: "image.png".into(),
+                }],
+                vec![],
+            )
+            .await?;
+
+        while let Some(event) = stream.next().await {
+            match event {
+                AttachmentKind::AttachedProgress(Progression::CurrentProgress { .. }) => {}
+                AttachmentKind::AttachedProgress(Progression::ProgressComplete { name, total }) => {
+                    assert_eq!(name, "image.png");
+                    assert_eq!(total, Some(PROFILE_IMAGE.len()));
+                }
+                AttachmentKind::AttachedProgress(Progression::ProgressFailed { .. }) => {
+                    unreachable!("should not fail")
+                }
+                AttachmentKind::Pending(result) => result?,
+            }
+        }
+
+        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::MessageSent {
+                    conversation_id,
+                    message_id,
+                }) = conversation_a.next().await
+                {
+                    break chat_a.get_message(conversation_id, message_id).await;
+                }
+            }
+        })
+        .await??;
+
+        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::MessageReceived {
+                    conversation_id,
+                    message_id,
+                }) = conversation_b.next().await
+                {
+                    break chat_b.get_message(conversation_id, message_id).await;
+                }
+            }
+        })
+        .await??;
+
+        assert_eq!(message_a, message_b);
+        assert_eq!(message_a.message_type(), MessageType::Attachment);
+        let attachments = message_a.attachments();
+        assert!(!attachments.is_empty());
+
+        let file = attachments.first().expect("attachment exist");
+
+        assert_eq!(file.name(), "image.png");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn delete_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -159,8 +275,8 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -262,8 +378,8 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -375,8 +491,8 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, did_a, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -570,8 +686,8 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -736,8 +852,8 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, did_a, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -825,8 +941,8 @@ mod test {
         ])
         .await?;
 
-        let (mut _account_a, mut chat_a, did_a, _) = accounts.first().cloned().unwrap();
-        let (mut _account_b, mut chat_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut _account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut _account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut account_subscribe_a = _account_a.subscribe().await?;
         let mut account_subscribe_b = _account_b.subscribe().await?;

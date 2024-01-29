@@ -1,6 +1,7 @@
 use futures::{stream, StreamExt};
 use rust_ipfs::{Ipfs, Multiaddr, PeerId, Protocol};
 use warp::{
+    constellation::Constellation,
     crypto::DID,
     multipass::{identity::Identity, MultiPass},
     raygun::RayGun,
@@ -50,7 +51,7 @@ pub async fn create_account(
     username: Option<&str>,
     passphrase: Option<&str>,
     context: Option<String>,
-) -> anyhow::Result<(Box<dyn MultiPass>, DID, Identity)> {
+) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn Constellation>, DID, Identity)> {
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
@@ -66,7 +67,7 @@ pub async fn create_account(
     config.store_setting.update_events = UpdateEvents::Enabled;
     config.bootstrap = Bootstrap::None;
 
-    let (mut account, _, _) = WarpIpfsBuilder::default()
+    let (mut account, _, fs) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
@@ -74,13 +75,13 @@ pub async fn create_account(
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 
-    Ok((account, identity.did_key(), identity))
+    Ok((account, fs, identity.did_key(), identity))
 }
 
 #[allow(dead_code)]
 pub async fn create_accounts(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
-) -> anyhow::Result<Vec<(Box<dyn MultiPass>, DID, Identity)>> {
+) -> anyhow::Result<Vec<(Box<dyn MultiPass>, Box<dyn Constellation>, DID, Identity)>> {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer().pretty())
         .with(EnvFilter::from_default_env())
@@ -110,7 +111,13 @@ pub async fn create_account_and_chat(
     username: Option<&str>,
     passphrase: Option<&str>,
     context: Option<String>,
-) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, DID, Identity)> {
+) -> anyhow::Result<(
+    Box<dyn MultiPass>,
+    Box<dyn RayGun>,
+    Box<dyn Constellation>,
+    DID,
+    Identity,
+)> {
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
@@ -126,7 +133,7 @@ pub async fn create_account_and_chat(
     config.ipfs_setting.bootstrap = false;
     config.bootstrap = Bootstrap::None;
 
-    let (mut account, raygun, _) = WarpIpfsBuilder::default()
+    let (mut account, raygun, fs) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
@@ -135,12 +142,20 @@ pub async fn create_account_and_chat(
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 
-    Ok((account, raygun, identity.did_key(), identity))
+    Ok((account, raygun, fs, identity.did_key(), identity))
 }
 
 pub async fn create_accounts_and_chat(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
-) -> anyhow::Result<Vec<(Box<dyn MultiPass>, Box<dyn RayGun>, DID, Identity)>> {
+) -> anyhow::Result<
+    Vec<(
+        Box<dyn MultiPass>,
+        Box<dyn RayGun>,
+        Box<dyn Constellation>,
+        DID,
+        Identity,
+    )>,
+> {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer().pretty())
         .with(EnvFilter::from_default_env())
