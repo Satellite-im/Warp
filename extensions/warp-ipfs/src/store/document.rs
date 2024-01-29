@@ -207,7 +207,6 @@ impl RootDocument {
                 })
                 .await
                 .unwrap_or_default();
-            
 
         // TODO: Uncomment when tying the files portion to shuttle
         // let file_index = futures::future::ready(self.file_index.ok_or(Error::Other))
