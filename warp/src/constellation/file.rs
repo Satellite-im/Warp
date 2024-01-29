@@ -41,7 +41,7 @@ impl From<FileType> for FormatType {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct File {
     /// ID of the `File`
-    id: Arc<Uuid>,
+    id: Arc<RwLock<Uuid>>,
 
     /// Name of the `File`
     name: Arc<RwLock<String>>,
@@ -92,6 +92,7 @@ pub struct File {
 impl std::fmt::Debug for File {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("File")
+            .field("id", &self.id())
             .field("name", &self.name())
             .field("description", &self.description())
             .field("thumbnail", &self.thumbnail_format())
@@ -121,8 +122,9 @@ impl Eq for File {}
 impl Default for File {
     fn default() -> Self {
         let timestamp = Utc::now();
+        let id = Uuid::new_v4();
         Self {
-            id: Arc::new(Uuid::new_v4()),
+            id: Arc::new(RwLock::new(id)),
             name: Arc::new(RwLock::new(String::from("un-named file"))),
             description: Default::default(),
             size: Default::default(),
@@ -167,6 +169,10 @@ impl File {
 
     pub fn name(&self) -> String {
         self.name.read().to_owned()
+    }
+
+    pub fn set_id(&self, id: Uuid) {
+        *self.id.write() = id;
     }
 
     pub fn set_name(&self, name: &str) {
@@ -368,7 +374,7 @@ impl File {
 
 impl File {
     pub fn id(&self) -> Uuid {
-        *self.id
+        *self.id.read()
     }
 
     pub fn creation(&self) -> DateTime<Utc> {

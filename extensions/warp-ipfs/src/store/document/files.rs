@@ -6,6 +6,7 @@ use futures::{StreamExt, TryFutureExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use warp::constellation::item::Item;
 use warp::error::Error;
 
@@ -236,6 +237,7 @@ impl FileDocument {
     pub fn to_attachment(&self) -> Result<FileAttachmentDocument, Error> {
         let data = self.reference.ok_or(Error::FileNotFound)?;
         Ok(FileAttachmentDocument {
+            id: Uuid::new_v4(),
             name: self.name.clone(),
             size: self.size,
             creation: Utc::now(),

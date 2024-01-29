@@ -287,6 +287,7 @@ impl RootDocument {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct FileAttachmentDocument {
+    pub id: Uuid,
     pub name: String,
     pub size: usize,
     pub creation: DateTime<Utc>,
@@ -303,6 +304,7 @@ impl FileAttachmentDocument {
 
     pub async fn resolve_to_file(&self, ipfs: &Ipfs, local: bool) -> Result<File, Error> {
         let file = File::new(&self.name);
+        file.set_id(self.id);
         file.set_size(self.size);
         file.set_file_type(self.file_type.clone());
 
