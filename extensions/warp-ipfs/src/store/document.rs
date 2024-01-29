@@ -374,4 +374,22 @@ impl FileAttachmentDocument {
 
         progress_stream.boxed()
     }
+
+    pub fn download_stream<'a>(
+        &'a self,
+        ipfs: &'a Ipfs,
+        members: &'a [PeerId],
+        timeout: Option<Duration>,
+    ) -> BoxStream<'a, Result<Vec<u8>, Error>> {
+        let progress_stream = async_stream::stream! {
+            let stream = ipfs.unixfs().cat(self.data, None, members, false, timeout);
+
+            for await result in stream {
+                let result = result.map_err(anyhow::Error::from).map_err(Error::from);
+                yield result;
+            }
+        };
+
+        progress_stream.boxed()
+    }
 }

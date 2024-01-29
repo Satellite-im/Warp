@@ -3166,43 +3166,40 @@ impl MessageStore {
 
     pub async fn download_stream(
         &self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
-        let members = self.get_conversation(conversation).await.map(|c| {
-            c.recipients()
-                .iter()
-                .filter_map(|did| did.to_peer_id().ok())
-                .collect::<Vec<_>>()
-        })?;
+        let conversation = self.conversations.get(conversation_id).await?;
 
-        let message = self.get_message(conversation, message_id).await?;
+        let members = conversation
+            .recipients()
+            .iter()
+            .filter_map(|did| did.to_peer_id().ok())
+            .collect::<Vec<_>>();
 
-        if message.message_type() != MessageType::Attachment {
+        let message = self
+            .get_message_document(conversation_id, message_id)
+            .await?;
+
+        if message.message_type != MessageType::Attachment {
             return Err(Error::InvalidMessage);
         }
 
         let attachment = message
-            .attachments()
+            .attachments(&self.ipfs)
+            .await
             .iter()
-            .find(|attachment| attachment.name() == file)
+            .find(|attachment| attachment.name == file)
             .cloned()
-            .ok_or(Error::FileNotFound)?;
-
-        let reference = attachment
-            .reference()
-            .and_then(|reference| IpfsPath::from_str(&reference).ok())
             .ok_or(Error::FileNotFound)?;
 
         let ipfs = self.ipfs.clone();
 
         let stream = async_stream::stream! {
-            let stream = ipfs.unixfs().cat(reference, None, &members, false, None);
-
-            for await result in stream {
-                let result = result.map_err(anyhow::Error::from).map_err(Error::from);
-                yield result;
+            let stream = attachment.download_stream(&ipfs, &members, None);
+            for await event in stream {
+                yield event;
             }
         };
 
