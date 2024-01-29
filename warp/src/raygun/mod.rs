@@ -1084,7 +1084,7 @@ pub trait RayGunAttachment: Sync + Send {
         &self,
         _: Uuid,
         _: Uuid,
-        _: String,
+        _: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
         Err(Error::Unimplemented)
     }

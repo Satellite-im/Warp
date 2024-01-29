@@ -2,7 +2,7 @@ mod common;
 
 #[cfg(test)]
 mod test {
-    use futures::StreamExt;
+    use futures::{StreamExt, TryStreamExt};
     use std::time::Duration;
     use warp::{
         constellation::Progression,
@@ -256,8 +256,14 @@ mod test {
         let file = attachments.first().expect("attachment exist");
 
         assert_eq!(file.name(), "image.png");
-        //TODO: Add download functionality when download stream is implemented
 
+        let stream = chat_b
+            .download_stream(id_a, message_a.id(), "image.png".into())
+            .await?;
+
+        let data = stream.try_collect::<Vec<_>>().await?.concat();
+
+        assert_eq!(data, PROFILE_IMAGE);
         Ok(())
     }
 

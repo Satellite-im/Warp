@@ -3308,9 +3308,7 @@ impl MessageStore {
         conversation: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'_, Result<Vec<u8>, Error>>, Error> {
-        let constellation = self.filesystem.clone();
-
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
         let members = self.get_conversation(conversation).await.map(|c| {
             c.recipients()
                 .iter()
@@ -3330,8 +3328,6 @@ impl MessageStore {
             .find(|attachment| attachment.name() == file)
             .cloned()
             .ok_or(Error::FileNotFound)?;
-
-        let _root = constellation.root_directory();
 
         let reference = attachment
             .reference()

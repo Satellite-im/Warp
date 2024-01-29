@@ -1546,10 +1546,10 @@ impl RayGunAttachment for WarpIpfs {
         &self,
         conversation_id: Uuid,
         message_id: Uuid,
-        file: String,
+        file: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
         self.messaging_store()?
-            .download_stream(conversation_id, message_id, &file)
+            .download_stream(conversation_id, message_id, file)
             .await
     }
 }
