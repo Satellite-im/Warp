@@ -1064,6 +1064,17 @@ pub trait RayGunAttachment: Sync + Send {
     ) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
+
+    /// Stream a file that been attached to a message
+    /// Note: Must use the filename associated when downloading
+    async fn download_stream(
+        &self,
+        _: Uuid,
+        _: Uuid,
+        _: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+        Err(Error::Unimplemented)
+    }
 }
 
 #[async_trait::async_trait]

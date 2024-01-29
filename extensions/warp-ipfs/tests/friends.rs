@@ -15,8 +15,8 @@ mod test {
         ])
         .await?;
 
-        let (mut account_a, did_a, _) = accounts.first().cloned().unwrap();
-        let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut account_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut subscribe_a = account_a.subscribe().await?;
         let mut subscribe_b = account_b.subscribe().await?;
@@ -56,8 +56,8 @@ mod test {
         ])
         .await?;
 
-        let (mut account_a, did_a, _) = accounts.first().cloned().unwrap();
-        let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut account_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut subscribe_a = account_a.subscribe().await?;
         let mut subscribe_b = account_b.subscribe().await?;
@@ -119,8 +119,8 @@ mod test {
         ])
         .await?;
 
-        let (mut account_a, _, _) = accounts.first().cloned().unwrap();
-        let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut account_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut subscribe_a = account_a.subscribe().await?;
         let mut subscribe_b = account_b.subscribe().await?;
@@ -160,8 +160,8 @@ mod test {
         ])
         .await?;
 
-        let (mut account_a, _, _) = accounts.first().cloned().unwrap();
-        let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut account_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut subscribe_a = account_a.subscribe().await?;
         let mut subscribe_b = account_b.subscribe().await?;
@@ -213,8 +213,8 @@ mod test {
         ])
         .await?;
 
-        let (mut account_a, did_a, _) = accounts.first().cloned().unwrap();
-        let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut account_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut subscribe_a = account_a.subscribe().await?;
         let mut subscribe_b = account_b.subscribe().await?;
@@ -256,8 +256,8 @@ mod test {
         ])
         .await?;
 
-        let (mut account_a, _, _) = accounts.first().cloned().unwrap();
-        let (_, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut account_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (_, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut subscribe_a = account_a.subscribe().await?;
 
@@ -295,8 +295,8 @@ mod test {
         ])
         .await?;
 
-        let (mut account_a, did_a, _) = accounts.first().cloned().unwrap();
-        let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut account_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let mut subscribe_a = account_a.subscribe().await?;
         let mut subscribe_b = account_b.subscribe().await?;
@@ -364,7 +364,7 @@ mod test {
 
     #[tokio::test]
     async fn cannot_block_self() -> anyhow::Result<()> {
-        let (mut account_a, did_a, _) = create_account(
+        let (mut account_a, _, did_a, _) = create_account(
             Some("JohnDoe"),
             None,
             Some("test::cannot_block_self".into()),
