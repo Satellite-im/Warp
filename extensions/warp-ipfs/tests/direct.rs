@@ -258,7 +258,7 @@ mod test {
         assert_eq!(file.name(), "image.png");
 
         let stream = chat_b
-            .download_stream(id_a, message_a.id(), "image.png".into())
+            .download_stream(id_a, message_a.id(), "image.png")
             .await?;
 
         let data = stream.try_collect::<Vec<_>>().await?.concat();
