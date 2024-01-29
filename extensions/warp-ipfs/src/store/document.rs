@@ -207,18 +207,22 @@ impl RootDocument {
                 })
                 .await
                 .unwrap_or_default();
+            
 
-        let file_index = futures::future::ready(self.file_index.ok_or(Error::Other))
-            .and_then(|document| async move {
-                ipfs.get_dag(document)
-                    .local()
-                    .deserialized::<DirectoryDocument>()
-                    .await
-                    .map_err(Error::from)
-            })
-            .and_then(|document| async move { document.resolve(ipfs, false).await })
-            .await
-            .ok();
+        // TODO: Uncomment when tying the files portion to shuttle
+        // let file_index = futures::future::ready(self.file_index.ok_or(Error::Other))
+        //     .and_then(|document| async move {
+        //         ipfs.get_dag(document)
+        //             .local()
+        //             .deserialized::<DirectoryDocument>()
+        //             .await
+        //             .map_err(Error::from)
+        //     })
+        //     .and_then(|document| async move { document.resolve(ipfs, false).await })
+        //     .await
+        //     .ok();
+
+        let file_index = None;
 
         let mut exported = ExtractedRootDocument {
             identity,
