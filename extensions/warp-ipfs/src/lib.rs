@@ -246,9 +246,7 @@ impl WarpIpfs {
 
         let behaviour = behaviour::Behaviour {
             shuttle_identity: enable
-                .then_some(shuttle::identity::client::Behaviour::new(
-                    &keypair, None, id_sh_rx, nodes,
-                ))
+                .then(|| shuttle::identity::client::Behaviour::new(&keypair, None, id_sh_rx, nodes))
                 .into(),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
@@ -1543,6 +1541,17 @@ impl RayGunAttachment for WarpIpfs {
             .download(conversation_id, message_id, &file, path, false)
             .await
     }
+
+    async fn download_stream(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+        self.messaging_store()?
+            .download_stream(conversation_id, message_id, file)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -1637,7 +1646,7 @@ impl Constellation for WarpIpfs {
         self.file_store()?.put(name, path).await
     }
 
-    async fn get(&self, name: &str, path: &str) -> Result<(), Error> {
+    async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?.get(name, path).await
     }
 
