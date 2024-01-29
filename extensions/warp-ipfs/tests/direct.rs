@@ -256,6 +256,8 @@ mod test {
         let file = attachments.first().expect("attachment exist");
 
         assert_eq!(file.name(), "image.png");
+        //TODO: Add download functionality when download stream is implemented
+
         Ok(())
     }
 
