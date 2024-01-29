@@ -1541,6 +1541,17 @@ impl RayGunAttachment for WarpIpfs {
             .download(conversation_id, message_id, &file, path, false)
             .await
     }
+
+    async fn download_stream(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: String,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+        self.messaging_store()?
+            .download_stream(conversation_id, message_id, &file)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
