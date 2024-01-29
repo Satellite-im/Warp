@@ -324,7 +324,7 @@ impl FileAttachmentDocument {
             file.set_thumbnail(&data);
         }
 
-        // Note: 
+        // Note:
         //  - because of the internal updates, we will set creation and modified timestamp last
         //  - `creation` should represent the time of when the file was attach and not the actual creation.
         //  - The file would not be `modified` per se but only making sure that creation and modified state
