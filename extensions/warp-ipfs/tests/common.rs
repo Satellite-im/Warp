@@ -107,6 +107,7 @@ pub async fn create_accounts(
     Ok(accounts)
 }
 
+#[allow(dead_code)]
 pub async fn create_account_and_chat(
     username: Option<&str>,
     passphrase: Option<&str>,
@@ -145,6 +146,7 @@ pub async fn create_account_and_chat(
     Ok((account, raygun, fs, identity.did_key(), identity))
 }
 
+#[allow(dead_code)]
 pub async fn create_accounts_and_chat(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
 ) -> anyhow::Result<
