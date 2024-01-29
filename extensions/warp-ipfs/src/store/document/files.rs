@@ -238,6 +238,7 @@ impl FileDocument {
         Ok(FileAttachmentDocument {
             name: self.name.clone(),
             size: self.size,
+            creation: Utc::now(),
             thumbnail: self.thumbnail,
             file_type: self.file_type.clone(),
             data,

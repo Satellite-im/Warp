@@ -289,6 +289,7 @@ impl RootDocument {
 pub struct FileAttachmentDocument {
     pub name: String,
     pub size: usize,
+    pub creation: DateTime<Utc>,
     pub thumbnail: Option<Cid>,
     pub file_type: FileType,
     pub data: Cid,
@@ -322,6 +323,14 @@ impl FileAttachmentDocument {
 
             file.set_thumbnail(&data);
         }
+
+        // Note: 
+        //  - because of the internal updates, we will set creation and modified timestamp last
+        //  - `creation` should represent the time of when the file was attach and not the actual creation.
+        //  - The file would not be `modified` per se but only making sure that creation and modified state
+        //    matches.
+        file.set_creation(self.creation);
+        file.set_modified(Some(self.creation));
 
         Ok(file)
     }
