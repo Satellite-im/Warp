@@ -12,7 +12,7 @@ mod test {
 
     #[tokio::test]
     async fn create_identity() -> anyhow::Result<()> {
-        let (_, did, _) = create_account(
+        let (_, _, did, _) = create_account(
             None,
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
             None,
@@ -29,7 +29,7 @@ mod test {
 
     #[tokio::test]
     async fn get_own_identity() -> anyhow::Result<()> {
-        let (_, _, identity) = create_account(
+        let (_, _, _, identity) = create_account(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
             None,
@@ -53,9 +53,9 @@ mod test {
         ])
         .await?;
 
-        let (account_a, _, _) = accounts.first().expect("Account exist");
+        let (account_a, _, _, _) = accounts.first().expect("Account exist");
 
-        let (_, did_b, _) = accounts.last().expect("Account exist");
+        let (_, _, did_b, _) = accounts.last().expect("Account exist");
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
         let identity_b = tokio::time::timeout(Duration::from_secs(60), async {
@@ -92,9 +92,9 @@ mod test {
         ])
         .await?;
 
-        let (account_a, _, _) = accounts.first().unwrap();
+        let (account_a, _, _, _) = accounts.first().unwrap();
 
-        let (_account_b, _, _) = accounts.last().unwrap();
+        let (_account_b, _, _, _) = accounts.last().unwrap();
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
 
@@ -181,7 +181,7 @@ mod test {
 
     #[tokio::test]
     async fn identity_status() -> anyhow::Result<()> {
-        let (account, did, _) =
+        let (account, _, did, _) =
             create_account(Some("JohnDoe"), None, Some("test::identity_status".into())).await?;
         let status = account.identity_status(&did).await?;
         assert_eq!(status, IdentityStatus::Online);
@@ -190,7 +190,7 @@ mod test {
 
     #[tokio::test]
     async fn update_identity_status() -> anyhow::Result<()> {
-        let (mut account, did, _) = create_account(
+        let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
             None,
             Some("test::update_identity_status".into()),
@@ -223,9 +223,9 @@ mod test {
         ])
         .await?;
 
-        let (account_a, _, _) = accounts.first().unwrap();
+        let (account_a, _, _, _) = accounts.first().unwrap();
 
-        let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
         let status_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
@@ -258,7 +258,7 @@ mod test {
 
     #[tokio::test]
     async fn identity_platform() -> anyhow::Result<()> {
-        let (account, did, _) = create_account(
+        let (account, _, did, _) = create_account(
             Some("JohnDoe"),
             None,
             Some("test::identity_platform".into()),
@@ -271,7 +271,7 @@ mod test {
 
     #[tokio::test]
     async fn identity_real_profile_picture() -> anyhow::Result<()> {
-        let (mut account, did, _) = create_account(
+        let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
             None,
             Some("test::identity_real_profile_picture".into()),
@@ -293,7 +293,7 @@ mod test {
 
     #[tokio::test]
     async fn identity_profile_picture() -> anyhow::Result<()> {
-        let (mut account, did, _) = create_account(
+        let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
             None,
             Some("test::identity_profile_picture".into()),
@@ -315,7 +315,7 @@ mod test {
 
     #[tokio::test]
     async fn identity_profile_banner() -> anyhow::Result<()> {
-        let (mut account, did, _) = create_account(
+        let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
             None,
             Some("test::identity_profile_banner".into()),
@@ -351,9 +351,9 @@ mod test {
         ])
         .await?;
 
-        let (account_a, _, _) = accounts.first().unwrap();
+        let (account_a, _, _, _) = accounts.first().unwrap();
 
-        let (_account_b, did_b, _) = accounts.last().unwrap();
+        let (_account_b, _, did_b, _) = accounts.last().unwrap();
 
         let platform_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
