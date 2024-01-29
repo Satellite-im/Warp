@@ -19,7 +19,7 @@ mod test {
         )])
         .await?;
 
-        let (_account_a, mut chat_a, did_a, _) = accounts[0].clone();
+        let (_account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
 
@@ -58,7 +58,7 @@ mod test {
         )])
         .await?;
 
-        let (_account_a, mut chat_a, _, _) = accounts[0].clone();
+        let (_account_a, mut chat_a, _, _, _) = accounts[0].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
 
@@ -126,9 +126,9 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, did_a, _) = accounts[0].clone();
-        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
-        let (_account_c, mut chat_c, did_c, _) = accounts[2].clone();
+        let (_account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -227,10 +227,10 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, did_a, _) = accounts[0].clone();
-        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
-        let (_account_c, mut chat_c, did_c, _) = accounts[2].clone();
-        let (_account_d, mut chat_d, did_d, _) = accounts[3].clone();
+        let (_account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
+        let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -386,10 +386,10 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, did_a, _) = accounts[0].clone();
-        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
-        let (_account_c, mut chat_c, did_c, _) = accounts[2].clone();
-        let (_account_d, mut chat_d, did_d, _) = accounts[3].clone();
+        let (_account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
+        let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -603,10 +603,10 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _) = accounts[0].clone();
-        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
-        let (_account_c, mut chat_c, did_c, _) = accounts[2].clone();
-        let (_account_d, mut chat_d, did_d, _) = accounts[3].clone();
+        let (_account_a, mut chat_a, _, _, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
+        let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -757,9 +757,9 @@ mod test {
         ])
         .await?;
 
-        let (mut _account_a, mut chat_a, did_a, _) = accounts[0].clone();
-        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
-        let (mut _account_c, mut chat_c, did_c, _) = accounts[2].clone();
+        let (mut _account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (mut _account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
 
         let mut account_subscribe_a = _account_a.subscribe().await?;
         let mut account_subscribe_c = _account_c.subscribe().await?;
@@ -915,9 +915,9 @@ mod test {
         ])
         .await?;
 
-        let (mut _account_a, mut chat_a, did_a, _) = accounts[0].clone();
-        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
-        let (mut _account_c, mut chat_c, did_c, _) = accounts[2].clone();
+        let (mut _account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (mut _account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
 
         let mut account_subscribe_a = _account_a.subscribe().await?;
         let mut account_subscribe_c = _account_c.subscribe().await?;
