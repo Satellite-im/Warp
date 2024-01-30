@@ -1,6 +1,6 @@
 use std::{
     collections::{
-        btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap,
+        btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet
     },
     future::IntoFuture,
     path::PathBuf,
@@ -24,8 +24,7 @@ use warp::{
     crypto::{cipher::Cipher, generate, DID},
     error::Error,
     raygun::{
-        Conversation, ConversationType, DirectConversationSettings, MessageEventKind, PinState,
-        ReactionState,
+        Conversation, ConversationType, DirectConversationSettings, GroupSettings, MessageEventKind, PinState, ReactionState
     },
 };
 
@@ -469,6 +468,149 @@ impl ConversationTask {
         // self.event
         //     .emit(RayGunEventKind::ConversationCreated {
         //         conversation_id: convo_id,
+        //     })
+        //     .await;
+
+        Ok(Conversation::from(&conversation))
+    }
+
+    pub async fn create_group_conversation(
+        &mut self,
+        name: Option<String>,
+        mut recipients: HashSet<DID>,
+        settings: GroupSettings,
+    ) -> Result<Conversation, Error> {
+        let own_did = &*(self.keypair.clone());
+
+        if recipients.contains(own_did) {
+            return Err(Error::CannotCreateConversation);
+        }
+
+        if let Some(name) = name.as_ref() {
+            let name_length = name.trim().len();
+
+            if name_length == 0 || name_length > 255 {
+                return Err(Error::InvalidLength {
+                    context: "name".into(),
+                    current: name_length,
+                    minimum: Some(1),
+                    maximum: Some(255),
+                });
+            }
+        }
+
+        let mut removal = vec![];
+
+        // for did in recipients.iter() {
+        //     if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did).await? {
+        //         info!("{did} is not on the friends list.. removing from list");
+        //         removal.push(did.clone());
+        //     }
+
+        //     if let Ok(true) = self.identity.is_blocked(did).await {
+        //         info!("{did} is blocked.. removing from list");
+        //         removal.push(did.clone());
+        //     }
+        // }
+
+        for did in removal {
+            recipients.remove(&did);
+        }
+
+        //Temporary limit
+        // if self.list_conversations().await.unwrap_or_default().len() >= 256 {
+        //     return Err(Error::ConversationLimitReached);
+        // }
+
+        // for recipient in &recipients {
+        //     if !self.discovery.contains(recipient).await {
+        //         let _ = self.discovery.insert(recipient).await.ok();
+        //     }
+        // }
+
+        let restricted = self.root.get_blocks().await.unwrap_or_default();
+
+        let conversation = ConversationDocument::new_group(
+            own_did,
+            name,
+            &Vec::from_iter(recipients),
+            &restricted,
+            settings,
+        )?;
+
+        let recipient = conversation.recipients();
+
+        let convo_id = conversation.id();
+        let topic = conversation.topic();
+
+        self.set_document(conversation).await?;
+
+        let mut keystore = Keystore::new(convo_id);
+        keystore.insert(own_did, own_did, warp::crypto::generate::<64>())?;
+
+        self.set_keystore(convo_id, keystore).await?;
+
+        // let stream = self.ipfs.pubsub_subscribe(topic).await?;
+
+        // self.start_task(convo_id, stream).await;
+
+        let peer_id_list = recipient
+            .clone()
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .map(|did| (did.clone(), did))
+            .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
+            .collect::<Vec<_>>();
+
+        let conversation = self.get(convo_id).await?;
+
+        let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
+            conversation: conversation.clone(),
+        })?;
+
+        for (did, peer_id) in peer_id_list {
+            let bytes = ecdh_encrypt(own_did, Some(&did), &event)?;
+            let signature = sign_serde(own_did, &bytes)?;
+
+            let payload = Payload::new(own_did, &bytes, &signature);
+
+            let peers = self.ipfs.pubsub_peers(Some(did.messaging())).await?;
+            if !peers.contains(&peer_id)
+                || (peers.contains(&peer_id)
+                    && self
+                        .ipfs
+                        .pubsub_publish(did.messaging(), payload.to_bytes()?.into())
+                        .await
+                        .is_err())
+            {
+                warn!("Unable to publish to topic. Queuing event");
+                // if let Err(e) = self
+                //     .queue_event(
+                //         did.clone(),
+                //         Queue::direct(
+                //             convo_id,
+                //             None,
+                //             peer_id,
+                //             did.messaging(),
+                //             payload.data().to_vec(),
+                //         ),
+                //     )
+                //     .await
+                // {
+                //     error!("Error submitting event to queue: {e}");
+                // }
+            }
+        }
+
+        for recipient in recipient.iter().filter(|d| own_did.ne(d)) {
+            if let Err(e) = self.request_key(conversation.id(), recipient).await {
+                tracing::warn!("Failed to send exchange request to {recipient}: {e}");
+            }
+        }
+
+        // self.event
+        //     .emit(RayGunEventKind::ConversationCreated {
+        //         conversation_id: conversation.id(),
         //     })
         //     .await;
 
