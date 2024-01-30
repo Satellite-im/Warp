@@ -19,6 +19,7 @@ use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastS
 use tracing::Span;
 use tracing::{error, info, trace, warn};
 use uuid::Uuid;
+use warp::constellation::directory::Directory;
 use warp::constellation::{ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
@@ -3024,6 +3025,26 @@ impl MessageStore {
             return Err(Error::NoAttachments);
         }
 
+        let root_directory = constellation.root_directory();
+
+        if !root_directory.has_item("chat_media") {
+            let new_dir = Directory::new("chat_media");
+            root_directory.add_directory(new_dir)?;
+        }
+
+        let mut media_dir = root_directory
+            .get_last_directory_from_path(&format!("/chat_media/{conversation_id}"))?;
+
+        if media_dir.name() == "chat_media" {
+            let new_dir = Directory::new(&conversation_id.to_string());
+            media_dir.add_directory(new_dir)?;
+            // in case the index isnt rebuilt from signaling
+            _ = constellation.export().await;
+            media_dir = media_dir.get_last_directory_from_path(&conversation_id.to_string())?;
+        }
+
+        assert_eq!(media_dir.name(), conversation_id.to_string());
+
         let store = self.clone();
 
         let stream = async_stream::stream! {
@@ -3066,13 +3087,7 @@ impl MessageStore {
 
                         let original = filename.clone();
 
-                        let current_directory = match constellation.current_directory() {
-                            Ok(directory) => directory,
-                            Err(e) => {
-                                yield AttachmentKind::Pending(Err(e));
-                                return;
-                            }
-                        };
+                        let current_directory = media_dir.clone();
 
                         let mut interval = 0;
                         let skip;
@@ -3112,6 +3127,8 @@ impl MessageStore {
 
                         in_stack.push(filename.clone());
 
+                        let filename = format!("/chat_media/{conversation_id}/{filename}");
+
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
                             Err(e) => {
@@ -3124,7 +3141,7 @@ impl MessageStore {
                             }
                         };
 
-                        let current_directory = current_directory.clone();
+                        let directory = root_directory.clone();
                         let filename = filename.to_string();
 
                         let stream = async_stream::stream! {
@@ -3134,7 +3151,7 @@ impl MessageStore {
                                         yield (item, None);
                                     },
                                     item @ Progression::ProgressComplete { .. } => {
-                                        let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
+                                        let file = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
                                         yield (item, file);
                                         break;
                                     },

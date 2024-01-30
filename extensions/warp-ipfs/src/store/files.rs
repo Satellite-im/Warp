@@ -174,7 +174,7 @@ impl FileStore {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn export(&self) -> Result<(), Error> {
+    pub(crate) async fn export(&self) -> Result<(), Error> {
         tracing::trace!("Exporting index");
 
         let mut index = self.index.clone();
