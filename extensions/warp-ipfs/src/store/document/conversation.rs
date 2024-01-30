@@ -1,16 +1,19 @@
 use std::{
     collections::{
-        btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet
+        btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet,
     },
     future::IntoFuture,
-    path::PathBuf,
+    path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
+    time::Instant,
 };
 
+use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
-    stream::FuturesUnordered,
+    stream::{self, BoxStream, FuturesUnordered},
     SinkExt, Stream, StreamExt,
 };
 use libipld::Cid;
@@ -21,16 +24,22 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
 use warp::{
+    constellation::{ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
     error::Error,
     raygun::{
-        Conversation, ConversationType, DirectConversationSettings, GroupSettings, MessageEventKind, PinState, ReactionState
+        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
+        ConversationType, DirectConversationSettings, GroupSettings, Location, MessageEventKind,
+        MessageType, PinState, RayGunEventKind, ReactionState,
     },
 };
 
 use crate::store::{
     conversation::{ConversationDocument, MessageDocument},
-    ecdh_decrypt, ecdh_encrypt, generate_shared_topic,
+    ecdh_decrypt, ecdh_encrypt,
+    event_subscription::EventSubscription,
+    files::FileStore,
+    generate_shared_topic,
     keystore::Keystore,
     message::{EventOpt, MessageDirection},
     payload::Payload,
@@ -40,6 +49,8 @@ use crate::store::{
 };
 
 use super::root::RootDocumentMap;
+
+pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
 
 #[allow(clippy::large_enum_variant)]
 enum ConversationCommand {
@@ -75,6 +86,87 @@ enum ConversationCommand {
         id: Uuid,
         response: oneshot::Sender<Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error>>,
     },
+
+    CreateConversation {
+        did: DID,
+        response: oneshot::Sender<Result<Conversation, Error>>,
+    },
+    CreateGroupConversation {
+        name: Option<String>,
+        recipients: HashSet<DID>,
+        settings: GroupSettings,
+        response: oneshot::Sender<Result<Conversation, Error>>,
+    },
+    UpdateConversationName {
+        conversation_id: Uuid,
+        name: String,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    AddRecipient {
+        conversation_id: Uuid,
+        did: DID,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    RemoveRecipient {
+        conversation_id: Uuid,
+        did: DID,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    SendMessage {
+        conversation_id: Uuid,
+        lines: Vec<String>,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    EditMessage {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        lines: Vec<String>,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    Reply {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        lines: Vec<String>,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    DeleteMessage {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    PinMessage {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    React {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    Attach {
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        locations: Vec<Location>,
+        messages: Vec<String>,
+        response: oneshot::Sender<Result<AttachmentEventStream, Error>>,
+    },
+    Download {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        path: PathBuf,
+        response: oneshot::Sender<Result<ConstellationProgressStream, Error>>,
+    },
+    DownloadStream {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        response: oneshot::Sender<Result<DownloadStream, Error>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +181,8 @@ impl Conversations {
         path: Option<PathBuf>,
         keypair: Arc<DID>,
         root: RootDocumentMap,
+        file: FileStore,
+        event: EventSubscription<RayGunEventKind>,
     ) -> Self {
         let cid = match path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".message_id"))
@@ -115,6 +209,8 @@ impl Conversations {
                 topic_stream,
                 rx,
                 root,
+                file,
+                event,
             };
 
             select! {
@@ -218,6 +314,274 @@ impl Conversations {
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
+
+    pub async fn create_conversation(&self, did: &DID) -> Result<Conversation, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::CreateConversation {
+                did: did.clone(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn create_group_conversation(
+        &self,
+        name: Option<String>,
+        members: HashSet<DID>,
+        settings: GroupSettings,
+    ) -> Result<Conversation, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::CreateGroupConversation {
+                name,
+                recipients: members,
+                settings,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn update_conversation_name<S: Into<String>>(
+        &self,
+        conversation_id: Uuid,
+        name: S,
+    ) -> Result<(), Error> {
+        let name = name.into();
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::UpdateConversationName {
+                conversation_id,
+                name,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn add_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::AddRecipient {
+                conversation_id,
+                did: did.clone(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn remove_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::RemoveRecipient {
+                conversation_id,
+                did: did.clone(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn send_message(
+        &self,
+        conversation_id: Uuid,
+        lines: Vec<String>,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::SendMessage {
+                conversation_id,
+                lines,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn edit_message(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        lines: Vec<String>,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::EditMessage {
+                conversation_id,
+                message_id,
+                lines,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn reply(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        lines: Vec<String>,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::Reply {
+                conversation_id,
+                message_id,
+                lines,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn delete_message(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::DeleteMessage {
+                conversation_id,
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn pin_message(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::PinMessage {
+                conversation_id,
+                message_id,
+                state,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn react<S: Into<String>>(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: S,
+    ) -> Result<(), Error> {
+        let emoji = emoji.into();
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::React {
+                conversation_id,
+                message_id,
+                state,
+                emoji,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn attach(
+        &self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        locations: Vec<Location>,
+        messages: Vec<String>,
+    ) -> Result<AttachmentEventStream, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::Attach {
+                conversation_id,
+                message_id,
+                locations,
+                messages,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn download<S: Into<String>, P: AsRef<Path>>(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: S,
+        path: P,
+    ) -> Result<ConstellationProgressStream, Error> {
+        let file = file.into();
+        let path = path.as_ref().to_path_buf();
+
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::Download {
+                conversation_id,
+                message_id,
+                file,
+                path,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn download_string<S: Into<String>>(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: S,
+    ) -> Result<DownloadStream, Error> {
+        let file = file.into();
+
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::DownloadStream {
+                conversation_id,
+                message_id,
+                file,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
 }
 
 struct ConversationTask {
@@ -228,6 +592,8 @@ struct ConversationTask {
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
     topic_stream: StreamMap<Uuid, mpsc::Receiver<ConversationStreamData>>,
     root: RootDocumentMap,
+    file: FileStore,
+    event: EventSubscription<RayGunEventKind>,
     rx: mpsc::Receiver<ConversationCommand>,
 }
 
@@ -273,6 +639,48 @@ impl ConversationTask {
                         } => {
                             let _ = response.send(self.set_keystore(id, document).await);
                         }
+                        ConversationCommand::CreateConversation { did, response } => {
+                            _ = response.send(self.create_conversation(&did).await);
+                        },
+                        ConversationCommand::CreateGroupConversation { name, recipients, settings, response } => {
+                            _ = response.send(self.create_group_conversation(name, recipients, settings).await);
+                        },
+                        ConversationCommand::UpdateConversationName { conversation_id, name, response } => {
+                            _ = response.send(self.update_conversation_name(conversation_id, &name).await)
+                        },
+                        ConversationCommand::AddRecipient { conversation_id, did, response } => {
+                            _ = response.send(self.add_recipient(conversation_id, &did).await)
+                        },
+                        ConversationCommand::RemoveRecipient { conversation_id, did, response } => {
+                            _ = response.send(self.remove_recipient(conversation_id, &did, true).await)
+                        },
+                        ConversationCommand::SendMessage { conversation_id, lines, response } => {
+                            _ = response.send(self.send_message(conversation_id, lines).await)
+                        },
+                        ConversationCommand::EditMessage { conversation_id, message_id, lines, response } => {
+                            _ = response.send(self.edit_message(conversation_id, message_id, lines).await)
+                        },
+                        ConversationCommand::Reply { conversation_id, message_id, lines, response } => {
+                            _ = response.send(self.reply_message(conversation_id, message_id, lines).await)
+                        },
+                        ConversationCommand::DeleteMessage { conversation_id, message_id, response } => {
+                            _ = response.send(self.delete_message(conversation_id, message_id, true).await)
+                        },
+                        ConversationCommand::PinMessage { conversation_id, message_id, state, response } => {
+                            _ = response.send(self.pin_message(conversation_id, message_id, state).await)
+                        },
+                        ConversationCommand::React { conversation_id, message_id, state, emoji, response } => {
+                            _ = response.send(self.react(conversation_id, message_id, state, emoji).await)
+                        },
+                        ConversationCommand::Attach { conversation_id, message_id, locations, messages, response } => {
+                            _ = response.send(self.attach(conversation_id, message_id, locations, messages).await)
+                        },
+                        ConversationCommand::Download { conversation_id, message_id, file, path, response } => {
+                            _ = response.send(self.download(conversation_id, message_id, &file, path).await)
+                        },
+                        ConversationCommand::DownloadStream { conversation_id, message_id, file, response } => {
+                            _ = response.send(self.download_stream(conversation_id, message_id, &file).await)
+                        },
                     }
                 }
                 Some(message) = stream.next() => {
@@ -338,9 +746,9 @@ impl ConversationTask {
         //     return Err(Error::FriendDoesntExist);
         // }
 
-        // if let Ok(true) = self.identity.is_blocked(did_key).await {
-        //     return Err(Error::PublicKeyIsBlocked);
-        // }
+        if self.root.is_blocked(did).await.unwrap_or_default() {
+            return Err(Error::PublicKeyIsBlocked);
+        }
 
         if did == &*self.keypair {
             return Err(Error::CannotCreateConversation);
@@ -355,11 +763,9 @@ impl ConversationTask {
                     && conversation.recipients().contains(did)
                     && conversation.recipients().contains(&self.keypair)
             })
-            .cloned()
+            .map(Conversation::from)
         {
-            return Err(Error::ConversationExist {
-                conversation: conversation.into(),
-            });
+            return Err(Error::ConversationExist { conversation });
         }
 
         //Temporary limit
@@ -465,11 +871,11 @@ impl ConversationTask {
             // }
         }
 
-        // self.event
-        //     .emit(RayGunEventKind::ConversationCreated {
-        //         conversation_id: convo_id,
-        //     })
-        //     .await;
+        self.event
+            .emit(RayGunEventKind::ConversationCreated {
+                conversation_id: convo_id,
+            })
+            .await;
 
         Ok(Conversation::from(&conversation))
     }
@@ -501,17 +907,14 @@ impl ConversationTask {
 
         let mut removal = vec![];
 
-        // for did in recipients.iter() {
-        //     if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did).await? {
-        //         info!("{did} is not on the friends list.. removing from list");
-        //         removal.push(did.clone());
-        //     }
-
-        //     if let Ok(true) = self.identity.is_blocked(did).await {
-        //         info!("{did} is blocked.. removing from list");
-        //         removal.push(did.clone());
-        //     }
-        // }
+        for did in recipients.iter() {
+            let is_blocked = self.root.is_blocked(did).await?;
+            let is_blocked_by = self.root.is_blocked_by(did).await?;
+            if is_blocked || is_blocked_by {
+                tracing::info!("{did} is blocked.. removing from list");
+                removal.push(did.clone());
+            }
+        }
 
         for did in removal {
             recipients.remove(&did);
@@ -541,7 +944,9 @@ impl ConversationTask {
         let recipient = conversation.recipients();
 
         let convo_id = conversation.id();
-        let topic = conversation.topic();
+        let main_topic = conversation.topic();
+        let event_topic = conversation.event_topic();
+        let request_topic = conversation.reqres_topic(&self.keypair);
 
         self.set_document(conversation).await?;
 
@@ -550,9 +955,45 @@ impl ConversationTask {
 
         self.set_keystore(convo_id, keystore).await?;
 
-        // let stream = self.ipfs.pubsub_subscribe(topic).await?;
+        let messaging_stream = self
+            .ipfs
+            .pubsub_subscribe(main_topic)
+            .await?
+            .map(ConversationStreamData::Message)
+            .boxed();
 
-        // self.start_task(convo_id, stream).await;
+        let event_stream = self
+            .ipfs
+            .pubsub_subscribe(event_topic)
+            .await?
+            .map(ConversationStreamData::Event)
+            .boxed();
+
+        let request_stream = self
+            .ipfs
+            .pubsub_subscribe(request_topic)
+            .await?
+            .map(ConversationStreamData::RequestResponse)
+            .boxed();
+
+        let mut stream = messaging_stream
+            .chain(event_stream)
+            .chain(request_stream)
+            .boxed();
+
+        let (mut tx, rx) = mpsc::channel(256);
+
+        tokio::spawn(async move {
+            while let Some(stream_type) = stream.next().await {
+                if let Err(e) = tx.send(stream_type).await {
+                    if e.is_disconnected() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        self.topic_stream.insert(convo_id, rx);
 
         let peer_id_list = recipient
             .clone()
@@ -608,11 +1049,11 @@ impl ConversationTask {
             }
         }
 
-        // self.event
-        //     .emit(RayGunEventKind::ConversationCreated {
-        //         conversation_id: conversation.id(),
-        //     })
-        //     .await;
+        self.event
+            .emit(RayGunEventKind::ConversationCreated {
+                conversation_id: conversation.id(),
+            })
+            .await;
 
         Ok(Conversation::from(&conversation))
     }
@@ -907,6 +1348,1217 @@ impl ConversationTask {
 
         Ok(())
     }
+
+    async fn get_message(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<warp::raygun::Message, Error> {
+        let conversation = self.get(conversation_id).await?;
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group { .. } => self.get_keystore(conversation.id()).await.ok(),
+        };
+        conversation
+            .get_message(&self.ipfs, &self.keypair, message_id, keystore.as_ref())
+            .await
+    }
+}
+
+impl ConversationTask {
+    pub async fn send_message(
+        &mut self,
+        conversation_id: Uuid,
+        messages: Vec<String>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        if messages.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length == 0 || lines_value_length > 4096 {
+            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
+        }
+
+        let own_did = &*self.keypair;
+
+        let mut message = warp::raygun::Message::default();
+        message.set_conversation_id(conversation.id());
+        message.set_sender(own_did.clone());
+        message.set_lines(messages.clone());
+
+        let construct = [
+            message.id().into_bytes().to_vec(),
+            message.conversation_id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            message
+                .lines()
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = sign_serde(own_did, &construct)?;
+        message.set_signature(Some(signature));
+
+        let message_id = message.id();
+
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
+        };
+
+        let message_document = MessageDocument::new(
+            &self.ipfs,
+            self.keypair.clone(),
+            message.clone(),
+            keystore.as_ref(),
+        )
+        .await?;
+
+        let mut messages = conversation.get_message_list(&self.ipfs).await?;
+        messages.insert(message_document);
+        conversation.set_message_list(&self.ipfs, messages).await?;
+        self.set_document(conversation).await?;
+
+        let event = MessageEventKind::MessageSent {
+            conversation_id,
+            message_id,
+        };
+
+        if let Err(e) = tx.send(event) {
+            error!("Error broadcasting event: {e}");
+        }
+
+        let event = MessagingEvents::New { message };
+
+        self.publish(conversation_id, Some(message_id), event, true)
+            .await
+    }
+
+    pub async fn edit_message(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        messages: Vec<String>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+        if messages.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length == 0 || lines_value_length > 4096 {
+            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
+        }
+
+        let mut message = self.get_message(conversation_id, message_id).await?;
+
+        let sender = message.sender();
+
+        let own_did = &*self.keypair;
+
+        if sender.ne(own_did) {
+            return Err(Error::InvalidMessage);
+        }
+
+        {
+            let signature = message.signature();
+            let construct = [
+                message.id().into_bytes().to_vec(),
+                message.conversation_id().into_bytes().to_vec(),
+                sender.to_string().as_bytes().to_vec(),
+                message
+                    .lines()
+                    .iter()
+                    .map(|s| s.as_bytes())
+                    .collect::<Vec<_>>()
+                    .concat(),
+            ]
+            .concat();
+            verify_serde_sig(sender.clone(), &construct, &signature)?;
+        }
+
+        let construct = [
+            message_id.into_bytes().to_vec(),
+            conversation.id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            messages
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = sign_serde(own_did, &construct)?;
+
+        let modified = Utc::now();
+
+        message.set_signature(Some(signature.clone()));
+        *message.lines_mut() = messages.clone();
+        message.set_modified(modified);
+
+        let event = MessagingEvents::Edit {
+            conversation_id: conversation.id(),
+            message_id,
+            modified,
+            lines: messages,
+            signature,
+        };
+
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
+        };
+
+        let mut list = conversation.get_message_list(&self.ipfs).await?;
+
+        //TODO: Maybe assert?
+        let mut message_document = list
+            .iter()
+            .find(|document| {
+                document.id == message_id && document.conversation_id == conversation_id
+            })
+            .copied()
+            .ok_or(Error::MessageNotFound)?;
+
+        message_document
+            .update(&self.ipfs, &self.keypair, message, keystore.as_ref())
+            .await?;
+
+        list.replace(message_document);
+        conversation.set_message_list(&self.ipfs, list).await?;
+        self.set_document(conversation).await?;
+
+        _ = tx.send(MessageEventKind::MessageEdited {
+            conversation_id,
+            message_id,
+        });
+
+        self.publish(conversation_id, None, event, true).await
+    }
+
+    pub async fn reply_message(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        messages: Vec<String>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        if messages.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length == 0 || lines_value_length > 4096 {
+            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
+        }
+
+        let own_did = &*self.keypair;
+
+        let mut message = warp::raygun::Message::default();
+        message.set_conversation_id(conversation.id());
+        message.set_sender(own_did.clone());
+        message.set_lines(messages);
+        message.set_replied(Some(message_id));
+
+        let construct = [
+            message.id().into_bytes().to_vec(),
+            message.conversation_id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            message
+                .lines()
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = sign_serde(own_did, &construct)?;
+        message.set_signature(Some(signature));
+
+        let message_id = message.id();
+
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
+        };
+
+        let message_document = MessageDocument::new(
+            &self.ipfs,
+            self.keypair.clone(),
+            message.clone(),
+            keystore.as_ref(),
+        )
+        .await?;
+
+        let mut messages = conversation.get_message_list(&self.ipfs).await?;
+        messages.insert(message_document);
+        conversation.set_message_list(&self.ipfs, messages).await?;
+        self.set_document(conversation).await?;
+
+        let event = MessageEventKind::MessageSent {
+            conversation_id,
+            message_id,
+        };
+
+        if let Err(e) = tx.send(event) {
+            error!("Error broadcasting event: {e}");
+        }
+
+        let event = MessagingEvents::New { message };
+
+        self.publish(conversation_id, Some(message_id), event, true)
+            .await
+    }
+
+    pub async fn delete_message(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        broadcast: bool,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        let event = MessagingEvents::Delete {
+            conversation_id: conversation.id(),
+            message_id,
+        };
+
+        conversation.delete_message(&self.ipfs, message_id).await?;
+
+        self.set_document(conversation).await?;
+
+        _ = tx.send(MessageEventKind::MessageDeleted {
+            conversation_id,
+            message_id,
+        });
+
+        if broadcast {
+            self.publish(conversation_id, None, event, true).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn pin_message(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
+        };
+
+        let mut list = conversation.get_message_list(&self.ipfs).await?;
+
+        let mut message_document = conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await?;
+
+        let mut message = message_document
+            .resolve(&self.ipfs, &self.keypair, keystore.as_ref())
+            .await?;
+
+        let event = match state {
+            PinState::Pin => {
+                if message.pinned() {
+                    return Ok(());
+                }
+                *message.pinned_mut() = true;
+                MessageEventKind::MessagePinned {
+                    conversation_id,
+                    message_id,
+                }
+            }
+            PinState::Unpin => {
+                if !message.pinned() {
+                    return Ok(());
+                }
+                *message.pinned_mut() = false;
+                MessageEventKind::MessageUnpinned {
+                    conversation_id,
+                    message_id,
+                }
+            }
+        };
+
+        message_document
+            .update(&self.ipfs, &self.keypair, message, keystore.as_ref())
+            .await?;
+
+        list.replace(message_document);
+        conversation.set_message_list(&self.ipfs, list).await?;
+        self.set_document(conversation).await?;
+
+        _ = tx.send(event);
+
+        let event = MessagingEvents::Pin {
+            conversation_id,
+            member: (*self.keypair).clone(),
+            message_id,
+            state,
+        };
+
+        self.publish(conversation_id, None, event, true).await
+    }
+
+    pub async fn react(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
+        };
+
+        let mut list = conversation.get_message_list(&self.ipfs).await?;
+
+        let mut message_document = conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await?;
+
+        let mut message = message_document
+            .resolve(&self.ipfs, &self.keypair, keystore.as_ref())
+            .await?;
+
+        let reactions = message.reactions_mut();
+
+        match state {
+            ReactionState::Add => {
+                let entry = reactions.entry(emoji.clone()).or_default();
+
+                if entry.contains(&self.keypair) {
+                    return Err(Error::ReactionExist);
+                }
+
+                entry.push((*self.keypair).clone());
+
+                message_document
+                    .update(&self.ipfs, &self.keypair, message, keystore.as_ref())
+                    .await?;
+
+                list.replace(message_document);
+                conversation.set_message_list(&self.ipfs, list).await?;
+                self.set_document(conversation).await?;
+
+                _ = tx.send(MessageEventKind::MessageReactionAdded {
+                    conversation_id,
+                    message_id,
+                    did_key: (*self.keypair).clone(),
+                    reaction: emoji.clone(),
+                });
+            }
+            ReactionState::Remove => {
+                match reactions.entry(emoji.clone()) {
+                    BTreeEntry::Occupied(mut e) => {
+                        let list = e.get_mut();
+
+                        if !list.contains(&self.keypair) {
+                            return Err(Error::ReactionDoesntExist);
+                        }
+
+                        list.retain(|did| did != &(*self.keypair).clone());
+                        if list.is_empty() {
+                            e.remove();
+                        }
+                    }
+                    BTreeEntry::Vacant(_) => return Err(Error::ReactionDoesntExist),
+                };
+
+                message_document
+                    .update(&self.ipfs, &self.keypair, message, keystore.as_ref())
+                    .await?;
+
+                list.replace(message_document);
+                conversation.set_message_list(&self.ipfs, list).await?;
+
+                self.set_document(conversation).await?;
+
+                _ = tx.send(MessageEventKind::MessageReactionRemoved {
+                    conversation_id,
+                    message_id,
+                    did_key: (*self.keypair).clone(),
+                    reaction: emoji.clone(),
+                });
+            }
+        }
+
+        let event = MessagingEvents::React {
+            conversation_id,
+            reactor: (*self.keypair).clone(),
+            message_id,
+            state,
+            emoji,
+        };
+
+        // let (one_tx, one_rx) = oneshot::channel();
+        // tx.send((event.clone(), Some(one_tx)))
+        //     .await
+        //     .map_err(anyhow::Error::from)?;
+        // one_rx.await.map_err(anyhow::Error::from)??;
+
+        self.publish(conversation_id, None, event, true).await
+    }
+
+    pub async fn attach(
+        &mut self,
+        _conversation_id: Uuid,
+        _message_id: Option<Uuid>,
+        _locations: Vec<Location>,
+        _messages: Vec<String>,
+    ) -> Result<BoxStream<'static, AttachmentKind>, Error> {
+        // if locations.len() > 8 {
+        //     return Err(Error::InvalidLength {
+        //         context: "files".into(),
+        //         current: locations.len(),
+        //         minimum: Some(1),
+        //         maximum: Some(8),
+        //     });
+        // }
+
+        // if !messages.is_empty() {
+        //     let lines_value_length: usize = messages
+        //         .iter()
+        //         .filter(|s| !s.is_empty())
+        //         .map(|s| s.trim())
+        //         .map(|s| s.chars().count())
+        //         .sum();
+
+        //     if lines_value_length > 4096 {
+        //         error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+        //         return Err(Error::InvalidLength {
+        //             context: "message".into(),
+        //             current: lines_value_length,
+        //             minimum: None,
+        //             maximum: Some(4096),
+        //         });
+        //     }
+        // }
+        // let conversation = self.get(conversation_id).await?;
+        // let mut tx = self.subscribe(conversation_id).await?;
+
+        // let mut constellation = self.file.clone();
+
+        // let files = locations
+        //     .iter()
+        //     .filter(|location| match location {
+        //         Location::Disk { path } => path.is_file(),
+        //         _ => true,
+        //     })
+        //     .cloned()
+        //     .collect::<Vec<_>>();
+
+        // if files.is_empty() {
+        //     return Err(Error::NoAttachments);
+        // }
+
+        // let stream = async_stream::stream! {
+        //     let mut in_stack = vec![];
+
+        //     let mut attachments = vec![];
+        //     let mut total_thumbnail_size = 0;
+
+        //     let mut streams: SelectAll<_> = SelectAll::new();
+
+        //     for file in files {
+        //         match file {
+        //             Location::Constellation { path } => {
+        //                 match constellation
+        //                     .root_directory()
+        //                     .get_item_by_path(&path)
+        //                     .and_then(|item| item.get_file())
+        //                 {
+        //                     Ok(f) => {
+        //                         let stream = async_stream::stream! {
+        //                             yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
+        //                         };
+        //                         streams.push(stream.boxed());
+        //                     },
+        //                     Err(e) => {
+        //                         let constellation_path = PathBuf::from(&path);
+        //                         let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
+        //                         let stream = async_stream::stream! {
+        //                             yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
+        //                         };
+        //                         streams.push(stream.boxed());
+        //                     },
+        //                 }
+        //             }
+        //             Location::Disk {path} => {
+        //                 let mut filename = match path.file_name() {
+        //                     Some(file) => file.to_string_lossy().to_string(),
+        //                     None => continue,
+        //                 };
+
+        //                 let original = filename.clone();
+
+        //                 let current_directory = match constellation.current_directory() {
+        //                     Ok(directory) => directory,
+        //                     Err(e) => {
+        //                         yield AttachmentKind::Pending(Err(e));
+        //                         return;
+        //                     }
+        //                 };
+
+        //                 let mut interval = 0;
+        //                 let skip;
+        //                 loop {
+        //                     if in_stack.contains(&filename) || current_directory.has_item(&filename) {
+        //                         if interval > 2000 {
+        //                             skip = true;
+        //                             break;
+        //                         }
+        //                         interval += 1;
+        //                         let file = PathBuf::from(&original);
+        //                         let file_stem =
+        //                             file.file_stem().and_then(OsStr::to_str).map(str::to_string);
+        //                         let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
+
+        //                         filename = match (file_stem, ext) {
+        //                             (Some(filename), Some(ext)) => {
+        //                                 format!("{filename} ({interval}).{ext}")
+        //                             }
+        //                             _ => format!("{original} ({interval})"),
+        //                         };
+        //                         continue;
+        //                     }
+        //                     skip = false;
+        //                     break;
+        //                 }
+
+        //                 if skip {
+        //                     let stream = async_stream::stream! {
+        //                         yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None);
+        //                     };
+        //                     streams.push(stream.boxed());
+        //                     continue;
+        //                 }
+
+        //                 let file = path.display().to_string();
+
+        //                 in_stack.push(filename.clone());
+
+        //                 let mut progress = match constellation.put(&filename, &file).await {
+        //                     Ok(stream) => stream,
+        //                     Err(e) => {
+        //                         error!("Error uploading {filename}: {e}");
+        //                         let stream = async_stream::stream! {
+        //                             yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
+        //                         };
+        //                         streams.push(stream.boxed());
+        //                         continue;
+        //                     }
+        //                 };
+
+        //                 let current_directory = current_directory.clone();
+        //                 let filename = filename.to_string();
+
+        //                 let stream = async_stream::stream! {
+        //                     while let Some(item) = progress.next().await {
+        //                         match item {
+        //                             item @ Progression::CurrentProgress { .. } => {
+        //                                 yield (item, None);
+        //                             },
+        //                             item @ Progression::ProgressComplete { .. } => {
+        //                                 let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
+        //                                 yield (item, file);
+        //                                 break;
+        //                             },
+        //                             item @ Progression::ProgressFailed { .. } => {
+        //                                 yield (item, None);
+        //                                 break;
+        //                             }
+        //                         }
+        //                     }
+        //                 };
+
+        //                 streams.push(stream.boxed());
+        //             }
+        //         };
+        //     }
+
+        //     for await (progress, file) in streams {
+        //         yield AttachmentKind::AttachedProgress(progress);
+        //         if let Some(file) = file {
+        //             // We reconstruct it to avoid out any metadata that was apart of the `File` structure that we dont want to share
+        //             let new_file = warp::constellation::file::File::new(&file.name());
+
+        //             let thumbnail = file.thumbnail();
+
+        //             if total_thumbnail_size < 3 * 1024 * 1024
+        //                 && !thumbnail.is_empty()
+        //                 && thumbnail.len() <= 1024 * 1024
+        //             {
+        //                 new_file.set_thumbnail(&thumbnail);
+        //                 new_file.set_thumbnail_format(file.thumbnail_format());
+        //                 total_thumbnail_size += thumbnail.len();
+        //             }
+        //             new_file.set_size(file.size());
+        //             new_file.set_hash(file.hash());
+        //             new_file.set_reference(&file.reference().unwrap_or_default());
+        //             attachments.push(new_file);
+        //         }
+        //     }
+
+        //     let final_results = {
+        //         async move {
+
+        //             if attachments.is_empty() {
+        //                 return Err(Error::NoAttachments);
+        //             }
+
+        //             let own_did = &*self.keypair;
+        //             let mut message = warp::raygun::Message::default();
+        //             message.set_message_type(MessageType::Attachment);
+        //             message.set_conversation_id(conversation.id());
+        //             message.set_sender(own_did.clone());
+        //             message.set_attachment(attachments);
+        //             message.set_lines(messages.clone());
+        //             message.set_replied(message_id);
+        //             let construct = [
+        //                 message.id().into_bytes().to_vec(),
+        //                 message.conversation_id().into_bytes().to_vec(),
+        //                 own_did.to_string().as_bytes().to_vec(),
+        //                 message
+        //                     .lines()
+        //                     .iter()
+        //                     .map(|s| s.as_bytes())
+        //                     .collect::<Vec<_>>()
+        //                     .concat(),
+        //             ]
+        //             .concat();
+
+        //             let signature = sign_serde(own_did, &construct)?;
+        //             message.set_signature(Some(signature));
+
+        //             let event = MessagingEvents::New { message };
+        //             // let (one_tx, one_rx) = oneshot::channel();
+        //             // tx.send((event.clone(), Some(one_tx)))
+        //             //     .await
+        //             //     .map_err(anyhow::Error::from)?;
+        //             // one_rx.await.map_err(anyhow::Error::from)??;
+        //             self.publish(conversation_id, None, event, true).await
+        //         }
+        //     };
+
+        //     yield AttachmentKind::Pending(final_results.await)
+        // };
+
+        //TODO
+        Ok(stream::empty().boxed())
+    }
+
+    pub async fn download(
+        &self,
+        conversation: Uuid,
+        message_id: Uuid,
+        file: &str,
+        path: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
+        let constellation = self.file.clone();
+
+        let members = self.get(conversation).await.map(|c| {
+            c.recipients()
+                .iter()
+                .filter_map(|did| did.to_peer_id().ok())
+                .collect::<Vec<_>>()
+        })?;
+
+        let message = self.get_message(conversation, message_id).await?;
+
+        if message.message_type() != MessageType::Attachment {
+            return Err(Error::InvalidMessage);
+        }
+
+        let attachment = message
+            .attachments()
+            .iter()
+            .find(|attachment| attachment.name() == file)
+            .cloned()
+            .ok_or(Error::FileNotFound)?;
+
+        let _root = constellation.root_directory();
+
+        let reference = attachment
+            .reference()
+            .and_then(|reference| IpfsPath::from_str(&reference).ok())
+            .ok_or(Error::FileNotFound)?;
+
+        let ipfs = self.ipfs.clone();
+        let _constellation = constellation.clone();
+        let progress_stream = async_stream::stream! {
+            yield Progression::CurrentProgress {
+                name: attachment.name(),
+                current: 0,
+                total: Some(attachment.size()),
+            };
+
+            let stream = ipfs.unixfs().get(reference, &path, &members, false, None);
+
+            for await event in stream {
+                match event {
+                    rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
+                        yield Progression::CurrentProgress {
+                            name: attachment.name(),
+                            current: written,
+                            total: total_size
+                        };
+                    },
+                    rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
+                        yield Progression::ProgressComplete {
+                            name: attachment.name(),
+                            total: total_size,
+                        };
+                    },
+                    rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
+                        if let Err(e) = tokio::fs::remove_file(&path).await {
+                            error!("Error removing file: {e}");
+                        }
+                        yield Progression::ProgressFailed {
+                            name: attachment.name(),
+                            last_size: Some(written),
+                            error: error.map(|e| e.to_string()),
+                        };
+                    },
+                }
+            }
+        };
+
+        Ok(progress_stream.boxed())
+    }
+
+    pub async fn download_stream(
+        &self,
+        conversation: Uuid,
+        message_id: Uuid,
+        file: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+        let members = self.get(conversation).await.map(|c| {
+            c.recipients()
+                .iter()
+                .filter_map(|did| did.to_peer_id().ok())
+                .collect::<Vec<_>>()
+        })?;
+
+        let message = self.get_message(conversation, message_id).await?;
+
+        if message.message_type() != MessageType::Attachment {
+            return Err(Error::InvalidMessage);
+        }
+
+        let attachment = message
+            .attachments()
+            .iter()
+            .find(|attachment| attachment.name() == file)
+            .cloned()
+            .ok_or(Error::FileNotFound)?;
+
+        let reference = attachment
+            .reference()
+            .and_then(|reference| IpfsPath::from_str(&reference).ok())
+            .ok_or(Error::FileNotFound)?;
+
+        let ipfs = self.ipfs.clone();
+
+        let stream = async_stream::stream! {
+            let stream = ipfs.unixfs().cat(reference, None, &members, false, None);
+
+            for await result in stream {
+                let result = result.map_err(anyhow::Error::from).map_err(Error::from);
+                yield result;
+            }
+        };
+
+        Ok(stream.boxed())
+    }
+
+    pub async fn update_conversation_name(
+        &mut self,
+        conversation_id: Uuid,
+        name: &str,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        let name = name.trim();
+        let name_length = name.len();
+
+        if name_length > 255 {
+            return Err(Error::InvalidLength {
+                context: "name".into(),
+                current: name_length,
+                minimum: None,
+                maximum: Some(255),
+            });
+        }
+
+        if matches!(conversation.conversation_type, ConversationType::Direct) {
+            return Err(Error::InvalidConversation);
+        }
+
+        let Some(creator) = conversation.creator.as_ref() else {
+            return Err(Error::InvalidConversation);
+        };
+
+        let own_did = &*self.keypair;
+
+        if creator.ne(own_did) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        conversation.name = (!name.is_empty()).then_some(name.to_string());
+
+        self.set_document(conversation).await?;
+
+        let conversation = self.get(conversation_id).await?;
+
+        let new_name = conversation.name();
+
+        let event = MessagingEvents::UpdateConversation {
+            conversation,
+            kind: ConversationUpdateKind::ChangeName { name: new_name },
+        };
+
+        let _ = tx.send(MessageEventKind::ConversationNameUpdated {
+            conversation_id,
+            name: name.to_string(),
+        });
+
+        self.publish(conversation_id, None, event, true).await
+    }
+
+    pub async fn add_recipient(
+        &mut self,
+        conversation_id: Uuid,
+        did_key: &DID,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+
+        let settings = match conversation.settings {
+            ConversationSettings::Group(settings) => settings,
+            ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
+        };
+        assert_eq!(conversation.conversation_type, ConversationType::Group);
+
+        let Some(creator) = conversation.creator.clone() else {
+            return Err(Error::InvalidConversation);
+        };
+
+        let own_did = &*self.keypair;
+
+        if !settings.members_can_add_participants() && creator.ne(own_did) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if creator.eq(did_key) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if self.root.is_blocked(did_key).await? {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
+        if conversation.recipients.contains(did_key) {
+            return Err(Error::IdentityExist);
+        }
+
+        conversation.recipients.push(did_key.clone());
+
+        self.set_document(conversation).await?;
+
+        let conversation = self.get(conversation_id).await?;
+
+        let event = MessagingEvents::UpdateConversation {
+            conversation: conversation.clone(),
+            kind: ConversationUpdateKind::AddParticipant {
+                did: did_key.clone(),
+            },
+        };
+
+        let tx = self.subscribe(conversation_id).await?;
+        let _ = tx.send(MessageEventKind::RecipientAdded {
+            conversation_id,
+            recipient: did_key.clone(),
+        });
+
+        self.publish(conversation_id, None, event, true).await?;
+
+        let new_event = ConversationEvents::NewGroupConversation { conversation };
+
+        self.send_single_conversation_event(conversation_id, did_key, new_event)
+            .await?;
+        if let Err(_e) = self.request_key(conversation_id, did_key).await {}
+        Ok(())
+    }
+
+    pub async fn remove_recipient(
+        &mut self,
+        conversation_id: Uuid,
+        did_key: &DID,
+        broadcast: bool,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+
+        if matches!(conversation.conversation_type, ConversationType::Direct) {
+            return Err(Error::InvalidConversation);
+        }
+
+        let Some(creator) = conversation.creator.as_ref() else {
+            return Err(Error::InvalidConversation);
+        };
+
+        let own_did = &*self.keypair;
+
+        if creator.ne(own_did) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if creator.eq(did_key) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if !conversation.recipients.contains(did_key) {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        conversation.recipients.retain(|did| did.ne(did_key));
+        self.set_document(conversation).await?;
+
+        let conversation = self.get(conversation_id).await?;
+
+        let event = MessagingEvents::UpdateConversation {
+            conversation: conversation.clone(),
+            kind: ConversationUpdateKind::RemoveParticipant {
+                did: did_key.clone(),
+            },
+        };
+
+        let tx = self.subscribe(conversation_id).await?;
+        let _ = tx.send(MessageEventKind::RecipientRemoved {
+            conversation_id,
+            recipient: did_key.clone(),
+        });
+
+        self.publish(conversation_id, None, event, true).await?;
+
+        if broadcast {
+            let new_event = ConversationEvents::DeleteConversation { conversation_id };
+
+            self.send_single_conversation_event(conversation_id, did_key, new_event)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn publish(
+        &mut self,
+        conversation: Uuid,
+        message_id: Option<Uuid>,
+        event: MessagingEvents,
+        queue: bool,
+    ) -> Result<(), Error> {
+        let conversation = self.get(conversation).await?;
+
+        let own_did = &*self.keypair;
+
+        let event = serde_json::to_vec(&event)?;
+
+        let bytes = match conversation.conversation_type {
+            ConversationType::Direct => {
+                let recipient = conversation
+                    .recipients()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .first()
+                    .cloned()
+                    .ok_or(Error::InvalidConversation)?;
+                ecdh_encrypt(own_did, Some(&recipient), &event)?
+            }
+            ConversationType::Group { .. } => {
+                let keystore = self.get_keystore(conversation.id()).await?;
+                let key = keystore.get_latest(own_did, own_did)?;
+                Cipher::direct_encrypt(&event, &key)?
+            }
+        };
+
+        let signature = sign_serde(own_did, &bytes)?;
+
+        let payload = Payload::new(own_did, &bytes, &signature);
+
+        let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
+
+        let mut can_publish = false;
+
+        for recipient in conversation
+            .recipients()
+            .iter()
+            .filter(|did| own_did.ne(did))
+        {
+            let peer_id = recipient.to_peer_id()?;
+
+            // We want to confirm that there is atleast one peer subscribed before attempting to send a message
+            match peers.contains(&peer_id) {
+                true => {
+                    can_publish = true;
+                }
+                false => {
+                    // if queue {
+                    //     if let Err(e) = self
+                    //         .queue_event(
+                    //             recipient.clone(),
+                    //             Queue::direct(
+                    //                 conversation.id(),
+                    //                 message_id,
+                    //                 peer_id,
+                    //                 conversation.topic(),
+                    //                 payload.data().to_vec(),
+                    //             ),
+                    //         )
+                    //         .await
+                    //     {
+                    //         error!("Error submitting event to queue: {e}");
+                    //     }
+                    // }
+                }
+            };
+        }
+
+        if can_publish {
+            let bytes = payload.to_bytes()?;
+            tracing::trace!("Payload size: {} bytes", bytes.len());
+            let timer = Instant::now();
+            let mut time = true;
+            if let Err(_e) = self
+                .ipfs
+                .pubsub_publish(conversation.topic(), bytes.into())
+                .await
+            {
+                error!("Error publishing: {_e}");
+                time = false;
+            }
+            if time {
+                let end = timer.elapsed();
+                tracing::trace!("Took {}ms to send event", end.as_millis());
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn send_single_conversation_event(
+        &mut self,
+        conversation_id: Uuid,
+        did_key: &DID,
+        event: ConversationEvents,
+    ) -> Result<(), Error> {
+        let event = serde_json::to_vec(&event)?;
+
+        let bytes = ecdh_encrypt(&self.keypair, Some(did_key), &event)?;
+        let signature = sign_serde(&self.keypair, &bytes)?;
+
+        let payload = Payload::new(&self.keypair, &bytes, &signature);
+
+        let peer_id = did_key.to_peer_id()?;
+        let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
+
+        let mut time = true;
+        let timer = Instant::now();
+        if !peers.contains(&peer_id)
+            || (peers.contains(&peer_id)
+                && self
+                    .ipfs
+                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?.into())
+                    .await
+                    .is_err())
+        {
+            warn!("Unable to publish to topic. Queuing event");
+            // if let Err(e) = self
+            //     .queue_event(
+            //         did_key.clone(),
+            //         Queue::direct(
+            //             conversation_id,
+            //             None,
+            //             peer_id,
+            //             did_key.messaging(),
+            //             payload.data().to_vec(),
+            //         ),
+            //     )
+            //     .await
+            // {
+            //     error!("Error submitting event to queue: {e}");
+            // }
+            time = false;
+        }
+        if time {
+            let end = timer.elapsed();
+            tracing::info!("Event sent to {did_key}");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
+        }
+
+        Ok(())
+    }
 }
 
 enum ConversationStreamData {
@@ -1000,11 +2652,9 @@ async fn process_conversation(
 
             // self.start_task(this, stream).await;
 
-            // self.event
-            //     .emit(RayGunEventKind::ConversationCreated {
-            //         conversation_id: id,
-            //     })
-            //     .await;
+            this.event
+                .emit(RayGunEventKind::ConversationCreated { conversation_id })
+                .await;
         }
         ConversationEvents::NewGroupConversation { mut conversation } => {
             let conversation_id = conversation.id;
@@ -1088,25 +2738,20 @@ async fn process_conversation(
 
             this.topic_stream.insert(conversation_id, rx);
 
-            // self.start_task(conversation_id, stream).await;
-
             let conversation = this.get(conversation_id).await?;
 
             tracing::info!(%conversation_id,"{} conversation created", conversation_type);
+            let keypair = this.keypair.clone();
 
-            for _recipient in conversation
-                .recipients
-                .iter()
-                .filter(|d| (*this.keypair).ne(d))
-            {
-                // if let Err(e) = self.request_key(conversation_id, recipient).await {
-                //     tracing::warn!("Failed to send exchange request to {recipient}: {e}");
-                // }
+            for recipient in conversation.recipients.iter().filter(|d| (*keypair).ne(d)) {
+                if let Err(e) = this.request_key(conversation_id, recipient).await {
+                    tracing::warn!("Failed to send exchange request to {recipient}: {e}");
+                }
             }
 
-            // self.event
-            //     .emit(RayGunEventKind::ConversationCreated { conversation_id })
-            //     .await;
+            this.event
+                .emit(RayGunEventKind::ConversationCreated { conversation_id })
+                .await;
         }
         ConversationEvents::LeaveConversation {
             conversation_id,
@@ -1212,9 +2857,9 @@ async fn process_conversation(
             //     warn!(conversation_id = %document.id(), "topic should have been unsubscribed after dropping conversation.");
             // }
 
-            // self.event
-            //     .emit(RayGunEventKind::ConversationDeleted { conversation_id })
-            //     .await;
+            this.event
+                .emit(RayGunEventKind::ConversationDeleted { conversation_id })
+                .await;
         }
     }
     Ok(())

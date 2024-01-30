@@ -129,7 +129,15 @@ impl MessageStore {
 
         let root = identity.root_document().clone();
 
-        let conversations = Conversations::new(&ipfs, path.clone(), did.clone(), root).await;
+        let conversations = Conversations::new(
+            &ipfs,
+            path.clone(),
+            did.clone(),
+            root,
+            filesystem.clone(),
+            event.clone(),
+        )
+        .await;
 
         let store = Self {
             path,
