@@ -1375,7 +1375,7 @@ impl RayGun for WarpIpfs {
     }
 
     async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
-        self.messaging_store()?.list_conversations().await
+        Ok(self.messaging_store()?.list_conversations().await)
     }
 
     async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize, Error> {

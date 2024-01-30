@@ -242,7 +242,7 @@ impl MessageStore {
             }
 
             MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did } => {
-                let list = self.conversations.list().await?;
+                let list = self.conversations.list().await;
 
                 for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
                     let id = conversation.id();
@@ -272,7 +272,7 @@ impl MessageStore {
             }
             MultiPassEventKind::Unblocked { did } => {
                 let own_did = (*self.did).clone();
-                let list = self.conversations.list().await?;
+                let list = self.conversations.list().await;
 
                 for conversation in list
                     .iter()
@@ -294,7 +294,7 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                let list = self.conversations.list().await?;
+                let list = self.conversations.list().await;
 
                 for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
                     let id = conversation.id();
@@ -460,7 +460,7 @@ impl MessageStore {
         info!("RequestResponse Task started for {conversation_id}");
 
         let task = tokio::spawn({
-            let store = self.clone();
+            let mut store = self.clone();
             async move {
                 let did = store.did.clone();
 
@@ -1447,7 +1447,7 @@ impl MessageStore {
             }
             ConversationEvents::NewGroupConversation { mut conversation } => {
                 let conversation_id = conversation.id;
-                let did = &*self.did;
+                let did = self.did.clone();
                 info!("New group conversation event received");
 
                 if self.exist(conversation_id).await {
@@ -1455,7 +1455,7 @@ impl MessageStore {
                     return Ok(());
                 }
 
-                if !conversation.recipients.contains(did) {
+                if !conversation.recipients.contains(&*did) {
                     warn!(%conversation_id, "was added to conversation but never was apart of the conversation.");
                     return Ok(());
                 }
@@ -1471,7 +1471,7 @@ impl MessageStore {
                 let conversation_type = conversation.conversation_type;
 
                 let mut keystore = Keystore::new(conversation_id);
-                keystore.insert(did, did, warp::crypto::generate::<64>())?;
+                keystore.insert(&*did, &*did, warp::crypto::generate::<64>())?;
 
                 conversation.verify()?;
 
@@ -1497,7 +1497,7 @@ impl MessageStore {
 
                 info!(%conversation_id,"{} conversation created", conversation_type);
 
-                for recipient in conversation.recipients.iter().filter(|d| did.ne(d)) {
+                for recipient in conversation.recipients.iter().filter(|d| *did != **d) {
                     if let Err(e) = self.request_key(conversation_id, recipient).await {
                         tracing::warn!("Failed to send exchange request to {recipient}: {e}");
                     }
@@ -1719,7 +1719,6 @@ impl MessageStore {
         if let Some(conversation) = self
             .list_conversations()
             .await
-            .unwrap_or_default()
             .iter()
             .find(|conversation| {
                 conversation.conversation_type() == ConversationType::Direct
@@ -2069,7 +2068,7 @@ impl MessageStore {
     }
 
     pub async fn load_conversations(&self) -> Result<(), Error> {
-        let list = self.conversations.list().await.unwrap_or_default();
+        let list = self.conversations.list().await;
 
         for conversation in &list {
             let task = {
@@ -2101,14 +2100,16 @@ impl MessageStore {
         Ok(())
     }
 
-    pub async fn list_conversation_documents(&self) -> Result<Vec<ConversationDocument>, Error> {
+    pub async fn list_conversation_documents(&self) -> Vec<ConversationDocument> {
         self.conversations.list().await
     }
 
-    pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+    pub async fn list_conversations(&self) -> Vec<Conversation> {
         self.list_conversation_documents()
             .await
-            .map(|list| list.iter().map(|document| document.into()).collect())
+            .iter()
+            .map(|document| document.into())
+            .collect()
     }
 
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
@@ -2124,7 +2125,7 @@ impl MessageStore {
     }
 
     pub async fn set_conversation_keystore(
-        &self,
+        &mut self,
         conversation_id: Uuid,
         keystore: Keystore,
     ) -> Result<(), Error> {
@@ -2319,10 +2320,7 @@ impl MessageStore {
     }
 
     pub async fn exist(&self, conversation: Uuid) -> bool {
-        self.conversations
-            .contains(conversation)
-            .await
-            .unwrap_or_default()
+        self.conversations.contains(conversation).await
     }
 
     pub async fn get_conversation_sender(

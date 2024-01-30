@@ -5,15 +5,10 @@ use std::{
     sync::Arc,
 };
 
-use futures::{
-    channel::{mpsc, oneshot},
-    stream::FuturesUnordered,
-    SinkExt, Stream, StreamExt,
-};
+use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
-use tokio::select;
-use tokio_util::sync::{CancellationToken, DropGuard};
+use tokio::sync::{broadcast::Sender, Mutex};
 use tracing::warn;
 use uuid::Uuid;
 use warp::{
@@ -26,46 +21,14 @@ use crate::store::{conversation::ConversationDocument, keystore::Keystore};
 
 use super::root::RootDocumentMap;
 
-#[allow(clippy::large_enum_variant)]
-enum ConversationCommand {
-    GetDocument {
-        id: Uuid,
-        response: oneshot::Sender<Result<ConversationDocument, Error>>,
-    },
-    GetKeystore {
-        id: Uuid,
-        response: oneshot::Sender<Result<Keystore, Error>>,
-    },
-    SetDocument {
-        document: ConversationDocument,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    SetKeystore {
-        id: Uuid,
-        document: Keystore,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    Delete {
-        id: Uuid,
-        response: oneshot::Sender<Result<ConversationDocument, Error>>,
-    },
-    Contains {
-        id: Uuid,
-        response: oneshot::Sender<Result<bool, Error>>,
-    },
-    List {
-        response: oneshot::Sender<Result<Vec<ConversationDocument>, Error>>,
-    },
-    Subscribe {
-        id: Uuid,
-        response: oneshot::Sender<Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error>>,
-    },
-}
-
 #[derive(Debug, Clone)]
 pub struct Conversations {
-    tx: mpsc::Sender<ConversationCommand>,
-    _task_cancellation: Arc<DropGuard>,
+    ipfs: Ipfs,
+    cid: Option<Cid>,
+    path: Option<PathBuf>,
+    keypair: Arc<DID>,
+    event_handler: Arc<Mutex<HashMap<Uuid, Sender<MessageEventKind>>>>,
+    root: RootDocumentMap,
 }
 
 impl Conversations {
@@ -84,171 +47,17 @@ impl Conversations {
             None => None,
         };
 
-        let (tx, rx) = futures::channel::mpsc::channel(0);
-
-        let mut task = ConversationTask {
+        Self {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
             keypair,
             path,
             cid,
-            rx,
             root,
-        };
-
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
-        tokio::spawn(async move {
-            select! {
-                _ = token.cancelled() => {}
-                _ = task.run() => {}
-            }
-        });
-
-        Self {
-            tx,
-            _task_cancellation: Arc::new(drop_guard),
         }
     }
 
     pub async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(ConversationCommand::GetDocument { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(ConversationCommand::GetKeystore { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn contains(&self, id: Uuid) -> Result<bool, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(ConversationCommand::Contains { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn set(&self, document: ConversationDocument) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(ConversationCommand::SetDocument {
-                document,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn set_keystore(&self, id: Uuid, document: Keystore) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(ConversationCommand::SetKeystore {
-                id,
-                document,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn delete(&self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(ConversationCommand::Delete { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn list(&self) -> Result<Vec<ConversationDocument>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(ConversationCommand::List { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn subscribe(
-        &self,
-        id: Uuid,
-    ) -> Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(ConversationCommand::Subscribe { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-}
-
-struct ConversationTask {
-    ipfs: Ipfs,
-    cid: Option<Cid>,
-    path: Option<PathBuf>,
-    keypair: Arc<DID>,
-    event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
-    root: RootDocumentMap,
-    rx: mpsc::Receiver<ConversationCommand>,
-}
-
-impl ConversationTask {
-    async fn run(&mut self) {
-        while let Some(command) = self.rx.next().await {
-            match command {
-                ConversationCommand::GetDocument { id, response } => {
-                    let _ = response.send(self.get(id).await);
-                }
-                ConversationCommand::SetDocument { document, response } => {
-                    let _ = response.send(self.set_document(document).await);
-                }
-                ConversationCommand::List { response } => {
-                    let _ = response.send(Ok(self.list().await));
-                }
-                ConversationCommand::Delete { id, response } => {
-                    let _ = response.send(self.delete(id).await);
-                }
-                ConversationCommand::Subscribe { id, response } => {
-                    let _ = response.send(self.subscribe(id).await);
-                }
-                ConversationCommand::Contains { id, response } => {
-                    let _ = response.send(Ok(self.contains(id).await));
-                }
-                ConversationCommand::GetKeystore { id, response } => {
-                    let _ = response.send(self.get_keystore(id).await);
-                }
-                ConversationCommand::SetKeystore {
-                    id,
-                    document,
-                    response,
-                } => {
-                    let _ = response.send(self.set_keystore(id, document).await);
-                }
-            }
-        }
-    }
-
-    async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
         let cid = match self.cid {
             Some(cid) => cid,
             None => return Err(Error::InvalidConversation),
@@ -271,7 +80,7 @@ impl ConversationTask {
         Ok(document)
     }
 
-    async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+    pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
         if !self.contains(id).await {
             return Err(Error::InvalidConversation);
         }
@@ -279,7 +88,7 @@ impl ConversationTask {
         self.root.get_conversation_keystore(id).await
     }
 
-    async fn set_keystore(&mut self, id: Uuid, document: Keystore) -> Result<(), Error> {
+    pub async fn set_keystore(&mut self, id: Uuid, document: Keystore) -> Result<(), Error> {
         if !self.contains(id).await {
             return Err(Error::InvalidConversation);
         }
@@ -294,7 +103,7 @@ impl ConversationTask {
         self.set_keystore_map(map).await
     }
 
-    async fn delete(&mut self, id: Uuid) -> Result<ConversationDocument, Error> {
+    pub async fn delete(&mut self, id: Uuid) -> Result<ConversationDocument, Error> {
         if !self.contains(id).await {
             return Err(Error::InvalidConversation);
         }
@@ -308,7 +117,7 @@ impl ConversationTask {
         let list = conversation.messages.take();
         conversation.deleted = true;
 
-        self.set_document(conversation.clone()).await?;
+        self.set(conversation.clone()).await?;
 
         if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
             if ks_map.remove(&id.to_string()).is_some() {
@@ -325,7 +134,7 @@ impl ConversationTask {
         Ok(conversation)
     }
 
-    async fn list(&self) -> Vec<ConversationDocument> {
+    pub async fn list(&self) -> Vec<ConversationDocument> {
         self.list_stream().collect::<Vec<_>>().await
     }
 
@@ -364,7 +173,7 @@ impl ConversationTask {
         stream.boxed()
     }
 
-    async fn contains(&self, id: Uuid) -> bool {
+    pub async fn contains(&self, id: Uuid) -> bool {
         self.list_stream()
             .any(|conversation| async move { conversation.id() == id })
             .await
@@ -395,7 +204,7 @@ impl ConversationTask {
         Ok(())
     }
 
-    async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
+    pub async fn set(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
         if let Some(creator) = document.creator.as_ref() {
             if creator.eq(&self.keypair)
                 && matches!(document.conversation_type, ConversationType::Group { .. })
@@ -419,21 +228,20 @@ impl ConversationTask {
         self.set_map(map).await
     }
 
-    async fn subscribe(
-        &mut self,
-        id: Uuid,
-    ) -> Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error> {
+    pub async fn subscribe(&self, id: Uuid) -> Result<Sender<MessageEventKind>, Error> {
+        let mut event_handler = self.event_handler.lock().await;
+
         if !self.contains(id).await {
             return Err(Error::InvalidConversation);
         }
 
-        if let Some(tx) = self.event_handler.get(&id) {
+        if let Some(tx) = event_handler.get(&id) {
             return Ok(tx.clone());
         }
 
         let (tx, _) = tokio::sync::broadcast::channel(1024);
 
-        self.event_handler.insert(id, tx.clone());
+        event_handler.insert(id, tx.clone());
 
         Ok(tx)
     }
