@@ -1467,8 +1467,6 @@ impl ConversationTask {
         Ok(())
     }
 
-    //TODO: Use function to request key
-    #[allow(dead_code)]
     async fn request_key(&mut self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
         let request = ConversationRequestResponse::Request {
             conversation_id,

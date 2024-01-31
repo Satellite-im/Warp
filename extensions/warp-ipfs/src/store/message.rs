@@ -2,10 +2,8 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use futures::channel::mpsc::Sender;
-use futures::channel::oneshot::Sender as OneshotSender;
 use futures::stream::BoxStream;
 use futures::Stream;
 use rust_ipfs::{Ipfs, PeerId};
@@ -13,7 +11,7 @@ use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tracing::Span;
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use warp::constellation::ConstellationProgressStream;
 use warp::crypto::DID;
@@ -29,9 +27,7 @@ use std::sync::Arc;
 
 use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;
-use crate::store::{
-    connected_to_peer, ecdh_encrypt, get_keypair_did, sign_serde, DidExt, PeerTopic,
-};
+use crate::store::{connected_to_peer, get_keypair_did, sign_serde};
 
 use super::conversation::ConversationDocument;
 use super::discovery::Discovery;
@@ -40,9 +36,6 @@ use super::event_subscription::EventSubscription;
 use super::files::FileStore;
 use super::identity::IdentityStore;
 use super::keystore::Keystore;
-use super::{ConversationEvents, MessagingEvents};
-
-type ConversationSender = Sender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -52,9 +45,6 @@ pub struct MessageStore {
 
     // Write handler
     path: Option<PathBuf>,
-
-    // conversation cid
-    conversation_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationSender>>>,
 
     // identity store
     identity: IdentityStore,
@@ -66,11 +56,6 @@ pub struct MessageStore {
 
     // filesystem instance
     filesystem: FileStore,
-
-    stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
-    stream_reqres_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
-    stream_event_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
-    stream_conversation_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
     // Queue
     queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
@@ -112,12 +97,7 @@ impl MessageStore {
         let queue = Arc::new(Default::default());
         let did = Arc::new(get_keypair_did(ipfs.keypair()?)?);
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
-        let stream_task = Arc::new(Default::default());
-        let stream_event_task = Arc::new(Default::default());
         let with_friends = Arc::new(AtomicBool::new(with_friends));
-        let stream_reqres_task = Arc::default();
-        let conversation_sender = Arc::default();
-        let stream_conversation_task = Arc::default();
 
         let root = identity.root_document().clone();
 
@@ -137,10 +117,6 @@ impl MessageStore {
         let store = Self {
             path,
             ipfs,
-            stream_task,
-            stream_event_task,
-            stream_reqres_task,
-            conversation_sender,
             conversations,
             identity,
             discovery,
@@ -150,7 +126,6 @@ impl MessageStore {
             event,
             spam_filter,
             with_friends,
-            stream_conversation_task,
             span,
         };
 
@@ -311,61 +286,6 @@ impl MessageStore {
         self.conversations
             .set_keystore(conversation_id, keystore)
             .await
-    }
-
-    async fn send_single_conversation_event(
-        &mut self,
-        did_key: &DID,
-        conversation_id: Uuid,
-        event: ConversationEvents,
-    ) -> Result<(), Error> {
-        let own_did = &*self.did;
-
-        let event = serde_json::to_vec(&event)?;
-
-        let bytes = ecdh_encrypt(own_did, Some(did_key), &event)?;
-        let signature = sign_serde(own_did, &bytes)?;
-
-        let payload = Payload::new(own_did, &bytes, &signature);
-
-        let peer_id = did_key.to_peer_id()?;
-        let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
-
-        let mut time = true;
-        let timer = Instant::now();
-        if !peers.contains(&peer_id)
-            || (peers.contains(&peer_id)
-                && self
-                    .ipfs
-                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?.into())
-                    .await
-                    .is_err())
-        {
-            warn!("Unable to publish to topic. Queuing event");
-            if let Err(e) = self
-                .queue_event(
-                    did_key.clone(),
-                    Queue::direct(
-                        conversation_id,
-                        None,
-                        peer_id,
-                        did_key.messaging(),
-                        payload.data().to_vec(),
-                    ),
-                )
-                .await
-            {
-                error!("Error submitting event to queue: {e}");
-            }
-            time = false;
-        }
-        if time {
-            let end = timer.elapsed();
-            info!("Event sent to {did_key}");
-            trace!("Took {}ms to send event", end.as_millis());
-        }
-
-        Ok(())
     }
 
     pub async fn get_message(
@@ -569,52 +489,6 @@ impl MessageStore {
             .await
     }
 
-    pub async fn leave_group_conversation(
-        &mut self,
-        creator: &DID,
-        list: &[DID],
-        conversation_id: Uuid,
-    ) -> Result<(), Error> {
-        let own_did = &*self.did;
-
-        let context = format!("exclude {}", own_did);
-        let signature = sign_serde(own_did, &context)?;
-        let signature = bs58::encode(signature).into_string();
-
-        let event = ConversationEvents::LeaveConversation {
-            conversation_id,
-            recipient: own_did.clone(),
-            signature,
-        };
-
-        //We want to send the event to the recipients until the creator can remove them from the conversation directly
-
-        for did in list.iter() {
-            if let Err(e) = self
-                .send_single_conversation_event(did, conversation_id, event.clone())
-                .await
-            {
-                tracing::error!("Error sending conversation event to {did}: {e}");
-                continue;
-            }
-        }
-
-        self.send_single_conversation_event(creator, conversation_id, event)
-            .await
-    }
-
-    pub async fn conversation_tx(
-        &self,
-        conversation_id: Uuid,
-    ) -> Result<ConversationSender, Error> {
-        self.conversation_sender
-            .read()
-            .await
-            .get(&conversation_id)
-            .cloned()
-            .ok_or(Error::InvalidConversation)
-    }
-
     pub async fn send_message(
         &mut self,
         conversation_id: Uuid,
@@ -753,6 +627,8 @@ impl MessageStore {
             .await
     }
 
+    // TODO: Remove
+    #[allow(dead_code)]
     async fn queue_event(&self, did: DID, queue: Queue) -> Result<(), Error> {
         self.queue.write().await.entry(did).or_default().push(queue);
         self.save_queue().await;
