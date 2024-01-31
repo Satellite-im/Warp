@@ -1452,11 +1452,8 @@ impl RayGun for WarpIpfs {
     ) -> Result<(), Error> {
         let mut store = self.messaging_store()?;
         match message_id {
-            Some(id) => store.delete_message(conversation_id, id, true).await,
-            None => store
-                .delete_conversation(conversation_id, true)
-                .await
-                .map(|_| ()),
+            Some(id) => store.delete_message(conversation_id, id).await,
+            None => store.delete_conversation(conversation_id).await.map(|_| ()),
         }
     }
 
@@ -1538,7 +1535,7 @@ impl RayGunAttachment for WarpIpfs {
         path: PathBuf,
     ) -> Result<ConstellationProgressStream, Error> {
         self.messaging_store()?
-            .download(conversation_id, message_id, &file, path, false)
+            .download(conversation_id, message_id, &file, path)
             .await
     }
 
@@ -1578,7 +1575,7 @@ impl RayGunGroupConversation for WarpIpfs {
         did_key: &DID,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .remove_recipient(conversation_id, did_key, true)
+            .remove_recipient(conversation_id, did_key)
             .await
     }
 }
