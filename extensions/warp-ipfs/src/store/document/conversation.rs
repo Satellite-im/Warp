@@ -2,6 +2,7 @@ use std::{
     collections::{
         btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet,
     },
+    ffi::OsStr,
     future::IntoFuture,
     path::{Path, PathBuf},
     str::FromStr,
@@ -13,7 +14,7 @@ use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
-    stream::{self, BoxStream, FuturesUnordered},
+    stream::{BoxStream, FuturesUnordered, SelectAll},
     SinkExt, Stream, StreamExt,
 };
 use libipld::Cid;
@@ -223,6 +224,7 @@ impl Conversations {
         let drop_guard = token.clone().drop_guard();
         let ipfs = ipfs.clone();
         tokio::spawn(async move {
+            let (atx, arx) = mpsc::channel(1);
             let mut task = ConversationTask {
                 ipfs,
                 event_handler: Default::default(),
@@ -234,6 +236,8 @@ impl Conversations {
                 root,
                 file,
                 event,
+                attachment_rx: arx,
+                attachment_tx: atx,
             };
             select! {
                 _ = token.cancelled() => {}
@@ -683,6 +687,12 @@ impl Conversations {
     }
 }
 
+type AttachmentChan = (
+    Uuid,
+    warp::raygun::Message,
+    oneshot::Sender<Result<(), Error>>,
+);
+
 struct ConversationTask {
     ipfs: Ipfs,
     cid: Option<Cid>,
@@ -693,6 +703,10 @@ struct ConversationTask {
     root: RootDocumentMap,
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
+
+    // used for attachments to store message on document and publish it to the network
+    attachment_rx: mpsc::Receiver<AttachmentChan>,
+    attachment_tx: mpsc::Sender<AttachmentChan>,
     rx: mpsc::Receiver<ConversationCommand>,
 }
 
@@ -797,6 +811,9 @@ impl ConversationTask {
                             _ = response.send(self.cancel_event(conversation_id, event).await)
                         }
                     }
+                }
+                Some((conversation_id, message, response)) = self.attachment_rx.next() => {
+                    _ = response.send(self.store_direct_for_attachment(conversation_id, message).await);
                 }
                 Some(ev) = identity_event.next() => {
                     if let Err(e) = process_identity_events(self, ev).await {
@@ -2024,261 +2041,301 @@ impl ConversationTask {
             emoji,
         };
 
-        // let (one_tx, one_rx) = oneshot::channel();
-        // tx.send((event.clone(), Some(one_tx)))
-        //     .await
-        //     .map_err(anyhow::Error::from)?;
-        // one_rx.await.map_err(anyhow::Error::from)??;
-
         self.publish(conversation_id, None, event, true).await
     }
 
     pub async fn attach(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Option<Uuid>,
-        _locations: Vec<Location>,
-        _messages: Vec<String>,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        locations: Vec<Location>,
+        messages: Vec<String>,
     ) -> Result<BoxStream<'static, AttachmentKind>, Error> {
-        // if locations.len() > 8 {
-        //     return Err(Error::InvalidLength {
-        //         context: "files".into(),
-        //         current: locations.len(),
-        //         minimum: Some(1),
-        //         maximum: Some(8),
-        //     });
-        // }
+        if locations.len() > 8 {
+            return Err(Error::InvalidLength {
+                context: "files".into(),
+                current: locations.len(),
+                minimum: Some(1),
+                maximum: Some(8),
+            });
+        }
 
-        // if !messages.is_empty() {
-        //     let lines_value_length: usize = messages
-        //         .iter()
-        //         .filter(|s| !s.is_empty())
-        //         .map(|s| s.trim())
-        //         .map(|s| s.chars().count())
-        //         .sum();
+        if !messages.is_empty() {
+            let lines_value_length: usize = messages
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim())
+                .map(|s| s.chars().count())
+                .sum();
 
-        //     if lines_value_length > 4096 {
-        //         error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
-        //         return Err(Error::InvalidLength {
-        //             context: "message".into(),
-        //             current: lines_value_length,
-        //             minimum: None,
-        //             maximum: Some(4096),
-        //         });
-        //     }
-        // }
-        // let conversation = self.get(conversation_id).await?;
-        // let mut tx = self.subscribe(conversation_id).await?;
+            if lines_value_length > 4096 {
+                error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: None,
+                    maximum: Some(4096),
+                });
+            }
+        }
+        let conversation = self.get(conversation_id).await?;
+        let keypair = self.keypair.clone();
+        // let tx = self.subscribe(conversation_id).await?;
 
-        // let mut constellation = self.file.clone();
+        let mut constellation = self.file.clone();
 
-        // let files = locations
-        //     .iter()
-        //     .filter(|location| match location {
-        //         Location::Disk { path } => path.is_file(),
-        //         _ => true,
-        //     })
-        //     .cloned()
-        //     .collect::<Vec<_>>();
+        let files = locations
+            .iter()
+            .filter(|location| match location {
+                Location::Disk { path } => path.is_file(),
+                _ => true,
+            })
+            .cloned()
+            .collect::<Vec<_>>();
 
-        // if files.is_empty() {
-        //     return Err(Error::NoAttachments);
-        // }
+        if files.is_empty() {
+            return Err(Error::NoAttachments);
+        }
 
-        // let stream = async_stream::stream! {
-        //     let mut in_stack = vec![];
+        // let mut publisher = self.publisher_tx.clone();
+        let mut atx = self.attachment_tx.clone();
 
-        //     let mut attachments = vec![];
-        //     let mut total_thumbnail_size = 0;
+        let stream = async_stream::stream! {
+            let mut in_stack = vec![];
 
-        //     let mut streams: SelectAll<_> = SelectAll::new();
+            let mut attachments = vec![];
+            let mut total_thumbnail_size = 0;
 
-        //     for file in files {
-        //         match file {
-        //             Location::Constellation { path } => {
-        //                 match constellation
-        //                     .root_directory()
-        //                     .get_item_by_path(&path)
-        //                     .and_then(|item| item.get_file())
-        //                 {
-        //                     Ok(f) => {
-        //                         let stream = async_stream::stream! {
-        //                             yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
-        //                         };
-        //                         streams.push(stream.boxed());
-        //                     },
-        //                     Err(e) => {
-        //                         let constellation_path = PathBuf::from(&path);
-        //                         let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
-        //                         let stream = async_stream::stream! {
-        //                             yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
-        //                         };
-        //                         streams.push(stream.boxed());
-        //                     },
-        //                 }
-        //             }
-        //             Location::Disk {path} => {
-        //                 let mut filename = match path.file_name() {
-        //                     Some(file) => file.to_string_lossy().to_string(),
-        //                     None => continue,
-        //                 };
+            let mut streams: SelectAll<_> = SelectAll::new();
 
-        //                 let original = filename.clone();
+            for file in files {
+                match file {
+                    Location::Constellation { path } => {
+                        match constellation
+                            .root_directory()
+                            .get_item_by_path(&path)
+                            .and_then(|item| item.get_file())
+                        {
+                            Ok(f) => {
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
+                                };
+                                streams.push(stream.boxed());
+                            },
+                            Err(e) => {
+                                let constellation_path = PathBuf::from(&path);
+                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
+                                };
+                                streams.push(stream.boxed());
+                            },
+                        }
+                    }
+                    Location::Disk {path} => {
+                        let mut filename = match path.file_name() {
+                            Some(file) => file.to_string_lossy().to_string(),
+                            None => continue,
+                        };
 
-        //                 let current_directory = match constellation.current_directory() {
-        //                     Ok(directory) => directory,
-        //                     Err(e) => {
-        //                         yield AttachmentKind::Pending(Err(e));
-        //                         return;
-        //                     }
-        //                 };
+                        let original = filename.clone();
 
-        //                 let mut interval = 0;
-        //                 let skip;
-        //                 loop {
-        //                     if in_stack.contains(&filename) || current_directory.has_item(&filename) {
-        //                         if interval > 2000 {
-        //                             skip = true;
-        //                             break;
-        //                         }
-        //                         interval += 1;
-        //                         let file = PathBuf::from(&original);
-        //                         let file_stem =
-        //                             file.file_stem().and_then(OsStr::to_str).map(str::to_string);
-        //                         let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
+                        let current_directory = match constellation.current_directory() {
+                            Ok(directory) => directory,
+                            Err(e) => {
+                                yield AttachmentKind::Pending(Err(e));
+                                return;
+                            }
+                        };
 
-        //                         filename = match (file_stem, ext) {
-        //                             (Some(filename), Some(ext)) => {
-        //                                 format!("{filename} ({interval}).{ext}")
-        //                             }
-        //                             _ => format!("{original} ({interval})"),
-        //                         };
-        //                         continue;
-        //                     }
-        //                     skip = false;
-        //                     break;
-        //                 }
+                        let mut interval = 0;
+                        let skip;
+                        loop {
+                            if in_stack.contains(&filename) || current_directory.has_item(&filename) {
+                                if interval > 2000 {
+                                    skip = true;
+                                    break;
+                                }
+                                interval += 1;
+                                let file = PathBuf::from(&original);
+                                let file_stem =
+                                    file.file_stem().and_then(OsStr::to_str).map(str::to_string);
+                                let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
 
-        //                 if skip {
-        //                     let stream = async_stream::stream! {
-        //                         yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None);
-        //                     };
-        //                     streams.push(stream.boxed());
-        //                     continue;
-        //                 }
+                                filename = match (file_stem, ext) {
+                                    (Some(filename), Some(ext)) => {
+                                        format!("{filename} ({interval}).{ext}")
+                                    }
+                                    _ => format!("{original} ({interval})"),
+                                };
+                                continue;
+                            }
+                            skip = false;
+                            break;
+                        }
 
-        //                 let file = path.display().to_string();
+                        if skip {
+                            let stream = async_stream::stream! {
+                                yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None);
+                            };
+                            streams.push(stream.boxed());
+                            continue;
+                        }
 
-        //                 in_stack.push(filename.clone());
+                        let file = path.display().to_string();
 
-        //                 let mut progress = match constellation.put(&filename, &file).await {
-        //                     Ok(stream) => stream,
-        //                     Err(e) => {
-        //                         error!("Error uploading {filename}: {e}");
-        //                         let stream = async_stream::stream! {
-        //                             yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
-        //                         };
-        //                         streams.push(stream.boxed());
-        //                         continue;
-        //                     }
-        //                 };
+                        in_stack.push(filename.clone());
 
-        //                 let current_directory = current_directory.clone();
-        //                 let filename = filename.to_string();
+                        let mut progress = match constellation.put(&filename, &file).await {
+                            Ok(stream) => stream,
+                            Err(e) => {
+                                error!("Error uploading {filename}: {e}");
+                                let stream = async_stream::stream! {
+                                    yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
+                                };
+                                streams.push(stream.boxed());
+                                continue;
+                            }
+                        };
 
-        //                 let stream = async_stream::stream! {
-        //                     while let Some(item) = progress.next().await {
-        //                         match item {
-        //                             item @ Progression::CurrentProgress { .. } => {
-        //                                 yield (item, None);
-        //                             },
-        //                             item @ Progression::ProgressComplete { .. } => {
-        //                                 let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
-        //                                 yield (item, file);
-        //                                 break;
-        //                             },
-        //                             item @ Progression::ProgressFailed { .. } => {
-        //                                 yield (item, None);
-        //                                 break;
-        //                             }
-        //                         }
-        //                     }
-        //                 };
+                        let current_directory = current_directory.clone();
+                        let filename = filename.to_string();
 
-        //                 streams.push(stream.boxed());
-        //             }
-        //         };
-        //     }
+                        let stream = async_stream::stream! {
+                            while let Some(item) = progress.next().await {
+                                match item {
+                                    item @ Progression::CurrentProgress { .. } => {
+                                        yield (item, None);
+                                    },
+                                    item @ Progression::ProgressComplete { .. } => {
+                                        let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
+                                        yield (item, file);
+                                        break;
+                                    },
+                                    item @ Progression::ProgressFailed { .. } => {
+                                        yield (item, None);
+                                        break;
+                                    }
+                                }
+                            }
+                        };
 
-        //     for await (progress, file) in streams {
-        //         yield AttachmentKind::AttachedProgress(progress);
-        //         if let Some(file) = file {
-        //             // We reconstruct it to avoid out any metadata that was apart of the `File` structure that we dont want to share
-        //             let new_file = warp::constellation::file::File::new(&file.name());
+                        streams.push(stream.boxed());
+                    }
+                };
+            }
 
-        //             let thumbnail = file.thumbnail();
+            for await (progress, file) in streams {
+                yield AttachmentKind::AttachedProgress(progress);
+                if let Some(file) = file {
+                    // We reconstruct it to avoid out any metadata that was apart of the `File` structure that we dont want to share
+                    let new_file = warp::constellation::file::File::new(&file.name());
 
-        //             if total_thumbnail_size < 3 * 1024 * 1024
-        //                 && !thumbnail.is_empty()
-        //                 && thumbnail.len() <= 1024 * 1024
-        //             {
-        //                 new_file.set_thumbnail(&thumbnail);
-        //                 new_file.set_thumbnail_format(file.thumbnail_format());
-        //                 total_thumbnail_size += thumbnail.len();
-        //             }
-        //             new_file.set_size(file.size());
-        //             new_file.set_hash(file.hash());
-        //             new_file.set_reference(&file.reference().unwrap_or_default());
-        //             attachments.push(new_file);
-        //         }
-        //     }
+                    let thumbnail = file.thumbnail();
 
-        //     let final_results = {
-        //         async move {
+                    if total_thumbnail_size < 3 * 1024 * 1024
+                        && !thumbnail.is_empty()
+                        && thumbnail.len() <= 1024 * 1024
+                    {
+                        new_file.set_thumbnail(&thumbnail);
+                        new_file.set_thumbnail_format(file.thumbnail_format());
+                        total_thumbnail_size += thumbnail.len();
+                    }
+                    new_file.set_size(file.size());
+                    new_file.set_hash(file.hash());
+                    new_file.set_reference(&file.reference().unwrap_or_default());
+                    attachments.push(new_file);
+                }
+            }
 
-        //             if attachments.is_empty() {
-        //                 return Err(Error::NoAttachments);
-        //             }
+            let final_results = {
+                async move {
 
-        //             let own_did = &*self.keypair;
-        //             let mut message = warp::raygun::Message::default();
-        //             message.set_message_type(MessageType::Attachment);
-        //             message.set_conversation_id(conversation.id());
-        //             message.set_sender(own_did.clone());
-        //             message.set_attachment(attachments);
-        //             message.set_lines(messages.clone());
-        //             message.set_replied(message_id);
-        //             let construct = [
-        //                 message.id().into_bytes().to_vec(),
-        //                 message.conversation_id().into_bytes().to_vec(),
-        //                 own_did.to_string().as_bytes().to_vec(),
-        //                 message
-        //                     .lines()
-        //                     .iter()
-        //                     .map(|s| s.as_bytes())
-        //                     .collect::<Vec<_>>()
-        //                     .concat(),
-        //             ]
-        //             .concat();
+                    if attachments.is_empty() {
+                        return Err(Error::NoAttachments);
+                    }
 
-        //             let signature = sign_serde(own_did, &construct)?;
-        //             message.set_signature(Some(signature));
+                    let own_did = &*keypair;
+                    let mut message = warp::raygun::Message::default();
+                    message.set_message_type(MessageType::Attachment);
+                    message.set_conversation_id(conversation.id());
+                    message.set_sender(own_did.clone());
+                    message.set_attachment(attachments);
+                    message.set_lines(messages.clone());
+                    message.set_replied(message_id);
+                    let construct = [
+                        message.id().into_bytes().to_vec(),
+                        message.conversation_id().into_bytes().to_vec(),
+                        own_did.to_string().as_bytes().to_vec(),
+                        message
+                            .lines()
+                            .iter()
+                            .map(|s| s.as_bytes())
+                            .collect::<Vec<_>>()
+                            .concat(),
+                    ]
+                    .concat();
 
-        //             let event = MessagingEvents::New { message };
-        //             // let (one_tx, one_rx) = oneshot::channel();
-        //             // tx.send((event.clone(), Some(one_tx)))
-        //             //     .await
-        //             //     .map_err(anyhow::Error::from)?;
-        //             // one_rx.await.map_err(anyhow::Error::from)??;
-        //             self.publish(conversation_id, None, event, true).await
-        //         }
-        //     };
+                    let signature = sign_serde(own_did, &construct)?;
+                    message.set_signature(Some(signature));
 
-        //     yield AttachmentKind::Pending(final_results.await)
-        // };
+
+                    let (tx, rx) = oneshot::channel();
+                    _ = atx.send((conversation_id, message, tx)).await;
+
+                    rx.await.expect("shouldnt drop")
+                }
+            };
+
+            yield AttachmentKind::Pending(final_results.await)
+        };
 
         //TODO
-        Ok(stream::empty().boxed())
+        Ok(stream.boxed())
+    }
+
+    // use specifically for attachment messages
+    async fn store_direct_for_attachment(
+        &mut self,
+        conversation_id: Uuid,
+        message: warp::raygun::Message,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        let message_id = message.id();
+
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
+        };
+
+        let message_document = MessageDocument::new(
+            &self.ipfs,
+            self.keypair.clone(),
+            message.clone(),
+            keystore.as_ref(),
+        )
+        .await?;
+
+        let mut messages = conversation.get_message_list(&self.ipfs).await?;
+        messages.insert(message_document);
+        conversation.set_message_list(&self.ipfs, messages).await?;
+        self.set_document(conversation).await?;
+
+        let event = MessageEventKind::MessageSent {
+            conversation_id,
+            message_id,
+        };
+
+        if let Err(e) = tx.send(event) {
+            error!("Error broadcasting event: {e}");
+        }
+
+        let event = MessagingEvents::New { message };
+
+        self.publish(conversation_id, Some(message_id), event, true)
+            .await
     }
 
     pub async fn download(
