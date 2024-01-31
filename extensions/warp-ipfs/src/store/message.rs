@@ -1471,7 +1471,7 @@ impl MessageStore {
                 let conversation_type = conversation.conversation_type;
 
                 let mut keystore = Keystore::new(conversation_id);
-                keystore.insert(&*did, &*did, warp::crypto::generate::<64>())?;
+                keystore.insert(&did, &did, warp::crypto::generate::<64>())?;
 
                 conversation.verify()?;
 
