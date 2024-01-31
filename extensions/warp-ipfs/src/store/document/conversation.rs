@@ -854,19 +854,19 @@ impl ConversationTask {
                         ConversationStreamData::RequestResponse(req) => {
                             let source = req.source;
                             if let Err(e) = process_request_response_event(self, conversation_id, req).await {
-                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, "Failed to process payload");
+                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "request", "Failed to process payload");
                             }
                         },
                         ConversationStreamData::Event(ev) => {
                             let source = ev.source;
                             if let Err(e) = process_conversation_event(self, conversation_id, ev).await {
-                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, "Failed to process payload");
+                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "ev", "Failed to process payload");
                             }
                         },
                         ConversationStreamData::Message(msg) => {
                             let source = msg.source;
                             if let Err(e) = self.process_msg_event(conversation_id, msg).await {
-                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, "Failed to process payload");
+                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "msg", "Failed to process payload");
                             }
                         },
                     }
@@ -905,10 +905,8 @@ impl ConversationTask {
                     .map(ConversationStreamData::RequestResponse)
                     .boxed();
 
-                let mut stream = messaging_stream
-                    .chain(event_stream)
-                    .chain(request_stream)
-                    .boxed();
+                let mut stream =
+                    futures::stream::select_all([messaging_stream, event_stream, request_stream]);
 
                 let (mut tx, rx) = mpsc::channel(256);
 
@@ -1005,10 +1003,8 @@ impl ConversationTask {
             .map(ConversationStreamData::RequestResponse)
             .boxed();
 
-        let mut stream = messaging_stream
-            .chain(event_stream)
-            .chain(request_stream)
-            .boxed();
+        let mut stream =
+            futures::stream::select_all([messaging_stream, event_stream, request_stream]);
 
         let (mut tx, rx) = mpsc::channel(256);
 
@@ -1169,10 +1165,8 @@ impl ConversationTask {
             .map(ConversationStreamData::RequestResponse)
             .boxed();
 
-        let mut stream = messaging_stream
-            .chain(event_stream)
-            .chain(request_stream)
-            .boxed();
+        let mut stream =
+            futures::stream::select_all([messaging_stream, event_stream, request_stream]);
 
         let (mut tx, rx) = mpsc::channel(256);
 
@@ -3236,10 +3230,8 @@ async fn process_conversation(
                 .map(ConversationStreamData::RequestResponse)
                 .boxed();
 
-            let mut stream = messaging_stream
-                .chain(event_stream)
-                .chain(request_stream)
-                .boxed();
+            let mut stream =
+                futures::stream::select_all([messaging_stream, event_stream, request_stream]);
 
             let (mut tx, rx) = mpsc::channel(256);
 
@@ -3324,10 +3316,8 @@ async fn process_conversation(
                 .map(ConversationStreamData::RequestResponse)
                 .boxed();
 
-            let mut stream = messaging_stream
-                .chain(event_stream)
-                .chain(request_stream)
-                .boxed();
+            let mut stream =
+                futures::stream::select_all([messaging_stream, event_stream, request_stream]);
 
             let (mut tx, rx) = mpsc::channel(256);
 
