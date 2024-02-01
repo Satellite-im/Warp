@@ -565,14 +565,8 @@ impl WarpIpfs {
             identity_store,
             discovery,
             filestore,
-            false,
-            1000,
             self.raygun_tx.clone(),
             span.clone(),
-            (
-                config.store_setting.check_spam,
-                config.store_setting.with_friends,
-            ),
         )
         .await?;
 

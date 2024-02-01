@@ -21,7 +21,6 @@ use warp::raygun::{
 
 use std::sync::Arc;
 
-use crate::spam_filter::SpamFilter;
 use crate::store::get_keypair_did;
 
 use super::conversation::ConversationDocument;
@@ -55,8 +54,6 @@ pub struct MessageStore {
     // Event
     event: EventSubscription<RayGunEventKind>,
 
-    spam_filter: Arc<Option<SpamFilter>>,
-
     span: Span,
 }
 
@@ -68,11 +65,8 @@ impl MessageStore {
         identity: IdentityStore,
         discovery: Discovery,
         filesystem: FileStore,
-        _: bool,
-        _: u64,
         event: EventSubscription<RayGunEventKind>,
         span: Span,
-        (check_spam, _): (bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
 
@@ -83,7 +77,6 @@ impl MessageStore {
         }
 
         let did = Arc::new(get_keypair_did(ipfs.keypair()?)?);
-        let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
 
         let root = identity.root_document().clone();
 
@@ -108,7 +101,6 @@ impl MessageStore {
             discovery,
             did,
             event,
-            spam_filter,
             span,
         };
 
@@ -477,15 +469,4 @@ impl MessageStore {
             .update_conversation_settings(conversation_id, settings)
             .await
     }
-}
-
-pub fn spam_check(message: &mut Message, filter: Arc<Option<SpamFilter>>) -> anyhow::Result<()> {
-    if let Some(filter) = filter.as_ref() {
-        if filter.process(&message.lines().join(" "))? {
-            message
-                .metadata_mut()
-                .insert("is_spam".to_owned(), "true".to_owned());
-        }
-    }
-    Ok(())
 }
