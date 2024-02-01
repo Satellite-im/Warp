@@ -17,20 +17,21 @@ use rust_ipfs::{Ipfs, IpfsPath, PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tracing::Span;
+use tracing::{error, info, trace, warn};
 use uuid::Uuid;
 use warp::constellation::{ConstellationProgressStream, Progression};
 use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
 use warp::error::Error;
-use warp::logging::tracing::{error, info, trace, warn};
 use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
     AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType,
     DirectConversationSettings, EmbedState, GroupSettings, Location, Message, MessageEvent,
-    MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageStream, MessageType,
-    Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
+    MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
+    MessagesType, PinState, RayGunEventKind, ReactionState,
 };
-use warp::sync::Arc;
+
+use std::sync::Arc;
 
 use crate::spam_filter::SpamFilter;
 use crate::store::payload::Payload;
@@ -2301,7 +2302,7 @@ impl MessageStore {
                 let stream = conversation
                     .get_messages_stream(&self.ipfs, self.did.clone(), opt, keystore.as_ref())
                     .await?;
-                Ok(Messages::Stream(MessageStream(stream)))
+                Ok(Messages::Stream(stream))
             }
             MessagesType::List => {
                 let list = conversation
@@ -2441,6 +2442,10 @@ impl MessageStore {
         }
 
         if self.identity.is_blocked(did_key).await? {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
+        if conversation.restrict.contains(did_key) {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -3219,7 +3224,7 @@ impl MessageStore {
             yield AttachmentKind::Pending(final_results.await)
         };
 
-        Ok(AttachmentEventStream(stream.boxed()))
+        Ok(stream.boxed())
     }
 
     pub async fn download(
@@ -3299,7 +3304,52 @@ impl MessageStore {
             }
         };
 
-        Ok(ConstellationProgressStream(progress_stream.boxed()))
+        Ok(progress_stream.boxed())
+    }
+
+    pub async fn download_stream(
+        &self,
+        conversation: Uuid,
+        message_id: Uuid,
+        file: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+        let members = self.get_conversation(conversation).await.map(|c| {
+            c.recipients()
+                .iter()
+                .filter_map(|did| did.to_peer_id().ok())
+                .collect::<Vec<_>>()
+        })?;
+
+        let message = self.get_message(conversation, message_id).await?;
+
+        if message.message_type() != MessageType::Attachment {
+            return Err(Error::InvalidMessage);
+        }
+
+        let attachment = message
+            .attachments()
+            .iter()
+            .find(|attachment| attachment.name() == file)
+            .cloned()
+            .ok_or(Error::FileNotFound)?;
+
+        let reference = attachment
+            .reference()
+            .and_then(|reference| IpfsPath::from_str(&reference).ok())
+            .ok_or(Error::FileNotFound)?;
+
+        let ipfs = self.ipfs.clone();
+
+        let stream = async_stream::stream! {
+            let stream = ipfs.unixfs().cat(reference, None, &members, false, None);
+
+            for await result in stream {
+                let result = result.map_err(anyhow::Error::from).map_err(Error::from);
+                yield result;
+            }
+        };
+
+        Ok(stream.boxed())
     }
 
     pub async fn send_event(

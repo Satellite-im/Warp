@@ -1,6 +1,7 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
+use parking_lot::RwLock;
 use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, SharedWriter};
 use std::collections::HashMap;
@@ -8,6 +9,7 @@ use std::env::temp_dir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tokio::task::JoinHandle;
@@ -23,7 +25,6 @@ use warp::raygun::{
     MessageEventKind, MessageEventStream, MessageOptions, MessageStream, MessageType, Messages,
     MessagesType, PinState, RayGun, ReactionState,
 };
-use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;

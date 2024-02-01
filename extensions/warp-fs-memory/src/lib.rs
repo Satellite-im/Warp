@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use warp::error::Error;
 
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::Arc;
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::constellation::directory::Directory;
 use warp::module::Module;
@@ -114,18 +115,5 @@ impl Extension for MemorySystem {
     }
     fn module(&self) -> Module {
         Module::FileSystem
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod ffi {
-    use crate::MemorySystem;
-    use warp::constellation::ConstellationAdapter;
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn constellation_fs_memory_create_context() -> *mut ConstellationAdapter {
-        let obj = Box::new(ConstellationAdapter::new(Box::new(MemorySystem::new())));
-        Box::into_raw(obj)
     }
 }

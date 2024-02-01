@@ -10,7 +10,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 
-use ipfs::{Ipfs, Keypair};
+use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
 
 use libipld::Cid;
 use rust_ipfs as ipfs;
@@ -37,9 +37,10 @@ use warp::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
         MultiPassEventKind,
     },
-    sync::Arc,
     tesseract::Tesseract,
 };
+
+use std::sync::Arc;
 
 use super::{
     connected_to_peer, did_keypair,
@@ -1630,7 +1631,7 @@ impl IdentityStore {
 
     pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.keys().copied() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1668,7 +1669,7 @@ impl IdentityStore {
         let identity = self.own_identity_document().await?;
 
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.keys().copied() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1706,7 +1707,7 @@ impl IdentityStore {
         let package = self.root_document.export_bytes().await?;
 
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.keys().copied() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1742,7 +1743,7 @@ impl IdentityStore {
 
     async fn is_registered(&self) -> Result<(), Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.keys().copied() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1776,7 +1777,7 @@ impl IdentityStore {
 
     async fn register(&self, identity: &IdentityDocument) -> Result<(), Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.keys().copied() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1813,7 +1814,7 @@ impl IdentityStore {
 
     async fn fetch_mailbox(&mut self) -> Result<(), Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.keys().copied() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -1874,7 +1875,7 @@ impl IdentityStore {
                 .sign(&self.did_key)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-            for peer_id in addresses.keys().copied() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
@@ -2046,7 +2047,7 @@ impl IdentityStore {
                 },
             };
             if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.keys().copied() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                     let (tx, rx) = futures::channel::oneshot::channel();
                     let _ = self
                         .identity_command

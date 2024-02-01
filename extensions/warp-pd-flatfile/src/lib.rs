@@ -7,15 +7,17 @@ use std::{
     fs::OpenOptions,
     io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use uuid::Uuid;
 use warp::{error::Error, libipld::Ipld, SingleHandle};
 use warp::{
     libipld::Cid,
     sata::{Sata, State},
-    sync::{Arc, RwLock},
     Extension,
 };
+
+use parking_lot::RwLock;
 
 use warp::data::DataType;
 use warp::module::Module;
@@ -729,39 +731,4 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
         }
     }
     Ok(list)
-}
-
-pub mod ffi {
-    use crate::FlatfileStorage;
-    use std::ffi::CStr;
-    use std::os::raw::c_char;
-    use warp::error::Error;
-    use warp::ffi::FFIResult;
-    use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn pocket_dimension_flatfile_new(
-        path: *const c_char,
-        index_file: *const c_char,
-    ) -> FFIResult<PocketDimensionAdapter> {
-        if path.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Path is null")));
-        }
-
-        let path = CStr::from_ptr(path).to_string_lossy().to_string();
-
-        let index_file = match index_file.is_null() {
-            true => String::from("index-file"),
-            false => CStr::from_ptr(index_file).to_string_lossy().to_string(),
-        };
-
-        match FlatfileStorage::new_with_index_file(path, index_file) {
-            Ok(flatfile) => FFIResult::ok(PocketDimensionAdapter::new(Arc::new(RwLock::new(
-                Box::new(flatfile),
-            )))),
-            Err(e) => FFIResult::err(e),
-        }
-    }
 }

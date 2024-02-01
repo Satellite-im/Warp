@@ -18,12 +18,14 @@ use ipfs::p2p::{
     IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
 };
 
+use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use store::document::ExtractedRootDocument;
 use store::event_subscription::EventSubscription;
@@ -42,15 +44,13 @@ use warp::constellation::{
 };
 use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
+use warp::module::Module;
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
     Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
     RayGunGroupConversation, RayGunStream, ReactionState,
 };
-use warp::sync::{Arc, RwLock};
-
-use warp::module::Module;
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
@@ -246,9 +246,7 @@ impl WarpIpfs {
 
         let behaviour = behaviour::Behaviour {
             shuttle_identity: enable
-                .then_some(shuttle::identity::client::Behaviour::new(
-                    &keypair, None, id_sh_rx, nodes,
-                ))
+                .then(|| shuttle::identity::client::Behaviour::new(&keypair, None, id_sh_rx, nodes))
                 .into(),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
@@ -1300,7 +1298,7 @@ impl Friends for WarpIpfs {
 impl FriendsEvent for WarpIpfs {
     async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let store = self.identity_store(true).await?;
-        store.subscribe().await.map(MultiPassEventStream)
+        store.subscribe().await
     }
 }
 
@@ -1543,6 +1541,17 @@ impl RayGunAttachment for WarpIpfs {
             .download(conversation_id, message_id, &file, path, false)
             .await
     }
+
+    async fn download_stream(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+        self.messaging_store()?
+            .download_stream(conversation_id, message_id, file)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -1578,7 +1587,7 @@ impl RayGunGroupConversation for WarpIpfs {
 impl RayGunStream for WarpIpfs {
     async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         let rx = self.raygun_tx.subscribe().await?;
-        Ok(RayGunEventStream(rx))
+        Ok(rx)
     }
     async fn get_conversation_stream(
         &mut self,
@@ -1586,7 +1595,7 @@ impl RayGunStream for WarpIpfs {
     ) -> Result<MessageEventStream, Error> {
         let store = self.messaging_store()?;
         let stream = store.get_conversation_stream(conversation_id).await?;
-        Ok(MessageEventStream(stream.boxed()))
+        Ok(stream.boxed())
     }
 }
 
@@ -1637,7 +1646,7 @@ impl Constellation for WarpIpfs {
         self.file_store()?.put(name, path).await
     }
 
-    async fn get(&self, name: &str, path: &str) -> Result<(), Error> {
+    async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?.get(name, path).await
     }
 

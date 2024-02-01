@@ -63,7 +63,6 @@ uuid.workspace = true
 derive_more.workspace = true
 paste.workspace = true
 libc.workspace = true
-warp-derive = { path = "./warp-derive" }
 sata.workspace = true
 tracing = {  features = ["log"], workspace = true }
 tracing-futures = { features = [

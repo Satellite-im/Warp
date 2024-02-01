@@ -1,10 +1,6 @@
 #![allow(clippy::result_large_err)]
-#[cfg(not(target_arch = "wasm32"))]
-pub mod ffi;
-
 use futures::{stream::BoxStream, StreamExt};
 use std::{collections::HashMap, fmt::Debug, io::ErrorKind, sync::atomic::Ordering};
-use warp_derive::FFIFree;
 use zeroize::Zeroize;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -17,14 +13,14 @@ use std::io::prelude::*;
 
 use std::path::PathBuf;
 
-use std::sync::atomic::AtomicBool;
+use std::sync::{atomic::AtomicBool, Arc};
 
-use crate::sync::{Arc, RwLock};
+use parking_lot::RwLock;
 
 type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
-#[derive(FFIFree, Clone)]
+#[derive(Clone)]
 pub struct Tesseract {
     inner: Arc<TesseractInner>,
 }
@@ -500,7 +496,6 @@ impl Tesseract {
     }
 }
 
-#[derive(FFIFree)]
 struct TesseractInner {
     internal: RwLock<HashMap<String, Vec<u8>>>,
     enc_pass: RwLock<Vec<u8>>,

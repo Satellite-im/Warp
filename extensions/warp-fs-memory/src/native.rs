@@ -70,37 +70,19 @@ impl Constellation for MemorySystem {
 
         let name = name.to_string();
 
-        let stream = ConstellationProgressStream(
-            futures::stream::once(async move {
-                Progression::ProgressComplete {
-                    name,
-                    total: Some(bytes as _),
-                }
-            })
-            .boxed(),
-        );
+        let stream = futures::stream::once(async move {
+            Progression::ProgressComplete {
+                name,
+                total: Some(bytes as _),
+            }
+        })
+        .boxed();
 
         Ok(stream)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    async fn get(&self, name: &str, path: &str) -> Result<()> {
-        if let Ok(cache) = self.get_cache() {
-            let mut query = QueryBuilder::default();
-            query.r#where("name", name.to_string())?;
-            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
-                //get last
-                if !list.is_empty() {
-                    let obj = list.last().unwrap();
-
-                    if let Ok(data) = obj.decode::<DimensionData>() {
-                        let mut file = std::fs::File::create(path)?;
-                        return data.write_from_path(&mut file);
-                    }
-                }
-            }
-        }
-
+    async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         let internal_file = self
             .internal
             .read()
@@ -111,7 +93,18 @@ impl Constellation for MemorySystem {
 
         tokio::fs::write(path, internal_file.data().as_slice()).await?;
 
-        Ok(())
+        let name = name.to_string();
+        let size = internal_file.size();
+
+        let stream = futures::stream::once(async move {
+            Progression::ProgressComplete {
+                name,
+                total: Some(size),
+            }
+        })
+        .boxed();
+
+        Ok(stream)
     }
 
     async fn put_buffer(
