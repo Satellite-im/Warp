@@ -1,35 +1,28 @@
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 use futures::stream::BoxStream;
 use futures::Stream;
 use rust_ipfs::Ipfs;
 
-use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
+use tracing::info;
 use tracing::Span;
-use tracing::{info, warn};
 use uuid::Uuid;
-use warp::constellation::ConstellationProgressStream;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::raygun::{
-    AttachmentEventStream, Conversation, ConversationSettings, ConversationType, EmbedState,
-    GroupSettings, Location, Message, MessageEvent, MessageEventKind, MessageOptions,
-    MessageReference, MessageStatus, Messages, MessagesType, PinState, RayGunEventKind,
-    ReactionState,
+    Conversation, ConversationType, Message, MessageEventKind, MessageOptions, MessageReference,
+    Messages, MessagesType, RayGunEventKind,
 };
 
 use std::sync::Arc;
 
 use crate::store::get_keypair_did;
 
-use super::conversation::ConversationDocument;
 use super::discovery::Discovery;
 use super::document::conversation::Conversations;
 use super::event_subscription::EventSubscription;
 use super::files::FileStore;
 use super::identity::IdentityStore;
-use super::keystore::Keystore;
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -39,14 +32,8 @@ pub struct MessageStore {
 
     conversations: Conversations,
 
-    // discovery
-    discovery: Discovery,
-
     // DID
     did: Arc<DID>,
-
-    // Event
-    event: EventSubscription<RayGunEventKind>,
 
     span: Span,
 }
@@ -72,15 +59,13 @@ impl MessageStore {
 
         let did = Arc::new(get_keypair_did(ipfs.keypair()?)?);
 
-        let root = identity.root_document().clone();
-
         let conversations = Conversations::new(
             &ipfs,
             path,
+            discovery,
             did.clone(),
-            root,
-            filesystem.clone(),
-            event.clone(),
+            filesystem,
+            event,
             identity,
         )
         .await;
@@ -88,9 +73,7 @@ impl MessageStore {
         let store = Self {
             ipfs,
             conversations,
-            discovery,
             did,
-            event,
             span,
         };
 
@@ -101,25 +84,17 @@ impl MessageStore {
     }
 }
 
+impl core::ops::Deref for MessageStore {
+    type Target = Conversations;
+    fn deref(&self) -> &Self::Target {
+        &self.conversations
+    }
+}
+
 impl MessageStore {
     pub async fn get_conversation(&self, id: Uuid) -> Result<Conversation, Error> {
         let document = self.conversations.get(id).await?;
         Ok(document.into())
-    }
-
-    pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
-        self.conversations.create_conversation(did_key).await
-    }
-
-    pub async fn create_group_conversation(
-        &mut self,
-        name: Option<String>,
-        recipients: HashSet<DID>,
-        settings: GroupSettings,
-    ) -> Result<Conversation, Error> {
-        self.conversations
-            .create_group_conversation(name, recipients, settings)
-            .await
     }
 
     pub async fn delete_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
@@ -128,12 +103,9 @@ impl MessageStore {
             .await
     }
 
-    pub async fn list_conversation_documents(&self) -> Result<Vec<ConversationDocument>, Error> {
-        self.conversations.list().await
-    }
-
     pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
-        self.list_conversation_documents()
+        self.conversations
+            .list()
             .await
             .map(|list| list.into_iter().map(|document| document.into()).collect())
     }
@@ -146,20 +118,6 @@ impl MessageStore {
             .await
     }
 
-    pub async fn conversation_keystore(&self, conversation_id: Uuid) -> Result<Keystore, Error> {
-        self.conversations.get_keystore(conversation_id).await
-    }
-
-    pub async fn set_conversation_keystore(
-        &self,
-        conversation_id: Uuid,
-        keystore: Keystore,
-    ) -> Result<(), Error> {
-        self.conversations
-            .set_keystore(conversation_id, keystore)
-            .await
-    }
-
     pub async fn get_message(
         &self,
         conversation_id: Uuid,
@@ -169,7 +127,7 @@ impl MessageStore {
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
             ConversationType::Group { .. } => {
-                self.conversation_keystore(conversation.id()).await.ok()
+                self.conversations.get_keystore(conversation_id).await.ok()
             }
         };
         conversation
@@ -200,30 +158,16 @@ impl MessageStore {
             .map(|document| document.into())
     }
 
-    //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself
-    //Note:
-    //  - For group chat, this can be ignored unless we decide to have a full acknowledgement from all recipients in which case, we can mark it as "sent"
-    //    until all confirm to have received the message
-    //  - If member sends an event stating that they do not have the message to grab the message from the store
-    //    and send it them, with a map marking the attempt(s)
-    pub async fn message_status(
-        &self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-    ) -> Result<MessageStatus, Error> {
-        unimplemented!()
-    }
-
     pub async fn get_messages(
         &self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         opt: MessageOptions,
     ) -> Result<Messages, Error> {
-        let conversation = self.conversations.get(conversation).await?;
+        let conversation = self.conversations.get(conversation_id).await?;
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
             ConversationType::Group { .. } => {
-                self.conversation_keystore(conversation.id()).await.ok()
+                self.conversations.get_keystore(conversation_id).await.ok()
             }
         };
 
@@ -256,29 +200,15 @@ impl MessageStore {
             .unwrap_or_default()
     }
 
-    pub async fn get_conversation_sender(
-        &self,
-        conversation_id: Uuid,
-    ) -> Result<BroadcastSender<MessageEventKind>, Error> {
-        self.conversations.subscribe(conversation_id).await
-    }
-
-    pub async fn get_conversation_receiver(
-        &self,
-        conversation_id: Uuid,
-    ) -> Result<BroadcastReceiver<MessageEventKind>, Error> {
-        let rx = self
-            .get_conversation_sender(conversation_id)
-            .await?
-            .subscribe();
-        Ok(rx)
-    }
-
     pub async fn get_conversation_stream(
         &self,
         conversation_id: Uuid,
     ) -> Result<impl Stream<Item = MessageEventKind>, Error> {
-        let mut rx = self.get_conversation_receiver(conversation_id).await?;
+        let mut rx = self
+            .conversations
+            .subscribe(conversation_id)
+            .await?
+            .subscribe();
         Ok(async_stream::stream! {
             loop {
                 match rx.recv().await {
@@ -288,173 +218,5 @@ impl MessageStore {
                 };
             }
         })
-    }
-
-    pub async fn update_conversation_name(
-        &mut self,
-        conversation_id: Uuid,
-        name: &str,
-    ) -> Result<(), Error> {
-        self.conversations
-            .update_conversation_name(conversation_id, name)
-            .await
-    }
-
-    pub async fn add_recipient(
-        &mut self,
-        conversation_id: Uuid,
-        did_key: &DID,
-    ) -> Result<(), Error> {
-        self.conversations
-            .add_recipient(conversation_id, did_key)
-            .await
-    }
-
-    pub async fn remove_recipient(
-        &mut self,
-        conversation_id: Uuid,
-        did_key: &DID,
-    ) -> Result<(), Error> {
-        self.conversations
-            .remove_recipient(conversation_id, did_key)
-            .await
-    }
-
-    pub async fn send_message(
-        &mut self,
-        conversation_id: Uuid,
-        messages: Vec<String>,
-    ) -> Result<(), Error> {
-        self.conversations
-            .send_message(conversation_id, messages)
-            .await
-    }
-
-    pub async fn edit_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        messages: Vec<String>,
-    ) -> Result<(), Error> {
-        self.conversations
-            .edit_message(conversation_id, message_id, messages)
-            .await
-    }
-
-    pub async fn reply_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        messages: Vec<String>,
-    ) -> Result<(), Error> {
-        self.conversations
-            .reply(conversation_id, message_id, messages)
-            .await
-    }
-
-    pub async fn delete_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-    ) -> Result<(), Error> {
-        self.conversations
-            .delete_message(conversation_id, message_id)
-            .await
-    }
-
-    pub async fn pin_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
-    ) -> Result<(), Error> {
-        self.conversations
-            .pin_message(conversation_id, message_id, state)
-            .await
-    }
-
-    pub async fn embeds(
-        &mut self,
-        _conversation: Uuid,
-        _message_id: Uuid,
-        _state: EmbedState,
-    ) -> Result<(), Error> {
-        warn!("Embed function is unavailable");
-        Err(Error::Unimplemented)
-    }
-
-    pub async fn react(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: ReactionState,
-        emoji: String,
-    ) -> Result<(), Error> {
-        self.conversations
-            .react(conversation_id, message_id, state, emoji)
-            .await
-    }
-
-    pub async fn attach(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-        locations: Vec<Location>,
-        messages: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
-        self.conversations
-            .attach(conversation_id, message_id, locations, messages)
-            .await
-    }
-
-    pub async fn download(
-        &self,
-        conversation: Uuid,
-        message_id: Uuid,
-        file: &str,
-        path: PathBuf,
-    ) -> Result<ConstellationProgressStream, Error> {
-        self.conversations
-            .download(conversation, message_id, file, path)
-            .await
-    }
-
-    pub async fn download_stream(
-        &self,
-        conversation: Uuid,
-        message_id: Uuid,
-        file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
-        self.conversations
-            .download_stream(conversation, message_id, file)
-            .await
-    }
-
-    pub async fn send_event(
-        &mut self,
-        conversation_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        self.conversations.send_event(conversation_id, event).await
-    }
-
-    pub async fn cancel_event(
-        &mut self,
-        conversation_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        self.conversations
-            .cancel_event(conversation_id, event)
-            .await
-    }
-
-    pub async fn update_conversation_settings(
-        &mut self,
-        conversation_id: Uuid,
-        settings: ConversationSettings,
-    ) -> Result<(), Error> {
-        self.conversations
-            .update_conversation_settings(conversation_id, settings)
-            .await
     }
 }

@@ -40,6 +40,7 @@ use warp::{
 use crate::store::{
     connected_to_peer,
     conversation::{ConversationDocument, MessageDocument},
+    discovery::Discovery,
     ecdh_decrypt, ecdh_encrypt,
     event_subscription::EventSubscription,
     files::FileStore,
@@ -128,6 +129,11 @@ enum ConversationCommand {
         did: DID,
         response: oneshot::Sender<Result<(), Error>>,
     },
+    MessageStatus {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        response: oneshot::Sender<Result<MessageStatus, Error>>,
+    },
     SendMessage {
         conversation_id: Uuid,
         lines: Vec<String>,
@@ -205,8 +211,8 @@ impl Conversations {
     pub async fn new(
         ipfs: &Ipfs,
         path: Option<PathBuf>,
+        discovery: Discovery,
         keypair: Arc<DID>,
-        root: RootDocumentMap,
         file: FileStore,
         event: EventSubscription<RayGunEventKind>,
         identity: IdentityStore,
@@ -226,6 +232,7 @@ impl Conversations {
         let drop_guard = token.clone().drop_guard();
         let ipfs = ipfs.clone();
         tokio::spawn(async move {
+            let root = identity.root_document().clone();
             let (atx, arx) = mpsc::channel(1);
             let mut task = ConversationTask {
                 ipfs,
@@ -237,6 +244,7 @@ impl Conversations {
                 identity,
                 rx,
                 root,
+                discovery,
                 file,
                 event,
                 attachment_rx: arx,
@@ -460,6 +468,24 @@ impl Conversations {
             .send(ConversationCommand::RemoveRecipient {
                 conversation_id,
                 did: did.clone(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn message_status(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::MessageStatus {
+                conversation_id,
+                message_id,
                 response: tx,
             })
             .await;
@@ -708,6 +734,7 @@ struct ConversationTask {
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
     identity: IdentityStore,
+    discovery: Discovery,
     // used for attachments to store message on document and publish it to the network
     attachment_rx: mpsc::Receiver<AttachmentChan>,
     attachment_tx: mpsc::Sender<AttachmentChan>,
@@ -791,6 +818,9 @@ impl ConversationTask {
                         },
                         ConversationCommand::RemoveRecipient { conversation_id, did, response } => {
                             _ = response.send(self.remove_recipient(conversation_id, &did, true).await)
+                        },
+                        ConversationCommand::MessageStatus { conversation_id, message_id, response } => {
+                            _ = response.send(self.message_status(conversation_id, message_id).await)
                         },
                         ConversationCommand::SendMessage { conversation_id, lines, response } => {
                             _ = response.send(self.send_message(conversation_id, lines).await)
@@ -995,9 +1025,9 @@ impl ConversationTask {
         //     return Err(Error::ConversationLimitReached);
         // }
 
-        // if !self.discovery.contains(did_key).await {
-        //     self.discovery.insert(did_key).await?;
-        // }
+        if !self.discovery.contains(did).await {
+            self.discovery.insert(did).await?;
+        }
 
         let settings = DirectConversationSettings::default();
         let conversation = ConversationDocument::new_direct(
@@ -1141,11 +1171,11 @@ impl ConversationTask {
         //     return Err(Error::ConversationLimitReached);
         // }
 
-        // for recipient in &recipients {
-        //     if !self.discovery.contains(recipient).await {
-        //         let _ = self.discovery.insert(recipient).await.ok();
-        //     }
-        // }
+        for recipient in &recipients {
+            if !self.discovery.contains(recipient).await {
+                let _ = self.discovery.insert(recipient).await.ok();
+            }
+        }
 
         let restricted = self.root.get_blocks().await.unwrap_or_default();
 
@@ -1585,7 +1615,12 @@ impl ConversationTask {
             .await
     }
 
-    #[allow(dead_code)]
+    //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself
+    //Note:
+    //  - For group chat, this can be ignored unless we decide to have a full acknowledgement from all recipients in which case, we can mark it as "sent"
+    //    until all confirm to have received the message
+    //  - If member sends an event stating that they do not have the message to grab the message from the store
+    //    and send it them, with a map marking the attempt(s)
     pub async fn message_status(
         &self,
         conversation_id: Uuid,
@@ -3338,11 +3373,11 @@ async fn process_conversation(
                 return Ok(());
             }
 
-            // for recipient in conversation.recipients.iter() {
-            //     if !self.discovery.contains(recipient).await {
-            //         let _ = self.discovery.insert(recipient).await;
-            //     }
-            // }
+            for recipient in conversation.recipients.iter() {
+                if !this.discovery.contains(recipient).await {
+                    let _ = this.discovery.insert(recipient).await;
+                }
+            }
 
             tracing::info!(%conversation_id, "Creating group conversation");
 
@@ -3911,17 +3946,17 @@ async fn message_event(
                         return Err(Error::IdentityExist);
                     }
 
-                    // if !self.discovery.contains(&did).await {
-                    //     let _ = self.discovery.insert(&did).await.ok();
-                    // }
+                    if !this.discovery.contains(&did).await {
+                        let _ = this.discovery.insert(&did).await.ok();
+                    }
 
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     this.set_document(conversation).await?;
 
-                    // if let Err(e) = self.request_key(conversation_id, &did).await {
-                    //     error!("Error requesting key: {e}");
-                    // }
+                    if let Err(e) = this.request_key(conversation_id, &did).await {
+                        error!("Error requesting key: {e}");
+                    }
 
                     if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
                         conversation_id,

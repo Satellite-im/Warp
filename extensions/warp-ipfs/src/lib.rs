@@ -1425,8 +1425,9 @@ impl RayGun for WarpIpfs {
     }
 
     async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
-        store.send_message(conversation_id, value).await
+        self.messaging_store()?
+            .send_message(conversation_id, value)
+            .await
     }
 
     async fn edit(
@@ -1435,8 +1436,9 @@ impl RayGun for WarpIpfs {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
-        store.edit_message(conversation_id, message_id, value).await
+        self.messaging_store()?
+            .edit_message(conversation_id, message_id, value)
+            .await
     }
 
     async fn delete(
@@ -1481,19 +1483,12 @@ impl RayGun for WarpIpfs {
         value: Vec<String>,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .reply_message(conversation_id, message_id, value)
+            .reply(conversation_id, message_id, value)
             .await
     }
 
-    async fn embeds(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: EmbedState,
-    ) -> Result<(), Error> {
-        self.messaging_store()?
-            .embeds(conversation_id, message_id, state)
-            .await
+    async fn embeds(&mut self, _: Uuid, _: Uuid, _: EmbedState) -> Result<(), Error> {
+        Err(Error::Unimplemented)
     }
 
     async fn update_conversation_settings(
