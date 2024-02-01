@@ -1,17 +1,13 @@
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::time::Duration;
 
 use futures::stream::BoxStream;
 use futures::Stream;
-use rust_ipfs::{Ipfs, PeerId};
+use rust_ipfs::Ipfs;
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tracing::Span;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 use warp::constellation::ConstellationProgressStream;
 use warp::crypto::DID;
@@ -26,8 +22,7 @@ use warp::raygun::{
 use std::sync::Arc;
 
 use crate::spam_filter::SpamFilter;
-use crate::store::payload::Payload;
-use crate::store::{connected_to_peer, get_keypair_did, sign_serde};
+use crate::store::get_keypair_did;
 
 use super::conversation::ConversationDocument;
 use super::discovery::Discovery;
@@ -54,12 +49,6 @@ pub struct MessageStore {
     // discovery
     discovery: Discovery,
 
-    // filesystem instance
-    filesystem: FileStore,
-
-    // Queue
-    queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
-
     // DID
     did: Arc<DID>,
 
@@ -68,7 +57,6 @@ pub struct MessageStore {
 
     spam_filter: Arc<Option<SpamFilter>>,
 
-    with_friends: Arc<AtomicBool>,
     span: Span,
 }
 
@@ -81,10 +69,10 @@ impl MessageStore {
         discovery: Discovery,
         filesystem: FileStore,
         _: bool,
-        interval_ms: u64,
+        _: u64,
         event: EventSubscription<RayGunEventKind>,
         span: Span,
-        (check_spam, with_friends): (bool, bool),
+        (check_spam, _): (bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
 
@@ -94,10 +82,8 @@ impl MessageStore {
             }
         }
 
-        let queue = Arc::new(Default::default());
         let did = Arc::new(get_keypair_did(ipfs.keypair()?)?);
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
-        let with_friends = Arc::new(AtomicBool::new(with_friends));
 
         let root = identity.root_document().clone();
 
@@ -120,112 +106,18 @@ impl MessageStore {
             conversations,
             identity,
             discovery,
-            filesystem,
-            queue,
             did,
             event,
             spam_filter,
-            with_friends,
             span,
         };
 
         info!("Loading queue");
-        if let Err(e) = store.load_queue().await {
-            warn!("Failed to load queue: {e}");
-        }
 
         let _ = store.conversations.load_conversations().await;
 
-        tokio::spawn({
-            let store: MessageStore = store.clone();
-            async move {
-                info!("MessagingStore task created");
-
-                let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
-
-                loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            if let Err(e) = store.process_queue().await {
-                                error!("Error processing queue: {e}");
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
         tokio::task::yield_now().await;
         Ok(store)
-    }
-
-    //TODO: Replace
-    async fn process_queue(&self) -> anyhow::Result<()> {
-        let mut list = self.queue.read().await.clone();
-        for (did, items) in list.iter_mut() {
-            if let Ok(crate::store::PeerConnectionType::Connected) =
-                connected_to_peer(&self.ipfs, did.clone()).await
-            {
-                for item in items.iter_mut() {
-                    let Queue::Direct {
-                        peer,
-                        topic,
-                        data,
-                        sent,
-                        ..
-                    } = item;
-                    if !*sent {
-                        if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
-                            //TODO: Check peer against conversation to see if they are connected
-                            if peers.contains(peer) {
-                                let signature = match sign_serde(&self.did, &data) {
-                                    Ok(sig) => sig,
-                                    Err(_e) => {
-                                        continue;
-                                    }
-                                };
-
-                                let payload = Payload::new(&self.did, data, &signature);
-
-                                let bytes = match payload.to_bytes() {
-                                    Ok(bytes) => bytes.into(),
-                                    Err(_e) => {
-                                        continue;
-                                    }
-                                };
-
-                                if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await
-                                {
-                                    error!("Error publishing to topic: {e}");
-                                    break;
-                                }
-
-                                *sent = true;
-                            }
-                        }
-                    }
-                    self.queue
-                        .write()
-                        .await
-                        .entry(did.clone())
-                        .or_default()
-                        .retain(|queue| {
-                            let Queue::Direct {
-                                sent: inner_sent,
-                                topic: inner_topic,
-                                ..
-                            } = queue;
-
-                            if inner_topic.eq(&*topic) && *sent != *inner_sent {
-                                return false;
-                            }
-                            true
-                        });
-                    self.save_queue().await;
-                }
-            }
-        }
-        Ok(())
     }
 }
 
@@ -336,51 +228,10 @@ impl MessageStore {
     //    and send it them, with a map marking the attempt(s)
     pub async fn message_status(
         &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
     ) -> Result<MessageStatus, Error> {
-        let conversation = self.conversations.get(conversation_id).await?;
-
-        if matches!(
-            conversation.conversation_type,
-            ConversationType::Group { .. }
-        ) {
-            //TODO: Handle message status for group
-            return Err(Error::Unimplemented);
-        }
-
-        let messages = conversation.get_message_list(&self.ipfs).await?;
-
-        if !messages.iter().any(|document| document.id == message_id) {
-            return Err(Error::MessageNotFound);
-        }
-
-        let own_did = &*self.did;
-
-        let list = conversation
-            .recipients()
-            .iter()
-            .filter(|did| own_did.ne(did))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        for peer in list {
-            if let Entry::Occupied(entry) = self.queue.read().await.clone().entry(peer) {
-                for item in entry.get() {
-                    let Queue::Direct { id, m_id, .. } = item;
-                    if conversation.id() == *id {
-                        if let Some(m_id) = m_id {
-                            if message_id == *m_id {
-                                return Ok(MessageStatus::NotSent);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent
-        Ok(MessageStatus::Sent)
+        unimplemented!()
     }
 
     pub async fn get_messages(
@@ -625,82 +476,6 @@ impl MessageStore {
         self.conversations
             .update_conversation_settings(conversation_id, settings)
             .await
-    }
-
-    // TODO: Remove
-    #[allow(dead_code)]
-    async fn queue_event(&self, did: DID, queue: Queue) -> Result<(), Error> {
-        self.queue.write().await.entry(did).or_default().push(queue);
-        self.save_queue().await;
-
-        Ok(())
-    }
-
-    async fn save_queue(&self) {
-        if let Some(path) = self.path.as_ref() {
-            let bytes = match serde_json::to_vec(&*self.queue.read().await) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Error serializing queue list into bytes: {e}");
-                    return;
-                }
-            };
-
-            if let Err(e) = tokio::fs::write(path.join(".messaging_queue"), bytes).await {
-                error!("Error saving queue: {e}");
-            }
-        }
-    }
-
-    async fn load_queue(&self) -> anyhow::Result<()> {
-        if let Some(path) = self.path.as_ref() {
-            let data = tokio::fs::read(path.join(".messaging_queue")).await?;
-            *self.queue.write().await = serde_json::from_slice(&data)?;
-        }
-
-        Ok(())
-    }
-}
-#[derive(Clone, Default)]
-pub struct EventOpt {
-    pub keep_if_owned: Arc<AtomicBool>,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum MessageDirection {
-    In,
-    Out,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Queue {
-    Direct {
-        id: Uuid,
-        m_id: Option<Uuid>,
-        peer: PeerId,
-        topic: String,
-        data: Vec<u8>,
-        sent: bool,
-    },
-}
-
-impl Queue {
-    pub fn direct(
-        id: Uuid,
-        m_id: Option<Uuid>,
-        peer: PeerId,
-        topic: String,
-        data: Vec<u8>,
-    ) -> Self {
-        Queue::Direct {
-            id,
-            m_id,
-            peer,
-            topic,
-            data,
-            sent: false,
-        }
     }
 }
 
