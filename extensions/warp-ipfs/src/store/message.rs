@@ -37,12 +37,6 @@ pub struct MessageStore {
     // ipfs instance
     ipfs: Ipfs,
 
-    // Write handler
-    path: Option<PathBuf>,
-
-    // identity store
-    identity: IdentityStore,
-
     conversations: Conversations,
 
     // discovery
@@ -80,31 +74,25 @@ impl MessageStore {
 
         let root = identity.root_document().clone();
 
-        let identity_stream = identity.subscribe().await.expect("Channel isnt dropped");
-
         let conversations = Conversations::new(
             &ipfs,
-            path.clone(),
+            path,
             did.clone(),
             root,
             filesystem.clone(),
             event.clone(),
-            identity_stream,
+            identity,
         )
         .await;
 
         let store = Self {
-            path,
             ipfs,
             conversations,
-            identity,
             discovery,
             did,
             event,
             span,
         };
-
-        info!("Loading queue");
 
         let _ = store.conversations.load_conversations().await;
 
@@ -147,7 +135,7 @@ impl MessageStore {
     pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
         self.list_conversation_documents()
             .await
-            .map(|list| list.iter().map(|document| document.into()).collect())
+            .map(|list| list.into_iter().map(|document| document.into()).collect())
     }
 
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {

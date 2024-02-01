@@ -44,6 +44,7 @@ use crate::store::{
     event_subscription::EventSubscription,
     files::FileStore,
     generate_shared_topic,
+    identity::IdentityStore,
     keystore::Keystore,
     payload::Payload,
     sign_serde, verify_serde_sig, ConversationEvents, ConversationRequestKind,
@@ -208,7 +209,7 @@ impl Conversations {
         root: RootDocumentMap,
         file: FileStore,
         event: EventSubscription<RayGunEventKind>,
-        identity_event: BoxStream<'static, MultiPassEventKind>,
+        identity: IdentityStore,
     ) -> Self {
         let cid = match path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".message_id"))
@@ -233,6 +234,7 @@ impl Conversations {
                 path,
                 cid,
                 topic_stream: StreamMap::new(),
+                identity,
                 rx,
                 root,
                 file,
@@ -243,7 +245,7 @@ impl Conversations {
             };
             select! {
                 _ = token.cancelled() => {}
-                _ = task.run(identity_event) => {}
+                _ = task.run() => {}
             }
         });
 
@@ -705,7 +707,7 @@ struct ConversationTask {
     root: RootDocumentMap,
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
-
+    identity: IdentityStore,
     // used for attachments to store message on document and publish it to the network
     attachment_rx: mpsc::Receiver<AttachmentChan>,
     attachment_tx: mpsc::Sender<AttachmentChan>,
@@ -716,7 +718,13 @@ struct ConversationTask {
 }
 
 impl ConversationTask {
-    async fn run(&mut self, mut identity_event: BoxStream<'static, MultiPassEventKind>) {
+    async fn run(&mut self) {
+        let mut identity_stream = self
+            .identity
+            .subscribe()
+            .await
+            .expect("Channel isnt dropped");
+
         let stream = self
             .ipfs
             .pubsub_subscribe(self.keypair.messaging())
@@ -822,7 +830,7 @@ impl ConversationTask {
                 Some((conversation_id, message, response)) = self.attachment_rx.next() => {
                     _ = response.send(self.store_direct_for_attachment(conversation_id, message).await);
                 }
-                Some(ev) = identity_event.next() => {
+                Some(ev) = identity_stream.next() => {
                     if let Err(e) = process_identity_events(self, ev).await {
                         tracing::error!("Error processing identity events: {e}");
                     }
@@ -2358,7 +2366,6 @@ impl ConversationTask {
             yield AttachmentKind::Pending(final_results.await)
         };
 
-        //TODO
         Ok(stream.boxed())
     }
 
