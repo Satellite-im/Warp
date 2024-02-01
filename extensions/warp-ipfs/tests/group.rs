@@ -361,6 +361,113 @@ mod test {
     }
 
     #[tokio::test]
+    async fn attempt_to_add_blocked_recipient() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::attempt_to_add_blocked_recipient".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::attempt_to_add_blocked_recipient".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::attempt_to_add_blocked_recipient".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::attempt_to_add_blocked_recipient".into()),
+            ),
+        ])
+        .await?;
+
+        let (mut account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
+        let (mut account_d, _chat_d, _, did_d, _) = accounts[3].clone();
+
+        let mut subscribe_a = account_a.subscribe().await?;
+        let mut subscribe_d = account_d.subscribe().await?;
+
+        account_a.block(&did_d).await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MultiPassEventKind::Blocked { did }) = subscribe_a.next().await {
+                    assert_eq!(did, did_d);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MultiPassEventKind::BlockedBy { did }) = subscribe_d.next().await {
+                    assert_eq!(did, did_a);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+        let mut chat_subscribe_c = chat_c.subscribe().await?;
+
+        let mut settings = GroupSettings::default();
+        settings.set_members_can_add_participants(true);
+
+        chat_a
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], settings)
+            .await?;
+
+        let id = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_c.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let ret = chat_b.add_recipient(id, &did_d).await;
+
+        assert!(ret.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn remove_recipient_from_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
