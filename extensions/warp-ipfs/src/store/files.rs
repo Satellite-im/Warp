@@ -771,11 +771,6 @@ impl FileTask {
             file.set_reference(&format!("{ipfs_path}"));
             file.set_file_type(to_file_type(&name));
 
-            if let Ok(Err(_e)) = tokio::task::spawn_blocking({
-                let f = file.clone();
-                move || f.hash_mut().hash_from_file(&path)
-            }).await {}
-
             if let Err(e) = current_directory.add_item(file.clone()) {
                 yield Progression::ProgressFailed {
                     name,
@@ -947,7 +942,6 @@ impl FileTask {
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
             file.set_file_type(to_file_type(&name));
-            file.hash_mut().hash_from_slice(&buffer)?;
 
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
@@ -1104,7 +1098,7 @@ impl FileTask {
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
             file.set_file_type(to_file_type(&name));
-            // file.hash_mut().hash_from_slice(buffer)?;
+
             if let Err(e) = current_directory.add_item(file) {
                 yield Progression::ProgressFailed {
                     name,
