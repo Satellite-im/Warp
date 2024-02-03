@@ -13,7 +13,6 @@ use rust_ipfs::{
     Ipfs, IpfsPath,
 };
 
-use tokio::sync::Notify;
 use tokio_util::io::ReaderStream;
 use tracing::{Instrument, Span};
 use warp::{
@@ -86,7 +85,6 @@ impl FileStore {
             config,
             signal_tx,
             signal_rx,
-            signal_guard: Arc::default(),
             rx,
         };
 
@@ -404,7 +402,6 @@ struct FileTask {
     path: Arc<RwLock<PathBuf>>,
     index_cid: Option<Cid>,
     config: config::Config,
-    signal_guard: Arc<Notify>,
     ipfs: Ipfs,
     signal_tx: futures::channel::mpsc::UnboundedSender<()>,
     signal_rx: futures::channel::mpsc::UnboundedReceiver<()>,
@@ -530,7 +527,6 @@ impl FileTask {
                     if let Err(_e) = self.export().await {
                         tracing::error!("Error exporting index: {_e}");
                     }
-                    self.signal_guard.notify_waiters();
                 }
             }
         }
