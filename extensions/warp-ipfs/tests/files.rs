@@ -120,6 +120,23 @@ mod test {
     }
 
     #[tokio::test]
+    async fn rename_file_in_directory() -> anyhow::Result<()> {
+        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let root_directory = fs.root_directory();
+        fs.create_directory("/my/storage", true).await?;
+
+        fs.put_buffer("/my/storage/image.png", PROFILE_IMAGE)
+            .await?;
+
+        fs.rename("/my/storage/image.png", "item.png").await?;
+
+        assert!(root_directory
+            .get_item_by_path("/my/storage/item.png")
+            .is_ok());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn remove_file() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();

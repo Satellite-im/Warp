@@ -449,17 +449,17 @@ impl FileTask {
                             stream,
                             response,
                         } => {
-                            _ = response.send(self.put_stream(&name, total_size, stream).await);
+                            _ = response.send(self.put_stream(&name, total_size, stream));
                         },
                         FileTaskCommand::Get {
                             name,
                             path,
                             response,
                         } => {
-                            _ = response.send(self.get(&name, &path).await);
+                            _ = response.send(self.get(&name, &path));
                         },
                         FileTaskCommand::GetStream { name, response } => {
-                            _ = response.send(self.get_stream(&name).await);
+                            _ = response.send(self.get_stream(&name));
                         },
                         FileTaskCommand::GetBuffer { name, response } => {
                             let fut = match self.get_buffer(name) {
@@ -493,7 +493,7 @@ impl FileTask {
                             recursive,
                             response,
                         } => {
-                            _ = response.send(self.create_directory(&name, recursive).await);
+                            _ = response.send(self.create_directory(&name, recursive));
                         },
                         FileTaskCommand::SyncRef { path, response } => {
                             let fut = match self.sync_ref(&path) {
@@ -523,7 +523,7 @@ impl FileTask {
                         }
                     }
                 },
-                _ = self.signal_rx.next() => {
+                Some(_) = self.signal_rx.next() => {
                     if let Err(_e) = self.export().await {
                         tracing::error!("Error exporting index: {_e}");
                     }
@@ -811,7 +811,7 @@ impl FileTask {
         Ok(progress_stream.boxed())
     }
 
-    async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
+    fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         let ipfs = self.ipfs.clone();
 
         let path = PathBuf::from(path);
@@ -992,7 +992,7 @@ impl FileTask {
     }
 
     /// Used to upload file to the filesystem with data from a stream
-    async fn put_stream(
+    fn put_stream(
         &mut self,
         name: &str,
         total_size: Option<usize>,
@@ -1119,10 +1119,7 @@ impl FileTask {
     }
 
     /// Used to download data from the filesystem using a stream
-    async fn get_stream(
-        &self,
-        name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
@@ -1190,14 +1187,19 @@ impl FileTask {
     }
 
     async fn rename(&mut self, current: &str, new: &str) -> Result<(), Error> {
-        //Note: This will only support renaming the file or directory in the index
-        let directory = self.current_directory()?;
-        let _g = directory.signal_guard();
-        if directory.get_item_by_path(new).is_ok() {
+        let (current, dest_path) = split_file_from_path(current)?;
+
+        let current_directory = match dest_path {
+            Some(dest) => self.root_directory().get_last_directory_from_path(&dest)?,
+            None => self.current_directory()?,
+        };
+
+        let _g = current_directory.signal_guard();
+        if current_directory.has_item(new) {
             return Err(Error::DuplicateName);
         }
 
-        directory.rename_item(current, new)?;
+        current_directory.rename_item(&current, new)?;
 
         self.constellation_tx
             .emit(ConstellationEventKind::Renamed {
@@ -1208,7 +1210,7 @@ impl FileTask {
         Ok(())
     }
 
-    pub async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
+    fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
         let directory = self.current_directory()?;
         let _g = directory.signal_guard();
 
