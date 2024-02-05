@@ -116,6 +116,10 @@ enum ConversationCommand {
         opt: MessageOptions,
         response: oneshot::Sender<Result<Messages, Error>>,
     },
+    GetMessagesCount {
+        conversation_id: Uuid,
+        response: oneshot::Sender<Result<usize, Error>>,
+    },
     GetMessageReference {
         conversation_id: Uuid,
         message_id: Uuid,
@@ -447,6 +451,19 @@ impl Conversations {
             .send(ConversationCommand::GetMessages {
                 conversation_id,
                 opt,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::GetMessagesCount {
+                conversation_id,
                 response: tx,
             })
             .await;
@@ -909,6 +926,9 @@ impl ConversationTask {
                         ConversationCommand::GetMessages { conversation_id, opt, response } => {
                             _ = response.send(self.get_messages(conversation_id, opt).await)
                         },
+                        ConversationCommand::GetMessagesCount { conversation_id, response } => {
+                            _ = response.send(self.messages_count(conversation_id).await)
+                        }
                         ConversationCommand::DeleteConversation { conversation_id, response } => {
                             _ = response.send(self.delete_conversation(conversation_id, true).await)
                         },
@@ -1703,6 +1723,13 @@ impl ConversationTask {
         // TODO: Store request locally and hold any messages and events until key is received from peer
 
         Ok(())
+    }
+
+    pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
+        self.get(conversation_id)
+            .await?
+            .messages_length(&self.ipfs)
+            .await
     }
 
     async fn get_message(
