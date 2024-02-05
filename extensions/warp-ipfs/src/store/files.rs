@@ -3,8 +3,8 @@ use std::{collections::VecDeque, ffi::OsStr, path::PathBuf, sync::Arc};
 use chrono::{DateTime, Utc};
 use futures::{
     channel::{mpsc, oneshot},
-    future::{self, BoxFuture},
-    stream::{self, BoxStream, FuturesUnordered},
+    future::BoxFuture,
+    stream::{self, BoxStream},
     FutureExt, SinkExt, StreamExt,
 };
 use libipld::Cid;
@@ -208,7 +208,7 @@ impl FileStore {
                 response: tx,
             })
             .await;
-        rx.await.map_err(anyhow::Error::from)?
+        rx.await.map_err(anyhow::Error::from)??.await
     }
 
     pub async fn get_buffer(&self, name: impl Into<String>) -> Result<Vec<u8>, Error> {
@@ -221,7 +221,7 @@ impl FileStore {
                 response: tx,
             })
             .await;
-        rx.await.map_err(anyhow::Error::from)?
+        rx.await.map_err(anyhow::Error::from)??.await
     }
 
     /// Used to upload file to the filesystem with data from a stream
@@ -323,12 +323,12 @@ impl FileStore {
                 response: tx,
             })
             .await;
-        rx.await.map_err(anyhow::Error::from)?
+        rx.await.map_err(anyhow::Error::from)??.await
     }
 }
 
 type GetStream = BoxStream<'static, Result<Vec<u8>, Error>>;
-
+type GetBufferFutResult = BoxFuture<'static, Result<Vec<u8>, Error>>;
 enum FileTaskCommand {
     Put {
         name: String,
@@ -338,7 +338,7 @@ enum FileTaskCommand {
     PutBuffer {
         name: String,
         buffer: Vec<u8>,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<BoxFuture<'static, Result<(), Error>>, Error>>,
     },
     PutStream {
         name: String,
@@ -358,7 +358,7 @@ enum FileTaskCommand {
     },
     GetBuffer {
         name: String,
-        response: oneshot::Sender<Result<Vec<u8>, Error>>,
+        response: oneshot::Sender<Result<GetBufferFutResult, Error>>,
     },
 
     Remove {
@@ -378,22 +378,7 @@ enum FileTaskCommand {
     },
     SyncRef {
         path: String,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-}
-
-enum FutResult {
-    Put {
-        result: Result<(), Error>,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    Get {
-        result: Result<Vec<u8>, Error>,
-        response: oneshot::Sender<Result<Vec<u8>, Error>>,
-    },
-    Sync {
-        result: Result<(), Error>,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<BoxFuture<'static, Result<(), Error>>, Error>>,
     },
 }
 
@@ -412,8 +397,6 @@ struct FileTask {
 
 impl FileTask {
     async fn run(&mut self) {
-        let mut futs: FuturesUnordered<BoxFuture<'static, FutResult>> = FuturesUnordered::new();
-        futs.push(future::pending().boxed());
         loop {
             tokio::select! {
                 biased;
@@ -431,17 +414,7 @@ impl FileTask {
                             buffer,
                             response,
                         } => {
-                            let fut = match self.put_buffer(name, buffer) {
-                                Ok(fut) => fut.then(|result| async move {
-                                    FutResult::Put { result, response }
-                                }).boxed(),
-                                Err(e) => {
-                                    _ = response.send(Err(e));
-                                    continue;
-                                }
-                            };
-
-                           futs.push(fut);
+                            _ = response.send(self.put_buffer(name, buffer));
                         },
                         FileTaskCommand::PutStream {
                             name,
@@ -462,17 +435,7 @@ impl FileTask {
                             _ = response.send(self.get_stream(&name));
                         },
                         FileTaskCommand::GetBuffer { name, response } => {
-                            let fut = match self.get_buffer(name) {
-                                Ok(fut) => fut.then(|result| async move {
-                                    FutResult::Get { result, response }
-                                }).boxed(),
-                                Err(e) => {
-                                    _ = response.send(Err(e));
-                                    continue;
-                                }
-                            };
-
-                           futs.push(fut);
+                            _ = response.send(self.get_buffer(name));
                         },
                         FileTaskCommand::Remove {
                             name,
@@ -496,31 +459,8 @@ impl FileTask {
                             _ = response.send(self.create_directory(&name, recursive));
                         },
                         FileTaskCommand::SyncRef { path, response } => {
-                            let fut = match self.sync_ref(&path) {
-                                Ok(fut) => fut.then(|result| async move {
-                                    FutResult::Sync { result, response }
-                                }).boxed(),
-                                Err(e) => {
-                                    _ = response.send(Err(e));
-                                    continue;
-                                }
-                            };
-
-                           futs.push(fut);
+                            _ = response.send(self.sync_ref(&path));
                         },
-                    }
-                },
-                Some(fut) = futs.next() => {
-                    match fut {
-                        FutResult::Put { result, response } => {
-                            _ = response.send(result);
-                        },
-                        FutResult::Get { result, response } => {
-                            _ = response.send(result);
-                        },
-                        FutResult::Sync { result, response } => {
-                            _ = response.send(result);
-                        }
                     }
                 },
                 Some(_) = self.signal_rx.next() => {
