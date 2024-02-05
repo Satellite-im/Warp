@@ -786,7 +786,9 @@ impl FileTask {
                             file.set_thumbnail_format(extension_type.into());
                             file.set_thumbnail_reference(&path.to_string());
                         }
-                        Err(_e) => {}
+                        Err(e) => {
+                            tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
+                        }
                     }
                 }
             };
@@ -945,7 +947,9 @@ impl FileTask {
                     file.set_thumbnail_format(extension_type.into());
                     file.set_thumbnail_reference(&path.to_string());
                 }
-                Err(_e) => {}
+                Err(e) => {
+                    tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
+                }
             }
 
             current_directory.add_item(file)?;
