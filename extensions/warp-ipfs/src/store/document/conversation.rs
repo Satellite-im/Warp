@@ -33,7 +33,8 @@ use warp::{
     raygun::{
         AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
         ConversationType, DirectConversationSettings, GroupSettings, Location, MessageEvent,
-        MessageEventKind, MessageStatus, MessageType, PinState, RayGunEventKind, ReactionState,
+        MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
+        MessagesType, PinState, RayGunEventKind, ReactionState,
     },
 };
 
@@ -104,6 +105,26 @@ enum ConversationCommand {
         recipients: HashSet<DID>,
         settings: GroupSettings,
         response: oneshot::Sender<Result<Conversation, Error>>,
+    },
+    GetMessage {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        response: oneshot::Sender<Result<warp::raygun::Message, Error>>,
+    },
+    GetMessages {
+        conversation_id: Uuid,
+        opt: MessageOptions,
+        response: oneshot::Sender<Result<Messages, Error>>,
+    },
+    GetMessageReference {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        response: oneshot::Sender<Result<MessageReference, Error>>,
+    },
+    GetMessageReferences {
+        conversation_id: Uuid,
+        opt: MessageOptions,
+        response: oneshot::Sender<Result<BoxStream<'static, MessageReference>, Error>>,
     },
     DeleteConversation {
         conversation_id: Uuid,
@@ -390,6 +411,78 @@ impl Conversations {
                 name,
                 recipients: members,
                 settings,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get_message(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<warp::raygun::Message, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::GetMessage {
+                conversation_id,
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get_messages(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<Messages, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::GetMessages {
+                conversation_id,
+                opt,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get_message_reference(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::GetMessageReference {
+                conversation_id,
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get_message_references(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(ConversationCommand::GetMessageReferences {
+                conversation_id,
+                opt,
                 response: tx,
             })
             .await;
@@ -803,6 +896,18 @@ impl ConversationTask {
                         },
                         ConversationCommand::CreateGroupConversation { name, recipients, settings, response } => {
                             _ = response.send(self.create_group_conversation(name, recipients, settings).await);
+                        },
+                        ConversationCommand::GetMessageReference { conversation_id, message_id, response } => {
+                            _ = response.send(self.get_message_reference(conversation_id, message_id).await);
+                        },
+                        ConversationCommand::GetMessageReferences { conversation_id, opt, response } => {
+                            _ = response.send(self.get_message_references(conversation_id, opt).await)
+                        },
+                        ConversationCommand::GetMessage { conversation_id, message_id, response } => {
+                            _ = response.send(self.get_message(conversation_id, message_id).await);
+                        },
+                        ConversationCommand::GetMessages { conversation_id, opt, response } => {
+                            _ = response.send(self.get_messages(conversation_id, opt).await)
                         },
                         ConversationCommand::DeleteConversation { conversation_id, response } => {
                             _ = response.send(self.delete_conversation(conversation_id, true).await)
@@ -1613,6 +1718,62 @@ impl ConversationTask {
         conversation
             .get_message(&self.ipfs, &self.keypair, message_id, keystore.as_ref())
             .await
+    }
+
+    async fn get_message_reference(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        let conversation = self.get(conversation_id).await?;
+        conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await
+            .map(|document| document.into())
+    }
+
+    pub async fn get_message_references<'a>(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<BoxStream<'a, MessageReference>, Error> {
+        let conversation = self.get(conversation_id).await?;
+        conversation
+            .get_messages_reference_stream(&self.ipfs, opt)
+            .await
+    }
+
+    pub async fn get_messages(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<Messages, Error> {
+        let conversation = self.get(conversation_id).await?;
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
+        };
+
+        let m_type = opt.messages_type();
+        match m_type {
+            MessagesType::Stream => {
+                let stream = conversation
+                    .get_messages_stream(&self.ipfs, self.keypair.clone(), opt, keystore.as_ref())
+                    .await?;
+                Ok(Messages::Stream(stream))
+            }
+            MessagesType::List => {
+                let list = conversation
+                    .get_messages(&self.ipfs, self.keypair.clone(), opt, keystore.as_ref())
+                    .await?;
+                Ok(Messages::List(list))
+            }
+            MessagesType::Pages { .. } => {
+                conversation
+                    .get_messages_pages(&self.ipfs, &self.keypair, opt, keystore.as_ref())
+                    .await
+            }
+        }
     }
 
     //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself
