@@ -99,7 +99,6 @@ impl FileStore {
         let mut index = task.index.clone();
         let path = task.path.clone();
         let config = task.config.clone();
-        let span = span.clone();
 
         let signal = Some(task.signal_tx.clone());
         index.rebuild_paths(&signal);
