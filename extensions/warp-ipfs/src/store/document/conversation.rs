@@ -282,10 +282,16 @@ impl Conversations {
             }
         });
 
-        Self {
+        let conversation = Self {
             tx,
             _task_cancellation: Arc::new(drop_guard),
+        };
+
+        if let Err(e) = conversation.load_conversations().await {
+            tracing::warn!("Unable to load conversations: {e}");
         }
+
+        conversation
     }
 
     pub async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {

@@ -59,8 +59,6 @@ impl MessageStore {
 
         let store = Self { conversations };
 
-        let _ = store.conversations.load_conversations().await;
-
         Ok(store)
     }
 }
@@ -76,12 +74,6 @@ impl MessageStore {
     pub async fn get_conversation(&self, id: Uuid) -> Result<Conversation, Error> {
         let document = self.conversations.get(id).await?;
         Ok(document.into())
-    }
-
-    pub async fn delete_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
-        self.conversations
-            .delete_conversation(conversation_id)
-            .await
     }
 
     pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
