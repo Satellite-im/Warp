@@ -20,7 +20,7 @@ use futures::{
 use libipld::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs, IpfsPath, PeerId};
 use serde::{Deserialize, Serialize};
-use tokio::select;
+use tokio::{select, task::JoinHandle};
 use tokio_stream::StreamMap;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
@@ -266,6 +266,7 @@ impl Conversations {
                 path,
                 cid,
                 topic_stream: StreamMap::new(),
+                conversation_task: HashMap::new(),
                 identity,
                 rx,
                 root,
@@ -846,6 +847,7 @@ struct ConversationTask {
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
     topic_stream: StreamMap<Uuid, mpsc::Receiver<ConversationStreamData>>,
+    conversation_task: HashMap<Uuid, JoinHandle<()>>,
     root: RootDocumentMap,
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
@@ -1089,7 +1091,7 @@ impl ConversationTask {
 
                 let (mut tx, rx) = mpsc::channel(256);
 
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     while let Some(stream_type) = stream.next().await {
                         if let Err(e) = tx.send(stream_type).await {
                             if e.is_disconnected() {
@@ -1100,6 +1102,7 @@ impl ConversationTask {
                 });
 
                 self.topic_stream.insert(id, rx);
+                self.conversation_task.insert(id, handle);
                 Ok::<_, Error>(())
             };
 
@@ -1200,7 +1203,7 @@ impl ConversationTask {
 
         let (mut tx, rx) = mpsc::channel(256);
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while let Some(stream_type) = stream.next().await {
                 if let Err(e) = tx.send(stream_type).await {
                     if e.is_disconnected() {
@@ -1211,6 +1214,7 @@ impl ConversationTask {
         });
 
         self.topic_stream.insert(convo_id, rx);
+        self.conversation_task.insert(convo_id, handle);
 
         let peer_id = did.to_peer_id()?;
 
@@ -1358,7 +1362,7 @@ impl ConversationTask {
 
         let (mut tx, rx) = mpsc::channel(256);
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while let Some(stream_type) = stream.next().await {
                 if let Err(e) = tx.send(stream_type).await {
                     if e.is_disconnected() {
@@ -1369,6 +1373,7 @@ impl ConversationTask {
         });
 
         self.topic_stream.insert(convo_id, rx);
+        self.conversation_task.insert(convo_id, handle);
 
         let peer_id_list = recipient
             .clone()
@@ -3454,7 +3459,10 @@ impl ConversationTask {
     }
 
     async fn destroy_conversation(&mut self, conversation_id: Uuid) {
-        self.topic_stream.remove(&conversation_id);
+        if let Some(handle) = self.conversation_task.remove(&conversation_id) {
+            handle.abort();
+            self.topic_stream.remove(&conversation_id);
+        }
     }
 }
 
@@ -3535,7 +3543,7 @@ async fn process_conversation(
 
             let (mut tx, rx) = mpsc::channel(256);
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 while let Some(stream_type) = stream.next().await {
                     if let Err(e) = tx.send(stream_type).await {
                         if e.is_disconnected() {
@@ -3546,8 +3554,7 @@ async fn process_conversation(
             });
 
             this.topic_stream.insert(conversation_id, rx);
-
-            // self.start_task(this, stream).await;
+            this.conversation_task.insert(conversation_id, handle);
 
             this.event
                 .emit(RayGunEventKind::ConversationCreated { conversation_id })
@@ -3744,8 +3751,6 @@ async fn process_conversation(
                     .into());
                 }
             };
-
-            // self.end_task(conversation_id).await;
 
             let _document = this.delete(conversation_id).await?;
 
