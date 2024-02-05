@@ -1396,15 +1396,15 @@ impl ConversationTask {
                 .unwrap_or_default();
 
             let unordered = FuturesUnordered::from_iter(
-                                conversation_map
-                                    .values()
-                                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
-                            )
-                            .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
-                            .filter(|document| {
-                                let deleted = document.deleted;
-                                async move { !deleted }
-                            });
+                conversation_map
+                    .values()
+                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
+            )
+            .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
+            .filter(|document| {
+                let deleted = document.deleted;
+                async move { !deleted }
+            });
 
             for await conversation in unordered {
                 yield conversation;
