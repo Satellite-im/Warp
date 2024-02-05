@@ -13,7 +13,10 @@ use rust_ipfs::{
     Ipfs, IpfsPath,
 };
 
-use tokio_util::io::ReaderStream;
+use tokio_util::{
+    io::ReaderStream,
+    sync::{CancellationToken, DropGuard},
+};
 use tracing::{Instrument, Span};
 use warp::{
     constellation::{
@@ -38,6 +41,7 @@ pub struct FileStore {
     path: Arc<RwLock<PathBuf>>,
     config: config::Config,
     tx: mpsc::Sender<FileTaskCommand>,
+    _guard: Arc<DropGuard>,
 }
 
 impl FileStore {
@@ -95,14 +99,18 @@ impl FileStore {
         let mut index = task.index.clone();
         let path = task.path.clone();
         let config = task.config.clone();
-        let _span = span.clone();
+        let span = span.clone();
 
         let signal = Some(task.signal_tx.clone());
         index.rebuild_paths(&signal);
 
+        let token = CancellationToken::new();
+        let _guard = Arc::new(token.clone().drop_guard());
+
         tokio::spawn(async move {
             tokio::select! {
-                _ = task.run().instrument(_span) => {}
+                _ = task.run().instrument(span) => {}
+                _ = token.cancelled() => {}
             }
         });
 
@@ -111,6 +119,7 @@ impl FileStore {
             config,
             path,
             tx,
+            _guard,
         })
     }
 }
