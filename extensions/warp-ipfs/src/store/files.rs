@@ -40,7 +40,7 @@ pub struct FileStore {
     index: Directory,
     path: Arc<RwLock<PathBuf>>,
     config: config::Config,
-    tx: mpsc::Sender<FileTaskCommand>,
+    command_sender: mpsc::Sender<FileTaskCommand>,
     _guard: Arc<DropGuard>,
 }
 
@@ -76,7 +76,7 @@ impl FileStore {
         let index = Directory::new("root");
         let thumbnail_store = ThumbnailGenerator::new(ipfs.clone());
 
-        let (tx, rx) = futures::channel::mpsc::channel(1);
+        let (command_sender, command_receiver) = futures::channel::mpsc::channel(1);
         let (signal_tx, signal_rx) = futures::channel::mpsc::unbounded();
 
         let mut task = FileTask {
@@ -89,7 +89,7 @@ impl FileStore {
             config,
             signal_tx,
             signal_rx,
-            rx,
+            command_receiver,
         };
 
         if let Err(e) = task.import().await {
@@ -117,7 +117,7 @@ impl FileStore {
             index,
             config,
             path,
-            tx,
+            command_sender,
             _guard,
         })
     }
@@ -172,7 +172,7 @@ impl FileStore {
     ) -> Result<ConstellationProgressStream, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::Put {
                 name: name.into(),
@@ -190,7 +190,7 @@ impl FileStore {
     ) -> Result<ConstellationProgressStream, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::Get {
                 name: name.into(),
@@ -208,7 +208,7 @@ impl FileStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::PutBuffer {
                 name: name.into(),
@@ -222,7 +222,7 @@ impl FileStore {
     pub async fn get_buffer(&self, name: impl Into<String>) -> Result<Vec<u8>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::GetBuffer {
                 name: name.into(),
@@ -241,7 +241,7 @@ impl FileStore {
     ) -> Result<ConstellationProgressStream, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::PutStream {
                 name: name.into(),
@@ -260,7 +260,7 @@ impl FileStore {
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::GetStream {
                 name: name.into(),
@@ -274,7 +274,7 @@ impl FileStore {
     pub async fn remove(&mut self, name: impl Into<String>, recursive: bool) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::Remove {
                 name: name.into(),
@@ -292,7 +292,7 @@ impl FileStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::Rename {
                 current: current.into(),
@@ -310,7 +310,7 @@ impl FileStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::CreateDirectory {
                 name: name.into(),
@@ -324,7 +324,7 @@ impl FileStore {
     pub async fn sync_ref(&mut self, path: impl Into<String>) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_sender
             .clone()
             .send(FileTaskCommand::SyncRef {
                 path: path.into(),
@@ -400,7 +400,7 @@ struct FileTask {
     signal_rx: futures::channel::mpsc::UnboundedReceiver<()>,
     thumbnail_store: ThumbnailGenerator,
     constellation_tx: EventSubscription<ConstellationEventKind>,
-    rx: futures::channel::mpsc::Receiver<FileTaskCommand>,
+    command_receiver: futures::channel::mpsc::Receiver<FileTaskCommand>,
 }
 
 impl FileTask {
@@ -408,7 +408,7 @@ impl FileTask {
         loop {
             tokio::select! {
                 biased;
-                Some(command) = self.rx.next() => {
+                Some(command) = self.command_receiver.next() => {
                     match command {
                         FileTaskCommand::Put {
                             name,
