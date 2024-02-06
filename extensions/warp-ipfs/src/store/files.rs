@@ -551,9 +551,7 @@ impl FileTask {
         tracing::trace!("Index exported");
         Ok(())
     }
-}
 
-impl FileTask {
     pub fn root_directory(&self) -> Directory {
         self.index.clone()
     }
