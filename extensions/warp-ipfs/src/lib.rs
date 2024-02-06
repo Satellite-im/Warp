@@ -1446,7 +1446,7 @@ impl RayGun for WarpIpfs {
         conversation_id: Uuid,
         message_id: Option<Uuid>,
     ) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
+        let store = self.messaging_store()?;
         match message_id {
             Some(id) => store.delete_message(conversation_id, id).await,
             None => store.delete_conversation(conversation_id).await.map(|_| ()),
