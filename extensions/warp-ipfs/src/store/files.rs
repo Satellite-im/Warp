@@ -651,7 +651,6 @@ impl FileTask {
 
         let background = self.config.thumbnail_task;
 
-        let name = name.to_string();
         let constellation_tx = self.constellation_tx.clone();
 
         let progress_stream = async_stream::stream! {
@@ -963,7 +962,6 @@ impl FileTask {
             return Err(Error::FileExist);
         }
 
-        let name = name.to_string();
         let stream = stream.map(Ok::<_, std::io::Error>).boxed();
         let constellation_tx = self.constellation_tx.clone();
         let max_size = self.max_size();
