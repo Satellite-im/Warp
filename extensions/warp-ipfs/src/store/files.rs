@@ -89,7 +89,7 @@ impl FileStore {
         };
 
         if let Some(p) = task.config.path.as_ref() {
-            let index_file = p.join("index_id");
+            let index_file = p.join(".index_id");
             // Since this file exist, we will attempt to migrate into root document
             if index_file.is_file() {
                 if let Err(e) = task.import_v0().await {
