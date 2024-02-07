@@ -70,6 +70,7 @@ impl FileStore {
         let thumbnail_store = ThumbnailGenerator::new(ipfs.clone());
 
         let (command_sender, command_receiver) = futures::channel::mpsc::channel(1);
+        let (export_tx, export_rx) = futures::channel::mpsc::channel(1);
         let (signal_tx, signal_rx) = futures::channel::mpsc::unbounded();
 
         let mut task = FileTask {
@@ -80,6 +81,8 @@ impl FileStore {
             ipfs,
             constellation_tx,
             config,
+            export_rx,
+            export_tx,
             signal_tx,
             signal_rx,
             command_receiver,
@@ -399,6 +402,8 @@ struct FileTask {
     root: RootDocumentMap,
     config: config::Config,
     ipfs: Ipfs,
+    export_tx: futures::channel::mpsc::Sender<oneshot::Sender<Result<(), Error>>>,
+    export_rx: futures::channel::mpsc::Receiver<oneshot::Sender<Result<(), Error>>>,
     signal_tx: futures::channel::mpsc::UnboundedSender<()>,
     signal_rx: futures::channel::mpsc::UnboundedReceiver<()>,
     thumbnail_store: ThumbnailGenerator,
@@ -474,11 +479,14 @@ impl FileTask {
                         },
                     }
                 },
+                Some(response) = self.export_rx.next() => {
+                    _ = response.send(self.export().await);
+                }
                 Some(_) = self.signal_rx.next() => {
                     if let Err(_e) = self.export().await {
                         tracing::error!("Error exporting index: {_e}");
                     }
-                }
+                },
             }
         }
     }
@@ -631,6 +639,7 @@ impl FileTask {
         let background = self.config.thumbnail_task;
 
         let constellation_tx = self.constellation_tx.clone();
+        let mut export_tx = self.export_tx.clone();
 
         let progress_stream = async_stream::stream! {
             let _current_guard = current_directory.signal_guard();
@@ -725,6 +734,15 @@ impl FileTask {
                 tokio::spawn(task);
             }
 
+            drop(_current_guard);
+
+            let (tx, rx) = oneshot::channel();
+            _ = export_tx.send(tx).await;
+
+            if let Err(e) = rx.await.expect("shouldnt drop") {
+                tracing::error!(error = %e, "unable to export index");
+            }
+
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
@@ -800,6 +818,7 @@ impl FileTask {
         let ipfs = self.ipfs.clone();
         let thumbnail_store = self.thumbnail_store.clone();
         let tx = self.constellation_tx.clone();
+        let mut export_tx = self.export_tx.clone();
         let thumbnail_size = self.config.thumbnail_size;
         let thumbnail_format = self.config.thumbnail_exact_format;
 
@@ -879,6 +898,13 @@ impl FileTask {
             }
 
             current_directory.add_item(file)?;
+            drop(_current_guard);
+            let (exported_tx, exported_rx) = oneshot::channel();
+            _ = export_tx.send(exported_tx).await;
+
+            if let Err(e) = exported_rx.await.expect("shouldnt drop") {
+                tracing::error!(error = %e, "unable to export index");
+            }
 
             tx.emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
@@ -943,6 +969,7 @@ impl FileTask {
 
         let stream = stream.map(Ok::<_, std::io::Error>).boxed();
         let constellation_tx = self.constellation_tx.clone();
+        let mut export_tx = self.export_tx.clone();
         let max_size = self.max_size();
         let root = self.root_directory();
 
@@ -1031,6 +1058,15 @@ impl FileTask {
                     error: Some(e.to_string()),
                 };
                 return;
+            }
+
+            drop(_current_guard);
+
+            let (tx, rx) = oneshot::channel();
+            _ = export_tx.send(tx).await;
+
+            if let Err(e) = rx.await.expect("shouldnt drop") {
+                tracing::error!(error = %e, "unable to export index");
             }
 
             yield Progression::ProgressComplete {
