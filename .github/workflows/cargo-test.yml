@@ -41,9 +41,6 @@ jobs:
           sudo apt-get install -y build-essential pkg-config libssl-dev
           sudo apt-get install -y librust-alsa-sys-dev libxdo-dev llvm-dev cmake libudev-dev
 
-      - name: Delete tools folder to free up space
-        run: rm -rf /opt/hostedtoolcache
-
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
