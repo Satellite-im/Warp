@@ -636,8 +636,6 @@ impl FileTask {
 
         let ticket = thumbnail_store.insert(&path, width, height, exact).await?;
 
-        let background = self.config.thumbnail_task;
-
         let constellation_tx = self.constellation_tx.clone();
         let mut export_tx = self.export_tx.clone();
 
@@ -711,27 +709,15 @@ impl FileTask {
                 return;
             }
 
-            let task = {
-                let store = thumbnail_store.clone();
-                let file = file.clone();
-                async move {
-                    match store.get(ticket).await {
-                        Ok((extension_type, path, thumbnail)) => {
-                            file.set_thumbnail(&thumbnail);
-                            file.set_thumbnail_format(extension_type.into());
-                            file.set_thumbnail_reference(&path.to_string());
-                        }
-                        Err(e) => {
-                            tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
-                        }
-                    }
+            match thumbnail_store.get(ticket).await {
+                Ok((extension_type, path, thumbnail)) => {
+                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail_format(extension_type.into());
+                    file.set_thumbnail_reference(&path.to_string());
                 }
-            };
-
-            if !background {
-                task.await;
-            } else {
-                tokio::spawn(task);
+                Err(e) => {
+                    tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
+                }
             }
 
             let (tx, rx) = oneshot::channel();
