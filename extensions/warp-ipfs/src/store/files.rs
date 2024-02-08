@@ -472,7 +472,7 @@ impl FileTask {
                             recursive,
                             response,
                         } => {
-                            _ = response.send(self.create_directory(&name, recursive));
+                            _ = response.send(self.create_directory(&name, recursive).await);
                         },
                         FileTaskCommand::SyncRef { path, response } => {
                             _ = response.send(self.sync_ref(&path));
@@ -734,10 +734,10 @@ impl FileTask {
                 tokio::spawn(task);
             }
 
-            drop(_current_guard);
-
             let (tx, rx) = oneshot::channel();
             _ = export_tx.send(tx).await;
+
+            drop(_current_guard);
 
             if let Err(e) = rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
@@ -898,10 +898,11 @@ impl FileTask {
             }
 
             current_directory.add_item(file)?;
-            drop(_current_guard);
+
             let (exported_tx, exported_rx) = oneshot::channel();
             _ = export_tx.send(exported_tx).await;
 
+            drop(_current_guard);
             if let Err(e) = exported_rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
             }
@@ -1060,10 +1061,10 @@ impl FileTask {
                 return;
             }
 
-            drop(_current_guard);
-
             let (tx, rx) = oneshot::channel();
             _ = export_tx.send(tx).await;
+
+            drop(_current_guard);
 
             if let Err(e) = rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
@@ -1142,6 +1143,8 @@ impl FileTask {
         let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
         tracing::info!(blocks = blocks.len(), "blocks removed");
 
+        _ = self.export().await;
+
         self.constellation_tx
             .emit(ConstellationEventKind::Deleted {
                 item_name: name.to_string(),
@@ -1166,6 +1169,8 @@ impl FileTask {
 
         current_directory.rename_item(&current, new)?;
 
+        self.export().await?;
+
         self.constellation_tx
             .emit(ConstellationEventKind::Renamed {
                 old_item_name: current.to_string(),
@@ -1175,7 +1180,7 @@ impl FileTask {
         Ok(())
     }
 
-    fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
+    async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
         let directory = self.current_directory()?;
         let _g = directory.signal_guard();
 
@@ -1189,6 +1194,8 @@ impl FileTask {
         }
 
         directory.add_directory(Directory::new(name))?;
+
+        _ = self.export().await;
 
         Ok(())
     }
@@ -1205,6 +1212,8 @@ impl FileTask {
             .and_then(|item| item.get_file())?;
 
         let reference = file.reference().ok_or(Error::FileNotFound)?;
+
+        let mut export_tx = self.export_tx.clone();
 
         Ok(async move {
             let buffer = ipfs
@@ -1223,6 +1232,13 @@ impl FileTask {
                 file.set_thumbnail(&thumbnail);
                 file.set_thumbnail_format(extension_type.into());
                 file.set_thumbnail_reference(&path.to_string());
+            }
+
+            let (tx, rx) = oneshot::channel();
+            _ = export_tx.send(tx).await;
+
+            if let Err(e) = rx.await.expect("shouldnt drop") {
+                tracing::error!(error = %e, "unable to export index");
             }
 
             Ok(())
