@@ -395,7 +395,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn get_root_index(&self) -> Result<Directory, Error> {
+    pub async fn get_directory_index(&self) -> Result<Directory, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -405,7 +405,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn set_root_index(&self, root: Directory) -> Result<(), Error> {
+    pub async fn set_directory_index(&self, root: Directory) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx

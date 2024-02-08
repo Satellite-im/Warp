@@ -540,7 +540,7 @@ impl FileTask {
     }
 
     async fn import_v1(&self) -> Result<(), Error> {
-        let index = self.root.get_root_index().await?;
+        let index = self.root.get_directory_index().await?;
         self.index.set_items(index.get_items());
         Ok(())
     }
@@ -554,7 +554,7 @@ impl FileTask {
 
         index.rebuild_paths(&signal);
 
-        self.root.set_root_index(index).await?;
+        self.root.set_directory_index(index).await?;
 
         tracing::trace!("Index exported");
         Ok(())
