@@ -320,6 +320,7 @@ async fn main() -> anyhow::Result<()> {
                         CreateGroupConversation(name, did_keys, open) => {
                             let mut settings = GroupSettings::default();
                             settings.set_members_can_add_participants(open);
+                            settings.set_members_can_change_name(open);
                             if let Err(e) = chat.create_group_conversation(
                                 Some(name.to_string()),
                                 did_keys,
@@ -369,6 +370,7 @@ async fn main() -> anyhow::Result<()> {
                             let topic = *topic.read();
                             let mut settings = GroupSettings::default();
                             settings.set_members_can_add_participants(open);
+                            settings.set_members_can_change_name(open);
                             if let Err(e) = chat.update_conversation_settings(topic, ConversationSettings::Group(settings)).await {
                                 writeln!(stdout, "Error updating group settings: {e}")?;
                                 continue

@@ -2888,17 +2888,19 @@ impl ConversationTask {
             });
         }
 
-        if matches!(conversation.conversation_type, ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
-        }
+        let settings = match conversation.settings {
+            ConversationSettings::Group(settings) => settings,
+            ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
+        };
+        assert_eq!(conversation.conversation_type, ConversationType::Group);
 
-        let Some(creator) = conversation.creator.as_ref() else {
+        let Some(creator) = conversation.creator.clone() else {
             return Err(Error::InvalidConversation);
         };
 
         let own_did = &*self.keypair;
 
-        if creator.ne(own_did) {
+        if !settings.members_can_change_name() && creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
         }
 
