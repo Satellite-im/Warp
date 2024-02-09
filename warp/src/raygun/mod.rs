@@ -482,13 +482,16 @@ pub struct DirectConversationSettings {}
 
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[display(
-    fmt = "Everyone can add participants: {}",
-    "if self.members_can_add_participants {\"✅\"} else {\"❌\"}"
+    fmt = "Everyone can add participants: {}, Everyone can change name: {}",
+    "if self.members_can_add_participants {\"✅\"} else {\"❌\"}",
+    "if self.members_can_change_name {\"✅\"} else {\"❌\"}"
 )]
 #[repr(C)]
 pub struct GroupSettings {
     // Everyone can add participants, if set to `true``.
     members_can_add_participants: bool,
+    // Everyone can change the name of the group.
+    members_can_change_name: bool,
 }
 
 impl GroupSettings {
@@ -496,8 +499,16 @@ impl GroupSettings {
         self.members_can_add_participants
     }
 
+    pub fn members_can_change_name(&self) -> bool {
+        self.members_can_change_name
+    }
+
     pub fn set_members_can_add_participants(&mut self, val: bool) {
         self.members_can_add_participants = val;
+    }
+
+    pub fn set_members_can_change_name(&mut self, val: bool) {
+        self.members_can_change_name = val;
     }
 }
 

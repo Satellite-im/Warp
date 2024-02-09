@@ -2316,9 +2316,11 @@ impl MessageStore {
 
         let mut conversation = self.conversations.get(conversation_id).await?;
 
-        if matches!(conversation.conversation_type, ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
-        }
+        let settings = match conversation.settings {
+            ConversationSettings::Group(settings) => settings,
+            ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
+        };
+        assert_eq!(conversation.conversation_type, ConversationType::Group);
 
         let Some(creator) = conversation.creator.clone() else {
             return Err(Error::InvalidConversation);
@@ -2326,7 +2328,7 @@ impl MessageStore {
 
         let own_did = &*self.did;
 
-        if creator.ne(own_did) {
+        if !settings.members_can_change_name() && creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
         }
 
