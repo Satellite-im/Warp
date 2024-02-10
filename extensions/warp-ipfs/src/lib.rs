@@ -68,7 +68,7 @@ use warp::multipass::{
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
-use crate::store::{ecdh_decrypt, PeerIdExt};
+use crate::store::{ecdh_decrypt, get_keypair_did, PeerIdExt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
@@ -529,6 +529,11 @@ impl WarpIpfs {
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
+        let keypair = {
+            let keypair = ipfs.keypair().expect("infallable");
+            Arc::new(get_keypair_did(keypair).expect("valid keypair"))
+        };
+
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
@@ -560,15 +565,15 @@ impl WarpIpfs {
         *self.file_store.write() = Some(filestore.clone());
 
         let message_store = MessageStore::new(
-            ipfs.clone(),
+            &ipfs,
             config.path.map(|path| path.join("messages")),
-            identity_store,
             discovery,
+            keypair,
             filestore,
             self.raygun_tx.clone(),
-            span.clone(),
+            identity_store,
         )
-        .await?;
+        .await;
 
         *self.message_store.write() = Some(message_store);
 

@@ -1,5 +1,4 @@
 pub mod cache;
-pub mod conversation;
 pub mod files;
 pub mod identity;
 pub mod image_dag;
