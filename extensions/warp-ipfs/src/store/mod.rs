@@ -137,7 +137,6 @@ where
 }
 
 #[allow(clippy::large_enum_variant)]
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationEvents {
@@ -173,14 +172,14 @@ pub enum ConversationRequestResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[allow(clippy::type_complexity)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationRequestKind {
+    Acknowledge,
     Key,
     Ping,
     RetrieveMessages {
-        // start/end
-        range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
     },
     WantMessage {
         message_id: Uuid,
@@ -188,12 +187,12 @@ pub enum ConversationRequestKind {
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationResponseKind {
     Key { key: Vec<u8> },
     Pong,
     HaveMessages { messages: Vec<Uuid> },
+    AcknowledgementConfirmed,
 }
 
 impl std::fmt::Debug for ConversationResponseKind {
