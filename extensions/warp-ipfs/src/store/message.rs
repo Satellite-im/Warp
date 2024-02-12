@@ -41,7 +41,6 @@ use warp::{
 };
 
 use crate::store::{
-    connected_to_peer,
     conversation::{ConversationDocument, MessageDocument},
     discovery::Discovery,
     ecdh_decrypt, ecdh_encrypt,
@@ -4649,62 +4648,60 @@ impl Queue {
 
 //TODO: Replace
 async fn process_queue(this: &mut ConversationTask) -> anyhow::Result<()> {
-    let mut list = this.queue.clone();
-    for (did, items) in list.iter_mut() {
-        if let Ok(crate::store::PeerConnectionType::Connected) =
-            connected_to_peer(&this.ipfs, did.clone()).await
-        {
-            for item in items.iter_mut() {
-                let Queue {
-                    peer,
-                    topic,
-                    data,
-                    sent,
-                    ..
-                } = item;
-                if !*sent {
-                    if let Ok(peers) = this.ipfs.pubsub_peers(Some(topic.clone())).await {
-                        //TODO: Check peer against conversation to see if they are connected
-                        if peers.contains(peer) {
-                            let signature = match sign_serde(&this.keypair, &data) {
-                                Ok(sig) => sig,
-                                Err(_e) => {
-                                    continue;
-                                }
-                            };
+    for (did, items) in this.queue.iter_mut() {
+        let Ok(peer_id) = did.to_peer_id() else {
+            continue;
+        };
 
-                            let payload = Payload::new(&this.keypair, data, &signature);
+        if !this.ipfs.is_connected(peer_id).await.unwrap_or_default() {
+            continue;
+        }
 
-                            let bytes = match payload.to_bytes() {
-                                Ok(bytes) => bytes.into(),
-                                Err(_e) => {
-                                    continue;
-                                }
-                            };
+        for item in items {
+            let Queue {
+                peer,
+                topic,
+                data,
+                sent,
+                ..
+            } = item;
 
-                            if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                                error!("Error publishing to topic: {e}");
-                                break;
-                            }
-
-                            *sent = true;
-                        }
-                    }
-                }
-                this.queue.entry(did.clone()).or_default().retain(|queue| {
-                    let Queue {
-                        sent: inner_sent,
-                        topic: inner_topic,
-                        ..
-                    } = queue;
-
-                    if inner_topic.eq(&*topic) && *sent != *inner_sent {
-                        return false;
-                    }
-                    true
-                });
+            if !this
+                .ipfs
+                .pubsub_peers(Some(topic.clone()))
+                .await
+                .map(|list| list.contains(peer))
+                .unwrap_or_default()
+            {
+                continue;
             }
+
+            if *sent {
+                continue;
+            }
+
+            let Ok(signature) = sign_serde(&this.keypair, &data) else {
+                continue;
+            };
+
+            let payload = Payload::new(&this.keypair, data, &signature);
+
+            let Ok(bytes) = payload.to_bytes() else {
+                continue;
+            };
+
+            if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes.into()).await {
+                error!("Error publishing to topic: {e}");
+                break;
+            }
+
+            *sent = true;
         }
     }
+
+    this.queue.retain(|_, queue| {
+        queue.retain(|item| !item.sent);
+        !queue.is_empty()
+    });
     Ok(())
 }
