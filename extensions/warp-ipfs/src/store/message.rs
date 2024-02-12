@@ -4190,7 +4190,7 @@ async fn message_event(
             match kind {
                 ConversationUpdateKind::AddParticipant { did } => {
                     if document.recipients.contains(&did) {
-                        return Err(Error::IdentityExist);
+                        return Ok(());
                     }
 
                     if !this.discovery.contains(&did).await {
