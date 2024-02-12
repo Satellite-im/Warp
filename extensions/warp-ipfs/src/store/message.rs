@@ -4692,7 +4692,7 @@ async fn process_queue(this: &mut ConversationTask) -> anyhow::Result<()> {
 
             if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes.into()).await {
                 error!("Error publishing to topic: {e}");
-                break;
+                continue;
             }
 
             *sent = true;
