@@ -287,6 +287,7 @@ impl MessageStore {
                 event,
                 attachment_rx: arx,
                 attachment_tx: atx,
+                pending_key_exchange: Default::default(),
                 queue: Default::default(),
             };
             select! {
@@ -899,6 +900,8 @@ struct ConversationTask {
     attachment_tx: mpsc::Sender<AttachmentChan>,
     rx: mpsc::Receiver<MessagingCommand>,
 
+    pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
+
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
 }
@@ -920,6 +923,8 @@ impl ConversationTask {
         pin_mut!(stream);
 
         let mut queue_timer = tokio::time::interval(Duration::from_secs(1));
+
+        let mut pending_exchange_timer = tokio::time::interval(Duration::from_secs(1));
 
         loop {
             tokio::select! {
@@ -1092,6 +1097,9 @@ impl ConversationTask {
                 }
                 _ = queue_timer.tick() => {
                     _ = process_queue(self).await;
+                }
+                _ = pending_exchange_timer.tick() => {
+                    _ = process_pending_payload(self).await;
                 }
             }
         }
@@ -1707,10 +1715,33 @@ impl ConversationTask {
                 ecdh_decrypt(own_did, Some(&recipient), data.data())?
             }
             ConversationType::Group { .. } => {
-                let key = self.get_keystore(id).await.and_then(|store| store.get_latest(own_did, &data.sender())).map_err(|e| {
-                    tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to obtain key");
-                    e
-                })?;
+                let store = self.get_keystore(id).await?;
+
+                let key = match store.get_latest(own_did, &data.sender()) {
+                    Ok(key) => key,
+                    Err(Error::PublicKeyDoesntExist) => {
+                        // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
+                        // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
+
+                        // Note: We can set aside the data without the payload being owned directly due to the data already been verified
+                        //       so we can own the data directly without worrying about the lifetime
+                        //       however, we may want to eventually validate the data to ensure it havent been tampered in some way
+                        //       while waiting for the response.
+
+                        self.pending_key_exchange.entry(id).or_default().push((
+                            data.sender(),
+                            data.data().to_vec(),
+                            false,
+                        ));
+
+                        // Maybe send a request? Although we could, we should check to determine if one was previously sent
+                        return Err(Error::PublicKeyDoesntExist);
+                    }
+                    Err(e) => {
+                        tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to obtain key");
+                        return Err(e);
+                    }
+                };
 
                 Cipher::direct_decrypt(data.data(), &key)?
             }
@@ -4448,7 +4479,7 @@ async fn process_request_response_event(
 
                 let raw_key = match keystore.get_latest(&this.keypair, &this.keypair) {
                     Ok(key) => key,
-                    Err(Error::PublicKeyInvalid) => {
+                    Err(Error::PublicKeyDoesntExist) => {
                         let key = generate::<64>().into();
                         keystore.insert(&this.keypair, &this.keypair, &key)?;
 
@@ -4538,6 +4569,12 @@ async fn process_request_response_event(
                 keystore.insert(&this.keypair, &sender, raw_key)?;
 
                 this.set_keystore(conversation_id, keystore).await?;
+
+                if let Some(list) = this.pending_key_exchange.get_mut(&conversation_id) {
+                    for (_, _, received) in list.iter_mut().filter(|(s, _, r)| sender.eq(s) && !r) {
+                        *received = true;
+                    }
+                }
             }
             _ => {
                 tracing::info!("Unimplemented/Unsupported Event");
@@ -4545,6 +4582,50 @@ async fn process_request_response_event(
         },
     }
     Ok(())
+}
+
+async fn process_pending_payload(this: &mut ConversationTask) {
+    if this.pending_key_exchange.is_empty() {
+        return;
+    }
+
+    let keypair = this.keypair.clone();
+
+    let mut processed_events: HashMap<Uuid, Vec<_>> = HashMap::new();
+
+    this.pending_key_exchange.retain(|id, list| {
+        list.retain(|(did, data, received)| {
+            if *received {
+                processed_events
+                    .entry(*id)
+                    .or_default()
+                    .push((did.clone(), data.clone()));
+                return false;
+            }
+            true
+        });
+        !list.is_empty()
+    });
+
+    for (conversation_id, list) in processed_events {
+        // Note: Conversation keystore should exist so we could expect here, however since the map for pending exchanges would have
+        //       been flushed out, we can just continue on in the iteration since it would be ignored 
+        let Ok(store) = this.get_keystore(conversation_id).await else {
+            continue;
+        };
+
+        for (sender, data) in list {
+            // Have a single block to try the functions so this whole scope does not error
+            let fut = async {
+                let key = store.get_latest(&keypair, &sender)?;
+                let data = Cipher::direct_decrypt(&data, &key)?;
+                let event = serde_json::from_slice(&data)?;
+                message_event(this, conversation_id, &event, MessageDirection::In).await
+            };
+
+            _ = fut.await;
+        }
+    }
 }
 
 async fn process_conversation_event(
