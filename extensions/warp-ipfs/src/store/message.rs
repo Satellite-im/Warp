@@ -3939,7 +3939,7 @@ async fn message_event(
             };
 
             if let Err(e) = tx.send(event) {
-                error!("Error broadcasting event: {e}");
+                tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
             }
         }
         MessagingEvents::Edit {
@@ -4071,7 +4071,7 @@ async fn message_event(
                 conversation_id,
                 message_id,
             }) {
-                error!("Error broadcasting event: {e}");
+                tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
             }
         }
         MessagingEvents::Pin {
@@ -4122,7 +4122,7 @@ async fn message_event(
             this.set_document(document).await?;
 
             if let Err(e) = tx.send(event) {
-                error!("Error broadcasting event: {e}");
+                tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
             }
         }
         MessagingEvents::React {
@@ -4172,7 +4172,7 @@ async fn message_event(
                         did_key: reactor,
                         reaction: emoji,
                     }) {
-                        error!("Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
                     }
                 }
                 ReactionState::Remove => {
@@ -4207,7 +4207,7 @@ async fn message_event(
                         did_key: reactor,
                         reaction: emoji,
                     }) {
-                        error!("Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
                     }
                 }
             }
@@ -4239,7 +4239,7 @@ async fn message_event(
                         conversation_id,
                         recipient: did,
                     }) {
-                        error!("Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
                     }
                 }
                 ConversationUpdateKind::RemoveParticipant { did } => {
@@ -4262,7 +4262,7 @@ async fn message_event(
                             conversation_id,
                             recipient: did,
                         }) {
-                            error!("Error broadcasting event: {e}");
+                            tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
                         }
                     }
                 }
@@ -4292,7 +4292,7 @@ async fn message_event(
                         conversation_id,
                         name: name.to_string(),
                     }) {
-                        error!("Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
                     }
                 }
 
@@ -4305,7 +4305,7 @@ async fn message_event(
                         conversation_id,
                         name: String::new(),
                     }) {
-                        error!("Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
                     }
                 }
                 ConversationUpdateKind::AddRestricted { .. }
@@ -4325,7 +4325,7 @@ async fn message_event(
                         conversation_id,
                         settings,
                     }) {
-                        error!("Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
                     }
                 }
             }
