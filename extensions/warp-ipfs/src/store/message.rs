@@ -1696,7 +1696,7 @@ impl ConversationTask {
 
         let own_did = &*self.keypair;
 
-        let conversation = self.get(id).await.expect("Conversation exist");
+        let conversation = self.get(id).await?;
 
         let bytes = match conversation.conversation_type {
             ConversationType::Direct => {
