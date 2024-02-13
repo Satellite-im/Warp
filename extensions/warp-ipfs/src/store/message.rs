@@ -1735,7 +1735,7 @@ impl ConversationTask {
                         ));
 
                         // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
-                        // but for now we can leave this commented until the queue is removed and refactored. 
+                        // but for now we can leave this commented until the queue is removed and refactored.
                         // _ = self.request_key(id, &data.sender()).await;
 
                         // Note: We will mark this as `Ok` since this is pending request to be resolved
