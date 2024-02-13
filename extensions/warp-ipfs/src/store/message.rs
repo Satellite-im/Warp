@@ -4609,7 +4609,7 @@ async fn process_pending_payload(this: &mut ConversationTask) {
 
     for (conversation_id, list) in processed_events {
         // Note: Conversation keystore should exist so we could expect here, however since the map for pending exchanges would have
-        //       been flushed out, we can just continue on in the iteration since it would be ignored 
+        //       been flushed out, we can just continue on in the iteration since it would be ignored
         let Ok(store) = this.get_keystore(conversation_id).await else {
             continue;
         };
