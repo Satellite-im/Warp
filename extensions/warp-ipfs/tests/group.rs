@@ -774,9 +774,10 @@ mod test {
         })
         .await?;
 
-        let ret = chat_b.add_recipient(id, &did_d).await;
-
-        assert!(ret.is_err());
+        chat_b
+            .add_recipient(id, &did_d)
+            .await
+            .expect_err("identity is blocked");
 
         Ok(())
     }
