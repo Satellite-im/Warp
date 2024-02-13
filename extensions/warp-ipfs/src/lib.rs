@@ -1184,13 +1184,12 @@ impl MultiPassImportExport for WarpIpfs {
 
                 let mut store = self.identity_store(false).await?;
 
-                let package = store.import_identity_remote(keypair.clone()).await?;
-                let decrypted_bundle = ecdh_decrypt(&keypair, None, package)?;
-                let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                // let decrypted_bundle = ecdh_decrypt(&keypair, None, package)?;
+                // let exported_document =
+                //     serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
 
-                exported_document.verify()?;
-                return store.import_identity(exported_document).await;
+                // exported_document.verify()?;
+                return store.import_identity_remote_resolve().await;
             }
         }
     }

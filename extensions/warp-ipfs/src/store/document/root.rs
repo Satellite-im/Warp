@@ -93,6 +93,13 @@ pub enum RootDocumentCommand {
     ExportEncrypted {
         response: oneshot::Sender<Result<Vec<u8>, Error>>,
     },
+    RootCid {
+        response: oneshot::Sender<Result<Cid, Error>>,
+    },
+    SetRootCid {
+        cid: Cid,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -347,6 +354,26 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn root_cid(&self) -> Result<Cid, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::RootCid { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn set_root_cid(&self, cid: Cid) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::SetRootCid { cid, response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -461,6 +488,12 @@ impl RootDocumentTask {
                 RootDocumentCommand::SetIdentityStatus { status, response } => {
                     let _ = response.send(self.set_identity_status(status).await);
                 }
+                RootDocumentCommand::RootCid { response } => {
+                    let _ = response.send(self.cid.ok_or(Error::IdentityInvalid));
+                }
+                RootDocumentCommand::SetRootCid { cid, response } => {
+                    let _ = response.send(self.set_root_cid(cid).await);
+                }
             }
         }
     }
@@ -563,13 +596,10 @@ impl RootDocumentTask {
         }
 
         if let Some(old_cid) = old_cid {
-            if old_cid != root_cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    if let Err(e) = self.ipfs.remove_pin(&old_cid).recursive().await {
-                        tracing::warn!(cid =? old_cid, "Failed to unpin root document: {e}");
-                    }
+            if old_cid != root_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                if let Err(e) = self.ipfs.remove_pin(&old_cid).recursive().await {
+                    tracing::warn!(cid =? old_cid, "Failed to unpin root document: {e}");
                 }
-                _ = self.ipfs.remove_block(old_cid, false).await;
             }
         }
 
@@ -951,5 +981,17 @@ impl RootDocumentTask {
 
         let bytes = serde_json::to_vec(&export)?;
         ecdh_encrypt(&self.keypair, None, bytes)
+    }
+
+    async fn set_root_cid(&mut self, cid: Cid) -> Result<(), Error> {
+        let root_document = self
+            .ipfs
+            .get_dag(cid)
+            .deserialized::<RootDocument>()
+            .await?;
+        // Step down through each field to resolve it
+        root_document.resolve2(&self.ipfs).await?;
+        self.set_root_document(root_document).await?;
+        Ok(())
     }
 }

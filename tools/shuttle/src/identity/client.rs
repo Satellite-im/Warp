@@ -5,6 +5,7 @@ use std::{
 };
 
 use futures::{channel::oneshot, FutureExt, StreamExt};
+use libipld::Cid;
 use rust_ipfs::{
     libp2p::{
         core::Endpoint,
@@ -74,7 +75,7 @@ pub enum IdentityCommand {
     },
     UpdatePackage {
         peer_id: PeerId,
-        package: Vec<u8>,
+        package: Cid,
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
     },
     SendRequest {
@@ -91,7 +92,7 @@ pub enum IdentityCommand {
     Fetch {
         peer_id: PeerId,
         did: DID,
-        response: futures::channel::oneshot::Sender<Result<Vec<u8>, warp::error::Error>>,
+        response: futures::channel::oneshot::Sender<Result<Cid, warp::error::Error>>,
     },
 }
 
@@ -121,7 +122,7 @@ enum IdentityResponse {
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
     },
     Fetch {
-        response: futures::channel::oneshot::Sender<Result<Vec<u8>, warp::error::Error>>,
+        response: futures::channel::oneshot::Sender<Result<Cid, warp::error::Error>>,
     },
 }
 
@@ -550,7 +551,7 @@ impl NetworkBehaviour for Behaviour {
                         response,
                     } => {
                         tracing::info!(
-                            package_size = package.len(),
+                            cid = %package,
                             "Sending package to {peer_id}"
                         );
                         let payload = payload_message_construct(

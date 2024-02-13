@@ -585,33 +585,9 @@ impl ShuttleTask {
                             continue;
                         }
 
-                        if package.is_empty() {
-                            tracing::warn!(%did, "package supplied is zero. Will skip");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::InvalidPayload {
-                                            msg: "package cannot be empty".into(),
-                                        },
-                                    ),
-                                ),
-                            )
-                            .expect("Valid payload construction");
+                        tracing::info!(%did, cid=%package);
 
-                            let _ = resp.send((ch, payload));
-
-                            continue;
-                        }
-
-                        tracing::info!(%did, package_size=package.len());
-
-                        if let Err(e) = self
-                            .identity_storage
-                            .store_package(&did, package.clone())
-                            .await
-                        {
+                        if let Err(e) = self.identity_storage.store_package(&did, *package).await {
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
@@ -627,7 +603,7 @@ impl ShuttleTask {
                             continue;
                         }
 
-                        tracing::info!(%did, package_size=package.len(), "package is stored");
+                        tracing::info!(%did, cid=%package, "package is stored");
 
                         let payload = payload_message_construct(
                             keypair,
@@ -854,9 +830,9 @@ impl ShuttleTask {
                         tracing::info!(%did, "looking for package");
                         let event = match self.identity_storage.get_package(did).await {
                             Ok(package) => {
-                                tracing::info!(%did, package_size = package.len(), "package found");
+                                tracing::info!(%did, cid = %package, "package found");
                                 Response::SynchronizedResponse(SynchronizedResponse::Package(
-                                    package.clone(),
+                                    package,
                                 ))
                             }
                             Err(_) => {

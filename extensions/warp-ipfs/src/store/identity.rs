@@ -1629,7 +1629,49 @@ impl IdentityStore {
         Ok(identity)
     }
 
-    pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
+    #[tracing::instrument(skip(self))]
+    pub async fn import_identity_remote_resolve(&mut self) -> Result<Identity, Error> {
+        let keypair = &*self.did_key;
+        let package = self.import_identity_remote(keypair.clone()).await?;
+
+        self.root_document.set_root_cid(package).await?;
+
+        tracing::info!("Loading friends list into phonebook");
+        if let Ok(friends) = self.friends_list().await {
+            if !friends.is_empty() {
+                let phonebook = self.phonebook();
+
+                if let Err(_e) = phonebook.add_friend_list(&friends).await {
+                    error!("Error adding friends in phonebook: {_e}");
+                }
+                _ = self.announce_identity_to_mesh().await;
+            }
+        }
+
+        match self.is_registered().await.is_ok() {
+            true => {
+                if let Err(e) = self.fetch_mailbox().await {
+                    tracing::warn!(error = %e, "Unable to fetch or process mailbox");
+                }
+            }
+            false => {
+                let id = self.own_identity_document().await.expect("Valid identity");
+                if let Err(e) = self.register(&id).await {
+                    tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
+                }
+
+                if let Err(e) = self.export_root_document().await {
+                    tracing::warn!(%id.did, error = %e, "Unable to export root document after registration");
+                }
+            }
+        }
+
+        let identity = self.own_identity().await?;
+
+        Ok(identity)
+    }
+
+    pub async fn import_identity_remote(&mut self, did: DID) -> Result<Cid, Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
@@ -1704,7 +1746,7 @@ impl IdentityStore {
     }
 
     pub async fn export_root_document(&self) -> Result<(), Error> {
-        let package = self.root_document.export_bytes().await?;
+        let package = self.root_document.root_cid().await?;
 
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
@@ -1714,7 +1756,7 @@ impl IdentityStore {
                     .clone()
                     .send(shuttle::identity::client::IdentityCommand::UpdatePackage {
                         peer_id,
-                        package: package.clone(),
+                        package,
                         response: tx,
                     })
                     .await;

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures::{
     channel::{
@@ -9,7 +9,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath};
+use rust_ipfs::{dag::ResolvedNode, Ipfs, IpfsPath};
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::{crypto::DID, error::Error};
@@ -47,12 +47,12 @@ enum IdentityStorageCommand {
     },
     StorePackage {
         did: DID,
-        pkg: Vec<u8>,
+        pkg: Cid,
         response: OneshotSender<Result<(), Error>>,
     },
     GetPackage {
         did: DID,
-        response: OneshotSender<Result<Vec<u8>, Error>>,
+        response: OneshotSender<Result<Cid, Error>>,
     },
     List {
         response: OneshotSender<Result<Vec<IdentityDocument>, Error>>,
@@ -184,7 +184,7 @@ impl IdentityStorage {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn store_package(&self, did: &DID, data: Vec<u8>) -> Result<(), Error> {
+    pub async fn store_package(&self, did: &DID, data: Cid) -> Result<(), Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
         let _ = self
@@ -200,7 +200,7 @@ impl IdentityStorage {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn get_package(&self, did: &DID) -> Result<Vec<u8>, Error> {
+    pub async fn get_package(&self, did: &DID) -> Result<Cid, Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
         let _ = self
@@ -375,7 +375,7 @@ impl IdentityStorageTask {
         Ok(())
     }
 
-    async fn store_package(&mut self, did: DID, package: Vec<u8>) -> Result<(), Error> {
+    async fn store_package(&mut self, did: DID, cid: Cid) -> Result<(), Error> {
         if !self.contains(did.clone()).await {
             return Err(Error::IdentityDoesntExist);
         }
@@ -391,18 +391,18 @@ impl IdentityStorageTask {
             None => HashMap::new(),
         };
 
-        let pkg_path = self
-            .ipfs
-            .add_unixfs(
-                futures::stream::once(async move { Ok::<_, std::io::Error>(package) }).boxed(),
-            )
-            .await?;
+        list.insert(did.to_string(), cid);
 
-        let pkg_cid = pkg_path.root().cid().copied().expect("Cid available");
+        let cid = self.ipfs.dag().put().serialize(list)?.await?;
 
-        list.insert(did.to_string(), pkg_cid);
-
-        let cid = self.ipfs.dag().put().pin(true).serialize(list)?.await?;
+        if !self.ipfs.is_pinned(&cid).await? {
+            self.ipfs
+                .insert_pin(&cid)
+                .recursive()
+                .exit_on_error()
+                .timeout(Duration::from_secs(10))
+                .await?;
+        }
 
         let old_cid = self.packages.replace(cid);
         if let Some(old_cid) = old_cid {
@@ -426,7 +426,7 @@ impl IdentityStorageTask {
         Ok(())
     }
 
-    async fn get_package(&mut self, did: DID) -> Result<Vec<u8>, Error> {
+    async fn get_package(&mut self, did: DID) -> Result<Cid, Error> {
         if !self.contains(did.clone()).await {
             return Err(Error::IdentityDoesntExist);
         }
@@ -439,14 +439,21 @@ impl IdentityStorageTask {
 
         let path = IpfsPath::from(self.packages.expect("Valid")).sub_path(&did_str)?;
 
-        let pkg_path = self
+        let (resolved, _) = self
             .ipfs
-            .unixfs()
-            .cat(path, None, &[], true, None)
+            .dag()
+            .resolve(path, true, &[], true)
             .await
             .map_err(anyhow::Error::from)?;
 
-        Ok(pkg_path)
+        let cid = match resolved {
+            ResolvedNode::Block(block) => *block.cid(),
+            ResolvedNode::Link(cid, _) => cid,
+            ResolvedNode::DagPbData(cid, _) => cid,
+            ResolvedNode::Projection(cid, _) => cid, 
+        };
+
+        Ok(cid)
     }
 
     async fn update(&mut self, document: IdentityDocument) -> Result<(), Error> {
