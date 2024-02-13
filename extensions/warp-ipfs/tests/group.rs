@@ -191,41 +191,27 @@ mod test {
     }
 
     #[tokio::test]
-    async fn add_recipient_to_conversation() -> anyhow::Result<()> {
-        let mut settings = GroupSettings::default();
-        // Test a group with default settings.
-        add_recipient_to_conversation_(settings).await?;
-        // Now a group which allows members to add participants.
-        settings.set_members_can_add_participants(true);
-        add_recipient_to_conversation_(settings).await?;
-        // Now a group which allows members to change the name as well.
-        settings.set_members_can_change_name(true);
-        add_recipient_to_conversation_(settings).await?;
-
-        Ok(())
-    }
-
-    async fn add_recipient_to_conversation_(settings: GroupSettings) -> anyhow::Result<()> {
+    async fn member_change_name_to_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
                 None,
                 None,
-                Some("test::add_recipient_to_conversation".into()),
+                Some("test::member_change_name_to_conversation".into()),
             ),
             (
                 None,
                 None,
-                Some("test::add_recipient_to_conversation".into()),
+                Some("test::member_change_name_to_conversation".into()),
             ),
             (
                 None,
                 None,
-                Some("test::add_recipient_to_conversation".into()),
+                Some("test::member_change_name_to_conversation".into()),
             ),
             (
                 None,
                 None,
-                Some("test::add_recipient_to_conversation".into()),
+                Some("test::member_change_name_to_conversation".into()),
             ),
         ])
         .await?;
@@ -239,6 +225,9 @@ mod test {
         let mut chat_subscribe_b = chat_b.subscribe().await?;
         let mut chat_subscribe_c = chat_c.subscribe().await?;
         let mut chat_subscribe_d = chat_d.subscribe().await?;
+
+        let mut settings = GroupSettings::default();
+        settings.set_members_can_change_name(true);
 
         chat_a
             .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], settings)
@@ -281,17 +270,174 @@ mod test {
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
         let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
 
-        let ret = chat_b.add_recipient(id_b, &did_d).await;
-        if settings.members_can_add_participants() {
-            // Non-owner should be able to add a recipient.
-            ret?;
-        } else {
-            // First attempt to add a recipient as a non-onwer should fail since the
-            // settings don't allow it.
-            assert!(ret.is_err());
-            // Second attempt to add a recipient as an owner should work.
-            chat_a.add_recipient(id_a, &did_d).await?;
-        }
+        chat_a.add_recipient(id_a, &did_d).await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::RecipientAdded {
+                    conversation_id,
+                    recipient,
+                }) = conversation_a.next().await
+                {
+                    assert_eq!(conversation_id, id_a);
+                    assert_eq!(recipient, did_d);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::RecipientAdded {
+                    conversation_id,
+                    recipient,
+                }) = conversation_b.next().await
+                {
+                    assert_eq!(conversation_id, id_a);
+                    assert_eq!(recipient, did_d);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::RecipientAdded {
+                    conversation_id,
+                    recipient,
+                }) = conversation_c.next().await
+                {
+                    assert_eq!(conversation_id, id_a);
+                    assert_eq!(recipient, did_d);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_d.next().await
+                {
+                    assert_eq!(conversation_id, id_a);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        chat_b.update_conversation_name(id_a, "test").await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationNameUpdated { name, .. }) =
+                    conversation_a.next().await
+                {
+                    assert_eq!(name, "test");
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(
+            conversation.settings(),
+            ConversationSettings::Group(settings),
+        );
+        assert_eq!(conversation.name().as_deref(), Some("test"));
+        assert_eq!(conversation.recipients().len(), 4);
+        assert!(conversation.recipients().contains(&did_a));
+        assert!(conversation.recipients().contains(&did_b));
+        assert!(conversation.recipients().contains(&did_c));
+        assert!(conversation.recipients().contains(&did_d));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn add_recipient_to_conversation_to_open_conversation() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation_to_open_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation_to_open_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation_to_open_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation_to_open_conversation".into()),
+            ),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
+        let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+        let mut chat_subscribe_c = chat_c.subscribe().await?;
+        let mut chat_subscribe_d = chat_d.subscribe().await?;
+
+        let mut settings = GroupSettings::default();
+        settings.set_members_can_add_participants(true);
+
+        chat_a
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], settings)
+            .await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_c = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_c.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
+        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+        let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
+
+        chat_b.add_recipient(id_b, &did_d).await?;
 
         tokio::time::timeout(Duration::from_secs(60), async {
             loop {
@@ -366,6 +512,159 @@ mod test {
         assert_eq!(
             conversation.settings(),
             ConversationSettings::Group(settings),
+        );
+        assert_eq!(conversation.recipients().len(), 4);
+        assert!(conversation.recipients().contains(&did_a));
+        assert!(conversation.recipients().contains(&did_b));
+        assert!(conversation.recipients().contains(&did_c));
+        assert!(conversation.recipients().contains(&did_d));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn add_recipient_to_conversation_to_close_conversation() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation_to_close_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation_to_close_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation_to_close_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation_to_close_conversation".into()),
+            ),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
+        let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+        let mut chat_subscribe_c = chat_c.subscribe().await?;
+        let mut chat_subscribe_d = chat_d.subscribe().await?;
+
+        chat_a
+            .create_group_conversation(
+                None,
+                vec![did_b.clone(), did_c.clone()],
+                GroupSettings::default(),
+            )
+            .await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_c = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_c.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
+        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+        let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
+
+        chat_a.add_recipient(id_a, &did_d).await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::RecipientAdded {
+                    conversation_id,
+                    recipient,
+                }) = conversation_a.next().await
+                {
+                    assert_eq!(conversation_id, id_a);
+                    assert_eq!(recipient, did_d);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::RecipientAdded {
+                    conversation_id,
+                    recipient,
+                }) = conversation_b.next().await
+                {
+                    assert_eq!(conversation_id, id_a);
+                    assert_eq!(recipient, did_d);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::RecipientAdded {
+                    conversation_id,
+                    recipient,
+                }) = conversation_c.next().await
+                {
+                    assert_eq!(conversation_id, id_a);
+                    assert_eq!(recipient, did_d);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_d.next().await
+                {
+                    assert_eq!(conversation_id, id_a);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(
+            conversation.settings(),
+            ConversationSettings::Group(Default::default()),
         );
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
