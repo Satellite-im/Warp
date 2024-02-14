@@ -4459,7 +4459,9 @@ async fn process_pending_payload(this: &mut ConversationTask) {
                 message_event(this, conversation_id, &event).await
             };
 
-            _ = fut.await;
+            if let Err(e) = fut.await {
+                tracing::error!(name = "process_pending_payload", %conversation_id, %sender, error = %e, "failed to process message")
+            }
         }
     }
 }
