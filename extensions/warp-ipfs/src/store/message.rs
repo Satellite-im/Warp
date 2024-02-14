@@ -42,7 +42,7 @@ use warp::{
 use crate::store::{
     conversation::{ConversationDocument, MessageDocument},
     discovery::Discovery,
-    ecdh_decrypt, ecdh_encrypt,
+    ecdh_decrypt, ecdh_encrypt, ecdh_shared_key,
     event_subscription::EventSubscription,
     files::FileStore,
     generate_shared_topic,
@@ -3203,25 +3203,9 @@ impl ConversationTask {
 
         let event = serde_json::to_vec(&event)?;
 
-        let bytes = match conversation.conversation_type {
-            ConversationType::Direct => {
-                let recipient = conversation
-                    .recipients()
-                    .iter()
-                    .filter(|did| own_did.ne(did))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .first()
-                    .cloned()
-                    .ok_or(Error::InvalidConversation)?;
-                ecdh_encrypt(own_did, Some(&recipient), &event)?
-            }
-            ConversationType::Group { .. } => {
-                let keystore = self.get_keystore(conversation.id()).await?;
-                let key = keystore.get_latest(own_did, own_did)?;
-                Cipher::direct_encrypt(&event, &key)?
-            }
-        };
+        let key = self.conversation_key(conversation_id, None).await?;
+
+        let bytes = Cipher::direct_encrypt(&event, &key)?;
 
         let signature = sign_serde(own_did, &bytes)?;
         let payload = Payload::new(own_did, &bytes, &signature);
@@ -3279,35 +3263,19 @@ impl ConversationTask {
 
     pub async fn publish(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Option<Uuid>,
         event: MessagingEvents,
         queue: bool,
     ) -> Result<(), Error> {
-        let conversation = self.get(conversation).await?;
+        let conversation = self.get(conversation_id).await?;
 
         let event = serde_json::to_vec(&event)?;
         let keypair = self.keypair.clone();
 
-        let bytes = match conversation.conversation_type {
-            ConversationType::Direct => {
-                let recipient = conversation
-                    .recipients()
-                    .iter()
-                    .filter(|did| (*keypair).ne(did))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .first()
-                    .cloned()
-                    .ok_or(Error::InvalidConversation)?;
-                ecdh_encrypt(&keypair, Some(&recipient), &event)?
-            }
-            ConversationType::Group { .. } => {
-                let keystore = self.get_keystore(conversation.id()).await?;
-                let key = keystore.get_latest(&keypair, &keypair)?;
-                Cipher::direct_encrypt(&event, &key)?
-            }
-        };
+        let key = self.conversation_key(conversation_id, None).await?;
+
+        let bytes = Cipher::direct_encrypt(&event, &key)?;
 
         let signature = sign_serde(&keypair, &bytes)?;
 
@@ -3470,6 +3438,32 @@ impl ConversationTask {
     async fn destroy_conversation(&mut self, conversation_id: Uuid) {
         if let Some(handle) = self.conversation_task.remove(&conversation_id) {
             handle.abort();
+        }
+    }
+
+    async fn conversation_key(
+        &self,
+        conversation_id: Uuid,
+        member: Option<&DID>,
+    ) -> Result<Vec<u8>, Error> {
+        let conversation = self.get(conversation_id).await?;
+        match conversation.conversation_type {
+            ConversationType::Direct => {
+                let list = conversation.recipients();
+
+                let recipients = list
+                    .iter()
+                    .filter(|did| (*self.keypair).ne(did))
+                    .collect::<Vec<_>>();
+
+                let member = recipients.first().ok_or(Error::InvalidConversation)?;
+                ecdh_shared_key(&self.keypair, Some(member))
+            }
+            ConversationType::Group { .. } => {
+                let recipient = member.unwrap_or(&*self.keypair);
+                let keystore = self.get_keystore(conversation.id()).await?;
+                keystore.get_latest(&self.keypair, recipient)
+            }
         }
     }
 }

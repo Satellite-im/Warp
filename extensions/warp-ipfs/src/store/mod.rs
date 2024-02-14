@@ -328,6 +328,19 @@ pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
     Ok(data)
 }
 
+pub(crate) fn ecdh_shared_key(did: &DID, recipient: Option<&DID>) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = prikey.key_exchange(&pubkey);
+
+    Ok(prik)
+}
+
 pub(crate) fn ecdh_decrypt<K: AsRef<[u8]>>(
     did: &DID,
     recipient: Option<&DID>,
