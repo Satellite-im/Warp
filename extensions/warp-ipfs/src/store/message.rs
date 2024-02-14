@@ -1637,7 +1637,7 @@ impl ConversationTask {
             e
         })?;
 
-        message_event(self, id, &event, MessageDirection::In).await?;
+        message_event(self, id, &event).await?;
 
         Ok(())
     }
@@ -3696,7 +3696,6 @@ async fn message_event(
     this: &mut ConversationTask,
     conversation_id: Uuid,
     events: &MessagingEvents,
-    direction: MessageDirection,
 ) -> Result<(), Error> {
     let mut document = this.get(conversation_id).await?;
     let tx = this.subscribe(conversation_id).await?;
@@ -3772,18 +3771,10 @@ async fn message_event(
             document.set_message_list(&this.ipfs, messages).await?;
             this.set_document(document).await?;
 
-            let event = match direction {
-                MessageDirection::In => MessageEventKind::MessageReceived {
-                    conversation_id,
-                    message_id,
-                },
-                MessageDirection::Out => MessageEventKind::MessageSent {
-                    conversation_id,
-                    message_id,
-                },
-            };
-
-            if let Err(e) = tx.send(event) {
+            if let Err(e) = tx.send(MessageEventKind::MessageReceived {
+                conversation_id,
+                message_id,
+            }) {
                 tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
             }
         }
@@ -4465,7 +4456,7 @@ async fn process_pending_payload(this: &mut ConversationTask) {
                 let key = store.get_latest(&keypair, &sender)?;
                 let data = Cipher::direct_decrypt(&data, &key)?;
                 let event = serde_json::from_slice(&data)?;
-                message_event(this, conversation_id, &event, MessageDirection::In).await
+                message_event(this, conversation_id, &event).await
             };
 
             _ = fut.await;
@@ -4535,12 +4526,6 @@ async fn process_conversation_event(
     }
 
     Ok(())
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum MessageDirection {
-    In,
-    Out,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
