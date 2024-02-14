@@ -4300,7 +4300,7 @@ async fn process_request_response_event(
                     ConversationType::Group { .. }
                 ) {
                     //Only group conversations support keys
-                    unreachable!()
+                    return Err(Error::InvalidConversation);
                 }
 
                 if !conversation.recipients().contains(&payload.sender()) {
@@ -4392,7 +4392,7 @@ async fn process_request_response_event(
                 ) {
                     //Only group conversations support keys
                     tracing::error!(id = ?conversation_id, "Invalid conversation type");
-                    unreachable!()
+                    return Err(Error::InvalidConversation);
                 }
 
                 if !conversation.recipients().contains(&sender) {
