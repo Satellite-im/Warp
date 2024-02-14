@@ -1553,7 +1553,10 @@ impl ConversationTask {
 
     async fn queue_event(&mut self, did: DID, queue: Queue) {
         self.queue.entry(did).or_default().push(queue);
+        self.save_queue().await
+    }
 
+    async fn save_queue(&self) {
         if let Some(path) = self.path.as_ref() {
             let bytes = match serde_json::to_vec(&self.queue) {
                 Ok(bytes) => bytes,
@@ -4571,6 +4574,8 @@ impl Queue {
 
 //TODO: Replace
 async fn process_queue(this: &mut ConversationTask) -> anyhow::Result<()> {
+    let mut changed = false;
+
     for (did, items) in this.queue.iter_mut() {
         let Ok(peer_id) = did.to_peer_id() else {
             continue;
@@ -4619,6 +4624,8 @@ async fn process_queue(this: &mut ConversationTask) -> anyhow::Result<()> {
             }
 
             *sent = true;
+
+            changed = true;
         }
     }
 
@@ -4626,5 +4633,10 @@ async fn process_queue(this: &mut ConversationTask) -> anyhow::Result<()> {
         queue.retain(|item| !item.sent);
         !queue.is_empty()
     });
+
+    if changed {
+        this.save_queue().await;
+    }
+
     Ok(())
 }
