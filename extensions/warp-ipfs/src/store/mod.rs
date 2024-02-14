@@ -158,8 +158,7 @@ pub enum ConversationEvents {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
-#[serde(rename_all = "lowercase", tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationRequestResponse {
     Request {
         conversation_id: Uuid,

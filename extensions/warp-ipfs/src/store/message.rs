@@ -4423,8 +4423,6 @@ async fn process_pending_payload(this: &mut ConversationTask) {
         return;
     }
 
-    let keypair = this.keypair.clone();
-
     let mut processed_events: HashMap<Uuid, Vec<_>> = HashMap::new();
 
     this.pending_key_exchange.retain(|id, list| {
@@ -4451,7 +4449,7 @@ async fn process_pending_payload(this: &mut ConversationTask) {
         for (sender, data) in list {
             // Have a single block to try the functions so this whole scope does not error
             let fut = async {
-                let key = store.get_latest(&keypair, &sender)?;
+                let key = store.get_latest(&this.keypair, &sender)?;
                 let data = Cipher::direct_decrypt(&data, &key)?;
                 let event = serde_json::from_slice(&data)?;
                 message_event(this, conversation_id, &event).await
