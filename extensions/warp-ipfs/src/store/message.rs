@@ -4471,29 +4471,14 @@ async fn process_conversation_event(
 ) -> Result<(), Error> {
     let tx = this.subscribe(conversation_id).await?;
 
-    let conversation = this.get(conversation_id).await?;
-
     let payload = Payload::from_bytes(&message.data)?;
+    let sender = payload.sender();
 
-    let data = match conversation.conversation_type {
-        ConversationType::Direct => {
-            let recipient = conversation
-                .recipients()
-                .iter()
-                .filter(|did| (*this.keypair).ne(did))
-                .cloned()
-                .collect::<Vec<_>>()
-                .first()
-                .cloned()
-                .ok_or(Error::InvalidConversation)?;
-            ecdh_decrypt(&this.keypair, Some(&recipient), payload.data())?
-        }
-        ConversationType::Group { .. } => {
-            let keystore = this.get_keystore(conversation_id).await?;
-            let key = keystore.get_latest(&this.keypair, &payload.sender())?;
-            Cipher::direct_decrypt(payload.data(), &key)?
-        }
-    };
+    let key = this
+        .conversation_key(conversation_id, Some(&sender))
+        .await?;
+
+    let data = Cipher::direct_decrypt(payload.data(), &key)?;
 
     let event = match serde_json::from_slice::<MessagingEvents>(&data)? {
         event @ MessagingEvents::Event { .. } => event,
