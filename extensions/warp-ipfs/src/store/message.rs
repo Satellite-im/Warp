@@ -1112,53 +1112,8 @@ impl ConversationTask {
         let mut stream = self.list_stream();
         while let Some(conversation) = stream.next().await {
             let id = conversation.id();
-            let loaded = async {
-                let main_topic = conversation.topic();
-                let event_topic = conversation.event_topic();
-                let request_topic = conversation.reqres_topic(&self.keypair);
 
-                let messaging_stream = self
-                    .ipfs
-                    .pubsub_subscribe(main_topic)
-                    .await?
-                    .map(move |msg| ConversationStreamData::Message(id, msg))
-                    .boxed();
-
-                let event_stream = self
-                    .ipfs
-                    .pubsub_subscribe(event_topic)
-                    .await?
-                    .map(move |msg| ConversationStreamData::Event(id, msg))
-                    .boxed();
-
-                let request_stream = self
-                    .ipfs
-                    .pubsub_subscribe(request_topic)
-                    .await?
-                    .map(move |msg| ConversationStreamData::RequestResponse(id, msg))
-                    .boxed();
-
-                let mut stream =
-                    futures::stream::select_all([messaging_stream, event_stream, request_stream]);
-
-                let (mut tx, rx) = mpsc::channel(256);
-
-                let handle = tokio::spawn(async move {
-                    while let Some(stream_type) = stream.next().await {
-                        if let Err(e) = tx.send(stream_type).await {
-                            if e.is_disconnected() {
-                                break;
-                            }
-                        }
-                    }
-                });
-
-                self.topic_stream.push(rx);
-                self.conversation_task.insert(id, handle);
-                Ok::<_, Error>(())
-            };
-
-            if let Err(e) = loaded.await {
+            if let Err(e) = self.create_conversation_task(id).await {
                 tracing::error!(id = %id, error = %e, "Failed to load conversation");
             }
         }
@@ -1223,50 +1178,10 @@ impl ConversationTask {
         )?;
 
         let convo_id = conversation.id();
-        let main_topic = conversation.topic();
-        let event_topic = conversation.event_topic();
-        let request_topic = conversation.reqres_topic(&self.keypair);
 
         self.set_document(conversation.clone()).await?;
 
-        let messaging_stream = self
-            .ipfs
-            .pubsub_subscribe(main_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::Message(convo_id, msg))
-            .boxed();
-
-        let event_stream = self
-            .ipfs
-            .pubsub_subscribe(event_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::Event(convo_id, msg))
-            .boxed();
-
-        let request_stream = self
-            .ipfs
-            .pubsub_subscribe(request_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::RequestResponse(convo_id, msg))
-            .boxed();
-
-        let mut stream =
-            futures::stream::select_all([messaging_stream, event_stream, request_stream]);
-
-        let (mut tx, rx) = mpsc::channel(256);
-
-        let handle = tokio::spawn(async move {
-            while let Some(stream_type) = stream.next().await {
-                if let Err(e) = tx.send(stream_type).await {
-                    if e.is_disconnected() {
-                        break;
-                    }
-                }
-            }
-        });
-
-        self.topic_stream.push(rx);
-        self.conversation_task.insert(convo_id, handle);
+        self.create_conversation_task(convo_id).await?;
 
         let peer_id = did.to_peer_id()?;
 
@@ -1377,9 +1292,6 @@ impl ConversationTask {
         let recipient = conversation.recipients();
 
         let convo_id = conversation.id();
-        let main_topic = conversation.topic();
-        let event_topic = conversation.event_topic();
-        let request_topic = conversation.reqres_topic(&self.keypair);
 
         self.set_document(conversation).await?;
 
@@ -1388,44 +1300,7 @@ impl ConversationTask {
 
         self.set_keystore(convo_id, keystore).await?;
 
-        let messaging_stream = self
-            .ipfs
-            .pubsub_subscribe(main_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::Message(convo_id, msg))
-            .boxed();
-
-        let event_stream = self
-            .ipfs
-            .pubsub_subscribe(event_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::Event(convo_id, msg))
-            .boxed();
-
-        let request_stream = self
-            .ipfs
-            .pubsub_subscribe(request_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::RequestResponse(convo_id, msg))
-            .boxed();
-
-        let mut stream =
-            futures::stream::select_all([messaging_stream, event_stream, request_stream]);
-
-        let (mut tx, rx) = mpsc::channel(256);
-
-        let handle = tokio::spawn(async move {
-            while let Some(stream_type) = stream.next().await {
-                if let Err(e) = tx.send(stream_type).await {
-                    if e.is_disconnected() {
-                        break;
-                    }
-                }
-            }
-        });
-
-        self.topic_stream.push(rx);
-        self.conversation_task.insert(convo_id, handle);
+        self.create_conversation_task(convo_id).await?;
 
         let peer_id_list = recipient
             .clone()
@@ -3543,6 +3418,55 @@ impl ConversationTask {
         Ok(())
     }
 
+    async fn create_conversation_task(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        let conversation = self.get(conversation_id).await?;
+
+        let main_topic = conversation.topic();
+        let event_topic = conversation.event_topic();
+        let request_topic = conversation.reqres_topic(&self.keypair);
+
+        let messaging_stream = self
+            .ipfs
+            .pubsub_subscribe(main_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::Message(conversation_id, msg))
+            .boxed();
+
+        let event_stream = self
+            .ipfs
+            .pubsub_subscribe(event_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::Event(conversation_id, msg))
+            .boxed();
+
+        let request_stream = self
+            .ipfs
+            .pubsub_subscribe(request_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::RequestResponse(conversation_id, msg))
+            .boxed();
+
+        let mut stream =
+            futures::stream::select_all([messaging_stream, event_stream, request_stream]);
+
+        let (mut tx, rx) = mpsc::channel(256);
+
+        let handle = tokio::spawn(async move {
+            while let Some(stream_type) = stream.next().await {
+                if let Err(e) = tx.send(stream_type).await {
+                    if e.is_disconnected() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        self.topic_stream.push(rx);
+        self.conversation_task.insert(conversation_id, handle);
+
+        Ok(())
+    }
+
     async fn destroy_conversation(&mut self, conversation_id: Uuid) {
         if let Some(handle) = self.conversation_task.remove(&conversation_id) {
             handle.abort();
@@ -3588,57 +3512,17 @@ async fn process_conversation(
             tracing::info!("Creating conversation");
 
             let convo = ConversationDocument::new_direct(did, list, settings)?;
-
-            tracing::info!(
-                "{} conversation created: {}",
-                convo.conversation_type,
-                conversation_id
-            );
-
-            let main_topic = convo.topic();
-            let event_topic = convo.event_topic();
-            let request_topic = convo.reqres_topic(&this.keypair);
+            let conversation_type = convo.conversation_type;
 
             this.set_document(convo).await?;
 
-            let messaging_stream = this
-                .ipfs
-                .pubsub_subscribe(main_topic)
-                .await?
-                .map(move |msg| ConversationStreamData::Message(conversation_id, msg))
-                .boxed();
+            tracing::info!(
+                "{} conversation created: {}",
+                conversation_type,
+                conversation_id
+            );
 
-            let event_stream = this
-                .ipfs
-                .pubsub_subscribe(event_topic)
-                .await?
-                .map(move |msg| ConversationStreamData::Event(conversation_id, msg))
-                .boxed();
-
-            let request_stream = this
-                .ipfs
-                .pubsub_subscribe(request_topic)
-                .await?
-                .map(move |msg| ConversationStreamData::RequestResponse(conversation_id, msg))
-                .boxed();
-
-            let mut stream =
-                futures::stream::select_all([messaging_stream, event_stream, request_stream]);
-
-            let (mut tx, rx) = mpsc::channel(256);
-
-            let handle = tokio::spawn(async move {
-                while let Some(stream_type) = stream.next().await {
-                    if let Err(e) = tx.send(stream_type).await {
-                        if e.is_disconnected() {
-                            break;
-                        }
-                    }
-                }
-            });
-
-            this.topic_stream.push(rx);
-            this.conversation_task.insert(conversation_id, handle);
+            this.create_conversation_task(conversation_id).await?;
 
             this.event
                 .emit(RayGunEventKind::ConversationCreated { conversation_id })
@@ -3676,58 +3560,15 @@ async fn process_conversation(
             //TODO: Resolve message list
             conversation.messages = None;
 
-            let main_topic = conversation.topic();
-            let event_topic = conversation.event_topic();
-            let request_topic = conversation.reqres_topic(&this.keypair);
-
             this.set_document(conversation).await?;
-
-            tracing::info!(%conversation_id, "{} conversation created", conversation_type);
 
             this.set_keystore(conversation_id, keystore).await?;
 
-            let messaging_stream = this
-                .ipfs
-                .pubsub_subscribe(main_topic)
-                .await?
-                .map(move |msg| ConversationStreamData::Message(conversation_id, msg))
-                .boxed();
-
-            let event_stream = this
-                .ipfs
-                .pubsub_subscribe(event_topic)
-                .await?
-                .map(move |msg| ConversationStreamData::Event(conversation_id, msg))
-                .boxed();
-
-            let request_stream = this
-                .ipfs
-                .pubsub_subscribe(request_topic)
-                .await?
-                .map(move |msg| ConversationStreamData::RequestResponse(conversation_id, msg))
-                .boxed();
-
-            let mut stream =
-                futures::stream::select_all([messaging_stream, event_stream, request_stream]);
-
-            let (mut tx, rx) = mpsc::channel(256);
-
-            let handle = tokio::spawn(async move {
-                while let Some(stream_type) = stream.next().await {
-                    if let Err(e) = tx.send(stream_type).await {
-                        if e.is_disconnected() {
-                            break;
-                        }
-                    }
-                }
-            });
-
-            this.topic_stream.push(rx);
-            this.conversation_task.insert(conversation_id, handle);
+            this.create_conversation_task(conversation_id).await?;
 
             let conversation = this.get(conversation_id).await?;
 
-            tracing::info!(%conversation_id,"{} conversation created", conversation_type);
+            tracing::info!(%conversation_id, "{} conversation created", conversation_type);
             let keypair = this.keypair.clone();
 
             for recipient in conversation.recipients.iter().filter(|d| (*keypair).ne(d)) {
