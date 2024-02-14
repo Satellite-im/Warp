@@ -23,7 +23,6 @@ use libipld::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs, IpfsPath, PeerId};
 use serde::{Deserialize, Serialize};
 use tokio::{select, task::JoinHandle};
-use tokio_stream::StreamMap;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -267,32 +266,36 @@ impl MessageStore {
 
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
-        let ipfs = ipfs.clone();
-        tokio::spawn(async move {
-            let root = identity.root_document().clone();
-            let (atx, arx) = mpsc::channel(1);
-            let mut task = ConversationTask {
-                ipfs,
-                event_handler: Default::default(),
-                keypair,
-                path,
-                cid,
-                topic_stream: StreamMap::new(),
-                conversation_task: HashMap::new(),
-                identity,
-                rx,
-                root,
-                discovery,
-                file,
-                event,
-                attachment_rx: arx,
-                attachment_tx: atx,
-                pending_key_exchange: Default::default(),
-                queue: Default::default(),
-            };
-            select! {
-                _ = token.cancelled() => {}
-                _ = task.run() => {}
+
+        tokio::spawn({
+            let ipfs = ipfs.clone();
+            let keypair = keypair.clone();
+            async move {
+                let root = identity.root_document().clone();
+                let (atx, arx) = mpsc::channel(1);
+                let mut task = ConversationTask {
+                    ipfs,
+                    event_handler: Default::default(),
+                    keypair,
+                    path,
+                    cid,
+                    topic_stream: Default::default(),
+                    conversation_task: HashMap::new(),
+                    identity,
+                    rx,
+                    root,
+                    discovery,
+                    file,
+                    event,
+                    attachment_rx: arx,
+                    attachment_tx: atx,
+                    pending_key_exchange: Default::default(),
+                    queue: Default::default(),
+                };
+                select! {
+                    _ = token.cancelled() => {}
+                    _ = task.run() => {}
+                }
             }
         });
 
@@ -888,7 +891,7 @@ struct ConversationTask {
     path: Option<PathBuf>,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
-    topic_stream: StreamMap<Uuid, mpsc::Receiver<ConversationStreamData>>,
+    topic_stream: SelectAll<mpsc::Receiver<ConversationStreamData>>,
     conversation_task: HashMap<Uuid, JoinHandle<()>>,
     root: RootDocumentMap,
     file: FileStore,
@@ -1073,21 +1076,21 @@ impl ConversationTask {
                         tracing::error!("Error processing conversation: {e}");
                     }
                 }
-                Some((conversation_id, message)) = self.topic_stream.next() => {
-                    match message {
-                        ConversationStreamData::RequestResponse(req) => {
+                Some(item) = self.topic_stream.next() => {
+                    match item {
+                        ConversationStreamData::RequestResponse(conversation_id, req) => {
                             let source = req.source;
                             if let Err(e) = process_request_response_event(self, conversation_id, req).await {
                                 tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "request", "Failed to process payload");
                             }
                         },
-                        ConversationStreamData::Event(ev) => {
+                        ConversationStreamData::Event(conversation_id, ev) => {
                             let source = ev.source;
                             if let Err(e) = process_conversation_event(self, conversation_id, ev).await {
                                 tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "ev", "Failed to process payload");
                             }
                         },
-                        ConversationStreamData::Message(msg) => {
+                        ConversationStreamData::Message(conversation_id, msg) => {
                             let source = msg.source;
                             if let Err(e) = self.process_msg_event(conversation_id, msg).await {
                                 tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "msg", "Failed to process payload");
@@ -1118,21 +1121,21 @@ impl ConversationTask {
                     .ipfs
                     .pubsub_subscribe(main_topic)
                     .await?
-                    .map(ConversationStreamData::Message)
+                    .map(move |msg| ConversationStreamData::Message(id, msg))
                     .boxed();
 
                 let event_stream = self
                     .ipfs
                     .pubsub_subscribe(event_topic)
                     .await?
-                    .map(ConversationStreamData::Event)
+                    .map(move |msg| ConversationStreamData::Event(id, msg))
                     .boxed();
 
                 let request_stream = self
                     .ipfs
                     .pubsub_subscribe(request_topic)
                     .await?
-                    .map(ConversationStreamData::RequestResponse)
+                    .map(move |msg| ConversationStreamData::RequestResponse(id, msg))
                     .boxed();
 
                 let mut stream =
@@ -1150,7 +1153,7 @@ impl ConversationTask {
                     }
                 });
 
-                self.topic_stream.insert(id, rx);
+                self.topic_stream.push(rx);
                 self.conversation_task.insert(id, handle);
                 Ok::<_, Error>(())
             };
@@ -1230,21 +1233,21 @@ impl ConversationTask {
             .ipfs
             .pubsub_subscribe(main_topic)
             .await?
-            .map(ConversationStreamData::Message)
+            .map(move |msg| ConversationStreamData::Message(convo_id, msg))
             .boxed();
 
         let event_stream = self
             .ipfs
             .pubsub_subscribe(event_topic)
             .await?
-            .map(ConversationStreamData::Event)
+            .map(move |msg| ConversationStreamData::Event(convo_id, msg))
             .boxed();
 
         let request_stream = self
             .ipfs
             .pubsub_subscribe(request_topic)
             .await?
-            .map(ConversationStreamData::RequestResponse)
+            .map(move |msg| ConversationStreamData::RequestResponse(convo_id, msg))
             .boxed();
 
         let mut stream =
@@ -1262,7 +1265,7 @@ impl ConversationTask {
             }
         });
 
-        self.topic_stream.insert(convo_id, rx);
+        self.topic_stream.push(rx);
         self.conversation_task.insert(convo_id, handle);
 
         let peer_id = did.to_peer_id()?;
@@ -1389,21 +1392,21 @@ impl ConversationTask {
             .ipfs
             .pubsub_subscribe(main_topic)
             .await?
-            .map(ConversationStreamData::Message)
+            .map(move |msg| ConversationStreamData::Message(convo_id, msg))
             .boxed();
 
         let event_stream = self
             .ipfs
             .pubsub_subscribe(event_topic)
             .await?
-            .map(ConversationStreamData::Event)
+            .map(move |msg| ConversationStreamData::Event(convo_id, msg))
             .boxed();
 
         let request_stream = self
             .ipfs
             .pubsub_subscribe(request_topic)
             .await?
-            .map(ConversationStreamData::RequestResponse)
+            .map(move |msg| ConversationStreamData::RequestResponse(convo_id, msg))
             .boxed();
 
         let mut stream =
@@ -1421,7 +1424,7 @@ impl ConversationTask {
             }
         });
 
-        self.topic_stream.insert(convo_id, rx);
+        self.topic_stream.push(rx);
         self.conversation_task.insert(convo_id, handle);
 
         let peer_id_list = recipient
@@ -3543,15 +3546,14 @@ impl ConversationTask {
     async fn destroy_conversation(&mut self, conversation_id: Uuid) {
         if let Some(handle) = self.conversation_task.remove(&conversation_id) {
             handle.abort();
-            self.topic_stream.remove(&conversation_id);
         }
     }
 }
 
 enum ConversationStreamData {
-    RequestResponse(Message),
-    Event(Message),
-    Message(Message),
+    RequestResponse(Uuid, Message),
+    Event(Uuid, Message),
+    Message(Uuid, Message),
 }
 
 async fn process_conversation(
@@ -3603,21 +3605,21 @@ async fn process_conversation(
                 .ipfs
                 .pubsub_subscribe(main_topic)
                 .await?
-                .map(ConversationStreamData::Message)
+                .map(move |msg| ConversationStreamData::Message(conversation_id, msg))
                 .boxed();
 
             let event_stream = this
                 .ipfs
                 .pubsub_subscribe(event_topic)
                 .await?
-                .map(ConversationStreamData::Event)
+                .map(move |msg| ConversationStreamData::Event(conversation_id, msg))
                 .boxed();
 
             let request_stream = this
                 .ipfs
                 .pubsub_subscribe(request_topic)
                 .await?
-                .map(ConversationStreamData::RequestResponse)
+                .map(move |msg| ConversationStreamData::RequestResponse(conversation_id, msg))
                 .boxed();
 
             let mut stream =
@@ -3635,7 +3637,7 @@ async fn process_conversation(
                 }
             });
 
-            this.topic_stream.insert(conversation_id, rx);
+            this.topic_stream.push(rx);
             this.conversation_task.insert(conversation_id, handle);
 
             this.event
@@ -3688,21 +3690,21 @@ async fn process_conversation(
                 .ipfs
                 .pubsub_subscribe(main_topic)
                 .await?
-                .map(ConversationStreamData::Message)
+                .map(move |msg| ConversationStreamData::Message(conversation_id, msg))
                 .boxed();
 
             let event_stream = this
                 .ipfs
                 .pubsub_subscribe(event_topic)
                 .await?
-                .map(ConversationStreamData::Event)
+                .map(move |msg| ConversationStreamData::Event(conversation_id, msg))
                 .boxed();
 
             let request_stream = this
                 .ipfs
                 .pubsub_subscribe(request_topic)
                 .await?
-                .map(ConversationStreamData::RequestResponse)
+                .map(move |msg| ConversationStreamData::RequestResponse(conversation_id, msg))
                 .boxed();
 
             let mut stream =
@@ -3710,7 +3712,7 @@ async fn process_conversation(
 
             let (mut tx, rx) = mpsc::channel(256);
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 while let Some(stream_type) = stream.next().await {
                     if let Err(e) = tx.send(stream_type).await {
                         if e.is_disconnected() {
@@ -3720,7 +3722,8 @@ async fn process_conversation(
                 }
             });
 
-            this.topic_stream.insert(conversation_id, rx);
+            this.topic_stream.push(rx);
+            this.conversation_task.insert(conversation_id, handle);
 
             let conversation = this.get(conversation_id).await?;
 
