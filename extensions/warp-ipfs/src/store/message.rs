@@ -1081,19 +1081,19 @@ impl ConversationTask {
                         ConversationStreamData::RequestResponse(conversation_id, req) => {
                             let source = req.source;
                             if let Err(e) = process_request_response_event(self, conversation_id, req).await {
-                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "request", "Failed to process payload");
+                                tracing::error!(%conversation_id, sender = ?source, error = %e, name = "request", "Failed to process payload");
                             }
                         },
                         ConversationStreamData::Event(conversation_id, ev) => {
                             let source = ev.source;
                             if let Err(e) = process_conversation_event(self, conversation_id, ev).await {
-                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "ev", "Failed to process payload");
+                                tracing::error!(%conversation_id, sender = ?source, error = %e, name = "ev", "Failed to process payload");
                             }
                         },
                         ConversationStreamData::Message(conversation_id, msg) => {
                             let source = msg.source;
                             if let Err(e) = self.process_msg_event(conversation_id, msg).await {
-                                tracing::error!(id = %conversation_id, sender = ?source, error = %e, name = "msg", "Failed to process payload");
+                                tracing::error!(%conversation_id, sender = ?source, error = %e, name = "msg", "Failed to process payload");
                             }
                         },
                     }
@@ -1205,7 +1205,7 @@ impl ConversationTask {
                     .await
                     .is_err())
         {
-            warn!("Unable to publish to topic. Queuing event");
+            warn!(conversation_id = %convo_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did.clone(),
                 Queue::direct(
@@ -1674,7 +1674,7 @@ impl ConversationTask {
                     .await
                     .is_err())
         {
-            warn!("Unable to publish to topic");
+            warn!(%conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
                 Queue::direct(
@@ -1904,7 +1904,7 @@ impl ConversationTask {
         };
 
         if let Err(e) = tx.send(event) {
-            error!("Error broadcasting event: {e}");
+            error!(%conversation_id, error = %e, "Error broadcasting event");
         }
 
         let event = MessagingEvents::New { message };
@@ -2109,7 +2109,7 @@ impl ConversationTask {
         };
 
         if let Err(e) = tx.send(event) {
-            error!("Error broadcasting event: {e}");
+            error!(%conversation_id, error = %e, "Error broadcasting event");
         }
 
         let event = MessagingEvents::New { message };
@@ -2456,7 +2456,7 @@ impl ConversationTask {
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
                             Err(e) => {
-                                error!("Error uploading {filename}: {e}");
+                                error!(%conversation_id, "Error uploading {filename}: {e}");
                                 let stream = async_stream::stream! {
                                     yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
                                 };
@@ -2595,7 +2595,7 @@ impl ConversationTask {
         };
 
         if let Err(e) = tx.send(event) {
-            error!("Error broadcasting event: {e}");
+            error!(%conversation_id, error = %e, "Error broadcasting event");
         }
 
         let event = MessagingEvents::New { message };
@@ -3046,7 +3046,7 @@ impl ConversationTask {
                         .leave_group_conversation(creator, &recipients, conversation_id)
                         .await
                     {
-                        error!("Error leaving conversation: {e}");
+                        error!(%conversation_id, error = %e, "Error leaving conversation");
                     }
                 }
             }
@@ -3085,7 +3085,7 @@ impl ConversationTask {
                                 .await
                                 .is_err())
                     {
-                        warn!("Unable to publish to topic. Queuing event");
+                        warn!(%conversation_id, "Unable to publish to topic. Queuing event");
                         //Note: If the error is related to peer not available then we should push this to queue but if
                         //      its due to the message limit being reached we should probably break up the message to fix into
                         //      "max_transmit_size" within rust-libp2p gossipsub
@@ -3106,12 +3106,12 @@ impl ConversationTask {
 
                     if time {
                         let end = timer.elapsed();
-                        tracing::info!("Event sent to {recipient}");
-                        tracing::trace!("Took {}ms to send event", end.as_millis());
+                        tracing::info!(%conversation_id, "Event sent to {recipient}");
+                        tracing::trace!(%conversation_id, "Took {}ms to send event", end.as_millis());
                     }
                 }
                 let main_timer_end = main_timer.elapsed();
-                tracing::trace!(
+                tracing::trace!(%conversation_id,
                     "Completed processing within {}ms",
                     main_timer_end.as_millis()
                 );
@@ -3152,7 +3152,7 @@ impl ConversationTask {
                 .send_single_conversation_event(conversation_id, did, event.clone())
                 .await
             {
-                tracing::error!("Error sending conversation event to {did}: {e}");
+                tracing::error!(%conversation_id, error = %e, "Error sending conversation event to {did}");
                 continue;
             }
         }
@@ -3224,7 +3224,7 @@ impl ConversationTask {
                 .pubsub_publish(conversation.event_topic(), payload.to_bytes()?.into())
                 .await
             {
-                error!("Unable to send event: {e}");
+                error!(%conversation_id, "Unable to send event: {e}");
             }
         }
         Ok(())
@@ -3320,7 +3320,7 @@ impl ConversationTask {
 
         if can_publish {
             let bytes = payload.to_bytes()?;
-            tracing::trace!("Payload size: {} bytes", bytes.len());
+            tracing::trace!(%conversation_id, "Payload size: {} bytes", bytes.len());
             let timer = Instant::now();
             let mut time = true;
             if let Err(_e) = self
@@ -3328,12 +3328,12 @@ impl ConversationTask {
                 .pubsub_publish(conversation.topic(), bytes.into())
                 .await
             {
-                error!("Error publishing: {_e}");
+                error!(%conversation_id, "Error publishing: {_e}");
                 time = false;
             }
             if time {
                 let end = timer.elapsed();
-                tracing::trace!("Took {}ms to send event", end.as_millis());
+                tracing::trace!(%conversation_id, "Took {}ms to send event", end.as_millis());
             }
         }
 
@@ -3366,7 +3366,7 @@ impl ConversationTask {
                     .await
                     .is_err())
         {
-            warn!("Unable to publish to topic. Queuing event");
+            warn!(%conversation_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did_key.clone(),
                 Queue::direct(
@@ -3382,8 +3382,8 @@ impl ConversationTask {
         }
         if time {
             let end = timer.elapsed();
-            tracing::info!("Event sent to {did_key}");
-            tracing::trace!("Took {}ms to send event", end.as_millis());
+            tracing::info!(%conversation_id, "Event sent to {did_key}");
+            tracing::trace!(%conversation_id, "Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -3435,12 +3435,14 @@ impl ConversationTask {
         self.topic_stream.push(rx);
         self.conversation_task.insert(conversation_id, handle);
 
+        tracing::info!(%conversation_id, "started conversation");
         Ok(())
     }
 
     async fn destroy_conversation(&mut self, conversation_id: Uuid) {
         if let Some(handle) = self.conversation_task.remove(&conversation_id) {
             handle.abort();
+            self.pending_key_exchange.remove(&conversation_id);
         }
     }
 
@@ -3493,7 +3495,7 @@ async fn process_conversation(
                 generate_shared_topic(did, &recipient, Some("direct-conversation"))?;
 
             if this.contains(conversation_id).await {
-                tracing::warn!("Conversation with {conversation_id} exist");
+                tracing::warn!(%conversation_id, "Conversation exist");
                 return Ok(());
             }
 
@@ -3506,18 +3508,14 @@ async fn process_conversation(
             }
 
             let list = [did.clone(), recipient];
-            tracing::info!("Creating conversation");
+            tracing::info!(%conversation_id, "Creating conversation");
 
             let convo = ConversationDocument::new_direct(did, list, settings)?;
             let conversation_type = convo.conversation_type;
 
             this.set_document(convo).await?;
 
-            tracing::info!(
-                "{} conversation created: {}",
-                conversation_type,
-                conversation_id
-            );
+            tracing::info!(%conversation_id, %conversation_type, "conversation created");
 
             this.create_conversation_task(conversation_id).await?;
 
@@ -3527,10 +3525,10 @@ async fn process_conversation(
         }
         ConversationEvents::NewGroupConversation { mut conversation } => {
             let conversation_id = conversation.id;
-            tracing::info!("New group conversation event received");
+            tracing::info!(%conversation_id, "New group conversation event received");
 
             if this.contains(conversation_id).await {
-                warn!("Conversation with {conversation_id} exist");
+                warn!(%conversation_id, "Conversation exist");
                 return Ok(());
             }
 
@@ -3570,7 +3568,7 @@ async fn process_conversation(
 
             for recipient in conversation.recipients.iter().filter(|d| (*keypair).ne(d)) {
                 if let Err(e) = this.request_key(conversation_id, recipient).await {
-                    tracing::warn!("Failed to send exchange request to {recipient}: {e}");
+                    tracing::warn!(%conversation_id, error = %e, %recipient, "Failed to send exchange request");
                 }
             }
 
@@ -3866,7 +3864,7 @@ async fn message_event(
                 conversation_id,
                 message_id,
             }) {
-                error!("Error broadcasting event: {e}");
+                error!(%conversation_id, error = %e, "Error broadcasting event");
             }
         }
         MessagingEvents::Delete {
@@ -3907,7 +3905,7 @@ async fn message_event(
                 conversation_id,
                 message_id,
             }) {
-                tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
             }
         }
         MessagingEvents::Pin {
@@ -3958,7 +3956,7 @@ async fn message_event(
             this.set_document(document).await?;
 
             if let Err(e) = tx.send(event) {
-                tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
             }
         }
         MessagingEvents::React {
@@ -4008,7 +4006,7 @@ async fn message_event(
                         did_key: reactor,
                         reaction: emoji,
                     }) {
-                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }
                 }
                 ReactionState::Remove => {
@@ -4043,7 +4041,7 @@ async fn message_event(
                         did_key: reactor,
                         reaction: emoji,
                     }) {
-                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }
                 }
             }
@@ -4075,7 +4073,7 @@ async fn message_event(
                         conversation_id,
                         recipient: did,
                     }) {
-                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }
                 }
                 ConversationUpdateKind::RemoveParticipant { did } => {
@@ -4098,7 +4096,7 @@ async fn message_event(
                             conversation_id,
                             recipient: did,
                         }) {
-                            tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                            tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                         }
                     }
                 }
@@ -4128,7 +4126,7 @@ async fn message_event(
                         conversation_id,
                         name: name.to_string(),
                     }) {
-                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }
                 }
 
@@ -4141,7 +4139,7 @@ async fn message_event(
                         conversation_id,
                         name: String::new(),
                     }) {
-                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }
                 }
                 ConversationUpdateKind::AddRestricted { .. }
@@ -4161,7 +4159,7 @@ async fn message_event(
                         conversation_id,
                         settings,
                     }) {
-                        tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }
                 }
             }
@@ -4198,7 +4196,7 @@ async fn process_identity_events(
                 match conversation.conversation_type {
                     ConversationType::Direct => {
                         if let Err(e) = this.delete_conversation(id, true).await {
-                            warn!("Failed to delete conversation {id}: {e}");
+                            warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
                             continue;
                         }
                     }
@@ -4208,7 +4206,7 @@ async fn process_identity_events(
                         }
 
                         if let Err(e) = this.remove_recipient(id, &did, true).await {
-                            warn!("Failed to remove {did} from conversation {id}: {e}");
+                            warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
                             continue;
                         }
 
@@ -4250,7 +4248,7 @@ async fn process_identity_events(
                 match conversation.conversation_type {
                     ConversationType::Direct => {
                         if let Err(e) = this.delete_conversation(id, true).await {
-                            warn!("Failed to delete conversation {id}: {e}");
+                            warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
                             continue;
                         }
                     }
@@ -4260,7 +4258,7 @@ async fn process_identity_events(
                         }
 
                         if let Err(e) = this.remove_recipient(id, &did, true).await {
-                            warn!("Failed to remove {did} from conversation {id}: {e}");
+                            warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
                             continue;
                         }
                     }
@@ -4288,7 +4286,7 @@ async fn process_request_response_event(
 
     let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
 
-    tracing::debug!(id = %conversation_id, ?event, "Event received");
+    tracing::debug!(%conversation_id, ?event, "Event received");
     match event {
         ConversationRequestResponse::Request {
             conversation_id,
@@ -4304,8 +4302,8 @@ async fn process_request_response_event(
                 }
 
                 if !conversation.recipients().contains(&payload.sender()) {
-                    warn!(
-                        "{} is not apart of conversation {conversation_id}",
+                    warn!(%conversation_id,
+                        "{} is not apart of conversation",
                         payload.sender()
                     );
                     return Err(Error::IdentityDoesntExist);
@@ -4323,7 +4321,7 @@ async fn process_request_response_event(
                         key
                     }
                     Err(e) => {
-                        error!("Error getting key from store: {e}");
+                        error!(%conversation_id, error = %e, "Error getting key from store");
                         return Err(e);
                     }
                 };
@@ -4349,9 +4347,9 @@ async fn process_request_response_event(
 
                 let bytes = payload.to_bytes()?;
 
-                tracing::trace!("Payload size: {} bytes", bytes.len());
+                tracing::trace!(%conversation_id, "Payload size: {} bytes", bytes.len());
 
-                tracing::info!("Responding to {sender}");
+                tracing::info!(%conversation_id, "Responding to {sender}");
 
                 if !peers.contains(&peer_id)
                     || (peers.contains(&peer_id)
@@ -4361,7 +4359,7 @@ async fn process_request_response_event(
                             .await
                             .is_err())
                 {
-                    warn!("Unable to publish to topic. Queuing event");
+                    warn!(%conversation_id, "Unable to publish to topic. Queuing event");
                     this.queue_event(
                         sender.clone(),
                         Queue::direct(
@@ -4376,7 +4374,7 @@ async fn process_request_response_event(
                 }
             }
             _ => {
-                tracing::info!("Unimplemented/Unsupported Event");
+                tracing::info!(%conversation_id, "Unimplemented/Unsupported Event");
             }
         },
         ConversationRequestResponse::Response {
@@ -4391,7 +4389,7 @@ async fn process_request_response_event(
                     ConversationType::Group { .. }
                 ) {
                     //Only group conversations support keys
-                    tracing::error!(id = ?conversation_id, "Invalid conversation type");
+                    tracing::error!(%conversation_id, "Invalid conversation type");
                     return Err(Error::InvalidConversation);
                 }
 
@@ -4413,7 +4411,7 @@ async fn process_request_response_event(
                 }
             }
             _ => {
-                tracing::info!("Unimplemented/Unsupported Event");
+                tracing::info!(%conversation_id, "Unimplemented/Unsupported Event");
             }
         },
     }
