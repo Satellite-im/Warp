@@ -1352,10 +1352,10 @@ impl ConversationTask {
             }
         }
 
+        let conversation_id = conversation.id();
+
         self.event
-            .emit(RayGunEventKind::ConversationCreated {
-                conversation_id: conversation.id(),
-            })
+            .emit(RayGunEventKind::ConversationCreated { conversation_id })
             .await;
 
         Ok(Conversation::from(&conversation))
@@ -1581,19 +1581,19 @@ impl ConversationTask {
 
         let bytes = match conversation.conversation_type {
             ConversationType::Direct => {
-                let Some(recipient) = conversation
-                    .recipients()
+                let list = conversation.recipients();
+
+                let recipients = list
                     .iter()
-                    .filter(|did| own_did.ne(did))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .first()
-                    .cloned()
-                else {
+                    .filter(|did| (*self.keypair).ne(did))
+                    .collect::<Vec<_>>();
+
+                let Some(member) = recipients.first() else {
                     tracing::warn!(id = %id, "participant is not in conversation");
                     return Err(Error::IdentityDoesntExist);
                 };
-                ecdh_decrypt(own_did, Some(&recipient), data.data())?
+
+                ecdh_decrypt(own_did, Some(member), data.data())?
             }
             ConversationType::Group { .. } => {
                 let store = self.get_keystore(id).await?;
@@ -1990,7 +1990,7 @@ impl ConversationTask {
         message.set_modified(modified);
 
         let event = MessagingEvents::Edit {
-            conversation_id: conversation.id(),
+            conversation_id,
             message_id,
             modified,
             lines: messages,
@@ -2128,7 +2128,7 @@ impl ConversationTask {
         let tx = self.subscribe(conversation_id).await?;
 
         let event = MessagingEvents::Delete {
-            conversation_id: conversation.id(),
+            conversation_id,
             message_id,
         };
 
@@ -3166,11 +3166,10 @@ impl ConversationTask {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let conversation = self.get(conversation_id).await?;
         let own_did = &*self.keypair;
 
         let event = MessagingEvents::Event {
-            conversation_id: conversation.id(),
+            conversation_id,
             member: own_did.clone(),
             event,
             cancelled: false,
@@ -3183,11 +3182,10 @@ impl ConversationTask {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let conversation = self.get(conversation_id).await?;
         let own_did = &*self.keypair;
 
         let event = MessagingEvents::Event {
-            conversation_id: conversation.id(),
+            conversation_id,
             member: own_did.clone(),
             event,
             cancelled: true,
@@ -3240,6 +3238,7 @@ impl ConversationTask {
         let Some(creator) = &conversation.creator else {
             return Err(Error::InvalidConversation);
         };
+
         if creator != own_did {
             return Err(Error::PublicKeyInvalid);
         }
