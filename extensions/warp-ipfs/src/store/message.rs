@@ -1302,7 +1302,6 @@ impl ConversationTask {
 
         self.create_conversation_task(convo_id).await?;
 
-
         let peer_id_list = recipient
             .iter()
             .filter(|did| own_did.ne(did))
