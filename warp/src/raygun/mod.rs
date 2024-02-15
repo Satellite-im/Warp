@@ -489,8 +489,10 @@ pub struct DirectConversationSettings {}
 #[repr(C)]
 pub struct GroupSettings {
     // Everyone can add participants, if set to `true``.
+    #[serde(default)]
     members_can_add_participants: bool,
     // Everyone can change the name of the group.
+    #[serde(default)]
     members_can_change_name: bool,
 }
 
