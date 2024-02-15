@@ -309,24 +309,6 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
     Ok(did.into())
 }
 
-pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
-    did: &DID,
-    recipient: Option<&DID>,
-    data: K,
-) -> Result<Vec<u8>, Error> {
-    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
-    let did_pubkey = match recipient {
-        Some(did) => did.public_key_bytes(),
-        None => did.public_key_bytes(),
-    };
-
-    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
-    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
-
-    Ok(data)
-}
-
 pub(crate) fn ecdh_shared_key(did: &DID, recipient: Option<&DID>) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
@@ -340,19 +322,23 @@ pub(crate) fn ecdh_shared_key(did: &DID, recipient: Option<&DID>) -> Result<Vec<
     Ok(prik)
 }
 
+pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
+    let prik = Zeroizing::new(ecdh_shared_key(did, recipient)?);
+    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
+}
+
 pub(crate) fn ecdh_decrypt<K: AsRef<[u8]>>(
     did: &DID,
     recipient: Option<&DID>,
     data: K,
 ) -> Result<Vec<u8>, Error> {
-    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
-    let did_pubkey = match recipient {
-        Some(did) => did.public_key_bytes(),
-        None => did.public_key_bytes(),
-    };
-
-    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let prik = Zeroizing::new(ecdh_shared_key(did, recipient)?);
     let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
 
     Ok(data)
