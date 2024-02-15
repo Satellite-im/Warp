@@ -334,47 +334,252 @@ impl Ord for MessagePage {
     }
 }
 
-#[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
+#[serde(rename_all = "snake_case")]
 #[repr(C)]
-pub enum ConversationType {
+pub enum Conversation {
     #[display(fmt = "direct")]
-    Direct,
+    Direct(DirectConversation),
     #[display(fmt = "group")]
-    Group,
+    Group(GroupConversation),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
-pub struct Conversation {
-    id: Uuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-    creator: Option<DID>,
-    created: DateTime<Utc>,
-    modified: DateTime<Utc>,
-    conversation_type: ConversationType,
-    settings: ConversationSettings,
-    recipients: Vec<DID>,
-}
+impl Conversation {
+    pub fn id(&self) -> Uuid {
+        self.common().id
+    }
 
-impl core::hash::Hash for Conversation {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
+    pub fn name(&self) -> Option<&String> {
+        self.common().name.as_ref()
+    }
+
+    pub fn creator(&self) -> Option<&DID> {
+        self.common().creator.as_ref()
+    }
+
+    pub fn created(&self) -> DateTime<Utc> {
+        self.common().created
+    }
+
+    pub fn modified(&self) -> DateTime<Utc> {
+        self.common().modified
+    }
+
+    pub fn settings(&self) -> ConversationSettings {
+        match self {
+            Conversation::Direct(direct) => ConversationSettings::Direct(direct.settings),
+            Conversation::Group(group) => ConversationSettings::Group(group.settings),
+        }
+    }
+
+    pub fn recipients(&self) -> &[DID] {
+        &self.common().recipients
+    }
+
+    fn common(&self) -> &ConversationCommon {
+        match self {
+            Conversation::Direct(direct) => &direct.common,
+            Conversation::Group(group) => &group.common,
+        }
     }
 }
 
-impl PartialEq for Conversation {
-    fn eq(&self, other: &Self) -> bool {
-        self.id.eq(&other.id)
+impl Conversation {
+    pub fn set_id(mut self, id: Uuid) -> Self {
+        self.common_mut().id = id;
+
+        self
+    }
+
+    pub fn id_mut(&mut self) -> &mut Uuid {
+        &mut self.common_mut().id
+    }
+
+    pub fn set_name(mut self, name: Option<String>) -> Self {
+        self.common_mut().name = name;
+
+        self
+    }
+
+    pub fn name_mut(&mut self) -> &mut Option<String> {
+        &mut self.common_mut().name
+    }
+
+    pub fn set_creator(mut self, creator: Option<DID>) -> Self {
+        self.common_mut().creator = creator;
+
+        self
+    }
+
+    pub fn creator_mut(&mut self) -> &mut Option<DID> {
+        &mut self.common_mut().creator
+    }
+
+    pub fn set_created(mut self, created: DateTime<Utc>) -> Self {
+        self.common_mut().created = created;
+
+        self
+    }
+
+    pub fn created_mut(&mut self) -> &mut DateTime<Utc> {
+        &mut self.common_mut().created
+    }
+
+    pub fn set_modified(mut self, modified: DateTime<Utc>) -> Self {
+        self.common_mut().modified = modified;
+
+        self
+    }
+
+    pub fn modified_mut(&mut self) -> &mut DateTime<Utc> {
+        &mut self.common_mut().modified
+    }
+
+    pub fn set_recipients(mut self, recipients: Vec<DID>) -> Self {
+        self.common_mut().recipients = recipients;
+
+        self
+    }
+
+    pub fn add_recipient(mut self, recipient: DID) -> Self {
+        self.common_mut().recipients.push(recipient);
+
+        self
+    }
+
+    pub fn recipients_mut(&mut self) -> &mut Vec<DID> {
+        &mut self.common_mut().recipients
+    }
+
+    fn common_mut(&mut self) -> &mut ConversationCommon {
+        match self {
+            Conversation::Direct(direct) => &mut direct.common,
+            Conversation::Group(group) => &mut group.common,
+        }
     }
 }
 
 impl Default for Conversation {
     fn default() -> Self {
+        Self::Direct(DirectConversation::default())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
+pub struct DirectConversation {
+    #[serde(flatten)]
+    common: ConversationCommon,
+    settings: DirectConversationSettings,
+}
+
+impl DirectConversation {
+    pub fn settings(&self) -> DirectConversationSettings {
+        self.settings
+    }
+
+    pub fn set_settings(mut self, settings: DirectConversationSettings) -> Self {
+        self.settings = settings;
+
+        self
+    }
+
+    pub fn settings_mut(&mut self) -> &mut DirectConversationSettings {
+        &mut self.settings
+    }
+}
+
+impl core::hash::Hash for DirectConversation {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.common.hash(state);
+    }
+}
+
+impl PartialEq for DirectConversation {
+    fn eq(&self, other: &Self) -> bool {
+        self.common.eq(&other.common)
+    }
+}
+
+impl Default for DirectConversation {
+    fn default() -> Self {
+        let common = ConversationCommon::default();
+        let settings = DirectConversationSettings::default();
+        Self { common, settings }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
+pub struct GroupConversation {
+    #[serde(flatten)]
+    common: ConversationCommon,
+    settings: GroupSettings,
+}
+
+impl GroupConversation {
+    pub fn settings(&self) -> GroupSettings {
+        self.settings
+    }
+
+    pub fn set_settings(mut self, settings: GroupSettings) -> Self {
+        self.settings = settings;
+
+        self
+    }
+
+    pub fn settings_mut(&mut self) -> &mut GroupSettings {
+        &mut self.settings
+    }
+}
+
+impl core::hash::Hash for GroupConversation {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.common.hash(state);
+    }
+}
+
+impl PartialEq for GroupConversation {
+    fn eq(&self, other: &Self) -> bool {
+        self.common.eq(&other.common)
+    }
+}
+
+impl Default for GroupConversation {
+    fn default() -> Self {
+        let common = ConversationCommon::default();
+        let settings = GroupSettings::default();
+        Self { common, settings }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
+struct ConversationCommon {
+    id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    creator: Option<DID>,
+    created: DateTime<Utc>,
+    modified: DateTime<Utc>,
+    recipients: Vec<DID>,
+}
+
+impl core::hash::Hash for ConversationCommon {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for ConversationCommon {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+impl Default for ConversationCommon {
+    fn default() -> Self {
         let id = Uuid::new_v4();
         let name = None;
         let creator = None;
-        let conversation_type = ConversationType::Direct;
         let recipients = Vec::new();
         let timestamp = Utc::now();
         Self {
@@ -383,78 +588,8 @@ impl Default for Conversation {
             creator,
             created: timestamp,
             modified: timestamp,
-            conversation_type,
-            settings: ConversationSettings::default(),
             recipients,
         }
-    }
-}
-
-impl Conversation {
-    pub fn id(&self) -> Uuid {
-        self.id
-    }
-
-    pub fn name(&self) -> Option<String> {
-        self.name.clone()
-    }
-
-    pub fn creator(&self) -> Option<DID> {
-        self.creator.clone()
-    }
-
-    pub fn created(&self) -> DateTime<Utc> {
-        self.created
-    }
-
-    pub fn modified(&self) -> DateTime<Utc> {
-        self.modified
-    }
-
-    pub fn conversation_type(&self) -> ConversationType {
-        self.conversation_type
-    }
-
-    pub fn settings(&self) -> ConversationSettings {
-        self.settings
-    }
-
-    pub fn recipients(&self) -> Vec<DID> {
-        self.recipients.clone()
-    }
-}
-
-impl Conversation {
-    pub fn set_id(&mut self, id: Uuid) {
-        self.id = id;
-    }
-
-    pub fn set_name(&mut self, name: Option<String>) {
-        self.name = name;
-    }
-
-    pub fn set_creator(&mut self, creator: Option<DID>) {
-        self.creator = creator;
-    }
-
-    pub fn set_created(&mut self, created: DateTime<Utc>) {
-        self.created = created;
-    }
-
-    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
-        self.modified = modified;
-    }
-
-    pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
-        self.conversation_type = conversation_type;
-    }
-
-    pub fn set_settings(&mut self, settings: ConversationSettings) {
-        self.settings = settings;
-    }
-
-    pub fn set_recipients(&mut self, recipients: Vec<DID>) {
-        self.recipients = recipients;
     }
 }
 
@@ -466,12 +601,6 @@ pub enum ConversationSettings {
     Direct(DirectConversationSettings),
     #[display(fmt = "group settings {{ {_0} }}")]
     Group(GroupSettings),
-}
-
-impl Default for ConversationSettings {
-    fn default() -> Self {
-        Self::Direct(DirectConversationSettings::default())
-    }
 }
 
 /// Settings for a direct conversation.

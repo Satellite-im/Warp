@@ -14,9 +14,9 @@ use warp::{
     crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{
-        Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
-        GroupSettings, Message, MessageOptions, MessagePage, MessageReference, Messages,
-        MessagesType,
+        Conversation, ConversationSettings, DirectConversation, DirectConversationSettings,
+        GroupConversation, GroupSettings, Message, MessageOptions, MessagePage, MessageReference,
+        Messages, MessagesType,
     },
 };
 
@@ -43,7 +43,6 @@ pub struct ConversationDocument {
     pub creator: Option<DID>,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
-    pub conversation_type: ConversationType,
     pub settings: ConversationSettings,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
@@ -127,7 +126,6 @@ impl ConversationDocument {
         mut recipients: Vec<DID>,
         restrict: Vec<DID>,
         id: Option<Uuid>,
-        conversation_type: ConversationType,
         settings: ConversationSettings,
         created: Option<DateTime<Utc>>,
         modified: Option<DateTime<Utc>>,
@@ -202,7 +200,6 @@ impl ConversationDocument {
             recipients.to_vec(),
             vec![],
             conversation_id,
-            ConversationType::Direct,
             ConversationSettings::Direct(settings),
             None,
             None,
@@ -225,7 +222,6 @@ impl ConversationDocument {
             recipients.to_vec(),
             restrict.to_vec(),
             conversation_id,
-            ConversationType::Group,
             ConversationSettings::Group(settings),
             None,
             None,
@@ -237,11 +233,13 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        if let ConversationSettings::Group(settings) = self.settings {
-            assert_eq!(self.conversation_type, ConversationType::Group);
-            let Some(creator) = self.creator.clone() else {
-                return Err(Error::PublicKeyInvalid);
-            };
+        let settings = match self.conversation.settings() {
+            ConversationSettings::Group(settings) => settings,
+            ConversationSettings::Direct(_) => return Ok(()),
+        };
+        let Some(creator) = self.conversation.creator() else {
+            return Err(Error::PublicKeyInvalid);
+        };
 
             if !settings.members_can_add_participants() && !creator.eq(did) {
                 return Err(Error::PublicKeyInvalid);
@@ -278,11 +276,13 @@ impl ConversationDocument {
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        if let ConversationSettings::Group(settings) = self.settings {
-            assert_eq!(self.conversation_type, ConversationType::Group);
-            let Some(creator) = &self.creator else {
-                return Err(Error::PublicKeyInvalid);
-            };
+        let settings = match self.conversation.settings() {
+            ConversationSettings::Group(settings) => settings,
+            ConversationSettings::Direct(_) => return Ok(()),
+        };
+        let Some(creator) = self.conversation.creator() else {
+            return Err(Error::PublicKeyInvalid);
+        };
 
             let Some(signature) = &self.signature else {
                 return Err(Error::InvalidSignature);

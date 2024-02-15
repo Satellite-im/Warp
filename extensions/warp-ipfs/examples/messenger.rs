@@ -357,12 +357,18 @@ async fn main() -> anyhow::Result<()> {
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    let username = get_username(&*new_account,  recipient).await;
+                                    let username = get_username(&*new_account, recipient.clone()).await;
                                     recipients.push(username);
                                 }
                                 let created = convo.created();
                                 let modified = convo.modified();
-                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), created.to_string(), modified.to_string(), recipients.join(",").to_string()]);
+                                table.add_row(vec![
+                                    convo.name().map(ToOwned::to_owned).unwrap_or_default(),
+                                    convo.id().to_string(),
+                                    created.to_string(),
+                                    modified.to_string(),
+                                    recipients.join(",").to_string(),
+                                ]);
                             }
                             writeln!(stdout, "{table}")?;
                         },
