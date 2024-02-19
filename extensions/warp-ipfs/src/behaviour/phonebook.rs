@@ -279,8 +279,7 @@ impl NetworkBehaviour for Behaviour {
 
                     let _ = response.send(Ok(()));
                 }
-                Poll::Ready(None) => unreachable!("Channels are owned"),
-                Poll::Pending => break,
+                Poll::Ready(None) | Poll::Pending => break,
             }
         }
 
