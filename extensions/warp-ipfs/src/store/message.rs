@@ -25,7 +25,7 @@ use warp::crypto::{generate, DID};
 use warp::error::Error;
 use warp::multipass::MultiPassEventKind;
 use warp::raygun::{
-    AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType,
+    AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
     DirectConversationSettings, EmbedState, GroupSettings, Location, Message, MessageEvent,
     MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
     MessagesType, PinState, RayGunEventKind, ReactionState,
@@ -247,14 +247,14 @@ impl MessageStore {
                 for doc in list.iter().filter(|c| c.recipients().contains(&did)) {
                     let conversation = &doc.conversation;
                     let id = conversation.id();
-                    match conversation.conversation_type() {
-                        ConversationType::Direct => {
+                    match conversation {
+                        Conversation::Direct(_) => {
                             if let Err(e) = self.delete_conversation(id, true).await {
                                 warn!("Failed to delete conversation {id}: {e}");
                                 continue;
                             }
                         }
-                        ConversationType::Group { .. } => {
+                        Conversation::Group(_) => {
                             if conversation.creator() != Some(&*self.did) {
                                 continue;
                             }
@@ -283,7 +283,7 @@ impl MessageStore {
                             .map(|creator| own_did.eq(creator))
                             .unwrap_or_default()
                     })
-                    .filter(|d| d.conversation.conversation_type() == ConversationType::Group)
+                    .filter(|d| matches!(d.conversation, Conversation::Group(_)))
                     .filter(|d| d.restrict.contains(&did))
                 {
                     let id = conversation.id();
@@ -300,14 +300,14 @@ impl MessageStore {
                 for doc in list.iter().filter(|c| c.recipients().contains(&did)) {
                     let conversation = &doc.conversation;
                     let id = conversation.id();
-                    match conversation.conversation_type() {
-                        ConversationType::Direct => {
+                    match conversation {
+                        Conversation::Direct(_) => {
                             if let Err(e) = self.delete_conversation(id, true).await {
                                 warn!("Failed to delete conversation {id}: {e}");
                                 continue;
                             }
                         }
-                        ConversationType::Group => {
+                        Conversation::Group(_) => {
                             if conversation.creator() != Some(&*self.did) {
                                 continue;
                             }
@@ -336,11 +336,11 @@ impl MessageStore {
             async move {
                 let did = store.did.clone();
 
-                let (topic, conversation_type) = store
+                let (topic, conversation) = store
                     .conversations
                     .get(conversation_id)
                     .await
-                    .map(|doc| (doc.event_topic(), doc.conversation.conversation_type()))
+                    .map(|doc| (doc.event_topic(), doc.conversation))
                     .expect("Conversation exist");
 
                 let stream = store
@@ -368,9 +368,10 @@ impl MessageStore {
                     let bytes = {
                         let own_did = &*did;
                         let store = store.clone();
+                        let conversation = conversation.clone();
                         async move {
-                            match conversation_type {
-                                ConversationType::Direct => {
+                            match conversation {
+                                Conversation::Direct(_) => {
                                     let recipient = store
                                         .conversations
                                         .get(conversation_id)
@@ -385,7 +386,7 @@ impl MessageStore {
                                         .ok_or(Error::InvalidConversation)?;
                                     ecdh_decrypt(own_did, Some(&recipient), payload.data())
                                 }
-                                ConversationType::Group { .. } => {
+                                Conversation::Group(_) => {
                                     let keystore =
                                         store.conversation_keystore(conversation_id).await?;
                                     let key = keystore.get_latest(own_did, &payload.sender())?;
@@ -514,10 +515,7 @@ impl MessageStore {
                                     .await
                                     .expect("Conversation exist");
 
-                                if !matches!(
-                                    conversation.conversation.conversation_type(),
-                                    ConversationType::Group,
-                                ) {
+                                if !matches!(conversation.conversation, Conversation::Group(_)) {
                                     //Only group conversations support keys
                                     continue;
                                 }
@@ -647,10 +645,7 @@ impl MessageStore {
                                     continue;
                                 };
 
-                                if !matches!(
-                                    conversation.conversation.conversation_type(),
-                                    ConversationType::Group,
-                                ) {
+                                if !matches!(conversation.conversation, Conversation::Group(_)) {
                                     //Only group conversations support keys
                                     tracing::error!(id = ?conversation_id, "Invalid conversation type");
                                     continue;
@@ -790,8 +785,8 @@ impl MessageStore {
 
                             let conversation = store.conversations.get(conversation_id).await.expect("Conversation exist");
 
-                            let bytes_results = match conversation.conversation.conversation_type() {
-                                ConversationType::Direct => {
+                            let bytes_results = match conversation.conversation {
+                                Conversation::Direct(_) => {
                                     let Some(recipient) = conversation
                                         .recipients()
                                         .iter()
@@ -805,7 +800,7 @@ impl MessageStore {
                                         };
                                     ecdh_decrypt(own_did, Some(&recipient), data.data())
                                 }
-                                ConversationType::Group => {
+                                Conversation::Group(_) => {
                                     let key = match store.conversation_keystore(conversation_id).await.and_then(|store| store.get_latest(own_did, &data.sender())) {
                                         Ok(key) => key,
                                         Err(e) => {
@@ -868,9 +863,9 @@ impl MessageStore {
 
         let mut document = self.conversations.get(conversation_id).await?;
 
-        let keystore = match document.conversation.conversation_type() {
-            ConversationType::Direct => None,
-            ConversationType::Group => self.conversation_keystore(conversation_id).await.ok(),
+        let keystore = match document.conversation {
+            Conversation::Direct(_) => None,
+            Conversation::Group(_) => self.conversation_keystore(conversation_id).await.ok(),
         };
 
         match events.clone() {
@@ -1421,11 +1416,7 @@ impl MessageStore {
 
                 let convo = ConversationDocument::new_direct(did, list, settings)?;
 
-                info!(
-                    "{} conversation created: {}",
-                    convo.conversation.conversation_type(),
-                    id
-                );
+                info!("{} conversation created: {}", convo.conversation, id);
 
                 let topic = convo.topic();
 
@@ -1472,8 +1463,6 @@ impl MessageStore {
 
                 info!(%conversation_id, "Creating group conversation");
 
-                let conversation_type = doc.conversation.conversation_type();
-
                 let mut keystore = Keystore::new(conversation_id);
                 keystore.insert(did, did, warp::crypto::generate::<64>())?;
 
@@ -1499,7 +1488,7 @@ impl MessageStore {
 
                 let doc = self.conversations.get(conversation_id).await?;
 
-                info!(%conversation_id,"{} conversation created", conversation_type);
+                info!(%conversation_id,"{} conversation created", doc.conversation);
 
                 for recipient in doc.conversation.recipients().iter().filter(|d| did.ne(d)) {
                     if let Err(e) = self.request_key(conversation_id, recipient).await {
@@ -1519,7 +1508,7 @@ impl MessageStore {
                 let doc = self.conversations.get(conversation_id).await?;
                 let conversation = &doc.conversation;
 
-                if !matches!(conversation.conversation_type(), ConversationType::Group,) {
+                if !matches!(conversation, Conversation::Group(_)) {
                     return Err(anyhow::anyhow!("Can only leave from a group conversation"));
                 }
 
@@ -1591,14 +1580,9 @@ impl MessageStore {
                 match self.conversations.get(conversation_id).await {
                     Ok(doc)
                         if doc.conversation.recipients().contains(&sender)
-                            && matches!(
-                                doc.conversation.conversation_type(),
-                                ConversationType::Direct
-                            )
-                            || matches!(
-                                doc.conversation.conversation_type(),
-                                ConversationType::Group
-                            ) && matches!(doc.conversation.creator(), Some(creator) if creator.eq(&sender)) =>
+                            && matches!(doc.conversation, Conversation::Direct(_))
+                            || matches!(doc.conversation, Conversation::Group(_))
+                                && matches!(doc.conversation.creator(), Some(creator) if creator.eq(&sender)) =>
                     {
                         doc
                     }
@@ -1724,7 +1708,7 @@ impl MessageStore {
             .unwrap_or_default()
             .iter()
             .find(|conversation| {
-                conversation.conversation_type() == ConversationType::Direct
+                matches!(conversation, Conversation::Direct(_))
                     && conversation.recipients().contains(did_key)
                     && conversation.recipients().contains(own_did)
             })
@@ -1964,10 +1948,7 @@ impl MessageStore {
 
             let mut can_broadcast = true;
 
-            if matches!(
-                document_type.conversation.conversation_type(),
-                ConversationType::Group,
-            ) {
+            if matches!(document_type.conversation, Conversation::Group(_)) {
                 let own_did = &*self.did;
                 let creator = document_type
                     .conversation
@@ -2196,9 +2177,9 @@ impl MessageStore {
         message_id: Uuid,
     ) -> Result<Message, Error> {
         let doc = self.conversations.get(conversation_id).await?;
-        let keystore = match doc.conversation.conversation_type() {
-            ConversationType::Direct => None,
-            ConversationType::Group => self.conversation_keystore(doc.conversation.id()).await.ok(),
+        let keystore = match doc.conversation {
+            Conversation::Direct(_) => None,
+            Conversation::Group(_) => self.conversation_keystore(doc.conversation.id()).await.ok(),
         };
         doc.get_message(&self.ipfs, &self.did, message_id, keystore.as_ref())
             .await
@@ -2241,7 +2222,7 @@ impl MessageStore {
         let doc = self.conversations.get(conversation_id).await?;
         let conversation = &doc.conversation;
 
-        if matches!(conversation.conversation_type(), ConversationType::Group,) {
+        if matches!(conversation, Conversation::Group(_)) {
             //TODO: Handle message status for group
             return Err(Error::Unimplemented);
         }
@@ -2287,11 +2268,9 @@ impl MessageStore {
     ) -> Result<Messages, Error> {
         let doc = self.conversations.get(conversation).await?;
         let conversation = &doc.conversation;
-        let keystore = match conversation.conversation_type() {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => {
-                self.conversation_keystore(conversation.id()).await.ok()
-            }
+        let keystore = match conversation {
+            Conversation::Direct(_) => None,
+            Conversation::Group(_) => self.conversation_keystore(conversation.id()).await.ok(),
         };
 
         let m_type = opt.messages_type();
@@ -2379,10 +2358,6 @@ impl MessageStore {
             Conversation::Group(group) => group.settings(),
             Conversation::Direct(_) => return Err(Error::InvalidConversation),
         };
-        assert_eq!(
-            doc.conversation.conversation_type(),
-            ConversationType::Group
-        );
 
         let Some(creator) = doc.conversation.creator().clone() else {
             return Err(Error::InvalidConversation);
@@ -2427,10 +2402,6 @@ impl MessageStore {
             Conversation::Group(group) => group.settings(),
             Conversation::Direct(_) => return Err(Error::InvalidConversation),
         };
-        assert_eq!(
-            doc.conversation.conversation_type(),
-            ConversationType::Group
-        );
 
         let Some(creator) = doc.conversation.creator().clone() else {
             return Err(Error::InvalidConversation);
@@ -2496,10 +2467,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let mut doc = self.conversations.get(conversation_id).await?;
 
-        if matches!(
-            doc.conversation.conversation_type(),
-            ConversationType::Direct
-        ) {
+        if matches!(doc.conversation, Conversation::Direct(_)) {
             return Err(Error::InvalidConversation);
         }
 
@@ -2555,10 +2523,7 @@ impl MessageStore {
     async fn add_restricted(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<(), Error> {
         let mut doc = self.conversations.get(conversation_id).await?;
 
-        if matches!(
-            doc.conversation.conversation_type(),
-            ConversationType::Direct
-        ) {
+        if matches!(doc.conversation, Conversation::Direct(_)) {
             return Err(Error::InvalidConversation);
         }
 
@@ -2608,10 +2573,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let mut doc = self.conversations.get(conversation_id).await?;
 
-        if matches!(
-            doc.conversation.conversation_type(),
-            ConversationType::Direct
-        ) {
+        if matches!(doc.conversation, Conversation::Direct(_)) {
             return Err(Error::InvalidConversation);
         }
 
@@ -3412,8 +3374,8 @@ impl MessageStore {
 
         let event = serde_json::to_vec(&event)?;
 
-        let bytes = match conversation.conversation_type() {
-            ConversationType::Direct => {
+        let bytes = match conversation {
+            Conversation::Direct(_) => {
                 let recipient = conversation
                     .recipients()
                     .iter()
@@ -3425,7 +3387,7 @@ impl MessageStore {
                     .ok_or(Error::InvalidConversation)?;
                 ecdh_encrypt(own_did, Some(&recipient), &event)?
             }
-            ConversationType::Group => {
+            Conversation::Group(_) => {
                 let keystore = self.conversation_keystore(conversation.id()).await?;
                 let key = keystore.get_latest(own_did, own_did)?;
                 Cipher::direct_encrypt(&event, &key)?
@@ -3463,8 +3425,8 @@ impl MessageStore {
 
         let event = serde_json::to_vec(&event)?;
 
-        let bytes = match conversation.conversation_type() {
-            ConversationType::Direct => {
+        let bytes = match conversation {
+            Conversation::Direct(_) => {
                 let recipient = conversation
                     .recipients()
                     .iter()
@@ -3476,7 +3438,7 @@ impl MessageStore {
                     .ok_or(Error::InvalidConversation)?;
                 ecdh_encrypt(own_did, Some(&recipient), &event)?
             }
-            ConversationType::Group => {
+            Conversation::Group(_) => {
                 let keystore = self.conversation_keystore(conversation.id()).await?;
                 let key = keystore.get_latest(own_did, own_did)?;
                 Cipher::direct_encrypt(&event, &key)?

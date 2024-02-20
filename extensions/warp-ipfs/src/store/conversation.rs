@@ -14,9 +14,9 @@ use warp::{
     crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{
-        Conversation, ConversationSettings, ConversationType, DirectConversation,
-        DirectConversationSettings, GroupConversation, GroupSettings, Message, MessageOptions,
-        MessagePage, MessageReference, Messages, MessagesType,
+        Conversation, ConversationSettings, DirectConversation, DirectConversationSettings,
+        GroupConversation, GroupSettings, Message, MessageOptions, MessagePage, MessageReference,
+        Messages, MessagesType,
     },
 };
 
@@ -71,7 +71,7 @@ impl ConversationDocument {
     }
 
     pub fn topic(&self) -> String {
-        format!("{}/{}", self.conversation.conversation_type(), self.id())
+        format!("{}/{}", self.conversation, self.id())
     }
 
     pub fn event_topic(&self) -> String {
@@ -196,13 +196,7 @@ impl ConversationDocument {
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
         let settings = match self.conversation.settings() {
-            ConversationSettings::Group(settings) => {
-                assert_eq!(
-                    self.conversation.conversation_type(),
-                    ConversationType::Group
-                );
-                settings
-            }
+            ConversationSettings::Group(settings) => settings,
             ConversationSettings::Direct(_) => return Ok(()),
         };
         let Some(creator) = self.conversation.creator().clone() else {
@@ -245,13 +239,7 @@ impl ConversationDocument {
 
     pub fn verify(&self) -> Result<(), Error> {
         let settings = match self.conversation.settings() {
-            ConversationSettings::Group(settings) => {
-                assert_eq!(
-                    self.conversation.conversation_type(),
-                    ConversationType::Group
-                );
-                settings
-            }
+            ConversationSettings::Group(settings) => settings,
             ConversationSettings::Direct(_) => return Ok(()),
         };
         let Some(creator) = self.conversation.creator() else {

@@ -334,16 +334,6 @@ impl Ord for MessagePage {
     }
 }
 
-#[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
-#[serde(rename_all = "lowercase")]
-#[repr(C)]
-pub enum ConversationType {
-    #[display(fmt = "direct")]
-    Direct,
-    #[display(fmt = "group")]
-    Group,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[serde(rename_all = "snake_case")]
 #[repr(C)]
@@ -373,13 +363,6 @@ impl Conversation {
 
     pub fn modified(&self) -> DateTime<Utc> {
         self.common().modified
-    }
-
-    pub fn conversation_type(&self) -> ConversationType {
-        match self {
-            Conversation::Direct(_) => ConversationType::Direct,
-            Conversation::Group(_) => ConversationType::Group,
-        }
     }
 
     pub fn settings(&self) -> ConversationSettings {

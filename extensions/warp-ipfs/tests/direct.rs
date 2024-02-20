@@ -8,8 +8,8 @@ mod test {
         constellation::Progression,
         multipass::MultiPassEventKind,
         raygun::{
-            AttachmentKind, ConversationType, Location, MessageEvent, MessageEventKind,
-            MessageType, PinState, RayGunEventKind, ReactionState,
+            AttachmentKind, Conversation, Location, MessageEvent, MessageEventKind, MessageType,
+            PinState, RayGunEventKind, ReactionState,
         },
     };
 
@@ -56,7 +56,7 @@ mod test {
         assert_eq!(id_a, id_b);
 
         let conversation = chat_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.conversation_type(), ConversationType::Direct);
+        assert!(matches!(conversation, Conversation::Direct(_)));
         assert_eq!(conversation.recipients().len(), 2);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
@@ -985,7 +985,7 @@ mod test {
         assert_eq!(id_a, id_b);
 
         let conversation = chat_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.conversation_type(), ConversationType::Direct);
+        assert!(matches!(conversation, Conversation::Direct(_)));
         assert_eq!(conversation.recipients().len(), 2);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));

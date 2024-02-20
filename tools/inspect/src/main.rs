@@ -146,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
         table.add_row(vec![
             convo.id().to_string(),
             convo.name().map(ToOwned::to_owned).unwrap_or_default(),
-            convo.conversation_type().to_string(),
+            convo.to_string(),
             recipients.join(", "),
             count.to_string(),
         ]);

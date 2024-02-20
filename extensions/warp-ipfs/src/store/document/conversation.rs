@@ -19,7 +19,7 @@ use uuid::Uuid;
 use warp::{
     crypto::DID,
     error::Error,
-    raygun::{ConversationType, MessageEventKind},
+    raygun::{Conversation, MessageEventKind},
 };
 
 use crate::store::{conversation::ConversationDocument, keystore::Keystore};
@@ -397,11 +397,7 @@ impl ConversationTask {
 
     async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
         if let Some(creator) = document.conversation.creator() {
-            if creator.eq(&self.keypair)
-                && matches!(
-                    document.conversation.conversation_type(),
-                    ConversationType::Group,
-                )
+            if creator.eq(&self.keypair) && matches!(document.conversation, Conversation::Group(_))
             {
                 document.sign(&self.keypair)?;
             }
