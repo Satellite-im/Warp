@@ -1056,10 +1056,12 @@ impl ConversationTask {
                         }
                     };
 
-                    let data = match ecdh_decrypt(&self.keypair, Some(&payload.sender()), payload.data()) {
+                    let sender = payload.sender();
+
+                    let data = match ecdh_decrypt(&self.keypair, Some(&sender), payload.data()) {
                         Ok(d) => d,
                         Err(e) => {
-                            tracing::warn!("Failed to decrypt message from {}: {e}", payload.sender());
+                            tracing::warn!(%sender, error = %e, "failed to decrypt message");
                             continue;
                         }
                     };
@@ -1067,13 +1069,13 @@ impl ConversationTask {
                     let events = match serde_json::from_slice::<ConversationEvents>(&data) {
                         Ok(ev) => ev,
                         Err(e) => {
-                            tracing::warn!("Failed to parse message: {e}");
+                            tracing::warn!(%sender, error = %e, "failed to parse message");
                             continue;
                         }
                     };
 
                     if let Err(e) = process_conversation(self, payload, events).await {
-                        tracing::error!("Error processing conversation: {e}");
+                        tracing::error!(%sender, error = %e, "error processing conversation");
                     }
                 }
                 Some(item) = self.topic_stream.next() => {
@@ -4064,7 +4066,7 @@ async fn message_event(
                     this.set_document(conversation).await?;
 
                     if let Err(e) = this.request_key(conversation_id, &did).await {
-                        error!("Error requesting key: {e}");
+                        tracing::error!(%conversation_id, error = %e, "error requesting key");
                     }
 
                     if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
@@ -4246,7 +4248,7 @@ async fn process_identity_events(
                 match conversation.conversation_type {
                     ConversationType::Direct => {
                         if let Err(e) = this.delete_conversation(id, true).await {
-                            warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
+                            tracing::warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
                             continue;
                         }
                     }
@@ -4256,7 +4258,7 @@ async fn process_identity_events(
                         }
 
                         if let Err(e) = this.remove_recipient(id, &did, true).await {
-                            warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
+                            tracing::warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
                             continue;
                         }
                     }
@@ -4280,7 +4282,9 @@ async fn process_request_response_event(
 
     let payload = Payload::from_bytes(&req.data)?;
 
-    let data = ecdh_decrypt(&this.keypair, Some(&payload.sender()), payload.data())?;
+    let sender = payload.sender();
+
+    let data = ecdh_decrypt(&this.keypair, Some(&sender), payload.data())?;
 
     let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
 
@@ -4299,11 +4303,8 @@ async fn process_request_response_event(
                     return Err(Error::InvalidConversation);
                 }
 
-                if !conversation.recipients().contains(&payload.sender()) {
-                    warn!(%conversation_id,
-                        "{} is not apart of conversation",
-                        payload.sender()
-                    );
+                if !conversation.recipients().contains(&sender) {
+                    warn!(%conversation_id, %sender, "apart of conversation");
                     return Err(Error::IdentityDoesntExist);
                 }
 
@@ -4323,7 +4324,7 @@ async fn process_request_response_event(
                         return Err(e);
                     }
                 };
-                let sender = payload.sender();
+
                 let key = ecdh_encrypt(&this.keypair, Some(&sender), raw_key)?;
 
                 let response = ConversationRequestResponse::Response {
@@ -4380,8 +4381,6 @@ async fn process_request_response_event(
             kind,
         } => match kind {
             ConversationResponseKind::Key { key } => {
-                let sender = payload.sender();
-
                 if !matches!(
                     conversation.conversation_type,
                     ConversationType::Group { .. }
@@ -4445,7 +4444,6 @@ async fn process_pending_payload(this: &mut ConversationTask) {
         };
 
         for (sender, data) in list {
-            // Have a single block to try the functions so this whole scope does not error
             let fut = async {
                 let key = store.get_latest(&this.keypair, &sender)?;
                 let data = Cipher::direct_decrypt(&data, &key)?;
@@ -4502,7 +4500,7 @@ async fn process_conversation_event(
         };
 
         if let Err(e) = tx.send(ev) {
-            tracing::error!("Error broadcasting event: {e}");
+            tracing::error!(%conversation_id, error = %e, "error broadcasting event");
         }
     }
 
@@ -4539,7 +4537,7 @@ impl Queue {
 }
 
 //TODO: Replace
-async fn process_queue(this: &mut ConversationTask) -> anyhow::Result<()> {
+async fn process_queue(this: &mut ConversationTask) {
     let mut changed = false;
 
     for (did, items) in this.queue.iter_mut() {
@@ -4603,6 +4601,4 @@ async fn process_queue(this: &mut ConversationTask) -> anyhow::Result<()> {
     if changed {
         this.save_queue().await;
     }
-
-    Ok(())
 }
