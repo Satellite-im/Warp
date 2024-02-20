@@ -1088,7 +1088,6 @@ impl FileTask {
         let ipfs = self.ipfs.clone();
         //TODO: Recursively delete directory but for now only support deleting a file
         let directory = self.current_directory()?;
-        let _g = directory.signal_guard();
 
         let item = directory.get_item_by_path(name)?;
 
@@ -1132,7 +1131,6 @@ impl FileTask {
             None => self.current_directory()?,
         };
 
-        let _g = current_directory.signal_guard();
         if current_directory.has_item(new) {
             return Err(Error::DuplicateName);
         }
@@ -1152,7 +1150,6 @@ impl FileTask {
 
     async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
         let directory = self.current_directory()?;
-        let _g = directory.signal_guard();
 
         //Prevent creating recursive/nested directorieis if `recursive` isnt true
         if name.contains('/') && !recursive {
