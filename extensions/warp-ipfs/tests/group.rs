@@ -198,6 +198,9 @@ mod test {
         // Now a group which allows members to add participants.
         settings.set_members_can_add_participants(true);
         add_recipient_to_conversation_(settings).await?;
+        // Now a group which allows members to change the name as well.
+        settings.set_members_can_change_name(true);
+        add_recipient_to_conversation_(settings).await?;
 
         Ok(())
     }
@@ -286,7 +289,7 @@ mod test {
             // First attempt to add a recipient as a non-onwer should fail since the
             // settings don't allow it.
             assert!(ret.is_err());
-            // Second attempt to add a recipient as an onwer should work.
+            // Second attempt to add a recipient as an owner should work.
             chat_a.add_recipient(id_a, &did_d).await?;
         }
 
@@ -346,6 +349,18 @@ mod test {
             }
         })
         .await?;
+
+        let ret = chat_b.update_conversation_name(id_b, "test").await;
+        if settings.members_can_change_name() {
+            // Non-owner should be able to change the name.
+            ret?;
+        } else {
+            // First attempt to change the name as a non-onwer should fail since the
+            // settings don't allow it.
+            assert!(ret.is_err());
+            // Second attempt to change the name as an owner should work.
+            chat_a.update_conversation_name(id_a, "test").await?;
+        }
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(

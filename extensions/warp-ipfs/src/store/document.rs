@@ -7,13 +7,14 @@ pub mod root;
 
 use chrono::{DateTime, Utc};
 use futures::TryFutureExt;
-use ipfs::Ipfs;
+use ipfs::{Ipfs, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, str::FromStr};
 use uuid::Uuid;
 use warp::{
+    constellation::directory::Directory,
     crypto::{did_key::CoreSign, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus},
@@ -21,7 +22,7 @@ use warp::{
 
 use crate::store::get_keypair_did;
 
-use self::identity::IdentityDocument;
+use self::{files::DirectoryDocument, identity::IdentityDocument};
 
 use super::{identity::Request, keystore::Keystore};
 
@@ -33,6 +34,8 @@ pub struct ExtractedRootDocument {
     pub friends: Vec<DID>,
     pub block_list: Vec<DID>,
     pub block_by_list: Vec<DID>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_index: Option<Directory>,
     pub request: Vec<Request>,
     pub conversation_keystore: BTreeMap<Uuid, Keystore>,
     pub signature: Option<Vec<u8>>,
@@ -79,6 +82,9 @@ pub struct RootDocument {
     /// map of keystore for group chat conversations
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversations_keystore: Option<Cid>,
+    /// index to constellation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_index: Option<Cid>,
     /// Online/Away/Busy/Offline status
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
@@ -125,7 +131,11 @@ impl RootDocument {
     }
 
     #[tracing::instrument(skip(self, ipfs))]
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {
+    pub async fn resolve(
+        &self,
+        ipfs: &Ipfs,
+        keypair: Option<&Keypair>,
+    ) -> Result<ExtractedRootDocument, Error> {
         let document: IdentityDocument = ipfs
             .get_dag(self.identity)
             .local()
@@ -198,6 +208,21 @@ impl RootDocument {
                 .await
                 .unwrap_or_default();
 
+        // TODO: Uncomment when tying the files portion to shuttle
+        // let file_index = futures::future::ready(self.file_index.ok_or(Error::Other))
+        //     .and_then(|document| async move {
+        //         ipfs.get_dag(document)
+        //             .local()
+        //             .deserialized::<DirectoryDocument>()
+        //             .await
+        //             .map_err(Error::from)
+        //     })
+        //     .and_then(|document| async move { document.resolve(ipfs, false).await })
+        //     .await
+        //     .ok();
+
+        let file_index = None;
+
         let mut exported = ExtractedRootDocument {
             identity,
             created: self.created,
@@ -206,12 +231,13 @@ impl RootDocument {
             block_list,
             block_by_list,
             request,
+            file_index,
             conversation_keystore,
             signature: None,
         };
 
         let bytes = serde_json::to_vec(&exported)?;
-        let kp = ipfs.keypair()?;
+        let kp = keypair.unwrap_or_else(|| ipfs.keypair().expect("doesnt error"));
         let signature = kp.sign(&bytes).map_err(anyhow::Error::from)?;
 
         exported.signature = Some(signature);
@@ -262,6 +288,15 @@ impl RootDocument {
             })
             .flatten();
 
+        let file_index = futures::future::ready(data.file_index.ok_or(Error::Other))
+            .and_then(|root| async move {
+                let document = DirectoryDocument::new(ipfs, &root).await?;
+                let cid = ipfs.dag().put().serialize(document)?.await?;
+                Ok::<_, Error>(cid)
+            })
+            .await
+            .ok();
+
         let root_document = RootDocument {
             identity,
             created: data.created,
@@ -271,6 +306,7 @@ impl RootDocument {
             friends,
             blocks,
             block_by,
+            file_index,
             request,
             status: None,
             signature: None,
