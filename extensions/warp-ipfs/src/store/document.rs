@@ -237,7 +237,7 @@ impl RootDocument {
         };
 
         let bytes = serde_json::to_vec(&exported)?;
-        let kp = keypair.unwrap_or_else(|| ipfs.keypair().expect("doesnt error"));
+        let kp = keypair.unwrap_or_else(|| ipfs.keypair());
         let signature = kp.sign(&bytes).map_err(anyhow::Error::from)?;
 
         exported.signature = Some(signature);
@@ -247,14 +247,14 @@ impl RootDocument {
     pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
         data.verify()?;
 
-        let keypair = ipfs.keypair()?;
+        let keypair = ipfs.keypair();
         let did_kp = get_keypair_did(keypair)?;
 
         let document: IdentityDocument = data.identity.into();
 
         let document = document.sign(&did_kp)?;
 
-        let identity = ipfs.dag().put().serialize(document)?.await?;
+        let identity = ipfs.dag().put().serialize(document).await?;
         let has_friends = !data.friends.is_empty();
         let has_blocks = !data.block_list.is_empty();
         let has_block_by_list = !data.block_by_list.is_empty();
@@ -262,36 +262,36 @@ impl RootDocument {
         let has_keystore = !data.conversation_keystore.is_empty();
 
         let friends = has_friends
-            .then_some(ipfs.dag().put().serialize(data.friends)?.await.ok())
+            .then_some(ipfs.dag().put().serialize(data.friends).await.ok())
             .flatten();
 
         let blocks = has_blocks
-            .then_some(ipfs.dag().put().serialize(data.block_list)?.await.ok())
+            .then_some(ipfs.dag().put().serialize(data.block_list).await.ok())
             .flatten();
         let block_by = has_block_by_list
-            .then_some(ipfs.dag().put().serialize(data.block_by_list)?.await.ok())
+            .then_some(ipfs.dag().put().serialize(data.block_by_list).await.ok())
             .flatten();
         let request = has_requests
-            .then_some(ipfs.dag().put().serialize(data.request)?.await.ok())
+            .then_some(ipfs.dag().put().serialize(data.request).await.ok())
             .flatten();
 
         let conversations_keystore = has_keystore
             .then_some({
                 let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
                 for (k, v) in data.conversation_keystore {
-                    if let Ok(cid) = ipfs.dag().put().serialize(v)?.await {
+                    if let Ok(cid) = ipfs.dag().put().serialize(v).await {
                         pointer_map.insert(k.to_string(), cid);
                     }
                 }
 
-                ipfs.dag().put().serialize(pointer_map)?.await.ok()
+                ipfs.dag().put().serialize(pointer_map).await.ok()
             })
             .flatten();
 
         let file_index = futures::future::ready(data.file_index.ok_or(Error::Other))
             .and_then(|root| async move {
                 let document = DirectoryDocument::new(ipfs, &root).await?;
-                let cid = ipfs.dag().put().serialize(document)?.await?;
+                let cid = ipfs.dag().put().serialize(document).await?;
                 Ok::<_, Error>(cid)
             })
             .await

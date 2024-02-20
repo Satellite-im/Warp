@@ -287,7 +287,7 @@ impl ConversationTask {
         let mut map = self.root.get_conversation_keystore_map().await?;
 
         let id = id.to_string();
-        let cid = self.ipfs.dag().put().serialize(document)?.await?;
+        let cid = self.ipfs.dag().put().serialize(document).await?;
 
         map.insert(id, cid);
 
@@ -375,7 +375,7 @@ impl ConversationTask {
     }
 
     async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let cid = self.ipfs.dag().put().serialize(map)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(map).pin(true).await?;
 
         let old_map_cid = self.cid.replace(cid);
 
@@ -412,7 +412,7 @@ impl ConversationTask {
         };
 
         let id = document.id().to_string();
-        let cid = self.ipfs.dag().put().serialize(document)?.await?;
+        let cid = self.ipfs.dag().put().serialize(document).await?;
 
         map.insert(id, cid);
 

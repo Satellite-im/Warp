@@ -118,7 +118,7 @@ impl MessageStore {
         }
 
         let queue = Arc::new(Default::default());
-        let did = Arc::new(get_keypair_did(ipfs.keypair()?)?);
+        let did = Arc::new(get_keypair_did(ipfs.keypair())?);
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());
@@ -602,7 +602,7 @@ impl MessageStore {
                                             || (peers.contains(&peer_id)
                                                 && store
                                                     .ipfs
-                                                    .pubsub_publish(topic.clone(), bytes.into())
+                                                    .pubsub_publish(topic.clone(), bytes)
                                                     .await
                                                     .is_err())
                                         {
@@ -736,7 +736,7 @@ impl MessageStore {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                    .pubsub_publish(topic.clone(), payload.to_bytes()?)
                     .await
                     .is_err())
         {
@@ -1653,7 +1653,7 @@ impl MessageStore {
                                 let payload = Payload::new(&self.did, data, &signature);
 
                                 let bytes = match payload.to_bytes() {
-                                    Ok(bytes) => bytes.into(),
+                                    Ok(bytes) => bytes,
                                     Err(_e) => {
                                         continue;
                                     }
@@ -1774,7 +1774,7 @@ impl MessageStore {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?.into())
+                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?)
                     .await
                     .is_err())
         {
@@ -1910,7 +1910,7 @@ impl MessageStore {
                 || (peers.contains(&peer_id)
                     && self
                         .ipfs
-                        .pubsub_publish(did.messaging(), payload.to_bytes()?.into())
+                        .pubsub_publish(did.messaging(), payload.to_bytes()?)
                         .await
                         .is_err())
             {
@@ -2018,7 +2018,7 @@ impl MessageStore {
                         || (peers.contains(&peer_id)
                             && self
                                 .ipfs
-                                .pubsub_publish(recipient.messaging(), payload.to_bytes()?.into())
+                                .pubsub_publish(recipient.messaging(), payload.to_bytes()?)
                                 .await
                                 .is_err())
                     {
@@ -2157,7 +2157,7 @@ impl MessageStore {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?.into())
+                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?)
                     .await
                     .is_err())
         {
@@ -3275,7 +3275,7 @@ impl MessageStore {
                 total: Some(attachment.size()),
             };
 
-            let stream = ipfs.unixfs().get(reference, &path, &members, false, None);
+            let stream = ipfs.unixfs().get(reference, &path).providers(&members);
 
             for await event in stream {
                 match event {
@@ -3343,10 +3343,10 @@ impl MessageStore {
         let ipfs = self.ipfs.clone();
 
         let stream = async_stream::stream! {
-            let stream = ipfs.unixfs().cat(reference, None, &members, false, None);
+            let stream = ipfs.unixfs().cat(reference).providers(&members);
 
             for await result in stream {
-                let result = result.map_err(anyhow::Error::from).map_err(Error::from);
+                let result = result.map(|b| b.into()).map_err(anyhow::Error::from).map_err(Error::from);
                 yield result;
             }
         };
@@ -3430,7 +3430,7 @@ impl MessageStore {
         if !peers.is_empty() {
             if let Err(e) = self
                 .ipfs
-                .pubsub_publish(conversation.event_topic(), payload.to_bytes()?.into())
+                .pubsub_publish(conversation.event_topic(), payload.to_bytes()?)
                 .await
             {
                 error!("Unable to send event: {e}");
@@ -3519,11 +3519,7 @@ impl MessageStore {
             trace!("Payload size: {} bytes", bytes.len());
             let timer = Instant::now();
             let mut time = true;
-            if let Err(_e) = self
-                .ipfs
-                .pubsub_publish(conversation.topic(), bytes.into())
-                .await
-            {
+            if let Err(_e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
                 error!("Error publishing: {_e}");
                 time = false;
             }

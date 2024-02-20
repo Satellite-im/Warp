@@ -81,7 +81,7 @@ pub async fn store_photo(
         mime: file_type,
     };
 
-    let cid = ipfs.dag().put().serialize(dag)?.pin(true).await?;
+    let cid = ipfs.dag().put().serialize(dag).pin(true).await?;
 
     Ok(cid)
 }
@@ -115,15 +115,17 @@ pub async fn get_image(
         None => {}
     }
 
-    let image = ipfs
-        .unixfs()
-        .cat(dag.link, None, peers, local, None)
-        .await
-        .map_err(anyhow::Error::from)?;
+    let mut image = ipfs.unixfs().cat(dag.link).providers(peers);
+
+    if local {
+        image = image.local();
+    }
+
+    let image = image.await.map_err(anyhow::Error::from)?;
 
     let mut id_img = IdentityImage::default();
 
-    id_img.set_data(image);
+    id_img.set_data(image.into());
     id_img.set_image_type(dag.mime);
 
     Ok(id_img)

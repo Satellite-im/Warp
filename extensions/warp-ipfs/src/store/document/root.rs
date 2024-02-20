@@ -545,7 +545,7 @@ impl RootDocumentTask {
             })
             .collect::<Vec<_>>();
 
-        let new_cid_fut = async { self.ipfs.dag().put().serialize(list)?.await };
+        let new_cid_fut = async { self.ipfs.dag().put().serialize(list).await };
 
         let new_cid = match new_cid_fut.await {
             Ok(cid) => cid,
@@ -589,7 +589,7 @@ impl RootDocumentTask {
         //Precautionary check
         document.verify(&self.ipfs).await?;
 
-        let root_cid = self.ipfs.dag().put().serialize(document)?.pin(true).await?;
+        let root_cid = self.ipfs.dag().put().serialize(document).pin(true).await?;
 
         let old_cid = self.cid.replace(root_cid);
 
@@ -619,7 +619,7 @@ impl RootDocumentTask {
         let mut identity = self.identity().await?;
         identity.metadata.status = Some(status);
         let identity = identity.sign(&self.keypair)?;
-        root.identity = self.ipfs.dag().put().serialize(identity)?.await?;
+        root.identity = self.ipfs.dag().put().serialize(identity).await?;
 
         self.set_root_document(root).await
     }
@@ -659,7 +659,7 @@ impl RootDocumentTask {
         }
 
         document.request =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -691,7 +691,7 @@ impl RootDocumentTask {
         }
 
         document.request =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -739,7 +739,7 @@ impl RootDocumentTask {
         }
 
         document.friends =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -774,7 +774,7 @@ impl RootDocumentTask {
 
         let index_document = DirectoryDocument::new(&self.ipfs, &root).await?;
 
-        let cid = self.ipfs.dag().put().serialize(index_document)?.await?;
+        let cid = self.ipfs.dag().put().serialize(index_document).await?;
 
         let old_document = document.file_index.replace(cid);
 
@@ -808,7 +808,7 @@ impl RootDocumentTask {
         }
 
         document.friends =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -856,7 +856,7 @@ impl RootDocumentTask {
         }
 
         document.blocks =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -887,7 +887,7 @@ impl RootDocumentTask {
         }
 
         document.blocks =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -934,7 +934,7 @@ impl RootDocumentTask {
         }
 
         document.block_by =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -965,7 +965,7 @@ impl RootDocumentTask {
         }
 
         document.block_by =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -979,7 +979,7 @@ impl RootDocumentTask {
 
     async fn set_conversation_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        document.conversations_keystore = Some(self.ipfs.dag().put().serialize(map)?.await?);
+        document.conversations_keystore = Some(self.ipfs.dag().put().serialize(map).await?);
         self.set_root_document(document).await
     }
 

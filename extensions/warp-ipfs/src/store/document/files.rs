@@ -49,7 +49,7 @@ impl DirectoryDocument {
         .collect::<Vec<_>>()
         .await;
 
-        let cid = ipfs.dag().put().serialize(items)?.await?;
+        let cid = ipfs.dag().put().serialize(items).await?;
 
         document.items = Some(cid);
 
@@ -111,7 +111,8 @@ impl DirectoryDocument {
             if resolve_thumbnail {
                 let data = ipfs
                     .unixfs()
-                    .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
+                    .cat(image.link)
+                    .timeout(Duration::from_secs(10))
                     .await
                     .unwrap_or_default();
 
@@ -136,12 +137,12 @@ impl ItemDocument {
         let document = match item {
             Item::File(file) => {
                 let document = FileDocument::new(ipfs, file).await?;
-                let cid = ipfs.dag().put().serialize(document)?.await?;
+                let cid = ipfs.dag().put().serialize(document).await?;
                 ItemDocument::File(cid)
             }
             Item::Directory(directory) => {
                 let document = DirectoryDocument::new(ipfs, directory).await?;
-                let cid = ipfs.dag().put().serialize(document)?.await?;
+                let cid = ipfs.dag().put().serialize(document).await?;
                 ItemDocument::Directory(cid)
             }
         };
@@ -258,7 +259,8 @@ impl FileDocument {
             if resolve_thumbnail {
                 let data = ipfs
                     .unixfs()
-                    .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
+                    .cat(image.link)
+                    .timeout(Duration::from_secs(10))
                     .await
                     .unwrap_or_default();
 
@@ -295,7 +297,7 @@ mod test {
         ipfs: &Ipfs,
         event: &EventSubscription<ConstellationEventKind>,
     ) -> Result<FileStore, Error> {
-        let key = ipfs.keypair().and_then(get_keypair_did)?;
+        let key = get_keypair_did(ipfs.keypair())?;
 
         let root_document = RootDocumentMap::new(ipfs, Arc::new(key), None).await;
         let store = FileStore::new(
