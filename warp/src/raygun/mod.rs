@@ -372,7 +372,7 @@ impl Conversation {
         }
     }
 
-    pub fn recipients(&self) -> &Vec<DID> {
+    pub fn recipients(&self) -> &[DID] {
         &self.common().recipients
     }
 

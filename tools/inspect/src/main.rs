@@ -133,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
     table.set_header(vec!["ID", "Name", "Type", "Recipients", "# of Messages"]);
     for convo in conversations {
         let recipients = account
-            .get_identity(Identifier::DIDList(convo.recipients().clone()))
+            .get_identity(Identifier::DIDList(convo.recipients().to_vec()))
             .await
             .map(|list| {
                 list.iter()
