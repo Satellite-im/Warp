@@ -10,11 +10,16 @@ use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use uuid::Uuid;
-use warp::{crypto::DID, error::Error, multipass::identity::IdentityStatus};
+use warp::{
+    constellation::directory::Directory, crypto::DID, error::Error,
+    multipass::identity::IdentityStatus,
+};
 
 use crate::store::{ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
 
-use super::{identity::IdentityDocument, ExtractedRootDocument, RootDocument};
+use super::{
+    files::DirectoryDocument, identity::IdentityDocument, ExtractedRootDocument, RootDocument,
+};
 
 #[allow(clippy::large_enum_variant)]
 pub enum RootDocumentCommand {
@@ -53,6 +58,13 @@ pub enum RootDocumentCommand {
     },
     GetRequestList {
         response: oneshot::Sender<Result<Vec<Request>, Error>>,
+    },
+    GetRootIndex {
+        response: oneshot::Sender<Result<Directory, Error>>,
+    },
+    SetRootIndex {
+        root: Directory,
+        response: oneshot::Sender<Result<(), Error>>,
     },
     AddBlock {
         did: DID,
@@ -416,6 +428,26 @@ impl RootDocumentMap {
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
+
+    pub async fn get_directory_index(&self) -> Result<Directory, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::GetRootIndex { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn set_directory_index(&self, root: Directory) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::SetRootIndex { root, response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
 }
 
 struct RootDocumentTask {
@@ -496,10 +528,16 @@ impl RootDocumentTask {
                     let _ = response.send(self.set_identity_status(status).await);
                 }
                 RootDocumentCommand::IsBlocked { did, response } => {
-                    _ = response.send(self.is_blocked(&did).await)
+                    _ = response.send(self.is_blocked(&did).await);
                 }
                 RootDocumentCommand::IsBlockedBy { did, response } => {
-                    _ = response.send(self.is_blocked_by(&did).await)
+                    _ = response.send(self.is_blocked_by(&did).await);
+                }
+                RootDocumentCommand::GetRootIndex { response } => {
+                    let _ = response.send(self.get_root_index().await);
+                }
+                RootDocumentCommand::SetRootIndex { root, response } => {
+                    let _ = response.send(self.set_root_index(root).await);
                 }
             }
         }
@@ -754,6 +792,43 @@ impl RootDocumentTask {
         Ok(())
     }
 
+    async fn get_root_index(&self) -> Result<Directory, Error> {
+        let document = self.get_root_document().await?;
+
+        let cid = document.file_index.ok_or(Error::DirectoryNotFound)?;
+
+        let document = self
+            .ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized::<DirectoryDocument>()
+            .await?;
+
+        let root = document.resolve(&self.ipfs, true).await?;
+
+        Ok(root)
+    }
+
+    async fn set_root_index(&mut self, root: Directory) -> Result<(), Error> {
+        let mut document = self.get_root_document().await?;
+
+        let index_document = DirectoryDocument::new(&self.ipfs, &root).await?;
+
+        let cid = self.ipfs.dag().put().serialize(index_document)?.await?;
+
+        let old_document = document.file_index.replace(cid);
+
+        self.set_root_document(document).await?;
+
+        if let Some(cid) = old_document {
+            if !self.ipfs.is_pinned(&cid).await? {
+                self.ipfs.remove_block(cid, false).await?;
+            }
+        }
+
+        Ok(())
+    }
+
     async fn remove_friend(&mut self, did: DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.friends;
@@ -995,7 +1070,7 @@ impl RootDocumentTask {
 
     async fn export(&self) -> Result<ExtractedRootDocument, Error> {
         let document = self.get_root_document().await?;
-        document.resolve(&self.ipfs).await
+        document.resolve(&self.ipfs, None).await
     }
 
     async fn export_bytes(&self) -> Result<Vec<u8>, Error> {
