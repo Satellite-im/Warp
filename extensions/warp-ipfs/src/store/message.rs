@@ -228,7 +228,7 @@ enum MessagingCommand {
 
 #[derive(Clone)]
 pub struct MessageStore {
-    tx: mpsc::Sender<MessagingCommand>,
+    command_tx: mpsc::Sender<MessagingCommand>,
     _task_cancellation: Arc<DropGuard>,
 }
 
@@ -282,7 +282,7 @@ impl MessageStore {
                     topic_stream: Default::default(),
                     conversation_task: HashMap::new(),
                     identity,
-                    rx,
+                    command_rx: rx,
                     root,
                     discovery,
                     file,
@@ -300,7 +300,7 @@ impl MessageStore {
         });
 
         let conversation = Self {
-            tx,
+            command_tx: tx,
             _task_cancellation: Arc::new(drop_guard),
         };
 
@@ -343,7 +343,7 @@ impl MessageStore {
     pub async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::GetDocument { id, response: tx })
             .await;
@@ -353,7 +353,7 @@ impl MessageStore {
     pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::GetKeystore { id, response: tx })
             .await;
@@ -363,7 +363,7 @@ impl MessageStore {
     pub async fn contains(&self, id: Uuid) -> Result<bool, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::Contains { id, response: tx })
             .await;
@@ -373,7 +373,7 @@ impl MessageStore {
     pub async fn set(&self, document: ConversationDocument) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::SetDocument {
                 document,
@@ -386,7 +386,7 @@ impl MessageStore {
     pub async fn set_keystore(&self, id: Uuid, document: Keystore) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::SetKeystore {
                 id,
@@ -400,7 +400,7 @@ impl MessageStore {
     pub async fn delete(&self, id: Uuid) -> Result<ConversationDocument, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::Delete { id, response: tx })
             .await;
@@ -410,7 +410,7 @@ impl MessageStore {
     pub async fn list(&self) -> Result<Vec<ConversationDocument>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::List { response: tx })
             .await;
@@ -420,7 +420,7 @@ impl MessageStore {
     pub async fn load_conversations(&self) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::LoadConversations { response: tx })
             .await;
@@ -433,7 +433,7 @@ impl MessageStore {
     ) -> Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::Subscribe { id, response: tx })
             .await;
@@ -443,7 +443,7 @@ impl MessageStore {
     pub async fn create_conversation(&self, did: &DID) -> Result<Conversation, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::CreateConversation {
                 did: did.clone(),
@@ -461,7 +461,7 @@ impl MessageStore {
     ) -> Result<Conversation, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::CreateGroupConversation {
                 name,
@@ -480,7 +480,7 @@ impl MessageStore {
     ) -> Result<warp::raygun::Message, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::GetMessage {
                 conversation_id,
@@ -498,7 +498,7 @@ impl MessageStore {
     ) -> Result<Messages, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::GetMessages {
                 conversation_id,
@@ -512,7 +512,7 @@ impl MessageStore {
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::GetMessagesCount {
                 conversation_id,
@@ -529,7 +529,7 @@ impl MessageStore {
     ) -> Result<MessageReference, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::GetMessageReference {
                 conversation_id,
@@ -547,7 +547,7 @@ impl MessageStore {
     ) -> Result<BoxStream<'static, MessageReference>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::GetMessageReferences {
                 conversation_id,
@@ -566,7 +566,7 @@ impl MessageStore {
         let name = name.into();
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::UpdateConversationName {
                 conversation_id,
@@ -584,7 +584,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::UpdateConversationSettings {
                 conversation_id,
@@ -598,7 +598,7 @@ impl MessageStore {
     pub async fn delete_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::DeleteConversation {
                 conversation_id,
@@ -611,7 +611,7 @@ impl MessageStore {
     pub async fn add_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::AddRecipient {
                 conversation_id,
@@ -625,7 +625,7 @@ impl MessageStore {
     pub async fn remove_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::RemoveRecipient {
                 conversation_id,
@@ -643,7 +643,7 @@ impl MessageStore {
     ) -> Result<MessageStatus, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::MessageStatus {
                 conversation_id,
@@ -661,7 +661,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::SendMessage {
                 conversation_id,
@@ -680,7 +680,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::EditMessage {
                 conversation_id,
@@ -700,7 +700,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::Reply {
                 conversation_id,
@@ -719,7 +719,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::DeleteMessage {
                 conversation_id,
@@ -738,7 +738,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::PinMessage {
                 conversation_id,
@@ -760,7 +760,7 @@ impl MessageStore {
         let emoji = emoji.into();
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::React {
                 conversation_id,
@@ -782,7 +782,7 @@ impl MessageStore {
     ) -> Result<AttachmentEventStream, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::Attach {
                 conversation_id,
@@ -807,7 +807,7 @@ impl MessageStore {
 
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::Download {
                 conversation_id,
@@ -830,7 +830,7 @@ impl MessageStore {
 
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::DownloadStream {
                 conversation_id,
@@ -849,7 +849,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::SendEvent {
                 conversation_id,
@@ -867,7 +867,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
-            .tx
+            .command_tx
             .clone()
             .send(MessagingCommand::CancelEvent {
                 conversation_id,
@@ -901,7 +901,7 @@ struct ConversationTask {
     // used for attachments to store message on document and publish it to the network
     attachment_rx: mpsc::Receiver<AttachmentChan>,
     attachment_tx: mpsc::Sender<AttachmentChan>,
-    rx: mpsc::Receiver<MessagingCommand>,
+    command_rx: mpsc::Receiver<MessagingCommand>,
 
     pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
 
@@ -932,7 +932,7 @@ impl ConversationTask {
         loop {
             tokio::select! {
                 biased;
-                Some(command) = self.rx.next() => {
+                Some(command) = self.command_rx.next() => {
                     match command {
                         MessagingCommand::GetDocument { id, response } => {
                             let _ = response.send(self.get(id).await);
