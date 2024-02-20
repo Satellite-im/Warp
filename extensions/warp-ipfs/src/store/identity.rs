@@ -430,10 +430,7 @@ impl IdentityStore {
         let did = store.get_keypair_did()?;
 
         let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
-        let identity_announce_stream = store
-            .ipfs
-            .pubsub_subscribe("/identity/announce/v0")
-            .await?;
+        let identity_announce_stream = store.ipfs.pubsub_subscribe("/identity/announce/v0").await?;
 
         store.discovery.start().await?;
 
