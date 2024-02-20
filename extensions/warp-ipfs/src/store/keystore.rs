@@ -68,7 +68,7 @@ impl Keystore {
                 list.last()
                     .and_then(|entry| super::ecdh_decrypt(did, None, entry).ok())
             })
-            .ok_or(Error::PublicKeyInvalid)
+            .ok_or(Error::PublicKeyDoesntExist)
     }
 
     pub fn get_all(&self, did: &DID, recipient: &DID) -> Result<Vec<Vec<u8>>, Error> {
@@ -79,14 +79,14 @@ impl Keystore {
                     .filter_map(|entry| super::ecdh_decrypt(did, None, entry).ok())
                     .collect::<Vec<_>>()
             })
-            .ok_or(Error::PublicKeyInvalid)
+            .ok_or(Error::PublicKeyDoesntExist)
     }
 
     pub fn count(&self, recipient: &DID) -> Result<usize, Error> {
         self.recipient_key
             .get(recipient)
             .map(|list| list.len())
-            .ok_or(Error::PublicKeyInvalid)
+            .ok_or(Error::PublicKeyDoesntExist)
     }
 }
 
