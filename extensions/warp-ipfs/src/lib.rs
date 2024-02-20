@@ -548,8 +548,11 @@ impl WarpIpfs {
 
         *self.ipfs.write() = Some(ipfs.clone());
 
+        let root = identity_store.root_document();
+
         let filestore = FileStore::new(
             ipfs.clone(),
+            root.clone(),
             &config,
             self.constellation_tx.clone(),
             span.clone(),

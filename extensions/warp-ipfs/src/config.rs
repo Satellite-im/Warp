@@ -266,7 +266,6 @@ pub struct Config {
     pub max_file_size: Option<usize>,
     pub thumbnail_size: (u32, u32),
     pub chunking: Option<usize>,
-    pub thumbnail_task: bool,
     pub thumbnail_exact_format: bool,
 }
 
@@ -291,7 +290,6 @@ impl Default for Config {
             max_file_size: Some(50 * 1024 * 1024),
             thumbnail_size: (128, 128),
             chunking: None,
-            thumbnail_task: false,
             thumbnail_exact_format: true,
         }
     }
