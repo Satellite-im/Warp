@@ -199,7 +199,7 @@ impl ConversationDocument {
             ConversationSettings::Group(settings) => settings,
             ConversationSettings::Direct(_) => return Ok(()),
         };
-        let Some(creator) = self.conversation.creator().clone() else {
+        let Some(creator) = self.conversation.creator() else {
             return Err(Error::PublicKeyInvalid);
         };
 

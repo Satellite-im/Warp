@@ -2359,7 +2359,7 @@ impl MessageStore {
             Conversation::Direct(_) => return Err(Error::InvalidConversation),
         };
 
-        let Some(creator) = doc.conversation.creator().clone() else {
+        let Some(creator) = doc.conversation.creator() else {
             return Err(Error::InvalidConversation);
         };
 
@@ -2403,7 +2403,7 @@ impl MessageStore {
             Conversation::Direct(_) => return Err(Error::InvalidConversation),
         };
 
-        let Some(creator) = doc.conversation.creator().clone() else {
+        let Some(creator) = doc.conversation.creator() else {
             return Err(Error::InvalidConversation);
         };
 
@@ -2471,7 +2471,7 @@ impl MessageStore {
             return Err(Error::InvalidConversation);
         }
 
-        let Some(creator) = doc.conversation.creator().clone() else {
+        let Some(creator) = doc.conversation.creator() else {
             return Err(Error::InvalidConversation);
         };
 
@@ -2527,7 +2527,7 @@ impl MessageStore {
             return Err(Error::InvalidConversation);
         }
 
-        let Some(creator) = doc.conversation.creator().clone() else {
+        let Some(creator) = doc.conversation.creator() else {
             return Err(Error::InvalidConversation);
         };
 
@@ -2577,7 +2577,7 @@ impl MessageStore {
             return Err(Error::InvalidConversation);
         }
 
-        let Some(creator) = doc.conversation.creator().clone() else {
+        let Some(creator) = doc.conversation.creator() else {
             return Err(Error::InvalidConversation);
         };
 
