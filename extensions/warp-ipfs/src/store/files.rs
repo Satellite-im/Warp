@@ -1,12 +1,14 @@
 use std::{collections::VecDeque, ffi::OsStr, path::PathBuf, sync::Arc};
 
 use chrono::{DateTime, Utc};
+
 use futures::{
     channel::{mpsc, oneshot},
     future::BoxFuture,
-    stream::{self, BoxStream},
+    stream::BoxStream,
     FutureExt, SinkExt, StreamExt,
 };
+
 use libipld::Cid;
 use rust_ipfs::{
     unixfs::{AddOption, UnixfsStatus},
@@ -33,7 +35,10 @@ use crate::{
     to_file_type,
 };
 
-use super::{ecdh_decrypt, ecdh_encrypt, event_subscription::EventSubscription, get_keypair_did};
+use super::{
+    document::root::RootDocumentMap, ecdh_decrypt, event_subscription::EventSubscription,
+    get_keypair_did,
+};
 
 #[derive(Clone)]
 pub struct FileStore {
@@ -47,33 +52,21 @@ pub struct FileStore {
 impl FileStore {
     pub async fn new(
         ipfs: Ipfs,
+        root: RootDocumentMap,
         config: &Config,
         constellation_tx: EventSubscription<ConstellationEventKind>,
         span: Span,
     ) -> Result<Self, Error> {
-        let mut index_cid = None;
-
         if let Some(path) = config.path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
-            }
-
-            if let Ok(cid) = tokio::fs::read(path.join(".index_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .and_then(|cid_str| {
-                    cid_str
-                        .parse::<Cid>()
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                })
-            {
-                index_cid = Some(cid);
             }
         }
 
         let config = config.clone();
 
         let index = Directory::new("root");
+
         let thumbnail_store = ThumbnailGenerator::new(ipfs.clone());
 
         let (command_sender, command_receiver) = futures::channel::mpsc::channel(1);
@@ -83,7 +76,7 @@ impl FileStore {
         let mut task = FileTask {
             index,
             path: Arc::default(),
-            index_cid,
+            root,
             thumbnail_store,
             ipfs,
             constellation_tx,
@@ -95,7 +88,17 @@ impl FileStore {
             command_receiver,
         };
 
-        if let Err(e) = task.import().await {
+        if let Some(p) = task.config.path.as_ref() {
+            let index_file = p.join(".index_id");
+            // Since this file exist, we will attempt to migrate into root document
+            if index_file.is_file() {
+                if let Err(e) = task.import_v0().await {
+                    tracing::error!("Error importing index: {e}");
+                }
+            }
+        }
+
+        if let Err(e) = task.import_v1().await {
             tracing::error!("Error importing index: {e}");
         }
 
@@ -396,7 +399,7 @@ enum FileTaskCommand {
 struct FileTask {
     index: Directory,
     path: Arc<RwLock<PathBuf>>,
-    index_cid: Option<Cid>,
+    root: RootDocumentMap,
     config: config::Config,
     ipfs: Ipfs,
     export_tx: futures::channel::mpsc::Sender<oneshot::Sender<Result<(), Error>>>,
@@ -469,7 +472,7 @@ impl FileTask {
                             recursive,
                             response,
                         } => {
-                            _ = response.send(self.create_directory(&name, recursive));
+                            _ = response.send(self.create_directory(&name, recursive).await);
                         },
                         FileTaskCommand::SyncRef { path, response } => {
                             _ = response.send(self.sync_ref(&path));
@@ -488,37 +491,62 @@ impl FileTask {
         }
     }
 
-    pub async fn import(&self) -> Result<(), Error> {
+    pub async fn import_v0(&self) -> Result<(), Error> {
         if self.config.path.is_none() {
             return Ok(());
         }
 
-        tracing::info!("Importing index");
-        let cid = self.index_cid.ok_or(Error::Other)?;
+        let path = match self.config.path.as_ref() {
+            Some(path) => path,
+            None => return Ok(()),
+        };
 
-        tracing::info!(cid = %cid, "Index located");
-
-        let data = self
-            .ipfs
-            .unixfs()
-            .cat(cid, None, &[], true, None)
+        if let Ok(cid) = tokio::fs::read(path.join(".index_id"))
             .await
-            .map_err(anyhow::Error::from)?;
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| {
+                cid_str
+                    .parse::<Cid>()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })
+        {
+            tracing::info!("Importing index");
+            let data = self
+                .ipfs
+                .unixfs()
+                .cat(cid, None, &[], true, None)
+                .await
+                .map_err(anyhow::Error::from)?;
 
-        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+            let key = self.ipfs.keypair().and_then(get_keypair_did)?;
 
-        let index_bytes = ecdh_decrypt(&key, None, data)?;
+            let index_bytes = ecdh_decrypt(&key, None, data)?;
 
-        let directory_index: Directory = serde_json::from_slice(&index_bytes)?;
-        self.index.set_items(directory_index.get_items());
+            let directory_index: Directory = serde_json::from_slice(&index_bytes)?;
 
-        tracing::info!(cid = %cid, "Index imported");
+            self.index.set_items(directory_index.get_items());
+
+            _ = self.export().await;
+
+            if self.ipfs.is_pinned(&cid).await? {
+                self.ipfs.remove_pin(&cid).recursive().await?;
+            }
+
+            self.ipfs.remove_block(cid, true).await?;
+            _ = tokio::fs::remove_file(path.join(".index_id")).await;
+        }
 
         Ok(())
     }
 
+    async fn import_v1(&self) -> Result<(), Error> {
+        let index = self.root.get_directory_index().await?;
+        self.index.set_items(index.get_items());
+        Ok(())
+    }
+
     #[tracing::instrument(skip(self))]
-    pub async fn export(&mut self) -> Result<(), Error> {
+    pub async fn export(&self) -> Result<(), Error> {
         tracing::trace!("Exporting index");
 
         let mut index = self.index.clone();
@@ -526,59 +554,14 @@ impl FileTask {
 
         index.rebuild_paths(&signal);
 
-        let index = serde_json::to_string(&self.index)?;
+        self.root.set_directory_index(index).await?;
 
-        let key = self.ipfs.keypair().and_then(get_keypair_did)?;
-
-        //TODO: Disable encryption of the index but instead store it all as a dag object.
-        //      possibly even building an internal graph of the index instead
-        let data = ecdh_encrypt(&key, None, index.as_bytes())?;
-
-        let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
-
-        let ipfs_path = self
-            .ipfs
-            .unixfs()
-            .add(
-                data_stream,
-                Some(AddOption {
-                    pin: true,
-                    ..Default::default()
-                }),
-            )
-            .await?;
-
-        tracing::trace!(path = %ipfs_path, "Index exported");
-
-        let cid = ipfs_path
-            .root()
-            .cid()
-            .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
-
-        let last_cid = self.index_cid.replace(*cid);
-
-        if let Some(path) = self.config.path.as_ref() {
-            if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
-                tracing::error!(cid = %cid, "Error writing index: {_e}");
-            }
-        }
-
-        if let Some(last_cid) = last_cid {
-            if *cid != last_cid {
-                if self.ipfs.is_pinned(&last_cid).await? {
-                    tracing::trace!(cid = %last_cid, "Unpinning block");
-                    self.ipfs.remove_pin(&last_cid).recursive().await?;
-                    tracing::trace!(cid = %last_cid, "Block unpinned");
-                }
-
-                tracing::trace!(cid = %last_cid, "Removing block");
-                let b = self.ipfs.remove_block(last_cid, true).await?;
-                tracing::trace!(cid = %last_cid, amount_removed = b.len(), "Blocks removed");
-            }
-        }
-
-        tracing::trace!(cid = %cid, "Index exported");
+        tracing::trace!("Index exported");
         Ok(())
+    }
+
+    pub fn root_directory(&self) -> Directory {
+        self.index.clone()
     }
 
     /// Get the current directory that is mutable.
@@ -595,10 +578,6 @@ impl FileTask {
                 .get_item_by_path(path)
                 .and_then(|item| item.get_directory()),
         }
-    }
-
-    fn root_directory(&self) -> Directory {
-        self.index.clone()
     }
 
     /// Current size of the file system
@@ -656,8 +635,6 @@ impl FileTask {
         let thumbnail_store = self.thumbnail_store.clone();
 
         let ticket = thumbnail_store.insert(&path, width, height, exact).await?;
-
-        let background = self.config.thumbnail_task;
 
         let constellation_tx = self.constellation_tx.clone();
         let mut export_tx = self.export_tx.clone();
@@ -732,33 +709,21 @@ impl FileTask {
                 return;
             }
 
-            let task = {
-                let store = thumbnail_store.clone();
-                let file = file.clone();
-                async move {
-                    match store.get(ticket).await {
-                        Ok((extension_type, path, thumbnail)) => {
-                            file.set_thumbnail(&thumbnail);
-                            file.set_thumbnail_format(extension_type.into());
-                            file.set_thumbnail_reference(&path.to_string());
-                        }
-                        Err(e) => {
-                            tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
-                        }
-                    }
+            match thumbnail_store.get(ticket).await {
+                Ok((extension_type, path, thumbnail)) => {
+                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail_format(extension_type.into());
+                    file.set_thumbnail_reference(&path.to_string());
                 }
-            };
-
-            if !background {
-                task.await;
-            } else {
-                tokio::spawn(task);
+                Err(e) => {
+                    tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
+                }
             }
-
-            drop(_current_guard);
 
             let (tx, rx) = oneshot::channel();
             _ = export_tx.send(tx).await;
+
+            drop(_current_guard);
 
             if let Err(e) = rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
@@ -919,10 +884,11 @@ impl FileTask {
             }
 
             current_directory.add_item(file)?;
-            drop(_current_guard);
+
             let (exported_tx, exported_rx) = oneshot::channel();
             _ = export_tx.send(exported_tx).await;
 
+            drop(_current_guard);
             if let Err(e) = exported_rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
             }
@@ -1081,10 +1047,10 @@ impl FileTask {
                 return;
             }
 
-            drop(_current_guard);
-
             let (tx, rx) = oneshot::channel();
             _ = export_tx.send(tx).await;
+
+            drop(_current_guard);
 
             if let Err(e) = rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
@@ -1163,6 +1129,8 @@ impl FileTask {
         let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
         tracing::info!(blocks = blocks.len(), "blocks removed");
 
+        _ = self.export().await;
+
         self.constellation_tx
             .emit(ConstellationEventKind::Deleted {
                 item_name: name.to_string(),
@@ -1187,6 +1155,8 @@ impl FileTask {
 
         current_directory.rename_item(&current, new)?;
 
+        self.export().await?;
+
         self.constellation_tx
             .emit(ConstellationEventKind::Renamed {
                 old_item_name: current.to_string(),
@@ -1196,7 +1166,7 @@ impl FileTask {
         Ok(())
     }
 
-    fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
+    async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
         let directory = self.current_directory()?;
         let _g = directory.signal_guard();
 
@@ -1210,6 +1180,8 @@ impl FileTask {
         }
 
         directory.add_directory(Directory::new(name))?;
+
+        _ = self.export().await;
 
         Ok(())
     }
@@ -1226,6 +1198,8 @@ impl FileTask {
             .and_then(|item| item.get_file())?;
 
         let reference = file.reference().ok_or(Error::FileNotFound)?;
+
+        let mut export_tx = self.export_tx.clone();
 
         Ok(async move {
             let buffer = ipfs
@@ -1244,6 +1218,13 @@ impl FileTask {
                 file.set_thumbnail(&thumbnail);
                 file.set_thumbnail_format(extension_type.into());
                 file.set_thumbnail_reference(&path.to_string());
+            }
+
+            let (tx, rx) = oneshot::channel();
+            _ = export_tx.send(tx).await;
+
+            if let Err(e) = rx.await.expect("shouldnt drop") {
+                tracing::error!(error = %e, "unable to export index");
             }
 
             Ok(())
