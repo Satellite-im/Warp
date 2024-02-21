@@ -267,7 +267,6 @@ impl MessageStore {
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
 
-
         tokio::spawn({
             let ipfs = ipfs.clone();
             let keypair = keypair.clone();
@@ -300,7 +299,6 @@ impl MessageStore {
             }
         });
 
-
         let conversation = Self {
             command_tx: tx,
             _task_cancellation: Arc::new(drop_guard),
@@ -311,7 +309,6 @@ impl MessageStore {
         }
 
         conversation
-
     }
 }
 
