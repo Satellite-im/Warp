@@ -253,7 +253,7 @@ impl WarpIpfs {
 
         info!("Starting ipfs");
         let mut uninitialized = UninitializedIpfs::new()
-            .with_identify(Some({
+            .with_identify({
                 let mut idconfig = IdentifyConfiguration {
                     protocol_version: "/satellite/warp/0.1".into(),
                     ..Default::default()
@@ -262,17 +262,17 @@ impl WarpIpfs {
                     idconfig.agent_version = agent.clone();
                 }
                 idconfig
-            }))
+            })
             .with_bitswap()
-            .with_ping(None)
-            .with_pubsub(Some(PubsubConfig {
+            .with_ping(Default::default())
+            .with_pubsub(PubsubConfig {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
-            }))
+            })
             .with_relay(true)
             .set_listening_addrs(config.listen_on.clone())
             .with_custom_behaviour(behaviour)
-            .set_keypair(keypair)
+            .set_keypair(&keypair)
             .with_rendezvous_client()
             .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
@@ -300,13 +300,13 @@ impl WarpIpfs {
             }
         ) {
             uninitialized = uninitialized.with_kademlia(
-                Some(either::Either::Left(KadConfig {
+                either::Either::Left(KadConfig {
                     query_timeout: std::time::Duration::from_secs(60),
                     publication_interval: Some(Duration::from_secs(30 * 60)),
                     provider_record_ttl: Some(Duration::from_secs(60 * 60)),
                     insert_method: KadInserts::Manual,
                     ..Default::default()
-                })),
+                }),
                 Default::default(),
             );
 
@@ -530,7 +530,7 @@ impl WarpIpfs {
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
         let keypair = {
-            let keypair = ipfs.keypair().expect("infallable");
+            let keypair = ipfs.keypair();
             Arc::new(get_keypair_did(keypair).expect("valid keypair"))
         };
 

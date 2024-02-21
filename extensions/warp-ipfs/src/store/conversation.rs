@@ -353,7 +353,7 @@ impl ConversationDocument {
         list: BTreeSet<MessageDocument>,
     ) -> Result<(), Error> {
         self.modified = Utc::now();
-        let cid = ipfs.dag().put().serialize(list)?.await?;
+        let cid = ipfs.dag().put().serialize(list).await?;
         self.messages = Some(cid);
         Ok(())
     }
@@ -721,7 +721,7 @@ impl MessageDocument {
             None => ecdh_encrypt(&did, Some(&sender), &bytes)?,
         };
 
-        let message = ipfs.dag().put().serialize(data)?.await?;
+        let message = ipfs.dag().put().serialize(data).await?;
 
         let sender = DIDEd25519Reference::from_did(&sender);
 
@@ -781,7 +781,7 @@ impl MessageDocument {
         self.pinned = message.pinned();
         self.modified = message.modified();
 
-        let message_cid = ipfs.dag().put().serialize(data)?.await?;
+        let message_cid = ipfs.dag().put().serialize(data).await?;
 
         tracing::info!(id = %self.conversation_id, message_id = %self.id, "Setting Message to document");
         self.message = message_cid;

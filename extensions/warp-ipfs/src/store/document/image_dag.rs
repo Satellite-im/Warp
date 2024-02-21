@@ -81,7 +81,7 @@ pub async fn store_photo(
         mime: file_type,
     };
 
-    let cid = ipfs.dag().put().serialize(dag)?.pin(true).await?;
+    let cid = ipfs.dag().put().serialize(dag).pin(true).await?;
 
     Ok(cid)
 }
@@ -94,13 +94,7 @@ pub async fn get_image(
     local: bool,
     limit: Option<usize>,
 ) -> Result<IdentityImage, Error> {
-    let mut dag = ipfs.get_dag(cid);
-
-    if local {
-        dag = dag.local();
-    }
-
-    let dag: ImageDag = dag.deserialized().await?;
+    let dag: ImageDag = ipfs.get_dag(cid).set_local(local).deserialized().await?;
 
     match limit {
         Some(size) if dag.size > size as _ => {
@@ -117,13 +111,15 @@ pub async fn get_image(
 
     let image = ipfs
         .unixfs()
-        .cat(dag.link, None, peers, local, None)
+        .cat(dag.link)
+        .providers(peers)
+        .set_local(local)
         .await
         .map_err(anyhow::Error::from)?;
 
     let mut id_img = IdentityImage::default();
 
-    id_img.set_data(image);
+    id_img.set_data(image.into());
     id_img.set_image_type(dag.mime);
 
     Ok(id_img)
