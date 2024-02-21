@@ -2717,14 +2717,16 @@ impl ConversationTask {
 
         let ipfs = self.ipfs.clone();
 
-        let stream = async_stream::stream! {
-            let stream = ipfs.unixfs().cat(reference).providers(&members);
-
-            for await result in stream {
-                let result = result.map(|b| b.into()).map_err(anyhow::Error::from).map_err(Error::from);
-                yield result;
-            }
-        };
+        let stream = ipfs
+            .unixfs()
+            .cat(reference)
+            .providers(&members)
+            .map(|result| {
+                result
+                    .map(|b| b.into())
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)
+            });
 
         Ok(stream.boxed())
     }
