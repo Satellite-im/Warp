@@ -585,9 +585,7 @@ impl RootDocumentTask {
             })
             .collect::<Vec<_>>();
 
-        let new_cid_fut = async { self.ipfs.dag().put().serialize(list).await };
-
-        let new_cid = match new_cid_fut.await {
+        let new_cid = match self.ipfs.dag().put().serialize(list).await {
             Ok(cid) => cid,
             Err(_) => return,
         };
