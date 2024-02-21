@@ -68,7 +68,7 @@ use warp::multipass::{
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
-use crate::store::{ecdh_decrypt, PeerIdExt};
+use crate::store::{ecdh_decrypt, get_keypair_did, PeerIdExt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
@@ -529,6 +529,11 @@ impl WarpIpfs {
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
+        let keypair = {
+            let keypair = ipfs.keypair();
+            Arc::new(get_keypair_did(keypair).expect("valid keypair"))
+        };
+
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
@@ -563,21 +568,15 @@ impl WarpIpfs {
         *self.file_store.write() = Some(filestore.clone());
 
         let message_store = MessageStore::new(
-            ipfs.clone(),
+            &ipfs,
             config.path.map(|path| path.join("messages")),
-            identity_store,
             discovery,
+            keypair,
             filestore,
-            false,
-            1000,
             self.raygun_tx.clone(),
-            span.clone(),
-            (
-                config.store_setting.check_spam,
-                config.store_setting.with_friends,
-            ),
+            identity_store,
         )
-        .await?;
+        .await;
 
         *self.message_store.write() = Some(message_store);
 
@@ -1434,8 +1433,9 @@ impl RayGun for WarpIpfs {
     }
 
     async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
-        store.send_message(conversation_id, value).await
+        self.messaging_store()?
+            .send_message(conversation_id, value)
+            .await
     }
 
     async fn edit(
@@ -1444,8 +1444,9 @@ impl RayGun for WarpIpfs {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
-        store.edit_message(conversation_id, message_id, value).await
+        self.messaging_store()?
+            .edit_message(conversation_id, message_id, value)
+            .await
     }
 
     async fn delete(
@@ -1453,13 +1454,10 @@ impl RayGun for WarpIpfs {
         conversation_id: Uuid,
         message_id: Option<Uuid>,
     ) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
+        let store = self.messaging_store()?;
         match message_id {
-            Some(id) => store.delete_message(conversation_id, id, true).await,
-            None => store
-                .delete_conversation(conversation_id, true)
-                .await
-                .map(|_| ()),
+            Some(id) => store.delete_message(conversation_id, id).await,
+            None => store.delete_conversation(conversation_id).await.map(|_| ()),
         }
     }
 
@@ -1493,19 +1491,12 @@ impl RayGun for WarpIpfs {
         value: Vec<String>,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .reply_message(conversation_id, message_id, value)
+            .reply(conversation_id, message_id, value)
             .await
     }
 
-    async fn embeds(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: EmbedState,
-    ) -> Result<(), Error> {
-        self.messaging_store()?
-            .embeds(conversation_id, message_id, state)
-            .await
+    async fn embeds(&mut self, _: Uuid, _: Uuid, _: EmbedState) -> Result<(), Error> {
+        Err(Error::Unimplemented)
     }
 
     async fn update_conversation_settings(
@@ -1541,7 +1532,7 @@ impl RayGunAttachment for WarpIpfs {
         path: PathBuf,
     ) -> Result<ConstellationProgressStream, Error> {
         self.messaging_store()?
-            .download(conversation_id, message_id, &file, path, false)
+            .download(conversation_id, message_id, &file, path)
             .await
     }
 
@@ -1581,7 +1572,7 @@ impl RayGunGroupConversation for WarpIpfs {
         did_key: &DID,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .remove_recipient(conversation_id, did_key, true)
+            .remove_recipient(conversation_id, did_key)
             .await
     }
 }

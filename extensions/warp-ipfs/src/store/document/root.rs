@@ -77,6 +77,10 @@ pub enum RootDocumentCommand {
     GetBlockList {
         response: oneshot::Sender<Result<Vec<DID>, Error>>,
     },
+    IsBlocked {
+        did: DID,
+        response: oneshot::Sender<Result<bool, Error>>,
+    },
     AddBlockBy {
         did: DID,
         response: oneshot::Sender<Result<(), Error>>,
@@ -87,6 +91,10 @@ pub enum RootDocumentCommand {
     },
     GetBlockByList {
         response: oneshot::Sender<Result<Vec<DID>, Error>>,
+    },
+    IsBlockedBy {
+        did: DID,
+        response: oneshot::Sender<Result<bool, Error>>,
     },
     SetKeystore {
         document: BTreeMap<String, Cid>,
@@ -247,6 +255,19 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::IsBlocked {
+                did: did.clone(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn add_block_by(&self, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -335,6 +356,19 @@ impl RootDocumentMap {
             .tx
             .clone()
             .send(RootDocumentCommand::GetBlockByList { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn is_blocked_by(&self, did: &DID) -> Result<bool, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::IsBlockedBy {
+                did: did.clone(),
+                response: tx,
+            })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -492,6 +526,12 @@ impl RootDocumentTask {
                 }
                 RootDocumentCommand::SetIdentityStatus { status, response } => {
                     let _ = response.send(self.set_identity_status(status).await);
+                }
+                RootDocumentCommand::IsBlocked { did, response } => {
+                    _ = response.send(self.is_blocked(&did).await);
+                }
+                RootDocumentCommand::IsBlockedBy { did, response } => {
+                    _ = response.send(self.is_blocked_by(&did).await);
                 }
                 RootDocumentCommand::GetRootIndex { response } => {
                     let _ = response.send(self.get_root_index().await);
@@ -835,6 +875,18 @@ impl RootDocumentTask {
             .await
             .unwrap_or_default();
         Ok(list)
+    }
+
+    async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
+        self.block_list()
+            .await
+            .map(|list| list.contains(public_key))
+    }
+
+    async fn is_blocked_by(&self, public_key: &DID) -> Result<bool, Error> {
+        self.blockby_list()
+            .await
+            .map(|list| list.contains(public_key))
     }
 
     async fn block_key(&mut self, did: DID) -> Result<(), Error> {
