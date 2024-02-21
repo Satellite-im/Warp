@@ -3669,18 +3669,7 @@ async fn process_conversation(
                 }
             };
 
-            let _document = this.delete(conversation_id).await?;
-
-            // let topic = document.topic();
-            // self.queue.write().await.remove(&sender);
-
-            // if this.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
-            //     warn!(conversation_id = %document.id(), "topic should have been unsubscribed after dropping conversation.");
-            // }
-
-            this.event
-                .emit(RayGunEventKind::ConversationDeleted { conversation_id })
-                .await;
+            this.delete_conversation(conversation_id, false).await?;
         }
     }
     Ok(())

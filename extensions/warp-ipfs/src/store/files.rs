@@ -93,7 +93,7 @@ impl FileStore {
         }
 
         if let Err(e) = task.import_v1().await {
-            tracing::error!("Error importing index: {e}");
+            tracing::warn!("Unable to import index: {e}");
         }
 
         let mut index = task.index.clone();

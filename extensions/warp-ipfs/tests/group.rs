@@ -7,7 +7,10 @@ mod test {
     use futures::StreamExt;
     use warp::{
         multipass::MultiPassEventKind,
-        raygun::{ConversationSettings, GroupSettings, MessageEventKind, RayGunEventKind},
+        raygun::{
+            ConversationSettings, ConversationType, GroupSettings, MessageEventKind,
+            RayGunEventKind,
+        },
     };
 
     #[tokio::test]
@@ -187,6 +190,83 @@ mod test {
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
         assert!(conversation.recipients().contains(&did_c));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn destroy_group_conversation() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![
+            (None, None, Some("test::destroy_group_conversation".into())),
+            (None, None, Some("test::destroy_group_conversation".into())),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+
+        chat_a
+            .create_group_conversation(None, vec![did_b.clone()], Default::default())
+            .await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        assert_eq!(id_a, id_b);
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.conversation_type(), ConversationType::Group);
+        assert_eq!(conversation.recipients().len(), 2);
+        assert!(conversation.recipients().contains(&did_a));
+        assert!(conversation.recipients().contains(&did_b));
+        let id = conversation.id();
+
+        chat_a.delete(id, None).await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    assert_eq!(conversation_id, id);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    assert_eq!(conversation_id, id);
+                    break;
+                }
+            }
+        })
+        .await?;
         Ok(())
     }
 
