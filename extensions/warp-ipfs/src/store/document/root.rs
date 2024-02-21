@@ -77,6 +77,10 @@ pub enum RootDocumentCommand {
     GetBlockList {
         response: oneshot::Sender<Result<Vec<DID>, Error>>,
     },
+    IsBlocked {
+        did: DID,
+        response: oneshot::Sender<Result<bool, Error>>,
+    },
     AddBlockBy {
         did: DID,
         response: oneshot::Sender<Result<(), Error>>,
@@ -87,6 +91,10 @@ pub enum RootDocumentCommand {
     },
     GetBlockByList {
         response: oneshot::Sender<Result<Vec<DID>, Error>>,
+    },
+    IsBlockedBy {
+        did: DID,
+        response: oneshot::Sender<Result<bool, Error>>,
     },
     SetKeystore {
         document: BTreeMap<String, Cid>,
@@ -247,6 +255,19 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::IsBlocked {
+                did: did.clone(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn add_block_by(&self, did: &DID) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -335,6 +356,19 @@ impl RootDocumentMap {
             .tx
             .clone()
             .send(RootDocumentCommand::GetBlockByList { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn is_blocked_by(&self, did: &DID) -> Result<bool, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::IsBlockedBy {
+                did: did.clone(),
+                response: tx,
+            })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -493,6 +527,12 @@ impl RootDocumentTask {
                 RootDocumentCommand::SetIdentityStatus { status, response } => {
                     let _ = response.send(self.set_identity_status(status).await);
                 }
+                RootDocumentCommand::IsBlocked { did, response } => {
+                    _ = response.send(self.is_blocked(&did).await);
+                }
+                RootDocumentCommand::IsBlockedBy { did, response } => {
+                    _ = response.send(self.is_blocked_by(&did).await);
+                }
                 RootDocumentCommand::GetRootIndex { response } => {
                     let _ = response.send(self.get_root_index().await);
                 }
@@ -545,9 +585,7 @@ impl RootDocumentTask {
             })
             .collect::<Vec<_>>();
 
-        let new_cid_fut = async { self.ipfs.dag().put().serialize(list)?.await };
-
-        let new_cid = match new_cid_fut.await {
+        let new_cid = match self.ipfs.dag().put().serialize(list).await {
             Ok(cid) => cid,
             Err(_) => return,
         };
@@ -589,7 +627,7 @@ impl RootDocumentTask {
         //Precautionary check
         document.verify(&self.ipfs).await?;
 
-        let root_cid = self.ipfs.dag().put().serialize(document)?.pin(true).await?;
+        let root_cid = self.ipfs.dag().put().serialize(document).pin(true).await?;
 
         let old_cid = self.cid.replace(root_cid);
 
@@ -619,7 +657,7 @@ impl RootDocumentTask {
         let mut identity = self.identity().await?;
         identity.metadata.status = Some(status);
         let identity = identity.sign(&self.keypair)?;
-        root.identity = self.ipfs.dag().put().serialize(identity)?.await?;
+        root.identity = self.ipfs.dag().put().serialize(identity).await?;
 
         self.set_root_document(root).await
     }
@@ -659,7 +697,7 @@ impl RootDocumentTask {
         }
 
         document.request =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -691,7 +729,7 @@ impl RootDocumentTask {
         }
 
         document.request =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -739,7 +777,7 @@ impl RootDocumentTask {
         }
 
         document.friends =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -774,7 +812,7 @@ impl RootDocumentTask {
 
         let index_document = DirectoryDocument::new(&self.ipfs, &root).await?;
 
-        let cid = self.ipfs.dag().put().serialize(index_document)?.await?;
+        let cid = self.ipfs.dag().put().serialize(index_document).await?;
 
         let old_document = document.file_index.replace(cid);
 
@@ -808,7 +846,7 @@ impl RootDocumentTask {
         }
 
         document.friends =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -837,6 +875,18 @@ impl RootDocumentTask {
         Ok(list)
     }
 
+    async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
+        self.block_list()
+            .await
+            .map(|list| list.contains(public_key))
+    }
+
+    async fn is_blocked_by(&self, public_key: &DID) -> Result<bool, Error> {
+        self.blockby_list()
+            .await
+            .map(|list| list.contains(public_key))
+    }
+
     async fn block_key(&mut self, did: DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.blocks;
@@ -856,7 +906,7 @@ impl RootDocumentTask {
         }
 
         document.blocks =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -887,7 +937,7 @@ impl RootDocumentTask {
         }
 
         document.blocks =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -934,7 +984,7 @@ impl RootDocumentTask {
         }
 
         document.block_by =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -965,7 +1015,7 @@ impl RootDocumentTask {
         }
 
         document.block_by =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list)?.await?);
+            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
 
         self.set_root_document(document).await?;
 
@@ -979,7 +1029,7 @@ impl RootDocumentTask {
 
     async fn set_conversation_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        document.conversations_keystore = Some(self.ipfs.dag().put().serialize(map)?.await?);
+        document.conversations_keystore = Some(self.ipfs.dag().put().serialize(map).await?);
         self.set_root_document(document).await
     }
 

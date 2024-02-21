@@ -344,13 +344,13 @@ impl IdentityStorageTask {
             .ipfs
             .dag()
             .put()
-            .serialize(document.clone())?
+            .serialize(document.clone())
             .pin(false)
             .await?;
 
         list.insert(did_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
+        let cid = self.ipfs.dag().put().serialize(list).pin(false).await?;
 
         let old_cid = self.list.replace(cid);
 
@@ -402,7 +402,7 @@ impl IdentityStorageTask {
 
         list.insert(did.to_string(), pkg_cid);
 
-        let cid = self.ipfs.dag().put().pin(true).serialize(list)?.await?;
+        let cid = self.ipfs.dag().put().pin(true).serialize(list).await?;
 
         let old_cid = self.packages.replace(cid);
         if let Some(old_cid) = old_cid {
@@ -441,12 +441,12 @@ impl IdentityStorageTask {
 
         let pkg_path = self
             .ipfs
-            .unixfs()
-            .cat(path, None, &[], true, None)
+            .cat_unixfs(path)
+            .local()
             .await
             .map_err(anyhow::Error::from)?;
 
-        Ok(pkg_path)
+        Ok(pkg_path.into())
     }
 
     async fn update(&mut self, document: IdentityDocument) -> Result<(), Error> {
@@ -483,13 +483,7 @@ impl IdentityStorageTask {
             return Err(Error::CannotUpdateIdentity);
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(document)?
-            .pin(false)
-            .await?;
+        let cid = self.ipfs.dag().put().serialize(document).pin(false).await?;
 
         let old_cid = list.insert(did_str, cid);
 
@@ -510,7 +504,7 @@ impl IdentityStorageTask {
             }
         }
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(false).await?;
+        let cid = self.ipfs.dag().put().serialize(list).pin(false).await?;
 
         let old_cid = self.list.replace(cid);
 
@@ -708,11 +702,11 @@ impl IdentityStorageTask {
 
         let remaining = mailbox.len();
 
-        let cid = self.ipfs.dag().put().serialize(mailbox)?.await?;
+        let cid = self.ipfs.dag().put().serialize(mailbox).await?;
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(list).pin(true).await?;
 
         let old_cid = self.mailbox.replace(cid);
 
@@ -777,11 +771,11 @@ impl IdentityStorageTask {
 
         mailbox.push(request);
 
-        let cid = self.ipfs.dag().put().serialize(mailbox)?.await?;
+        let cid = self.ipfs.dag().put().serialize(mailbox).await?;
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(list).pin(true).await?;
 
         let old_cid = self.mailbox.replace(cid);
 

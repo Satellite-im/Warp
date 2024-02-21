@@ -221,7 +221,7 @@ impl ConversationDocument {
     pub fn new_group(
         did: &DID,
         name: Option<String>,
-        recipients: &[DID],
+        recipients: impl IntoIterator<Item = DID>,
         restrict: &[DID],
         settings: GroupSettings,
     ) -> Result<Self, Error> {
@@ -229,7 +229,7 @@ impl ConversationDocument {
         Self::new(
             did,
             name,
-            recipients.to_vec(),
+            recipients.into_iter().collect(),
             restrict.to_vec(),
             conversation_id,
             ConversationType::Group,
@@ -360,7 +360,7 @@ impl ConversationDocument {
         list: BTreeSet<MessageDocument>,
     ) -> Result<(), Error> {
         self.modified = Utc::now();
-        let cid = ipfs.dag().put().serialize(list)?.await?;
+        let cid = ipfs.dag().put().serialize(list).await?;
         self.messages = Some(cid);
         Ok(())
     }
@@ -736,12 +736,12 @@ impl MessageDocument {
         .await;
 
         let attachments =
-            (!attachments.is_empty()).then_some(ipfs.dag().put().serialize(attachments)?.await?);
+            (!attachments.is_empty()).then_some(ipfs.dag().put().serialize(attachments).await?);
 
         let reactions = message.reactions();
 
         let reactions =
-            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions)?.await?);
+            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
 
         if !lines.is_empty() {
             let lines_value_length: usize = lines
@@ -771,7 +771,7 @@ impl MessageDocument {
             Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?,
         };
 
-        let message = Some(ipfs.dag().put().serialize(data)?.await?);
+        let message = Some(ipfs.dag().put().serialize(data).await?);
 
         let sender = DIDEd25519Reference::from_did(&sender);
 
@@ -916,7 +916,7 @@ impl MessageDocument {
         let reactions = message.reactions();
 
         self.reactions =
-            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions)?.await?);
+            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
 
         if message.lines() != old_message.lines() {
             let lines = message.lines();
@@ -965,7 +965,7 @@ impl MessageDocument {
                 (Either::Left(key), None) => ecdh_encrypt(did, Some(key), &bytes)?,
             };
 
-            let message = ipfs.dag().put().serialize(data)?.await?;
+            let message = ipfs.dag().put().serialize(data).await?;
 
             self.message.replace(message);
 

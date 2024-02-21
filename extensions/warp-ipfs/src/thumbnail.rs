@@ -12,7 +12,6 @@ use std::{
     time::Instant,
 };
 
-use futures::StreamExt;
 use image::io::Reader as ImageReader;
 use image::ImageFormat;
 use rust_ipfs::{Ipfs, IpfsPath};
@@ -127,19 +126,19 @@ impl ThumbnailGenerator {
 
             let (ty, data) = result?;
 
-            let path = ipfs
-                .add_unixfs(futures::stream::once(async { Ok(data.clone()) }).boxed())
-                .await?;
+            let size = data.len();
+
+            let path = ipfs.add_unixfs(data.clone()).await?;
 
             let link = *path.root().cid().expect("valid cid");
 
             let image_dag = ImageDag {
                 link,
-                size: data.len() as _,
+                size: size as _,
                 mime: ty.into(),
             };
 
-            let cid = ipfs.dag().put().serialize(image_dag)?.await?;
+            let cid = ipfs.dag().put().serialize(image_dag).await?;
 
             Ok((ty, IpfsPath::from(cid), data))
         });
@@ -215,9 +214,7 @@ impl ThumbnailGenerator {
 
             let (ty, data) = result?;
 
-            let path = ipfs
-                .add_unixfs(futures::stream::once(async { Ok(data.clone()) }).boxed())
-                .await?;
+            let path = ipfs.add_unixfs(data.clone()).await?;
 
             let link = *path.root().cid().expect("valid cid");
 
@@ -227,7 +224,7 @@ impl ThumbnailGenerator {
                 mime: ty.into(),
             };
 
-            let cid = ipfs.dag().put().serialize(image_dag)?.await?;
+            let cid = ipfs.dag().put().serialize(image_dag).await?;
 
             Ok((ty, IpfsPath::from(cid), data))
         });

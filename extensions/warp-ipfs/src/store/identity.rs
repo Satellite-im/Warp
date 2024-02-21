@@ -430,10 +430,7 @@ impl IdentityStore {
         let did = store.get_keypair_did()?;
 
         let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
-        let identity_announce_stream = store
-            .ipfs
-            .pubsub_subscribe("/identity/announce/v0".into())
-            .await?;
+        let identity_announce_stream = store.ipfs.pubsub_subscribe("/identity/announce/v0").await?;
 
         store.discovery.start().await?;
 
@@ -893,13 +890,13 @@ impl IdentityStore {
 
     pub async fn announce_identity_to_mesh(&self) -> Result<(), Error> {
         if self.config.store_setting.announce_to_mesh {
-            let kp = self.ipfs.keypair()?;
+            let kp = self.ipfs.keypair();
             let document = self.own_identity_document().await?;
             let payload = PayloadRequest::new(kp, None, document)?;
             let bytes = serde_json::to_vec(&payload)?;
             _ = self
                 .ipfs
-                .pubsub_publish("/identity/announce/v0".into(), bytes)
+                .pubsub_publish("/identity/announce/v0", bytes)
                 .await;
         }
 
@@ -1606,7 +1603,7 @@ impl IdentityStore {
         let did_kp = self.get_keypair_did()?;
         let identity = identity.sign(&did_kp)?;
 
-        let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
+        let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
 
         let root_document = RootDocument {
             identity: ident_cid,
@@ -2106,7 +2103,7 @@ impl IdentityStore {
 
         tracing::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
-        let ident_cid = self.ipfs.dag().put().serialize(identity)?.await?;
+        let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
         root_document.identity = ident_cid;
 
         self.root_document

@@ -12,7 +12,6 @@ pub mod queue;
 pub mod request;
 
 use chrono::{DateTime, Utc};
-use either::Either;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -30,17 +29,12 @@ use warp::{
     error::Error,
     multipass::identity::IdentityStatus,
     raygun::{
-        ConversationSettings, ConversationType, DirectConversationSettings, MessageEvent, PinState,
-        ReactionState,
+        ConversationSettings, DirectConversationSettings, MessageEvent, PinState, ReactionState,
     },
     tesseract::Tesseract,
 };
 
-use self::{
-    conversation::{ConversationDocument, MessageDocument},
-    document::conversation::Conversations,
-    keystore::Keystore,
-};
+use self::conversation::{ConversationDocument, MessageDocument};
 
 pub trait PeerTopic: Display {
     fn inbox(&self) -> String {
@@ -142,7 +136,6 @@ where
 }
 
 #[allow(clippy::large_enum_variant)]
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationEvents {
@@ -164,8 +157,7 @@ pub enum ConversationEvents {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
-#[serde(rename_all = "lowercase", tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationRequestResponse {
     Request {
         conversation_id: Uuid,
@@ -178,14 +170,14 @@ pub enum ConversationRequestResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[allow(clippy::type_complexity)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationRequestKind {
+    Acknowledge,
     Key,
     Ping,
     RetrieveMessages {
-        // start/end
-        range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
     },
     WantMessage {
         message_id: Uuid,
@@ -193,12 +185,12 @@ pub enum ConversationRequestKind {
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationResponseKind {
     Key { key: Vec<u8> },
     Pong,
     HaveMessages { messages: Vec<Uuid> },
+    AcknowledgementConfirmed,
 }
 
 impl std::fmt::Debug for ConversationResponseKind {
@@ -317,11 +309,7 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
     Ok(did.into())
 }
 
-pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
-    did: &DID,
-    recipient: Option<&DID>,
-    data: K,
-) -> Result<Vec<u8>, Error> {
+pub(crate) fn ecdh_shared_key(did: &DID, recipient: Option<&DID>) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
@@ -329,7 +317,17 @@ pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
     };
 
     let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let prik = prikey.key_exchange(&pubkey);
+
+    Ok(prik)
+}
+
+pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
+    let prik = Zeroizing::new(ecdh_shared_key(did, recipient)?);
     let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
 
     Ok(data)
@@ -359,14 +357,7 @@ pub(crate) fn ecdh_decrypt<K: AsRef<[u8]>>(
     recipient: Option<&DID>,
     data: K,
 ) -> Result<Vec<u8>, Error> {
-    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
-    let did_pubkey = match recipient {
-        Some(did) => did.public_key_bytes(),
-        None => did.public_key_bytes(),
-    };
-
-    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let prik = Zeroizing::new(ecdh_shared_key(did, recipient)?);
     let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
 
     Ok(data)
@@ -433,30 +424,6 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
-}
-
-pub async fn pubkey_or_keystore(
-    conversation: &Conversations,
-    conversation_id: Uuid,
-    keypair: &DID,
-) -> Result<Either<DID, Keystore>, Error> {
-    let document = conversation.get(conversation_id).await?;
-    let keystore = match document.conversation_type {
-        ConversationType::Direct => Either::Left({
-            document
-                .recipients()
-                .iter()
-                .filter(|did| keypair.ne(did))
-                .cloned()
-                .collect::<Vec<_>>()
-                .first()
-                .cloned()
-                .expect("Valid recipient")
-        }),
-        ConversationType::Group => Either::Right(conversation.get_keystore(conversation_id).await?),
-    };
-
-    Ok(keystore)
 }
 
 pub fn extract_data_slice<const N: usize>(data: &[u8]) -> (&[u8], &[u8]) {

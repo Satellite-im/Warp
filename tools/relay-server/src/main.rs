@@ -227,11 +227,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut uninitialized = UninitializedIpfs::new()
-        .with_identify(None)
-        .with_ping(None)
-        .with_relay_server(Some(config.into()))
+        .with_identify(Default::default())
+        .with_ping(Default::default())
+        .with_relay_server(config.into())
         .fd_limit(FDLimit::Max)
-        .set_keypair(keypair)
+        .set_keypair(&keypair)
         .set_idle_connection_timeout(30)
         .listen_as_external_addr()
         .with_custom_behaviour(ext_behaviour::Behaviour)

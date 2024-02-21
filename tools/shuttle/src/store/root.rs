@@ -190,7 +190,7 @@ impl RootStorageTask {
             .ipfs
             .dag()
             .put()
-            .serialize(self.root)?
+            .serialize(self.root)
             .pin(false)
             .await?;
 
@@ -209,7 +209,7 @@ impl RootStorageTask {
             .ipfs
             .dag()
             .put()
-            .serialize(self.root)?
+            .serialize(self.root)
             .pin(false)
             .await?;
         tracing::info!(cid = %cid, "root stored");
@@ -228,7 +228,7 @@ impl RootStorageTask {
             .ipfs
             .dag()
             .put()
-            .serialize(self.root)?
+            .serialize(self.root)
             .pin(false)
             .await?;
 
