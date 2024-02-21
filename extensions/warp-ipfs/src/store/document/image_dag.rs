@@ -94,13 +94,7 @@ pub async fn get_image(
     local: bool,
     limit: Option<usize>,
 ) -> Result<IdentityImage, Error> {
-    let mut dag = ipfs.get_dag(cid);
-
-    if local {
-        dag = dag.local();
-    }
-
-    let dag: ImageDag = dag.deserialized().await?;
+    let dag: ImageDag = ipfs.get_dag(cid).set_local(local).deserialized().await?;
 
     match limit {
         Some(size) if dag.size > size as _ => {
@@ -115,13 +109,13 @@ pub async fn get_image(
         None => {}
     }
 
-    let mut image = ipfs.unixfs().cat(dag.link).providers(peers);
-
-    if local {
-        image = image.local();
-    }
-
-    let image = image.await.map_err(anyhow::Error::from)?;
+    let image = ipfs
+        .unixfs()
+        .cat(dag.link)
+        .providers(peers)
+        .set_local(local)
+        .await
+        .map_err(anyhow::Error::from)?;
 
     let mut id_img = IdentityImage::default();
 
