@@ -919,6 +919,10 @@ impl MessageDocument {
             (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
 
         if message.lines() != old_message.lines() {
+            if sender.ne(did) {
+                return Err(Error::InvalidMessage);
+            }
+
             let lines = message.lines();
             if !lines.is_empty() {
                 let lines_value_length: usize = lines
@@ -973,6 +977,7 @@ impl MessageDocument {
                 (true, None) => {
                     *self = self.sign(did)?;
                 }
+                (false, None) | (true, Some(_)) => return Err(Error::InvalidConversation),
                 (false, Some(sig)) => {
                     let new_signature = MessageSignature::try_from(sig)?;
                     self.signature.replace(new_signature);
@@ -980,7 +985,6 @@ impl MessageDocument {
                         return Err(Error::InvalidSignature);
                     }
                 }
-                _ => unreachable!(),
             };
         }
 
