@@ -1225,23 +1225,10 @@ impl<'d> Deserialize<'d> for MessageSignature {
 
 const REFERENCE_LENGTH: usize = 500;
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Default, Debug, Serialize, Deserialize, Copy, Clone)]
 pub struct MessageReferenceList {
-    pub created: DateTime<Utc>,
-    pub modified: Option<DateTime<Utc>>,
     pub messages: Option<Cid>,
     pub next: Option<Cid>,
-}
-
-impl Default for MessageReferenceList {
-    fn default() -> Self {
-        Self {
-            created: Utc::now(),
-            modified: None,
-            messages: None,
-            next: None,
-        }
-    }
 }
 
 impl MessageReferenceList {
@@ -1285,7 +1272,7 @@ impl MessageReferenceList {
 
         let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
         self.messages.replace(ref_cid);
-        self.modified.replace(Utc::now());
+
         Ok(())
     }
 
@@ -1325,7 +1312,6 @@ impl MessageReferenceList {
 
         let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
         self.messages.replace(ref_cid);
-        self.modified.replace(Utc::now());
 
         Ok(())
     }
