@@ -1857,9 +1857,10 @@ impl ConversationTask {
         let message =
             MessageDocument::new(&self.ipfs, &self.keypair, message, keystore.as_ref()).await?;
 
-        let mut messages = conversation.get_message_list(&self.ipfs).await?;
-        messages.insert(message);
-        conversation.set_message_list(&self.ipfs, messages).await?;
+        conversation
+            .insert_message_document(&self.ipfs, message)
+            .await?;
+
         self.set_document(conversation).await?;
 
         let event = MessageEventKind::MessageSent {
@@ -1909,15 +1910,9 @@ impl ConversationTask {
 
         let keystore = pubkey_or_keystore(&*self, conversation.id(), &self.keypair).await?;
 
-        let mut list = conversation.get_message_list(&self.ipfs).await?;
-
-        let mut message_document = list
-            .iter()
-            .find(|document| {
-                document.id == message_id && document.conversation_id == conversation_id
-            })
-            .copied()
-            .ok_or(Error::MessageNotFound)?;
+        let mut message_document = conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await?;
 
         let mut message = message_document
             .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
@@ -1940,8 +1935,9 @@ impl ConversationTask {
         let nonce = message_document.nonce_from_message(&self.ipfs).await?;
         let signature = message_document.signature.expect("message to be signed");
 
-        list.replace(message_document);
-        conversation.set_message_list(&self.ipfs, list).await?;
+        conversation
+            .update_message_document(&self.ipfs, message_document)
+            .await?;
 
         self.set_document(conversation).await?;
 
@@ -2007,9 +2003,10 @@ impl ConversationTask {
 
         let message_id = message.id;
 
-        let mut messages = conversation.get_message_list(&self.ipfs).await?;
-        messages.insert(message);
-        conversation.set_message_list(&self.ipfs, messages).await?;
+        conversation
+            .insert_message_document(&self.ipfs, message)
+            .await?;
+
         self.set_document(conversation).await?;
 
         let event = MessageEventKind::MessageSent {
@@ -2068,8 +2065,6 @@ impl ConversationTask {
 
         let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
 
-        let mut list = conversation.get_message_list(&self.ipfs).await?;
-
         let mut message_document = conversation
             .get_message_document(&self.ipfs, message_id)
             .await?;
@@ -2112,8 +2107,10 @@ impl ConversationTask {
             )
             .await?;
 
-        list.replace(message_document);
-        conversation.set_message_list(&self.ipfs, list).await?;
+        conversation
+            .update_message_document(&self.ipfs, message_document)
+            .await?;
+
         self.set_document(conversation).await?;
 
         _ = tx.send(event);
@@ -2139,8 +2136,6 @@ impl ConversationTask {
         let tx = self.subscribe(conversation_id).await?;
 
         let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
-
-        let mut list = conversation.get_message_list(&self.ipfs).await?;
 
         let mut message_document = conversation
             .get_message_document(&self.ipfs, message_id)
@@ -2173,8 +2168,9 @@ impl ConversationTask {
                     )
                     .await?;
 
-                list.replace(message_document);
-                conversation.set_message_list(&self.ipfs, list).await?;
+                conversation
+                    .update_message_document(&self.ipfs, message_document)
+                    .await?;
                 self.set_document(conversation).await?;
 
                 _ = tx.send(MessageEventKind::MessageReactionAdded {
@@ -2212,8 +2208,9 @@ impl ConversationTask {
                     )
                     .await?;
 
-                list.replace(message_document);
-                conversation.set_message_list(&self.ipfs, list).await?;
+                conversation
+                    .update_message_document(&self.ipfs, message_document)
+                    .await?;
 
                 self.set_document(conversation).await?;
 
@@ -2468,9 +2465,10 @@ impl ConversationTask {
 
         let message_id = message.id;
 
-        let mut messages = conversation.get_message_list(&self.ipfs).await?;
-        messages.insert(message);
-        conversation.set_message_list(&self.ipfs, messages).await?;
+        conversation
+            .insert_message_document(&self.ipfs, message)
+            .await?;
+
         self.set_document(conversation).await?;
 
         let event = MessageEventKind::MessageSent {
@@ -3540,11 +3538,13 @@ async fn message_event(
                 return Err(Error::InvalidMessage);
             }
 
-            let mut messages = document.get_message_list(&this.ipfs).await?;
-            if messages
-                .iter()
-                .any(|message_document| message_document.id == message.id)
-            {
+            if document.id != message.conversation_id {
+                return Err(Error::InvalidConversation);
+            }
+
+            let message_id = message.id;
+
+            if document.contains(&this.ipfs, message_id).await? {
                 return Err(Error::MessageFound);
             }
 
@@ -3579,10 +3579,10 @@ async fn message_event(
 
             let conversation_id = message.conversation_id;
 
-            let message_id = message.id;
+            document
+                .insert_message_document(&this.ipfs, message)
+                .await?;
 
-            messages.insert(message);
-            document.set_message_list(&this.ipfs, messages).await?;
             this.set_document(document).await?;
 
             if let Err(e) = tx.send(MessageEventKind::MessageReceived {
@@ -3600,15 +3600,9 @@ async fn message_event(
             nonce,
             signature,
         } => {
-            let mut list = document.get_message_list(&this.ipfs).await?;
-
-            let mut message_document = list
-                .iter()
-                .find(|document| {
-                    document.id == message_id && document.conversation_id == conversation_id
-                })
-                .copied()
-                .ok_or(Error::MessageNotFound)?;
+            let mut message_document = document
+                .get_message_document(&this.ipfs, message_id)
+                .await?;
 
             let mut message = message_document
                 .resolve(&this.ipfs, &this.keypair, true, keystore.as_ref())
@@ -3647,8 +3641,9 @@ async fn message_event(
                 )
                 .await?;
 
-            list.replace(message_document);
-            document.set_message_list(&this.ipfs, list).await?;
+            document
+                .update_message_document(&this.ipfs, message_document)
+                .await?;
 
             this.set_document(document).await?;
 
@@ -3694,8 +3689,6 @@ async fn message_event(
             state,
             ..
         } => {
-            let mut list = document.get_message_list(&this.ipfs).await?;
-
             let mut message_document = document
                 .get_message_document(&this.ipfs, message_id)
                 .await?;
@@ -3738,8 +3731,10 @@ async fn message_event(
                 )
                 .await?;
 
-            list.replace(message_document);
-            document.set_message_list(&this.ipfs, list).await?;
+            document
+                .update_message_document(&this.ipfs, message_document)
+                .await?;
+
             this.set_document(document).await?;
 
             if let Err(e) = tx.send(event) {
@@ -3753,15 +3748,9 @@ async fn message_event(
             state,
             emoji,
         } => {
-            let mut list = document.get_message_list(&this.ipfs).await?;
-
-            let mut message_document = list
-                .iter()
-                .find(|document| {
-                    document.id == message_id && document.conversation_id == conversation_id
-                })
-                .cloned()
-                .ok_or(Error::MessageNotFound)?;
+            let mut message_document = document
+                .get_message_document(&this.ipfs, message_id)
+                .await?;
 
             let mut message = message_document
                 .resolve(&this.ipfs, &this.keypair, true, keystore.as_ref())
@@ -3790,8 +3779,10 @@ async fn message_event(
                         )
                         .await?;
 
-                    list.replace(message_document);
-                    document.set_message_list(&this.ipfs, list).await?;
+                    document
+                        .update_message_document(&this.ipfs, message_document)
+                        .await?;
+
                     this.set_document(document).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
@@ -3831,8 +3822,9 @@ async fn message_event(
                         )
                         .await?;
 
-                    list.replace(message_document);
-                    document.set_message_list(&this.ipfs, list).await?;
+                    document
+                        .update_message_document(&this.ipfs, message_document)
+                        .await?;
 
                     this.set_document(document).await?;
 
