@@ -947,10 +947,6 @@ impl MessageDocument {
             (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
 
         if message.lines() != old_message.lines() {
-            if sender.ne(did) {
-                return Err(Error::InvalidMessage);
-            }
-
             let lines = message.lines();
             if !lines.is_empty() {
                 let lines_value_length: usize = lines
