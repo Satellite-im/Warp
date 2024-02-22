@@ -377,7 +377,6 @@ impl ConversationDocument {
         self.set_message_reference_list(ipfs, list).await
     }
 
-
     pub async fn update_message_document(
         &mut self,
         ipfs: &Ipfs,
