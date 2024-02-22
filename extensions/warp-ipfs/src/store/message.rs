@@ -3641,12 +3641,6 @@ async fn message_event(
 
             let sender = message.sender();
 
-            let own_did = &*this.keypair;
-
-            if sender.ne(own_did) {
-                return Err(Error::InvalidMessage);
-            }
-
             *message.lines_mut() = lines;
             message.set_modified(modified);
 
