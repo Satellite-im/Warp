@@ -1918,6 +1918,14 @@ impl ConversationTask {
             .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
             .await?;
 
+        let sender = message.sender();
+
+        let own_did = &*self.keypair;
+
+        if sender.ne(own_did) {
+            return Err(Error::InvalidMessage);
+        }
+
         *message.lines_mut() = messages.clone();
         message.set_modified(Utc::now());
 
@@ -3626,6 +3634,12 @@ async fn message_event(
             }
 
             let sender = message.sender();
+
+            let own_did = &*this.keypair;
+
+            if sender.ne(own_did) {
+                return Err(Error::InvalidMessage);
+            }
 
             *message.lines_mut() = lines;
             message.set_modified(modified);
