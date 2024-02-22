@@ -6,7 +6,7 @@ use futures::{
     StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::Ipfs;
+use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 use std::{
@@ -337,32 +337,65 @@ impl ConversationDocument {
         Ok(())
     }
 
+    pub async fn message_reference_list(&self, ipfs: &Ipfs) -> Result<MessageReferenceList, Error> {
+        let refs = match self.messages {
+            Some(cid) => {
+                ipfs.get_dag(cid)
+                    .timeout(Duration::from_secs(10))
+                    .deserialized()
+                    .await?
+            }
+            None => MessageReferenceList::default(),
+        };
+
+        Ok(refs)
+    }
+
+    pub async fn contains(&self, ipfs: &Ipfs, message_id: Uuid) -> Result<bool, Error> {
+        let list = self.message_reference_list(ipfs).await?;
+        Ok(list.contains(ipfs, message_id).await)
+    }
+
+    pub async fn set_message_reference_list(
+        &mut self,
+        ipfs: &Ipfs,
+        list: MessageReferenceList,
+    ) -> Result<(), Error> {
+        self.modified = Utc::now();
+        let next_cid = ipfs.dag().put().serialize(list).await?;
+        self.messages.replace(next_cid);
+        Ok(())
+    }
+
+    pub async fn insert_message_document(
+        &mut self,
+        ipfs: &Ipfs,
+        message_document: MessageDocument,
+    ) -> Result<(), Error> {
+        let mut list = self.message_reference_list(ipfs).await?;
+        list.insert(ipfs, message_document).await?;
+        self.set_message_reference_list(ipfs, list).await
+    }
+
+    pub async fn update_message_document(
+        &mut self,
+        ipfs: &Ipfs,
+        message_document: MessageDocument,
+    ) -> Result<(), Error> {
+        let mut list = self.message_reference_list(ipfs).await?;
+        list.update(ipfs, message_document).await?;
+        self.set_message_reference_list(ipfs, list).await
+    }
+
     pub async fn messages_length(&self, ipfs: &Ipfs) -> Result<usize, Error> {
-        self.get_message_list(ipfs).await.map(|l| l.len())
+        let list = self.message_reference_list(ipfs).await?;
+        Ok(list.count(ipfs).await)
     }
 
     pub async fn get_message_list(&self, ipfs: &Ipfs) -> Result<BTreeSet<MessageDocument>, Error> {
-        match self.messages {
-            Some(cid) => ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .map_err(anyhow::Error::from)
-                .map_err(Error::from),
-            None => Ok(BTreeSet::new()),
-        }
-    }
-
-    pub async fn set_message_list(
-        &mut self,
-        ipfs: &Ipfs,
-        list: BTreeSet<MessageDocument>,
-    ) -> Result<(), Error> {
-        self.modified = Utc::now();
-        let cid = ipfs.dag().put().serialize(list).await?;
-        self.messages = Some(cid);
-        Ok(())
+        let refs = self.message_reference_list(ipfs).await?;
+        let list = refs.list(ipfs).await.collect::<BTreeSet<_>>().await;
+        Ok(list)
     }
 
     pub async fn get_messages(
@@ -617,15 +650,9 @@ impl ConversationDocument {
     }
 
     pub async fn delete_message(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
-        let mut messages = self.get_message_list(ipfs).await?;
-
-        let document = messages
-            .iter()
-            .find(|document| document.id == message_id)
-            .copied()
-            .ok_or(Error::MessageNotFound)?;
-        messages.remove(&document);
-        self.set_message_list(ipfs, messages).await?;
+        let mut list = self.message_reference_list(ipfs).await?;
+        list.remove(ipfs, message_id).await?;
+        self.set_message_reference_list(ipfs, list).await?;
         Ok(())
     }
 }
@@ -1193,5 +1220,284 @@ impl<'d> Deserialize<'d> for MessageSignature {
             .map_err(serde::de::Error::custom)?;
 
         Self::try_from(bytes).map_err(serde::de::Error::custom)
+    }
+}
+
+const REFERENCE_LENGTH: usize = 500;
+
+#[derive(Default, Debug, Serialize, Deserialize, Copy, Clone)]
+pub struct MessageReferenceList {
+    pub messages: Option<Cid>,
+    pub next: Option<Cid>,
+}
+
+impl MessageReferenceList {
+    #[async_recursion::async_recursion]
+    pub async fn insert(&mut self, ipfs: &Ipfs, message: MessageDocument) -> Result<(), Error> {
+        let mut list_refs = match self.messages {
+            Some(cid) => {
+                ipfs.get_dag(cid)
+                    .timeout(Duration::from_secs(10))
+                    .deserialized::<BTreeMap<String, Cid>>()
+                    .await?
+            }
+            None => BTreeMap::new(),
+        };
+
+        if list_refs.contains_key(&message.id.to_string()) {
+            return Err(Error::MessageFound);
+        }
+
+        if list_refs.len() > REFERENCE_LENGTH {
+            let mut next_ref = match self.next {
+                Some(cid) => {
+                    ipfs.get_dag(cid)
+                        .timeout(Duration::from_secs(10))
+                        .deserialized()
+                        .await?
+                }
+                None => MessageReferenceList::default(),
+            };
+
+            next_ref.insert(ipfs, message).await?;
+            let next_cid = ipfs.dag().put().serialize(next_ref).await?;
+            self.next.replace(next_cid);
+            return Ok(());
+        }
+
+        let id = message.id.to_string();
+
+        let cid = ipfs.dag().put().serialize(message).await?;
+        list_refs.insert(id, cid);
+
+        let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
+        self.messages.replace(ref_cid);
+
+        Ok(())
+    }
+
+    #[async_recursion::async_recursion]
+    pub async fn update(&mut self, ipfs: &Ipfs, message: MessageDocument) -> Result<(), Error> {
+        let mut list_refs = match self.messages {
+            Some(cid) => {
+                ipfs.get_dag(cid)
+                    .timeout(Duration::from_secs(10))
+                    .deserialized::<BTreeMap<String, Cid>>()
+                    .await?
+            }
+            None => BTreeMap::new(),
+        };
+
+        if !list_refs.contains_key(&message.id.to_string()) {
+            let mut next_ref = match self.next {
+                Some(cid) => {
+                    ipfs.get_dag(cid)
+                        .timeout(Duration::from_secs(10))
+                        .deserialized::<MessageReferenceList>()
+                        .await?
+                }
+                None => return Err(Error::MessageNotFound),
+            };
+
+            next_ref.update(ipfs, message).await?;
+            let next_cid = ipfs.dag().put().serialize(next_ref).await?;
+            self.next.replace(next_cid);
+            return Ok(());
+        }
+
+        let id = message.id.to_string();
+
+        let cid = ipfs.dag().put().serialize(message).await?;
+        list_refs.insert(id, cid);
+
+        let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
+        self.messages.replace(ref_cid);
+
+        Ok(())
+    }
+
+    #[async_recursion::async_recursion]
+    pub async fn list(&self, ipfs: &Ipfs) -> BoxStream<'_, MessageDocument> {
+        let cid = match self.messages {
+            Some(cid) => cid,
+            None => return stream::empty().boxed(),
+        };
+
+        let list = match ipfs
+            .get_dag(cid)
+            .timeout(Duration::from_secs(10))
+            .deserialized::<BTreeMap<String, Cid>>()
+            .await
+        {
+            Ok(list) => list,
+            Err(_) => return stream::empty().boxed(),
+        };
+
+        let ipfs = ipfs.clone();
+
+        let stream = async_stream::stream! {
+            for message_cid in list.values() {
+                if let Ok(message_document) = ipfs.get_dag(*message_cid).deserialized::<MessageDocument>().await {
+                    yield message_document;
+                }
+            }
+
+            let Some(next) = self.next else {
+                return;
+            };
+
+            let Ok(refs) = ipfs.get_dag(next)
+                .timeout(Duration::from_secs(10))
+                .deserialized::<MessageReferenceList>()
+                .await else {
+                    return;
+                };
+
+            let stream = refs.list(&ipfs).await;
+
+            for await item in stream {
+                yield item;
+            }
+        };
+
+        stream.boxed()
+    }
+
+    #[async_recursion::async_recursion]
+    pub async fn get(&self, ipfs: &Ipfs, message_id: Uuid) -> Result<MessageDocument, Error> {
+        let cid = self.messages.ok_or(Error::MessageNotFound)?;
+
+        if let Ok(message_document) = ipfs
+            .get_dag(IpfsPath::from(cid).sub_path(&message_id.to_string())?)
+            .timeout(Duration::from_secs(10))
+            .deserialized()
+            .await
+        {
+            //We can ignore the error
+            return Ok(message_document);
+        }
+
+        let cid = self.next.ok_or(Error::MessageNotFound)?;
+
+        let refs_list = ipfs
+            .get_dag(cid)
+            .timeout(Duration::from_secs(10))
+            .deserialized::<MessageReferenceList>()
+            .await?;
+
+        return refs_list.get(ipfs, message_id).await;
+    }
+
+    #[async_recursion::async_recursion]
+    pub async fn contains(&self, ipfs: &Ipfs, message_id: Uuid) -> bool {
+        let Some(cid) = self.messages else {
+            return false;
+        };
+
+        let Ok(list) = ipfs
+            .get_dag(cid)
+            .timeout(Duration::from_secs(10))
+            .deserialized::<BTreeMap<String, Cid>>()
+            .await
+        else {
+            return false;
+        };
+
+        if list.contains_key(&message_id.to_string()) {
+            return true;
+        }
+
+        let Ok(refs_list) = ipfs
+            .get_dag(cid)
+            .timeout(Duration::from_secs(10))
+            .deserialized::<MessageReferenceList>()
+            .await
+        else {
+            return false;
+        };
+
+        refs_list.contains(ipfs, message_id).await
+    }
+
+    #[async_recursion::async_recursion]
+    pub async fn count(&self, ipfs: &Ipfs) -> usize {
+        let Some(cid) = self.messages else {
+            return 0;
+        };
+
+        let Ok(list) = ipfs
+            .get_dag(cid)
+            .timeout(Duration::from_secs(10))
+            .deserialized::<BTreeMap<String, Cid>>()
+            .await
+        else {
+            return 0;
+        };
+
+        // Instead of resolving all documents, we will assume the whole list
+        // is valid for the purpose of this message account.
+        let count = list.len();
+
+        let Some(next) = self.next else {
+            return count;
+        };
+
+        let Ok(refs_list) = ipfs
+            .get_dag(next)
+            .timeout(Duration::from_secs(10))
+            .deserialized::<MessageReferenceList>()
+            .await
+        else {
+            return count;
+        };
+
+        refs_list.count(ipfs).await + count
+    }
+
+    #[async_recursion::async_recursion]
+    pub async fn remove(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
+        let cid = self.messages.ok_or(Error::MessageNotFound)?;
+
+        let id = &message_id.to_string();
+
+        let mut list = ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized::<BTreeMap<String, Cid>>()
+            .await?;
+
+        if list.remove(id).is_some() {
+            match list.is_empty() {
+                true => {
+                    self.messages.take();
+                }
+                false => {
+                    let cid = ipfs.dag().put().serialize(list).await?;
+                    self.messages.replace(cid);
+                }
+            };
+
+            return Ok(());
+        }
+
+        let cid = self.next.ok_or(Error::MessageNotFound)?;
+
+        let mut refs = ipfs
+            .get_dag(cid)
+            .timeout(Duration::from_secs(10))
+            .deserialized::<MessageReferenceList>()
+            .await?;
+
+        refs.remove(ipfs, message_id).await?;
+
+        if refs.messages.is_none() {
+            self.next.take();
+            return Ok(());
+        }
+        let cid = ipfs.dag().put().serialize(refs).await?;
+
+        self.next.replace(cid);
+
+        Ok(())
     }
 }
