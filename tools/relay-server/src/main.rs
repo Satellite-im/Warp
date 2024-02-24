@@ -72,31 +72,13 @@ impl Default for Config {
         Self {
             max_circuits: Some(32768),
             max_circuits_per_peer: Some(32768),
-            max_circuit_duration: Some(Duration::from_secs(60 * 2)),
-            max_circuit_bytes: Some(512 * 1024 * 1024),
-            circuit_rate_limiters: Some(vec![
-                Rate::PerPeer {
-                    limit: 32768.try_into().expect("greater than zero"),
-                    interval: Duration::from_secs(60 * 2),
-                },
-                Rate::PerIp {
-                    limit: 32768.try_into().expect("greater than zero"),
-                    interval: Duration::from_secs(30),
-                },
-            ]),
+            max_circuit_duration: None,
+            max_circuit_bytes: None,
+            circuit_rate_limiters: None,
             max_reservations_per_peer: Some(32768),
             max_reservations: Some(32768),
             reservation_duration: Some(Duration::from_secs(60 * 60)),
-            reservation_rate_limiters: Some(vec![
-                Rate::PerPeer {
-                    limit: 32768.try_into().expect("greater than zero"),
-                    interval: Duration::from_secs(30),
-                },
-                Rate::PerIp {
-                    limit: 32768.try_into().expect("greater than zero"),
-                    interval: Duration::from_secs(30),
-                },
-            ]),
+            reservation_rate_limiters: None,
         }
     }
 }
@@ -112,12 +94,12 @@ impl From<Config> for RelayConfig {
         reservation_rate_limiters.extend(reservation_rate.iter().map(|s| (*s).into()));
 
         RelayConfig {
-            max_circuits: config.max_circuits.unwrap_or(32768),
+            max_circuits: config.max_circuits.unwrap_or(usize::MAX),
             max_circuits_per_peer: config.max_circuits_per_peer.unwrap_or(32768),
             max_circuit_duration: config
                 .max_circuit_duration
-                .unwrap_or(Duration::from_secs(2 * 60)),
-            max_circuit_bytes: config.max_circuit_bytes.unwrap_or(512 * 1024 * 1024),
+                .unwrap_or(Duration::MAX),
+            max_circuit_bytes: config.max_circuit_bytes.unwrap_or(u64::MAX),
             circuit_src_rate_limiters,
             max_reservations_per_peer: config.max_reservations_per_peer.unwrap_or(21768),
             max_reservations: config.max_reservations.unwrap_or(32768),
