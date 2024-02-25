@@ -98,13 +98,13 @@ enum MessagingCommand {
 
     CreateConversation {
         did: DID,
-        response: oneshot::Sender<Result<Conversation, Error>>,
+        response: oneshot::Sender<Result<Box<dyn Conversation>, Error>>,
     },
     CreateGroupConversation {
         name: Option<String>,
         recipients: HashSet<DID>,
         settings: GroupSettings,
-        response: oneshot::Sender<Result<Conversation, Error>>,
+        response: oneshot::Sender<Result<Box<dyn Conversation>, Error>>,
     },
     GetMessage {
         conversation_id: Uuid,
@@ -313,15 +313,17 @@ impl MessageStore {
 }
 
 impl MessageStore {
-    pub async fn get_conversation(&self, id: Uuid) -> Result<Conversation, Error> {
+    pub async fn get_conversation(&self, id: Uuid) -> Result<Box<dyn Conversation>, Error> {
         let document = self.get(id).await?;
-        Ok(document.into())
+        Ok(Box::new(document))
     }
 
-    pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
-        self.list()
-            .await
-            .map(|list| list.into_iter().map(|document| document.into()).collect())
+    pub async fn list_conversations(&self) -> Result<Vec<Box<dyn Conversation>>, Error> {
+        self.list().await.map(|list| {
+            list.into_iter()
+                .map(|document| Box::new(document) as Box<_>)
+                .collect::<Vec<_>>()
+        })
     }
 
     pub async fn get_conversation_stream(
@@ -440,7 +442,7 @@ impl MessageStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn create_conversation(&self, did: &DID) -> Result<Conversation, Error> {
+    pub async fn create_conversation(&self, did: &DID) -> Result<Box<dyn Conversation>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -458,7 +460,7 @@ impl MessageStore {
         name: Option<String>,
         members: HashSet<DID>,
         settings: GroupSettings,
-    ) -> Result<Conversation, Error> {
+    ) -> Result<Box<dyn Conversation>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -1135,7 +1137,7 @@ impl ConversationTask {
         Ok(())
     }
 
-    async fn create_conversation(&mut self, did: &DID) -> Result<Conversation, Error> {
+    async fn create_conversation(&mut self, did: &DID) -> Result<Box<dyn Conversation>, Error> {
         //TODO: maybe use root document to directly check
         // if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did_key).await? {
         //     return Err(Error::FriendDoesntExist);
@@ -1152,13 +1154,13 @@ impl ConversationTask {
         if let Some(conversation) = self
             .list()
             .await
-            .iter()
+            .into_iter()
             .find(|conversation| {
                 conversation.conversation_type == ConversationType::Direct
                     && conversation.recipients().contains(did)
                     && conversation.recipients().contains(&self.keypair)
             })
-            .map(Conversation::from)
+            .map(Box::new)
         {
             return Err(Error::ConversationExist { conversation });
         }
@@ -1227,7 +1229,7 @@ impl ConversationTask {
             })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        Ok(Box::new(conversation))
     }
 
     pub async fn create_group_conversation(
@@ -1235,7 +1237,7 @@ impl ConversationTask {
         name: Option<String>,
         mut recipients: HashSet<DID>,
         settings: GroupSettings,
-    ) -> Result<Conversation, Error> {
+    ) -> Result<Box<dyn Conversation>, Error> {
         let own_did = &*(self.keypair.clone());
 
         if recipients.contains(own_did) {
@@ -1359,7 +1361,7 @@ impl ConversationTask {
             .emit(RayGunEventKind::ConversationCreated { conversation_id })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        Ok(Box::new(conversation))
     }
 
     async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {

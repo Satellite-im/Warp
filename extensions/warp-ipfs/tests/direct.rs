@@ -57,9 +57,9 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
-        assert_eq!(conversation.recipients().len(), 2);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
+        assert_eq!(conversation.members().len(), 2);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
         Ok(())
     }
 
@@ -105,9 +105,9 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
-        assert_eq!(conversation.recipients().len(), 2);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
+        assert_eq!(conversation.members().len(), 2);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
         let id = conversation.id();
 
         chat_a.delete(id, None).await?;
@@ -1061,9 +1061,9 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
-        assert_eq!(conversation.recipients().len(), 2);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
+        assert_eq!(conversation.members().len(), 2);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
 
         _account_a.block(&did_b).await?;
 

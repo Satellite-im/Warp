@@ -125,7 +125,7 @@ pub enum Error {
     InvalidConversation,
     #[error("Conversation already exist")]
     ConversationExist {
-        conversation: crate::raygun::Conversation,
+        conversation: Box<dyn crate::raygun::Conversation>,
     },
     #[error("Maximum conversations has been reached")]
     ConversationLimitReached,

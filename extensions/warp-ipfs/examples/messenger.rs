@@ -356,7 +356,7 @@ async fn main() -> anyhow::Result<()> {
                             let list = chat.list_conversations().await?;
                             for convo in list.iter() {
                                 let mut recipients = vec![];
-                                for recipient in convo.recipients() {
+                                for recipient in convo.members() {
                                     let username = get_username(&*new_account,  recipient).await;
                                     recipients.push(username);
                                 }

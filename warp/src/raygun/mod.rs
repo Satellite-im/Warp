@@ -344,118 +344,28 @@ pub enum ConversationType {
     Group,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
-pub struct Conversation {
-    id: Uuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-    creator: Option<DID>,
-    created: DateTime<Utc>,
-    modified: DateTime<Utc>,
-    conversation_type: ConversationType,
-    settings: ConversationSettings,
-    recipients: Vec<DID>,
-}
+pub trait Conversation: Debug + DynClone + Send + Sync {
+    /// ID of the converation in Uuid format
+    fn id(&self) -> Uuid;
 
-impl core::hash::Hash for Conversation {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
+    /// Name of the conversation, if any
+    fn name(&self) -> Option<String>;
 
-impl PartialEq for Conversation {
-    fn eq(&self, other: &Self) -> bool {
-        self.id.eq(&other.id)
-    }
-}
+    /// Time of when the conversation was created
+    fn created(&self) -> DateTime<Utc>;
 
-impl Default for Conversation {
-    fn default() -> Self {
-        let id = Uuid::new_v4();
-        let name = None;
-        let creator = None;
-        let conversation_type = ConversationType::Direct;
-        let recipients = Vec::new();
-        let timestamp = Utc::now();
-        Self {
-            id,
-            name,
-            creator,
-            created: timestamp,
-            modified: timestamp,
-            conversation_type,
-            settings: ConversationSettings::default(),
-            recipients,
-        }
-    }
-}
+    /// Last time the conversation was modified or updated
+    fn modified(&self) -> DateTime<Utc>;
 
-impl Conversation {
-    pub fn id(&self) -> Uuid {
-        self.id
-    }
+    /// The conversation type
+    /// Currently: Direct, Group
+    fn conversation_type(&self) -> ConversationType;
 
-    pub fn name(&self) -> Option<String> {
-        self.name.clone()
-    }
+    /// Conversation settings
+    fn settings(&self) -> ConversationSettings;
 
-    pub fn creator(&self) -> Option<DID> {
-        self.creator.clone()
-    }
-
-    pub fn created(&self) -> DateTime<Utc> {
-        self.created
-    }
-
-    pub fn modified(&self) -> DateTime<Utc> {
-        self.modified
-    }
-
-    pub fn conversation_type(&self) -> ConversationType {
-        self.conversation_type
-    }
-
-    pub fn settings(&self) -> ConversationSettings {
-        self.settings
-    }
-
-    pub fn recipients(&self) -> Vec<DID> {
-        self.recipients.clone()
-    }
-}
-
-impl Conversation {
-    pub fn set_id(&mut self, id: Uuid) {
-        self.id = id;
-    }
-
-    pub fn set_name(&mut self, name: Option<String>) {
-        self.name = name;
-    }
-
-    pub fn set_creator(&mut self, creator: Option<DID>) {
-        self.creator = creator;
-    }
-
-    pub fn set_created(&mut self, created: DateTime<Utc>) {
-        self.created = created;
-    }
-
-    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
-        self.modified = modified;
-    }
-
-    pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
-        self.conversation_type = conversation_type;
-    }
-
-    pub fn set_settings(&mut self, settings: ConversationSettings) {
-        self.settings = settings;
-    }
-
-    pub fn set_recipients(&mut self, recipients: Vec<DID>) {
-        self.recipients = recipients;
-    }
+    /// List of members to the conversation
+    fn members(&self) -> Vec<DID>;
 }
 
 #[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
@@ -927,7 +837,7 @@ pub trait RayGun:
     + DynClone
 {
     // Start a new conversation.
-    async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
+    async fn create_conversation(&mut self, _: &DID) -> Result<Box<dyn Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -936,17 +846,17 @@ pub trait RayGun:
         _: Option<String>,
         _: Vec<DID>,
         _: GroupSettings,
-    ) -> Result<Conversation, Error> {
+    ) -> Result<Box<dyn Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Get an active conversation
-    async fn get_conversation(&self, _: Uuid) -> Result<Conversation, Error> {
+    async fn get_conversation(&self, _: Uuid) -> Result<Box<dyn Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
     /// List all active conversations
-    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+    async fn list_conversations(&self) -> Result<Vec<Box<dyn Conversation>>, Error> {
         Err(Error::Unimplemented)
     }
 

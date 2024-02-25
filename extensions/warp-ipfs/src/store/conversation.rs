@@ -57,6 +57,36 @@ pub struct ConversationDocument {
     pub signature: Option<String>,
 }
 
+impl Conversation for ConversationDocument {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+
+    fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
+    fn created(&self) -> DateTime<Utc> {
+        self.created
+    }
+
+    fn modified(&self) -> DateTime<Utc> {
+        self.modified
+    }
+
+    fn conversation_type(&self) -> ConversationType {
+        self.conversation_type
+    }
+
+    fn settings(&self) -> ConversationSettings {
+        self.settings
+    }
+
+    fn members(&self) -> Vec<DID> {
+        self.recipients.clone()
+    }
+}
+
 impl Hash for ConversationDocument {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state)
@@ -621,27 +651,6 @@ impl ConversationDocument {
         messages.remove(&document);
         self.set_message_list(ipfs, messages).await?;
         Ok(())
-    }
-}
-
-impl From<ConversationDocument> for Conversation {
-    fn from(document: ConversationDocument) -> Self {
-        Conversation::from(&document)
-    }
-}
-
-impl From<&ConversationDocument> for Conversation {
-    fn from(document: &ConversationDocument) -> Self {
-        let mut conversation = Conversation::default();
-        conversation.set_id(document.id);
-        conversation.set_name(document.name.clone());
-        conversation.set_creator(document.creator.clone());
-        conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(document.recipients());
-        conversation.set_created(document.created);
-        conversation.set_settings(document.settings);
-        conversation.set_modified(document.modified);
-        conversation
     }
 }
 

@@ -1355,7 +1355,7 @@ impl IdentityInformation for WarpIpfs {
 
 #[async_trait::async_trait]
 impl RayGun for WarpIpfs {
-    async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
+    async fn create_conversation(&mut self, did_key: &DID) -> Result<Box<dyn Conversation>, Error> {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
@@ -1364,19 +1364,22 @@ impl RayGun for WarpIpfs {
         name: Option<String>,
         recipients: Vec<DID>,
         settings: GroupSettings,
-    ) -> Result<Conversation, Error> {
+    ) -> Result<Box<dyn Conversation>, Error> {
         self.messaging_store()?
             .create_group_conversation(name, HashSet::from_iter(recipients), settings)
             .await
     }
 
-    async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation, Error> {
+    async fn get_conversation(
+        &self,
+        conversation_id: Uuid,
+    ) -> Result<Box<dyn Conversation>, Error> {
         self.messaging_store()?
             .get_conversation(conversation_id)
             .await
     }
 
-    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+    async fn list_conversations(&self) -> Result<Vec<Box<dyn Conversation>>, Error> {
         self.messaging_store()?.list_conversations().await
     }
 
