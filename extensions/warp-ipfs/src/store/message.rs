@@ -1,3 +1,4 @@
+use parking_lot::RwLock;
 use tracing::info;
 
 use std::{
@@ -17,7 +18,7 @@ use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
     stream::{BoxStream, FuturesUnordered, SelectAll},
-    SinkExt, Stream, StreamExt, TryFutureExt,
+    FutureExt, SinkExt, Stream, StreamExt, TryFutureExt, TryStreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs, IpfsPath, PeerId};
@@ -54,6 +55,8 @@ use crate::store::{
     MessagingEvents, PeerTopic,
 };
 
+use self::handle::{ConversationHandle, ConversationMetadata, MetadataInner};
+
 use super::document::root::RootDocumentMap;
 
 pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
@@ -63,6 +66,10 @@ enum MessagingCommand {
     GetDocument {
         id: Uuid,
         response: oneshot::Sender<Result<ConversationDocument, Error>>,
+    },
+    GetMetadata {
+        id: Uuid,
+        response: oneshot::Sender<Result<ConversationMetadata, Error>>,
     },
     GetKeystore {
         id: Uuid,
@@ -98,13 +105,13 @@ enum MessagingCommand {
 
     CreateConversation {
         did: DID,
-        response: oneshot::Sender<Result<Conversation, Error>>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     CreateGroupConversation {
         name: Option<String>,
         recipients: HashSet<DID>,
         settings: GroupSettings,
-        response: oneshot::Sender<Result<Conversation, Error>>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     GetMessage {
         conversation_id: Uuid,
@@ -290,6 +297,7 @@ impl MessageStore {
                     attachment_rx: arx,
                     attachment_tx: atx,
                     pending_key_exchange: Default::default(),
+                    conversation_metadata: Default::default(),
                     queue: Default::default(),
                 };
                 select! {
@@ -313,15 +321,29 @@ impl MessageStore {
 }
 
 impl MessageStore {
-    pub async fn get_conversation(&self, id: Uuid) -> Result<Conversation, Error> {
-        let document = self.get(id).await?;
-        Ok(document.into())
+    pub async fn get_conversation(&self, id: Uuid) -> Result<Box<dyn Conversation>, Error> {
+        let meta = self.get_metadata(id).await?;
+        let conversation = ConversationHandle {
+            id,
+            metadata: meta,
+            message_store: self.clone(),
+        };
+        Ok(Box::new(conversation))
     }
 
-    pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
-        self.list()
+    pub async fn list_conversations(&self) -> Result<Vec<Box<dyn Conversation>>, Error> {
+        let conversation_ids: Vec<Uuid> = self
+            .list()
             .await
-            .map(|list| list.into_iter().map(|document| document.into()).collect())
+            .map(|list| list.into_iter().map(|document| document.id).collect())?;
+
+        FuturesUnordered::from_iter(
+            conversation_ids
+                .into_iter()
+                .map(|id| self.get_conversation(id).boxed()),
+        )
+        .try_collect::<Vec<_>>()
+        .await
     }
 
     pub async fn get_conversation_stream(
@@ -346,6 +368,16 @@ impl MessageStore {
             .command_tx
             .clone()
             .send(MessagingCommand::GetDocument { id, response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get_metadata(&self, id: Uuid) -> Result<ConversationMetadata, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .command_tx
+            .clone()
+            .send(MessagingCommand::GetMetadata { id, response: tx })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -440,7 +472,7 @@ impl MessageStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn create_conversation(&self, did: &DID) -> Result<Conversation, Error> {
+    pub async fn create_conversation(&self, did: &DID) -> Result<Uuid, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -458,7 +490,7 @@ impl MessageStore {
         name: Option<String>,
         members: HashSet<DID>,
         settings: GroupSettings,
-    ) -> Result<Conversation, Error> {
+    ) -> Result<Uuid, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -905,6 +937,8 @@ struct ConversationTask {
 
     pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
 
+    conversation_metadata: HashMap<Uuid, ConversationMetadata>,
+
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
 }
@@ -964,6 +998,12 @@ impl ConversationTask {
                             response,
                         } => {
                             let _ = response.send(self.set_keystore(id, document).await);
+                        }
+                        MessagingCommand::GetMetadata {
+                            id,
+                            response,
+                        } => {
+                            _ = response.send(self.get_metadata(id));
                         }
                         MessagingCommand::CreateConversation { did, response } => {
                             _ = response.send(self.create_conversation(&did).await);
@@ -1135,7 +1175,7 @@ impl ConversationTask {
         Ok(())
     }
 
-    async fn create_conversation(&mut self, did: &DID) -> Result<Conversation, Error> {
+    async fn create_conversation(&mut self, did: &DID) -> Result<Uuid, Error> {
         //TODO: maybe use root document to directly check
         // if self.with_friends.load(Ordering::SeqCst) && !self.identity.is_friend(did_key).await? {
         //     return Err(Error::FriendDoesntExist);
@@ -1149,19 +1189,20 @@ impl ConversationTask {
             return Err(Error::CannotCreateConversation);
         }
 
-        if let Some(conversation) = self
-            .list()
-            .await
-            .iter()
-            .find(|conversation| {
-                conversation.conversation_type == ConversationType::Direct
-                    && conversation.recipients().contains(did)
-                    && conversation.recipients().contains(&self.keypair)
-            })
-            .map(Conversation::from)
-        {
-            return Err(Error::ConversationExist { conversation });
-        }
+        //TODO
+        // if let Some(conversation) = self
+        //     .list()
+        //     .await
+        //     .iter()
+        //     .find(|conversation| {
+        //         conversation.conversation_type == ConversationType::Direct
+        //             && conversation.recipients().contains(did)
+        //             && conversation.recipients().contains(&self.keypair)
+        //     })
+        //     .map(Conversation::from)
+        // {
+        //     return Err(Error::ConversationExist { conversation });
+        // }
 
         //Temporary limit
         // if self.list_conversations().await.unwrap_or_default().len() >= 256 {
@@ -1227,7 +1268,7 @@ impl ConversationTask {
             })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        Ok(convo_id)
     }
 
     pub async fn create_group_conversation(
@@ -1235,7 +1276,7 @@ impl ConversationTask {
         name: Option<String>,
         mut recipients: HashSet<DID>,
         settings: GroupSettings,
-    ) -> Result<Conversation, Error> {
+    ) -> Result<Uuid, Error> {
         let own_did = &*(self.keypair.clone());
 
         if recipients.contains(own_did) {
@@ -1359,7 +1400,7 @@ impl ConversationTask {
             .emit(RayGunEventKind::ConversationCreated { conversation_id })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        Ok(conversation_id)
     }
 
     async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
@@ -1383,6 +1424,14 @@ impl ConversationTask {
         }
 
         Ok(document)
+    }
+
+    fn get_metadata(&self, id: Uuid) -> Result<ConversationMetadata, Error> {
+        let Some(metadata) = self.conversation_metadata.get(&id) else {
+            return Err(Error::InvalidConversation);
+        };
+
+        Ok(metadata.clone())
     }
 
     pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
@@ -2870,6 +2919,11 @@ impl ConversationTask {
 
         let conversation = self.get(conversation_id).await?;
 
+        if let Some(metadata) = self.conversation_metadata.get(&conversation_id) {
+            let mut inner = metadata.inner.write();
+            inner.name = conversation.name();
+        }
+
         let new_name = conversation.name();
 
         let event = MessagingEvents::UpdateConversation {
@@ -2930,6 +2984,12 @@ impl ConversationTask {
 
         let conversation = self.get(conversation_id).await?;
 
+        //Update metadata
+        if let Some(metadata) = self.conversation_metadata.get(&conversation_id) {
+            let mut inner = metadata.inner.write();
+            inner.recipients = conversation.recipients();
+        }
+
         let event = MessagingEvents::UpdateConversation {
             conversation: conversation.clone(),
             kind: ConversationUpdateKind::AddParticipant {
@@ -2987,6 +3047,12 @@ impl ConversationTask {
         self.set_document(conversation).await?;
 
         let conversation = self.get(conversation_id).await?;
+
+        //Update metadata
+        if let Some(metadata) = self.conversation_metadata.get(&conversation_id) {
+            let mut inner = metadata.inner.write();
+            inner.recipients.retain(|member| member != did_key);
+        }
 
         let event = MessagingEvents::UpdateConversation {
             conversation: conversation.clone(),
@@ -3250,6 +3316,12 @@ impl ConversationTask {
         self.set_document(conversation).await?;
 
         let conversation = self.get(conversation_id).await?;
+
+        if let Some(metadata) = self.conversation_metadata.get(&conversation_id) {
+            let mut inner = metadata.inner.write();
+            inner.settings = conversation.settings;
+        }
+
         let event = MessagingEvents::UpdateConversation {
             conversation: conversation.clone(),
             kind: ConversationUpdateKind::ChangeSettings {
@@ -3432,6 +3504,20 @@ impl ConversationTask {
 
         self.topic_stream.push(rx);
         self.conversation_task.insert(conversation_id, handle);
+
+        let metadata = ConversationMetadata {
+            inner: Arc::new(RwLock::new(MetadataInner {
+                name: conversation.name.clone(),
+                creator: conversation.creator.clone(),
+                created: conversation.created,
+                modified: conversation.modified,
+                conversation_type: conversation.conversation_type,
+                settings: conversation.settings,
+                recipients: conversation.recipients(),
+            })),
+        };
+
+        self.conversation_metadata.insert(conversation_id, metadata);
 
         tracing::info!(%conversation_id, "started conversation");
         Ok(())
@@ -4056,6 +4142,11 @@ async fn message_event(
                         tracing::error!(%conversation_id, error = %e, "error requesting key");
                     }
 
+                    if let Some(metadata) = this.conversation_metadata.get(&conversation_id) {
+                        let mut inner = metadata.inner.write();
+                        inner.recipients.push(did.clone());
+                    }
+
                     if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
                         conversation_id,
                         recipient: did,
@@ -4077,6 +4168,11 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     this.set_document(conversation).await?;
+
+                    if let Some(metadata) = this.conversation_metadata.get(&conversation_id) {
+                        let mut inner = metadata.inner.write();
+                        inner.recipients.retain(|member| member != &did);
+                    }
 
                     if can_emit {
                         if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
@@ -4109,6 +4205,11 @@ async fn message_event(
                     conversation.messages = document.messages;
                     this.set_document(conversation).await?;
 
+                    if let Some(metadata) = this.conversation_metadata.get(&conversation_id) {
+                        let mut inner = metadata.inner.write();
+                        inner.name = Some(name.to_string());
+                    }
+
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
                         conversation_id,
                         name: name.to_string(),
@@ -4121,7 +4222,10 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     this.set_document(conversation).await?;
-
+                    if let Some(metadata) = this.conversation_metadata.get(&conversation_id) {
+                        let mut inner = metadata.inner.write();
+                        inner.name = None;
+                    }
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
                         conversation_id,
                         name: String::new(),
@@ -4141,6 +4245,10 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     this.set_document(conversation).await?;
+                    if let Some(metadata) = this.conversation_metadata.get(&conversation_id) {
+                        let mut inner = metadata.inner.write();
+                        inner.settings = settings;
+                    }
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
                         conversation_id,
@@ -4587,5 +4695,279 @@ async fn process_queue(this: &mut ConversationTask) {
 
     if changed {
         this.save_queue().await;
+    }
+}
+
+pub mod handle {
+    use std::{path::PathBuf, sync::Arc};
+
+    use chrono::{DateTime, Utc};
+    use futures::{stream::BoxStream, StreamExt};
+    use parking_lot::RwLock;
+    use uuid::Uuid;
+    use warp::{
+        constellation::ConstellationProgressStream,
+        crypto::DID,
+        error::Error,
+        raygun::{
+            AttachmentEventStream, Conversation, ConversationAttachment, ConversationMessage,
+            ConversationSettings, ConversationStream, ConversationType, ConversationUpdate,
+            Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
+            MessageStatus, Messages, PinState, ReactionState,
+        },
+    };
+
+    use super::MessageStore;
+
+    #[derive(Clone)]
+    pub struct ConversationHandle {
+        pub id: Uuid,
+        pub message_store: MessageStore,
+        pub metadata: ConversationMetadata,
+    }
+
+    impl std::fmt::Debug for ConversationHandle {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let metadata = self.metadata.inner.read();
+            f.debug_struct("Conversation")
+                .field("id", &self.id)
+                .field("name", &metadata.name)
+                .finish()
+        }
+    }
+
+    impl Eq for ConversationHandle {}
+
+    impl core::hash::Hash for ConversationHandle {
+        fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+            self.id.hash(state);
+        }
+    }
+
+    impl PartialEq for ConversationHandle {
+        fn eq(&self, other: &Self) -> bool {
+            self.id.eq(&other.id)
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct ConversationMetadata {
+        pub inner: Arc<RwLock<MetadataInner>>,
+    }
+
+    pub struct MetadataInner {
+        pub name: Option<String>,
+        pub creator: Option<DID>,
+        pub created: DateTime<Utc>,
+        pub modified: DateTime<Utc>,
+        pub conversation_type: ConversationType,
+        pub settings: ConversationSettings,
+        pub recipients: Vec<DID>,
+    }
+
+    impl Conversation for ConversationHandle {
+        fn id(&self) -> Uuid {
+            self.id
+        }
+
+        fn name(&self) -> Option<String> {
+            self.metadata.inner.read().name.clone()
+        }
+
+        fn created(&self) -> DateTime<Utc> {
+            self.metadata.inner.read().created
+        }
+
+        fn modified(&self) -> DateTime<Utc> {
+            self.metadata.inner.read().modified
+        }
+
+        fn conversation_type(&self) -> ConversationType {
+            self.metadata.inner.read().conversation_type
+        }
+
+        fn settings(&self) -> ConversationSettings {
+            self.metadata.inner.read().settings
+        }
+
+        fn members(&self) -> Vec<DID> {
+            self.metadata.inner.read().recipients.clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ConversationUpdate for ConversationHandle {
+        /// Update conversation name
+        /// Note: This will only update the group conversation name
+        async fn update_name(&mut self, name: &str) -> Result<(), Error> {
+            self.message_store
+                .update_conversation_name(self.id, name)
+                .await
+        }
+
+        /// Add a member to the conversation
+        async fn add_member(&mut self, did_key: &DID) -> Result<(), Error> {
+            self.message_store.add_recipient(self.id, did_key).await
+        }
+
+        /// Remove a member from the conversation
+        async fn remove_member(&mut self, did_key: &DID) -> Result<(), Error> {
+            self.message_store.remove_recipient(self.id, did_key).await
+        }
+
+        /// Update conversation settings
+        async fn update_settings(&mut self, settings: ConversationSettings) -> Result<(), Error> {
+            self.message_store
+                .update_conversation_settings(self.id, settings)
+                .await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ConversationMessage for ConversationHandle {
+        /// Retrieve a message from the conversation
+        async fn get_message(&self, message_id: Uuid) -> Result<Message, Error> {
+            self.message_store.get_message(self.id, message_id).await
+        }
+
+        /// Retrieve a message reference from the conversation
+        async fn get_message_reference(&self, message_id: Uuid) -> Result<MessageReference, Error> {
+            self.message_store
+                .get_message_reference(self.id, message_id)
+                .await
+        }
+
+        /// Retrieve messages from the conversation
+        async fn get_messages(&self, options: MessageOptions) -> Result<Messages, Error> {
+            self.message_store.get_messages(self.id, options).await
+        }
+
+        /// Retrieve message references from the conversation
+        async fn get_message_references(
+            &self,
+            options: MessageOptions,
+        ) -> Result<BoxStream<'static, MessageReference>, Error> {
+            self.message_store
+                .get_message_references(self.id, options)
+                .await
+        }
+
+        /// Get a number of messages in the conversation
+        async fn get_message_count(&self) -> Result<usize, Error> {
+            self.message_store.messages_count(self.id).await
+        }
+
+        /// Get a status of a message in the conversation
+        async fn message_status(&self, message_id: Uuid) -> Result<MessageStatus, Error> {
+            self.message_store.message_status(self.id, message_id).await
+        }
+
+        /// Sends a message to a conversation.
+        async fn send(&mut self, message: Vec<String>) -> Result<(), Error> {
+            self.message_store.send_message(self.id, message).await
+        }
+
+        /// Edit an existing message in a conversation.
+        async fn edit(&mut self, message_id: Uuid, message: Vec<String>) -> Result<(), Error> {
+            self.message_store
+                .edit_message(self.id, message_id, message)
+                .await
+        }
+
+        /// Delete message from a conversation
+        async fn delete(&mut self, message_id: Option<Uuid>) -> Result<(), Error> {
+            match message_id {
+                Some(id) => self.message_store.delete_message(self.id, id).await,
+                None => self
+                    .message_store
+                    .delete_conversation(self.id)
+                    .await
+                    .map(|_| ()),
+            }
+        }
+
+        /// React to a message
+        async fn react(
+            &mut self,
+            message_id: Uuid,
+            state: ReactionState,
+            emoji: String,
+        ) -> Result<(), Error> {
+            self.message_store
+                .react(self.id, message_id, state, emoji)
+                .await
+        }
+
+        /// Pin a message within a conversation
+        async fn pin(&mut self, message_id: Uuid, state: PinState) -> Result<(), Error> {
+            self.message_store
+                .pin_message(self.id, message_id, state)
+                .await
+        }
+
+        /// Reply to a message within a conversation
+        async fn reply(&mut self, message_id: Uuid, message: Vec<String>) -> Result<(), Error> {
+            self.message_store.reply(self.id, message_id, message).await
+        }
+
+        /// Send an event to a conversation
+        async fn send_event(&mut self, event: MessageEvent) -> Result<(), Error> {
+            self.message_store.send_event(self.id, event).await
+        }
+
+        /// Cancel event that was sent, if any.
+        async fn cancel_event(&mut self, event: MessageEvent) -> Result<(), Error> {
+            self.message_store.cancel_event(self.id, event).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ConversationAttachment for ConversationHandle {
+        /// Send files to a conversation.
+        /// If no files is provided in the array, it will throw an error
+        async fn attach(
+            &mut self,
+            message_id: Option<Uuid>,
+            path: Vec<Location>,
+            messages: Vec<String>,
+        ) -> Result<AttachmentEventStream, Error> {
+            self.message_store
+                .attach(self.id, message_id, path, messages)
+                .await
+        }
+
+        /// Downloads a file that been attached to a message
+        /// Note: Must use the filename associated when downloading
+        async fn download(
+            &self,
+            message_id: Uuid,
+            file: String,
+            dest: PathBuf,
+        ) -> Result<ConstellationProgressStream, Error> {
+            self.message_store
+                .download(self.id, message_id, file, dest)
+                .await
+        }
+
+        /// Stream a file that been attached to a message
+        /// Note: Must use the filename associated when downloading
+        async fn download_stream(
+            &self,
+            message_id: Uuid,
+            file: &str,
+        ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+            self.message_store
+                .download_stream(self.id, message_id, file)
+                .await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ConversationStream for ConversationHandle {
+        /// Subscribe to an stream of events from the conversation
+        async fn get_conversation_stream(&mut self) -> Result<MessageEventStream, Error> {
+            let rx = self.message_store.get_conversation_stream(self.id).await?;
+            Ok(rx.boxed())
+        }
     }
 }

@@ -46,8 +46,8 @@ mod test {
             conversation.settings(),
             ConversationSettings::Group(GroupSettings::default()),
         );
-        assert_eq!(conversation.recipients().len(), 1);
-        assert!(conversation.recipients().contains(&did_a));
+        assert_eq!(conversation.members().len(), 1);
+        assert!(conversation.members().contains(&did_a));
 
         Ok(())
     }
@@ -186,10 +186,10 @@ mod test {
             conversation.settings(),
             ConversationSettings::Group(GroupSettings::default()),
         );
-        assert_eq!(conversation.recipients().len(), 3);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
-        assert!(conversation.recipients().contains(&did_c));
+        assert_eq!(conversation.members().len(), 3);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
+        assert!(conversation.members().contains(&did_c));
         Ok(())
     }
 
@@ -237,9 +237,9 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Group);
-        assert_eq!(conversation.recipients().len(), 2);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
+        assert_eq!(conversation.members().len(), 2);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
         let id = conversation.id();
 
         chat_a.delete(id, None).await?;
@@ -429,11 +429,11 @@ mod test {
             ConversationSettings::Group(settings),
         );
         assert_eq!(conversation.name().as_deref(), Some("test"));
-        assert_eq!(conversation.recipients().len(), 4);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
-        assert!(conversation.recipients().contains(&did_c));
-        assert!(conversation.recipients().contains(&did_d));
+        assert_eq!(conversation.members().len(), 4);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
+        assert!(conversation.members().contains(&did_c));
+        assert!(conversation.members().contains(&did_d));
         Ok(())
     }
 
@@ -593,11 +593,11 @@ mod test {
             conversation.settings(),
             ConversationSettings::Group(settings),
         );
-        assert_eq!(conversation.recipients().len(), 4);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
-        assert!(conversation.recipients().contains(&did_c));
-        assert!(conversation.recipients().contains(&did_d));
+        assert_eq!(conversation.members().len(), 4);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
+        assert!(conversation.members().contains(&did_c));
+        assert!(conversation.members().contains(&did_d));
         Ok(())
     }
 
@@ -746,11 +746,11 @@ mod test {
             conversation.settings(),
             ConversationSettings::Group(Default::default()),
         );
-        assert_eq!(conversation.recipients().len(), 4);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
-        assert!(conversation.recipients().contains(&did_c));
-        assert!(conversation.recipients().contains(&did_d));
+        assert_eq!(conversation.members().len(), 4);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
+        assert!(conversation.members().contains(&did_c));
+        assert!(conversation.members().contains(&did_d));
         Ok(())
     }
 
@@ -1071,11 +1071,11 @@ mod test {
             conversation.settings(),
             ConversationSettings::Group(GroupSettings::default()),
         );
-        assert_eq!(conversation.recipients().len(), 3);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(!conversation.recipients().contains(&did_b));
-        assert!(conversation.recipients().contains(&did_c));
-        assert!(conversation.recipients().contains(&did_d));
+        assert_eq!(conversation.members().len(), 3);
+        assert!(conversation.members().contains(&did_a));
+        assert!(!conversation.members().contains(&did_b));
+        assert!(conversation.members().contains(&did_c));
+        assert!(conversation.members().contains(&did_d));
         Ok(())
     }
 
@@ -1319,10 +1319,10 @@ mod test {
             conversation.settings(),
             ConversationSettings::Group(GroupSettings::default()),
         );
-        assert_eq!(conversation.recipients().len(), 3);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
-        assert!(conversation.recipients().contains(&did_c));
+        assert_eq!(conversation.members().len(), 3);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
+        assert!(conversation.members().contains(&did_c));
 
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
@@ -1477,10 +1477,10 @@ mod test {
             conversation.settings(),
             ConversationSettings::Group(GroupSettings::default()),
         );
-        assert_eq!(conversation.recipients().len(), 3);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
-        assert!(conversation.recipients().contains(&did_c));
+        assert_eq!(conversation.members().len(), 3);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
+        assert!(conversation.members().contains(&did_c));
 
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;

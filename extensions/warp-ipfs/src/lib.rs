@@ -46,10 +46,9 @@ use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
 use warp::module::Module;
 use warp::raygun::{
-    AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
-    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, GroupSettings, Location, MessageEvent, MessageEventStream,
+    RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
+    RayGunGroupConversation, RayGunStream,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
@@ -1355,8 +1354,10 @@ impl IdentityInformation for WarpIpfs {
 
 #[async_trait::async_trait]
 impl RayGun for WarpIpfs {
-    async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
-        self.messaging_store()?.create_conversation(did_key).await
+    async fn create_conversation(&mut self, did_key: &DID) -> Result<Box<dyn Conversation>, Error> {
+        let store = self.messaging_store()?;
+        let id = store.create_conversation(did_key).await?;
+        store.get_conversation(id).await
     }
 
     async fn create_group_conversation(
@@ -1364,149 +1365,25 @@ impl RayGun for WarpIpfs {
         name: Option<String>,
         recipients: Vec<DID>,
         settings: GroupSettings,
-    ) -> Result<Conversation, Error> {
-        self.messaging_store()?
+    ) -> Result<Box<dyn Conversation>, Error> {
+        let store = self.messaging_store()?;
+        let id = store
             .create_group_conversation(name, HashSet::from_iter(recipients), settings)
-            .await
+            .await?;
+        store.get_conversation(id).await
     }
 
-    async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation, Error> {
+    async fn get_conversation(
+        &self,
+        conversation_id: Uuid,
+    ) -> Result<Box<dyn Conversation>, Error> {
         self.messaging_store()?
             .get_conversation(conversation_id)
             .await
     }
 
-    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+    async fn list_conversations(&self) -> Result<Vec<Box<dyn Conversation>>, Error> {
         self.messaging_store()?.list_conversations().await
-    }
-
-    async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
-        self.messaging_store()?
-            .messages_count(conversation_id)
-            .await
-    }
-
-    async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
-        self.messaging_store()?
-            .get_message(conversation_id, message_id)
-            .await
-    }
-
-    async fn get_message_references(
-        &self,
-        conversation_id: Uuid,
-        opt: MessageOptions,
-    ) -> Result<BoxStream<'static, MessageReference>, Error> {
-        self.messaging_store()?
-            .get_message_references(conversation_id, opt)
-            .await
-    }
-
-    async fn get_message_reference(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-    ) -> Result<MessageReference, Error> {
-        self.messaging_store()?
-            .get_message_reference(conversation_id, message_id)
-            .await
-    }
-
-    async fn message_status(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-    ) -> Result<MessageStatus, Error> {
-        self.messaging_store()?
-            .message_status(conversation_id, message_id)
-            .await
-    }
-
-    async fn get_messages(
-        &self,
-        conversation_id: Uuid,
-        opt: MessageOptions,
-    ) -> Result<Messages, Error> {
-        self.messaging_store()?
-            .get_messages(conversation_id, opt)
-            .await
-    }
-
-    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<(), Error> {
-        self.messaging_store()?
-            .send_message(conversation_id, value)
-            .await
-    }
-
-    async fn edit(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        value: Vec<String>,
-    ) -> Result<(), Error> {
-        self.messaging_store()?
-            .edit_message(conversation_id, message_id, value)
-            .await
-    }
-
-    async fn delete(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-    ) -> Result<(), Error> {
-        let store = self.messaging_store()?;
-        match message_id {
-            Some(id) => store.delete_message(conversation_id, id).await,
-            None => store.delete_conversation(conversation_id).await.map(|_| ()),
-        }
-    }
-
-    async fn react(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: ReactionState,
-        emoji: String,
-    ) -> Result<(), Error> {
-        self.messaging_store()?
-            .react(conversation_id, message_id, state, emoji)
-            .await
-    }
-
-    async fn pin(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
-    ) -> Result<(), Error> {
-        self.messaging_store()?
-            .pin_message(conversation_id, message_id, state)
-            .await
-    }
-
-    async fn reply(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        value: Vec<String>,
-    ) -> Result<(), Error> {
-        self.messaging_store()?
-            .reply(conversation_id, message_id, value)
-            .await
-    }
-
-    async fn embeds(&mut self, _: Uuid, _: Uuid, _: EmbedState) -> Result<(), Error> {
-        Err(Error::Unimplemented)
-    }
-
-    async fn update_conversation_settings(
-        &mut self,
-        conversation_id: Uuid,
-        settings: ConversationSettings,
-    ) -> Result<(), Error> {
-        self.messaging_store()?
-            .update_conversation_settings(conversation_id, settings)
-            .await
     }
 }
 
@@ -1519,9 +1396,8 @@ impl RayGunAttachment for WarpIpfs {
         locations: Vec<Location>,
         message: Vec<String>,
     ) -> Result<AttachmentEventStream, Error> {
-        self.messaging_store()?
-            .attach(conversation_id, message_id, locations, message)
-            .await
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.attach(message_id, locations, message).await
     }
 
     async fn download(
@@ -1531,9 +1407,8 @@ impl RayGunAttachment for WarpIpfs {
         file: String,
         path: PathBuf,
     ) -> Result<ConstellationProgressStream, Error> {
-        self.messaging_store()?
-            .download(conversation_id, message_id, &file, path)
-            .await
+        let conversation = self.get_conversation(conversation_id).await?;
+        conversation.download(message_id, file, path).await
     }
 
     async fn download_stream(
@@ -1542,9 +1417,8 @@ impl RayGunAttachment for WarpIpfs {
         message_id: Uuid,
         file: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
-        self.messaging_store()?
-            .download_stream(conversation_id, message_id, file)
-            .await
+        let conversation = self.get_conversation(conversation_id).await?;
+        conversation.download_stream(message_id, file).await
     }
 }
 
@@ -1555,15 +1429,13 @@ impl RayGunGroupConversation for WarpIpfs {
         conversation_id: Uuid,
         name: &str,
     ) -> Result<(), Error> {
-        self.messaging_store()?
-            .update_conversation_name(conversation_id, name)
-            .await
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.update_name(name).await
     }
 
     async fn add_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<(), Error> {
-        self.messaging_store()?
-            .add_recipient(conversation_id, did_key)
-            .await
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.add_member(did_key).await
     }
 
     async fn remove_recipient(
@@ -1571,9 +1443,8 @@ impl RayGunGroupConversation for WarpIpfs {
         conversation_id: Uuid,
         did_key: &DID,
     ) -> Result<(), Error> {
-        self.messaging_store()?
-            .remove_recipient(conversation_id, did_key)
-            .await
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.remove_member(did_key).await
     }
 }
 
@@ -1587,9 +1458,8 @@ impl RayGunStream for WarpIpfs {
         &mut self,
         conversation_id: Uuid,
     ) -> Result<MessageEventStream, Error> {
-        let store = self.messaging_store()?;
-        let stream = store.get_conversation_stream(conversation_id).await?;
-        Ok(stream.boxed())
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.get_conversation_stream().await
     }
 }
 
@@ -1600,9 +1470,8 @@ impl RayGunEvents for WarpIpfs {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        self.messaging_store()?
-            .send_event(conversation_id, event)
-            .await
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.send_event(event).await
     }
 
     async fn cancel_event(
@@ -1610,9 +1479,8 @@ impl RayGunEvents for WarpIpfs {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        self.messaging_store()?
-            .cancel_event(conversation_id, event)
-            .await
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.cancel_event(event).await
     }
 }
 

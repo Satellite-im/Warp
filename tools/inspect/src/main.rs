@@ -133,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
     table.set_header(vec!["ID", "Name", "Type", "Recipients", "# of Messages"]);
     for convo in conversations {
         let recipients = account
-            .get_identity(Identifier::DIDList(convo.recipients()))
+            .get_identity(Identifier::DIDList(convo.members()))
             .await
             .map(|list| {
                 list.iter()
@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
                     .collect::<Vec<_>>()
             })?;
 
-        let count = rg.get_message_count(convo.id()).await?;
+        let count = convo.get_message_count().await?;
 
         table.add_row(vec![
             convo.id().to_string(),

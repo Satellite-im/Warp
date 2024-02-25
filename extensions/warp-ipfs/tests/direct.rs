@@ -57,9 +57,9 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
-        assert_eq!(conversation.recipients().len(), 2);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
+        assert_eq!(conversation.members().len(), 2);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
         Ok(())
     }
 
@@ -77,7 +77,7 @@ mod test {
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        let mut conversation = chat_a.create_conversation(&did_b).await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
@@ -103,14 +103,13 @@ mod test {
 
         assert_eq!(id_a, id_b);
 
-        let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
-        assert_eq!(conversation.recipients().len(), 2);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
+        assert_eq!(conversation.members().len(), 2);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
         let id = conversation.id();
 
-        chat_a.delete(id, None).await?;
+        conversation.delete(None).await?;
 
         tokio::time::timeout(Duration::from_secs(60), async {
             loop {
@@ -160,43 +159,44 @@ mod test {
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        let mut conversation_a = chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
                 {
-                    break conversation_id;
+                    assert_eq!(conversation_id, conversation_a.id());
+                    break;
                 }
             }
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let mut conversation_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
                 {
-                    break conversation_id;
+                    break chat_b.get_conversation(conversation_id).await;
                 }
             }
         })
-        .await?;
+        .await??;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+        let mut conversation_a_stream = conversation_a.get_conversation_stream().await?;
+        let mut conversation_b_stream = conversation_b.get_conversation_stream().await?;
 
-        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
+        conversation_a.send(vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
-                    conversation_id,
+                    conversation_id: _,
                     message_id,
-                }) = conversation_a.next().await
+                }) = conversation_a_stream.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break conversation_a.get_message(message_id).await;
                 }
             }
         })
@@ -205,11 +205,11 @@ mod test {
         let message_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
-                    conversation_id,
+                    conversation_id: _,
                     message_id,
-                }) = conversation_b.next().await
+                }) = conversation_b_stream.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break conversation_b.get_message(message_id).await;
                 }
             }
         })
@@ -241,40 +241,40 @@ mod test {
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        let mut conversation_a = chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
                 {
-                    break conversation_id;
+                    assert_eq!(conversation_id, conversation_a.id());
+                    break;
                 }
             }
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let mut conversation_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
                 {
-                    break conversation_id;
+                    break chat_b.get_conversation(conversation_id).await;
                 }
             }
         })
-        .await?;
+        .await??;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+        let mut conversation_a_stream = conversation_a.get_conversation_stream().await?;
+        let mut conversation_b_stream = conversation_b.get_conversation_stream().await?;
 
         //upload file to constellation to attach file from constellation
 
         fs_a.put_buffer("image.png", PROFILE_IMAGE).await?;
 
-        let mut stream = chat_a
+        let mut stream = conversation_a
             .attach(
-                id_a,
                 None,
                 vec![Location::Constellation {
                     path: "image.png".into(),
@@ -300,11 +300,11 @@ mod test {
         let message_a = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
-                    conversation_id,
+                    conversation_id: _,
                     message_id,
-                }) = conversation_a.next().await
+                }) = conversation_a_stream.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break conversation_a.get_message(message_id).await;
                 }
             }
         })
@@ -313,11 +313,11 @@ mod test {
         let message_b = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
-                    conversation_id,
+                    conversation_id: _,
                     message_id,
-                }) = conversation_b.next().await
+                }) = conversation_b_stream.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break conversation_b.get_message(message_id).await;
                 }
             }
         })
@@ -332,8 +332,8 @@ mod test {
 
         assert_eq!(file.name(), "image.png");
 
-        let stream = chat_b
-            .download_stream(id_a, message_a.id(), "image.png")
+        let stream = conversation_b
+            .download_stream(message_a.id(), "image.png")
             .await?;
 
         let data = stream.try_collect::<Vec<_>>().await?.concat();
@@ -1061,9 +1061,9 @@ mod test {
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
-        assert_eq!(conversation.recipients().len(), 2);
-        assert!(conversation.recipients().contains(&did_a));
-        assert!(conversation.recipients().contains(&did_b));
+        assert_eq!(conversation.members().len(), 2);
+        assert!(conversation.members().contains(&did_a));
+        assert!(conversation.members().contains(&did_b));
 
         _account_a.block(&did_b).await?;
 

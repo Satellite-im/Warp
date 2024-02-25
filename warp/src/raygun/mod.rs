@@ -344,118 +344,141 @@ pub enum ConversationType {
     Group,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
-pub struct Conversation {
-    id: Uuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-    creator: Option<DID>,
-    created: DateTime<Utc>,
-    modified: DateTime<Utc>,
-    conversation_type: ConversationType,
-    settings: ConversationSettings,
-    recipients: Vec<DID>,
+pub trait Conversation:
+    Debug
+    + ConversationUpdate
+    + ConversationMessage
+    + ConversationAttachment
+    + ConversationStream
+    + DynClone
+    + Send
+    + Sync
+{
+    /// ID of the converation in Uuid format
+    fn id(&self) -> Uuid;
+
+    /// Name of the conversation, if any
+    fn name(&self) -> Option<String>;
+
+    /// Time of when the conversation was created
+    fn created(&self) -> DateTime<Utc>;
+
+    /// Last time the conversation was modified or updated
+    fn modified(&self) -> DateTime<Utc>;
+
+    /// The conversation type
+    /// Currently: Direct, Group
+    fn conversation_type(&self) -> ConversationType;
+
+    /// Conversation settings
+    fn settings(&self) -> ConversationSettings;
+
+    /// List of members to the conversation
+    fn members(&self) -> Vec<DID>;
 }
 
-impl core::hash::Hash for Conversation {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
+#[async_trait::async_trait]
+pub trait ConversationUpdate {
+    /// Update conversation name
+    /// Note: This will only update the group conversation name
+    async fn update_name(&mut self, name: &str) -> Result<(), Error>;
+
+    /// Add a member to the conversation
+    async fn add_member(&mut self, did_key: &DID) -> Result<(), Error>;
+
+    /// Remove a member from the conversation
+    async fn remove_member(&mut self, did_key: &DID) -> Result<(), Error>;
+
+    /// Update conversation settings
+    async fn update_settings(&mut self, settings: ConversationSettings) -> Result<(), Error>;
 }
 
-impl PartialEq for Conversation {
-    fn eq(&self, other: &Self) -> bool {
-        self.id.eq(&other.id)
-    }
+#[async_trait::async_trait]
+pub trait ConversationMessage {
+    /// Retrieve a message from the conversation
+    async fn get_message(&self, message_id: Uuid) -> Result<Message, Error>;
+
+    /// Retrieve a message reference from the conversation
+    async fn get_message_reference(&self, message_id: Uuid) -> Result<MessageReference, Error>;
+
+    /// Retrieve messages from the conversation
+    async fn get_messages(&self, options: MessageOptions) -> Result<Messages, Error>;
+
+    /// Retrieve message references from the conversation
+    async fn get_message_references(
+        &self,
+        options: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error>;
+
+    /// Get a number of messages in the conversation
+    async fn get_message_count(&self) -> Result<usize, Error>;
+
+    /// Get a status of a message in the conversation
+    async fn message_status(&self, message_id: Uuid) -> Result<MessageStatus, Error>;
+
+    /// Sends a message to a conversation.
+    async fn send(&mut self, message: Vec<String>) -> Result<(), Error>;
+
+    /// Edit an existing message in a conversation.
+    async fn edit(&mut self, message_id: Uuid, message: Vec<String>) -> Result<(), Error>;
+
+    /// Delete message from a conversation
+    async fn delete(&mut self, message_id: Option<Uuid>) -> Result<(), Error>;
+
+    /// React to a message
+    async fn react(
+        &mut self,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    ) -> Result<(), Error>;
+
+    /// Pin a message within a conversation
+    async fn pin(&mut self, message_id: Uuid, state: PinState) -> Result<(), Error>;
+
+    /// Reply to a message within a conversation
+    async fn reply(&mut self, message_id: Uuid, message: Vec<String>) -> Result<(), Error>;
+
+    /// Send an event to a conversation
+    async fn send_event(&mut self, event: MessageEvent) -> Result<(), Error>;
+
+    /// Cancel event that was sent, if any.
+    async fn cancel_event(&mut self, event: MessageEvent) -> Result<(), Error>;
 }
 
-impl Default for Conversation {
-    fn default() -> Self {
-        let id = Uuid::new_v4();
-        let name = None;
-        let creator = None;
-        let conversation_type = ConversationType::Direct;
-        let recipients = Vec::new();
-        let timestamp = Utc::now();
-        Self {
-            id,
-            name,
-            creator,
-            created: timestamp,
-            modified: timestamp,
-            conversation_type,
-            settings: ConversationSettings::default(),
-            recipients,
-        }
-    }
+#[async_trait::async_trait]
+pub trait ConversationAttachment {
+    /// Send files to a conversation.
+    /// If no files is provided in the array, it will throw an error
+    async fn attach(
+        &mut self,
+        message_id: Option<Uuid>,
+        path: Vec<Location>,
+        messages: Vec<String>,
+    ) -> Result<AttachmentEventStream, Error>;
+
+    /// Downloads a file that been attached to a message
+    /// Note: Must use the filename associated when downloading
+    async fn download(
+        &self,
+        message_id: Uuid,
+        file: String,
+        dest: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error>;
+
+    /// Stream a file that been attached to a message
+    /// Note: Must use the filename associated when downloading
+    async fn download_stream(
+        &self,
+        message_id: Uuid,
+        file: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error>;
 }
 
-impl Conversation {
-    pub fn id(&self) -> Uuid {
-        self.id
-    }
-
-    pub fn name(&self) -> Option<String> {
-        self.name.clone()
-    }
-
-    pub fn creator(&self) -> Option<DID> {
-        self.creator.clone()
-    }
-
-    pub fn created(&self) -> DateTime<Utc> {
-        self.created
-    }
-
-    pub fn modified(&self) -> DateTime<Utc> {
-        self.modified
-    }
-
-    pub fn conversation_type(&self) -> ConversationType {
-        self.conversation_type
-    }
-
-    pub fn settings(&self) -> ConversationSettings {
-        self.settings
-    }
-
-    pub fn recipients(&self) -> Vec<DID> {
-        self.recipients.clone()
-    }
-}
-
-impl Conversation {
-    pub fn set_id(&mut self, id: Uuid) {
-        self.id = id;
-    }
-
-    pub fn set_name(&mut self, name: Option<String>) {
-        self.name = name;
-    }
-
-    pub fn set_creator(&mut self, creator: Option<DID>) {
-        self.creator = creator;
-    }
-
-    pub fn set_created(&mut self, created: DateTime<Utc>) {
-        self.created = created;
-    }
-
-    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
-        self.modified = modified;
-    }
-
-    pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
-        self.conversation_type = conversation_type;
-    }
-
-    pub fn set_settings(&mut self, settings: ConversationSettings) {
-        self.settings = settings;
-    }
-
-    pub fn set_recipients(&mut self, recipients: Vec<DID>) {
-        self.recipients = recipients;
-    }
+#[async_trait::async_trait]
+pub trait ConversationStream {
+    /// Subscribe to an stream of events from the conversation
+    async fn get_conversation_stream(&mut self) -> Result<MessageEventStream, Error>;
 }
 
 #[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
@@ -927,7 +950,7 @@ pub trait RayGun:
     + DynClone
 {
     // Start a new conversation.
-    async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
+    async fn create_conversation(&mut self, _: &DID) -> Result<Box<dyn Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -936,74 +959,109 @@ pub trait RayGun:
         _: Option<String>,
         _: Vec<DID>,
         _: GroupSettings,
-    ) -> Result<Conversation, Error> {
+    ) -> Result<Box<dyn Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Get an active conversation
-    async fn get_conversation(&self, _: Uuid) -> Result<Conversation, Error> {
+    async fn get_conversation(&self, _: Uuid) -> Result<Box<dyn Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
     /// List all active conversations
-    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+    async fn list_conversations(&self) -> Result<Vec<Box<dyn Conversation>>, Error> {
         Err(Error::Unimplemented)
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Retrieve all messages from a conversation
-    async fn get_message(&self, _: Uuid, _: Uuid) -> Result<Message, Error> {
-        Err(Error::Unimplemented)
+    async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
+        let conversation = self.get_conversation(conversation_id).await?;
+        conversation.get_message(message_id).await
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Get a number of messages in a conversation
-    async fn get_message_count(&self, _: Uuid) -> Result<usize, Error> {
-        Err(Error::Unimplemented)
+    async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
+        let conversation = self.get_conversation(conversation_id).await?;
+        conversation.get_message_count().await
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Get a status of a message in a conversation
-    async fn message_status(&self, _: Uuid, _: Uuid) -> Result<MessageStatus, Error> {
-        Err(Error::Unimplemented)
+    async fn message_status(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        let conversation = self.get_conversation(conversation_id).await?;
+        conversation.message_status(message_id).await
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Retrieve all message references from a conversation
     async fn get_message_references(
         &self,
-        _: Uuid,
-        _: MessageOptions,
+        conversation_id: Uuid,
+        opt: MessageOptions,
     ) -> Result<BoxStream<'static, MessageReference>, Error> {
-        Err(Error::Unimplemented)
+        let conversation = self.get_conversation(conversation_id).await?;
+        conversation.get_message_references(opt).await
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Retrieve a message reference from a conversation
-    async fn get_message_reference(&self, _: Uuid, _: Uuid) -> Result<MessageReference, Error> {
-        Err(Error::Unimplemented)
+    async fn get_message_reference(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        let conversation = self.get_conversation(conversation_id).await?;
+        conversation.get_message_reference(message_id).await
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Retrieve all messages from a conversation
     async fn get_messages(
         &self,
         conversation_id: Uuid,
         options: MessageOptions,
-    ) -> Result<Messages, Error>;
+    ) -> Result<Messages, Error> {
+        let conversation = self.get_conversation(conversation_id).await?;
+        conversation.get_messages(options).await
+    }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Sends a message to a conversation.
-    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error>;
+    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.send(message).await
+    }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Edit an existing message in a conversation.
     async fn edit(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
-    ) -> Result<(), Error>;
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.edit(message_id, message).await
+    }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Delete message from a conversation
     async fn delete(
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
-    ) -> Result<(), Error>;
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.delete(message_id).await
+    }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// React to a message
     async fn react(
         &mut self,
@@ -1011,54 +1069,69 @@ pub trait RayGun:
         message_id: Uuid,
         state: ReactionState,
         emoji: String,
-    ) -> Result<(), Error>;
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.react(message_id, state, emoji).await
+    }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Pin a message within a conversation
     async fn pin(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         state: PinState,
-    ) -> Result<(), Error>;
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.pin(message_id, state).await
+    }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Reply to a message within a conversation
     async fn reply(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
-    ) -> Result<(), Error>;
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.reply(message_id, message).await
+    }
 
-    async fn embeds(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: EmbedState,
-    ) -> Result<(), Error>;
+    async fn embeds(&mut self, _: Uuid, _: Uuid, _: EmbedState) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Update conversation settings
     async fn update_conversation_settings(
         &mut self,
         conversation_id: Uuid,
         settings: ConversationSettings,
-    ) -> Result<(), Error>;
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.update_settings(settings).await
+    }
 }
 
 dyn_clone::clone_trait_object!(RayGun);
 
 #[async_trait::async_trait]
 pub trait RayGunGroupConversation: Sync + Send {
+    #[deprecated(note = "Use `Conversation::`")]
     /// Update conversation name
     /// Note: This will only update the group conversation name
     async fn update_conversation_name(&mut self, _: Uuid, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Add a recipient to the conversation
     async fn add_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Remove a recipient from the conversation
     async fn remove_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
         Err(Error::Unimplemented)
@@ -1067,6 +1140,7 @@ pub trait RayGunGroupConversation: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait RayGunAttachment: Sync + Send {
+    #[deprecated(note = "Use `Conversation::`")]
     /// Send files to a conversation.
     /// If no files is provided in the array, it will throw an error
     async fn attach(
@@ -1079,6 +1153,7 @@ pub trait RayGunAttachment: Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Downloads a file that been attached to a message
     /// Note: Must use the filename associated when downloading
     async fn download(
@@ -1091,6 +1166,7 @@ pub trait RayGunAttachment: Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Stream a file that been attached to a message
     /// Note: Must use the filename associated when downloading
     async fn download_stream(
@@ -1105,6 +1181,7 @@ pub trait RayGunAttachment: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait RayGunStream: Sync + Send {
+    #[deprecated(note = "Use `Conversation::`")]
     /// Subscribe to an stream of events from the conversation
     async fn get_conversation_stream(&mut self, _: Uuid) -> Result<MessageEventStream, Error> {
         Err(Error::Unimplemented)
@@ -1118,11 +1195,13 @@ pub trait RayGunStream: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait RayGunEvents: Sync + Send {
+    #[deprecated(note = "Use `Conversation::`")]
     /// Send an event to a conversation
     async fn send_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
+    #[deprecated(note = "Use `Conversation::`")]
     /// Cancel event that was sent, if any.
     async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
         Err(Error::Unimplemented)
