@@ -175,7 +175,6 @@ async fn main() -> anyhow::Result<()> {
     ))?;
     rl.should_print_line_on(false, true);
 
-
     let mut topic = Uuid::nil();
 
     let mut stream_map: StreamMap<Uuid, BoxStream<'static, MessageEventKind>> = StreamMap::new();
@@ -214,12 +213,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         tokio::select! {
-            Some((conversation_id, event)) = stream_map.next() => {
-                if let Err(e) = message_event_handle(topic, event, &mut stdout, &*new_account, &*chat).await {
-                    writeln!(stdout, "error while processing event from {conversation_id}: {e}")?;
-                    continue;
-                }
-            }
+            biased;
             event = event_stream.next() => {
                 if let Some(event) = event {
                     match event {
@@ -239,6 +233,12 @@ async fn main() -> anyhow::Result<()> {
                             }
                         },
                     }
+                }
+            }
+            Some((conversation_id, event)) = stream_map.next() => {
+                if let Err(e) = message_event_handle(topic, event, &mut stdout, &*new_account, &*chat).await {
+                    writeln!(stdout, "error while processing event from {conversation_id}: {e}")?;
+                    continue;
                 }
             }
             line = rl.readline().fuse() => match line {
