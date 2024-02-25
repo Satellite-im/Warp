@@ -2,6 +2,7 @@ mod common;
 
 #[cfg(test)]
 mod test {
+    #![allow(deprecated)]
     use futures::{StreamExt, TryStreamExt};
     use std::time::Duration;
     use warp::{

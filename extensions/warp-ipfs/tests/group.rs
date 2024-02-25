@@ -1,6 +1,7 @@
 mod common;
 #[cfg(test)]
 mod test {
+    #![allow(deprecated)]
     use std::time::Duration;
 
     use crate::common::create_accounts_and_chat;
