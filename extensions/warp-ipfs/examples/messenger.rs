@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
