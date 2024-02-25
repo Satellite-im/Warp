@@ -973,21 +973,21 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::get_message`")]
     /// Retrieve all messages from a conversation
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
         let conversation = self.get_conversation(conversation_id).await?;
         conversation.get_message(message_id).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::get_message_count`")]
     /// Get a number of messages in a conversation
     async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
         let conversation = self.get_conversation(conversation_id).await?;
         conversation.get_message_count().await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::message_status`")]
     /// Get a status of a message in a conversation
     async fn message_status(
         &self,
@@ -998,7 +998,7 @@ pub trait RayGun:
         conversation.message_status(message_id).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::get_message_references`")]
     /// Retrieve all message references from a conversation
     async fn get_message_references(
         &self,
@@ -1009,7 +1009,7 @@ pub trait RayGun:
         conversation.get_message_references(opt).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::get_message_reference`")]
     /// Retrieve a message reference from a conversation
     async fn get_message_reference(
         &self,
@@ -1020,7 +1020,7 @@ pub trait RayGun:
         conversation.get_message_reference(message_id).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::get_messages`")]
     /// Retrieve all messages from a conversation
     async fn get_messages(
         &self,
@@ -1031,14 +1031,14 @@ pub trait RayGun:
         conversation.get_messages(options).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::send`")]
     /// Sends a message to a conversation.
     async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error> {
         let mut conversation = self.get_conversation(conversation_id).await?;
         conversation.send(message).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::edit`")]
     /// Edit an existing message in a conversation.
     async fn edit(
         &mut self,
@@ -1050,7 +1050,7 @@ pub trait RayGun:
         conversation.edit(message_id, message).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::delete`")]
     /// Delete message from a conversation
     async fn delete(
         &mut self,
@@ -1061,7 +1061,7 @@ pub trait RayGun:
         conversation.delete(message_id).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::react`")]
     /// React to a message
     async fn react(
         &mut self,
@@ -1074,7 +1074,7 @@ pub trait RayGun:
         conversation.react(message_id, state, emoji).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::pin`")]
     /// Pin a message within a conversation
     async fn pin(
         &mut self,
@@ -1086,7 +1086,7 @@ pub trait RayGun:
         conversation.pin(message_id, state).await
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::reply`")]
     /// Reply to a message within a conversation
     async fn reply(
         &mut self,
@@ -1102,7 +1102,7 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::update_settings`")]
     /// Update conversation settings
     async fn update_conversation_settings(
         &mut self,
@@ -1140,7 +1140,7 @@ pub trait RayGunGroupConversation: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait RayGunAttachment: Sync + Send {
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::attach`")]
     /// Send files to a conversation.
     /// If no files is provided in the array, it will throw an error
     async fn attach(
@@ -1153,7 +1153,7 @@ pub trait RayGunAttachment: Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::download`")]
     /// Downloads a file that been attached to a message
     /// Note: Must use the filename associated when downloading
     async fn download(
@@ -1166,7 +1166,7 @@ pub trait RayGunAttachment: Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::download_stream`")]
     /// Stream a file that been attached to a message
     /// Note: Must use the filename associated when downloading
     async fn download_stream(
@@ -1181,7 +1181,7 @@ pub trait RayGunAttachment: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait RayGunStream: Sync + Send {
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::get_conversation_stream`")]
     /// Subscribe to an stream of events from the conversation
     async fn get_conversation_stream(&mut self, _: Uuid) -> Result<MessageEventStream, Error> {
         Err(Error::Unimplemented)
@@ -1195,13 +1195,13 @@ pub trait RayGunStream: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait RayGunEvents: Sync + Send {
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::send_event`")]
     /// Send an event to a conversation
     async fn send_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
-    #[deprecated(note = "Use `Conversation::`")]
+    #[deprecated(note = "Use `Conversation::cancel_event`")]
     /// Cancel event that was sent, if any.
     async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
         Err(Error::Unimplemented)
