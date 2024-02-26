@@ -634,7 +634,6 @@ impl FileTask {
         let mut export_tx = self.export_tx.clone();
 
         let progress_stream = async_stream::stream! {
-            let _current_guard = current_directory.signal_guard();
             let mut last_written = 0;
 
             let mut total_written = 0;
@@ -716,8 +715,6 @@ impl FileTask {
 
             let (tx, rx) = oneshot::channel();
             _ = export_tx.send(tx).await;
-
-            drop(_current_guard);
 
             if let Err(e) = rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
