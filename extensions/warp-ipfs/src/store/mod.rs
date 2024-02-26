@@ -211,7 +211,7 @@ pub enum MessagingEvents {
         message_id: Uuid,
         modified: DateTime<Utc>,
         lines: Vec<String>,
-        nonce: Option<Vec<u8>>,
+        nonce: Vec<u8>,
         signature: Vec<u8>,
     },
     Delete {

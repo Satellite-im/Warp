@@ -1959,7 +1959,7 @@ impl ConversationTask {
             message_id,
             modified: message_document.modified.expect("message to be modified"),
             lines: messages,
-            nonce: Some(nonce.to_vec()),
+            nonce: nonce.to_vec(),
             signature: signature.into(),
         };
 
@@ -3645,7 +3645,7 @@ async fn message_event(
                     message,
                     (!signature.is_empty() && sender.ne(&this.keypair)).then_some(signature),
                     keystore.as_ref(),
-                    nonce.as_deref(),
+                    Some(nonce.as_slice()),
                 )
                 .await?;
 
