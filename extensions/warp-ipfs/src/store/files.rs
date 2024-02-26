@@ -693,15 +693,6 @@ impl FileTask {
             file.set_reference(&format!("{ipfs_path}"));
             file.set_file_type(to_file_type(&name));
 
-            if let Err(e) = current_directory.add_item(file.clone()) {
-                yield Progression::ProgressFailed {
-                    name,
-                    last_size: Some(last_written),
-                    error: Some(e.to_string()),
-                };
-                return;
-            }
-
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
                     file.set_thumbnail(&thumbnail);
@@ -711,6 +702,15 @@ impl FileTask {
                 Err(e) => {
                     tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
                 }
+            }
+
+            if let Err(e) = current_directory.add_item(file) {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
             }
 
             let (tx, rx) = oneshot::channel();
