@@ -1039,25 +1039,25 @@ impl MessageDocument {
         message.set_replied(self.replied);
 
         if let Some(cid) = self.attachments {
-            let mut dag_builder = ipfs.get_dag(cid).timeout(Duration::from_secs(10));
-            if local {
-                dag_builder = dag_builder.local()
-            }
+            let attachments: Vec<FileAttachmentDocument> = ipfs
+                .get_dag(cid)
+                .timeout(Duration::from_secs(10))
+                .set_local(local)
+                .deserialized()
+                .await
+                .unwrap_or_default();
 
-            let documents: Vec<FileAttachmentDocument> =
-                dag_builder.deserialized().await.unwrap_or_default();
-
-            if documents.len() > 32 {
+            if attachments.len() > 32 {
                 return Err(Error::InvalidLength {
                     context: "attachments".into(),
-                    current: documents.len(),
+                    current: attachments.len(),
                     minimum: Some(1),
                     maximum: Some(32),
                 });
             }
 
             let files = FuturesUnordered::from_iter(
-                documents
+                attachments
                     .iter()
                     .map(|document| document.resolve_to_file(ipfs, local).into_future()),
             )
@@ -1069,21 +1069,23 @@ impl MessageDocument {
         }
 
         if let Some(cid) = self.reactions {
-            let mut dag_builder = ipfs.get_dag(cid).timeout(Duration::from_secs(10));
-            if local {
-                dag_builder = dag_builder.local()
-            }
+            let reactions: BTreeMap<String, Vec<DID>> = ipfs
+                .get_dag(cid)
+                .timeout(Duration::from_secs(10))
+                .set_local(local)
+                .deserialized()
+                .await
+                .unwrap_or_default();
 
-            let reactions: BTreeMap<String, Vec<DID>> =
-                dag_builder.deserialized().await.unwrap_or_default();
             message.set_reactions(reactions);
         }
 
-        let mut dag_builder = ipfs.get_dag(message_cid).timeout(Duration::from_secs(10));
-        if local {
-            dag_builder = dag_builder.local()
-        }
-        let bytes: Vec<u8> = dag_builder.deserialized().await?;
+        let bytes: Vec<u8> = ipfs
+            .get_dag(message_cid)
+            .timeout(Duration::from_secs(10))
+            .set_local(local)
+            .deserialized()
+            .await?;
 
         let sender = self.sender.to_did();
 

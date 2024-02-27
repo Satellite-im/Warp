@@ -349,11 +349,12 @@ impl FileAttachmentDocument {
         file.set_file_type(self.file_type.clone());
 
         if let Some(cid) = self.thumbnail {
-            let mut dag_builder = ipfs.get_dag(cid).timeout(Duration::from_secs(10));
-            if local {
-                dag_builder = dag_builder.local()
-            }
-            let image: ImageDag = dag_builder.deserialized().await?;
+            let image: ImageDag = ipfs
+                .get_dag(cid)
+                .timeout(Duration::from_secs(10))
+                .set_local(local)
+                .deserialized()
+                .await?;
 
             file.set_thumbnail_format(image.mime.into());
 
