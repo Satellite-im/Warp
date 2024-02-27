@@ -3552,12 +3552,12 @@ async fn message_event(
 
             let message_id = message.id;
 
-            if document.contains(&this.ipfs, message_id).await? {
-                return Err(Error::MessageFound);
-            }
-
             if !document.recipients().contains(&message.sender.to_did()) {
                 return Err(Error::IdentityDoesntExist);
+            }
+
+            if document.contains(&this.ipfs, message_id).await? {
+                return Err(Error::MessageFound);
             }
 
             let resolved_message = message
