@@ -877,7 +877,6 @@ impl MessageDocument {
         let bytes: Vec<u8> = ipfs
             .get_dag(cid)
             .local()
-            .timeout(Duration::from_secs(10))
             .deserialized()
             .await?;
 
@@ -903,16 +902,6 @@ impl MessageDocument {
             .await
             .unwrap_or_default()
     }
-
-    // pub async fn remove(&self, ipfs: &Ipfs) -> Result<(), Error> {
-    //     let cid = self.message;
-    //     if ipfs.is_pinned(&cid).await? {
-    //         ipfs.remove_pin(&cid, false).await?;
-    //     }
-    //     ipfs.remove_block(cid).await?;
-
-    //     Ok(())
-    // }
 
     pub async fn update(
         &mut self,
@@ -1000,7 +989,7 @@ impl MessageDocument {
                 (true, None) => {
                     *self = self.sign(did)?;
                 }
-                (false, None) | (true, Some(_)) => return Err(Error::InvalidConversation),
+                (false, None) | (true, Some(_)) => return Err(Error::InvalidMessage),
                 (false, Some(sig)) => {
                     let new_signature = MessageSignature::try_from(sig)?;
                     self.signature.replace(new_signature);
