@@ -1628,7 +1628,7 @@ impl ConversationTask {
             e
         })?;
 
-        message_event(self, id, &event).await?;
+        message_event(self, id, event).await?;
 
         Ok(())
     }
@@ -3533,14 +3533,14 @@ async fn process_conversation(
 async fn message_event(
     this: &mut ConversationTask,
     conversation_id: Uuid,
-    events: &MessagingEvents,
+    events: MessagingEvents,
 ) -> Result<(), Error> {
     let mut document = this.get(conversation_id).await?;
     let tx = this.subscribe(conversation_id).await?;
 
     let keystore = pubkey_or_keystore(this, conversation_id, &this.keypair).await?;
 
-    match events.clone() {
+    match events {
         MessagingEvents::New { message } => {
             if !message.verify() {
                 return Err(Error::InvalidMessage);
@@ -4249,7 +4249,7 @@ async fn process_pending_payload(this: &mut ConversationTask) {
                 let key = store.get_latest(&this.keypair, &sender)?;
                 let data = Cipher::direct_decrypt(&data, &key)?;
                 let event = serde_json::from_slice(&data)?;
-                message_event(this, conversation_id, &event).await
+                message_event(this, conversation_id, event).await
             };
 
             if let Err(e) = fut.await {
