@@ -634,7 +634,6 @@ impl FileTask {
         let mut export_tx = self.export_tx.clone();
 
         let progress_stream = async_stream::stream! {
-            let _current_guard = current_directory.signal_guard();
             let mut last_written = 0;
 
             let mut total_written = 0;
@@ -694,15 +693,6 @@ impl FileTask {
             file.set_reference(&format!("{ipfs_path}"));
             file.set_file_type(to_file_type(&name));
 
-            if let Err(e) = current_directory.add_item(file.clone()) {
-                yield Progression::ProgressFailed {
-                    name,
-                    last_size: Some(last_written),
-                    error: Some(e.to_string()),
-                };
-                return;
-            }
-
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
                     file.set_thumbnail(&thumbnail);
@@ -714,10 +704,17 @@ impl FileTask {
                 }
             }
 
+            if let Err(e) = current_directory.add_item(file) {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
+            }
+
             let (tx, rx) = oneshot::channel();
             _ = export_tx.send(tx).await;
-
-            drop(_current_guard);
 
             if let Err(e) = rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
