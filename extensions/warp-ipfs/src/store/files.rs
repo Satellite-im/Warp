@@ -10,15 +10,9 @@ use futures::{
 };
 
 use libipld::Cid;
-use rust_ipfs::{
-    unixfs::{AddOption, UnixfsStatus},
-    Ipfs, IpfsPath,
-};
+use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath};
 
-use tokio_util::{
-    io::ReaderStream,
-    sync::{CancellationToken, DropGuard},
-};
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{Instrument, Span};
 use warp::{
     constellation::{
@@ -513,12 +507,12 @@ impl FileTask {
             tracing::info!("Importing index");
             let data = self
                 .ipfs
-                .unixfs()
-                .cat(cid, None, &[], true, None)
+                .cat_unixfs(cid)
+                .local()
                 .await
                 .map_err(anyhow::Error::from)?;
 
-            let key = self.ipfs.keypair().and_then(get_keypair_did)?;
+            let key = get_keypair_did(self.ipfs.keypair())?;
 
             let index_bytes = ecdh_decrypt(&key, None, data)?;
 
@@ -640,13 +634,12 @@ impl FileTask {
         let mut export_tx = self.export_tx.clone();
 
         let progress_stream = async_stream::stream! {
-            let _current_guard = current_directory.signal_guard();
             let mut last_written = 0;
 
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(path.clone(), Some(AddOption { pin: true, ..Default::default() }));
+            let mut stream = ipfs.unixfs().add(path);
 
             while let Some(status) = stream.next().await {
                 let name = name.clone();
@@ -700,15 +693,6 @@ impl FileTask {
             file.set_reference(&format!("{ipfs_path}"));
             file.set_file_type(to_file_type(&name));
 
-            if let Err(e) = current_directory.add_item(file.clone()) {
-                yield Progression::ProgressFailed {
-                    name,
-                    last_size: Some(last_written),
-                    error: Some(e.to_string()),
-                };
-                return;
-            }
-
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
                     file.set_thumbnail(&thumbnail);
@@ -720,10 +704,17 @@ impl FileTask {
                 }
             }
 
+            if let Err(e) = current_directory.add_item(file) {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
+            }
+
             let (tx, rx) = oneshot::channel();
             _ = export_tx.send(tx).await;
-
-            drop(_current_guard);
 
             if let Err(e) = rx.await.expect("shouldnt drop") {
                 tracing::error!(error = %e, "unable to export index");
@@ -837,20 +828,10 @@ impl FileTask {
                 .insert_buffer(&name, &buffer, width, height, exact)
                 .await;
 
-            let reader = ReaderStream::new(std::io::Cursor::new(&buffer))
-                .map(|result| result.map(|x| x.into()))
-                .boxed();
-
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(
-                reader,
-                Some(AddOption {
-                    pin: true,
-                    ..Default::default()
-                }),
-            );
+            let mut stream = ipfs.unixfs().add(buffer);
 
             while let Some(status) = stream.next().await {
                 match status {
@@ -918,7 +899,7 @@ impl FileTask {
             let reference = file.reference().ok_or(Error::Other)?; //Reference not found
 
             let buffer = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+                .cat_unixfs(reference.parse::<IpfsPath>()?)
                 .await
                 .map_err(anyhow::Error::new)?;
 
@@ -929,7 +910,7 @@ impl FileTask {
             })
             .await;
 
-            Ok(buffer)
+            Ok(buffer.into())
         }
         .boxed())
     }
@@ -967,7 +948,7 @@ impl FileTask {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(stream, Some(AddOption { pin: true, ..Default::default() }));
+            let mut stream = ipfs.unixfs().add(stream);
 
             while let Some(status) = stream.next().await {
                 let n = name.clone();
@@ -1083,11 +1064,11 @@ impl FileTask {
 
         let stream = async_stream::stream! {
             let cat_stream = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?, None);
+                .cat_unixfs(reference.parse::<IpfsPath>()?);
 
             for await data in cat_stream {
                 match data {
-                    Ok(data) => yield Ok(data),
+                    Ok(data) => yield Ok(data.into()),
                     Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
                 }
             }
@@ -1200,7 +1181,7 @@ impl FileTask {
 
         Ok(async move {
             let buffer = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+                .cat_unixfs(reference.parse::<IpfsPath>()?)
                 .await
                 .map_err(anyhow::Error::from)?;
 

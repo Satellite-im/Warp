@@ -87,23 +87,23 @@ impl ShuttleServer {
         let (id_event_tx, id_event_rx) = futures::channel::mpsc::channel(1);
         let (precord_tx, precord_rx) = futures::channel::mpsc::channel(256);
         let mut uninitialized = UninitializedIpfs::new()
-            .with_identify(Some(IdentifyConfiguration {
+            .with_identify(IdentifyConfiguration {
                 agent_version: format!("shuttle/{}", env!("CARGO_PKG_VERSION")),
                 ..Default::default()
-            }))
+            })
             .with_bitswap()
-            .with_ping(None)
-            .with_pubsub(Some(PubsubConfig {
+            .with_ping(Default::default())
+            .with_pubsub(PubsubConfig {
                 max_transmit_size: 4 * 1024 * 1024,
                 ..Default::default()
-            }))
+            })
             .with_custom_behaviour(Behaviour {
                 identity: identity::server::Behaviour::new(keypair, id_event_tx, precord_rx),
                 dummy: ext
                     .then_some(ext_behaviour::Behaviour::new(local_peer_id))
                     .into(),
             })
-            .set_keypair(keypair.clone())
+            .set_keypair(keypair)
             .fd_limit(FDLimit::Max)
             .set_idle_connection_timeout(60 * 30)
             .default_record_key_validator()
@@ -118,7 +118,7 @@ impl ShuttleServer {
             .listen_as_external_addr();
 
         if enable_relay_server {
-            uninitialized = uninitialized.with_relay_server(Some(RelayConfig {
+            uninitialized = uninitialized.with_relay_server(RelayConfig {
                 max_circuits: 8198,
                 max_circuits_per_peer: 8198,
                 max_circuit_duration: Duration::from_secs(2 * 60),
@@ -146,7 +146,7 @@ impl ShuttleServer {
                         interval: Duration::from_secs(60),
                     },
                 ],
-            }));
+            });
         }
 
         if memory_transport {
@@ -227,7 +227,7 @@ impl ShuttleServer {
 
 impl ShuttleTask {
     async fn start(&mut self) {
-        let keypair = self.ipfs.keypair().expect("noop error");
+        let keypair = self.ipfs.keypair();
 
         while let Some((id, ch, payload, resp)) = self.identity_rx.next().await {
             tracing::info!(request_id = ?id, "Processing Incoming Request");
@@ -358,7 +358,7 @@ impl ShuttleTask {
 
                         _ = self
                             .ipfs
-                            .pubsub_publish("/identity/announce/v0".into(), bytes)
+                            .pubsub_publish("/identity/announce/v0", bytes)
                             .await;
 
                         tracing::info!(%document.did, "identity registered");
@@ -719,7 +719,7 @@ impl ShuttleTask {
 
                         _ = self
                             .ipfs
-                            .pubsub_publish("/identity/announce/v0".into(), bytes)
+                            .pubsub_publish("/identity/announce/v0", bytes)
                             .await;
 
                         let payload = payload_message_construct(

@@ -1203,7 +1203,7 @@ impl ConversationTask {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(did.messaging(), payload.to_bytes()?.into())
+                    .pubsub_publish(did.messaging(), payload.to_bytes()?)
                     .await
                     .is_err())
         {
@@ -1328,7 +1328,7 @@ impl ConversationTask {
                 || (peers.contains(&peer_id)
                     && self
                         .ipfs
-                        .pubsub_publish(did.messaging(), payload.to_bytes()?.into())
+                        .pubsub_publish(did.messaging(), payload.to_bytes()?)
                         .await
                         .is_err())
             {
@@ -1401,7 +1401,7 @@ impl ConversationTask {
         let mut map = self.root.get_conversation_keystore_map().await?;
 
         let id = id.to_string();
-        let cid = self.ipfs.dag().put().serialize(document)?.await?;
+        let cid = self.ipfs.dag().put().serialize(document).await?;
 
         map.insert(id, cid);
 
@@ -1489,7 +1489,7 @@ impl ConversationTask {
     }
 
     pub async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let cid = self.ipfs.dag().put().serialize(map)?.pin(true).await?;
+        let cid = self.ipfs.dag().put().serialize(map).pin(true).await?;
 
         let old_map_cid = self.cid.replace(cid);
 
@@ -1526,7 +1526,7 @@ impl ConversationTask {
         };
 
         let id = document.id().to_string();
-        let cid = self.ipfs.dag().put().serialize(document)?.await?;
+        let cid = self.ipfs.dag().put().serialize(document).await?;
 
         map.insert(id, cid);
 
@@ -1671,7 +1671,7 @@ impl ConversationTask {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                    .pubsub_publish(topic.clone(), payload.to_bytes()?)
                     .await
                     .is_err())
         {
@@ -2650,7 +2650,7 @@ impl ConversationTask {
                 total: Some(attachment.size()),
             };
 
-            let stream = ipfs.unixfs().get(reference, &path, &members, false, None);
+            let stream = ipfs.unixfs().get(reference, &path).providers(&members);
 
             for await event in stream {
                 match event {
@@ -2717,14 +2717,16 @@ impl ConversationTask {
 
         let ipfs = self.ipfs.clone();
 
-        let stream = async_stream::stream! {
-            let stream = ipfs.unixfs().cat(reference, None, &members, false, None);
-
-            for await result in stream {
-                let result = result.map_err(anyhow::Error::from).map_err(Error::from);
-                yield result;
-            }
-        };
+        let stream = ipfs
+            .unixfs()
+            .cat(reference)
+            .providers(&members)
+            .map(|result| {
+                result
+                    .map(|b| b.into())
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)
+            });
 
         Ok(stream.boxed())
     }
@@ -3082,7 +3084,7 @@ impl ConversationTask {
                         || (peers.contains(&peer_id)
                             && self
                                 .ipfs
-                                .pubsub_publish(recipient.messaging(), payload.to_bytes()?.into())
+                                .pubsub_publish(recipient.messaging(), payload.to_bytes()?)
                                 .await
                                 .is_err())
                     {
@@ -3220,7 +3222,7 @@ impl ConversationTask {
         if !peers.is_empty() {
             if let Err(e) = self
                 .ipfs
-                .pubsub_publish(conversation.event_topic(), payload.to_bytes()?.into())
+                .pubsub_publish(conversation.event_topic(), payload.to_bytes()?)
                 .await
             {
                 error!(%conversation_id, "Unable to send event: {e}");
@@ -3323,11 +3325,7 @@ impl ConversationTask {
             tracing::trace!(%conversation_id, "Payload size: {} bytes", bytes.len());
             let timer = Instant::now();
             let mut time = true;
-            if let Err(_e) = self
-                .ipfs
-                .pubsub_publish(conversation.topic(), bytes.into())
-                .await
-            {
+            if let Err(_e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
                 error!(%conversation_id, "Error publishing: {_e}");
                 time = false;
             }
@@ -3362,7 +3360,7 @@ impl ConversationTask {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?.into())
+                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?)
                     .await
                     .is_err())
         {
@@ -4343,7 +4341,7 @@ async fn process_request_response_event(
                     || (peers.contains(&peer_id)
                         && this
                             .ipfs
-                            .pubsub_publish(topic.clone(), bytes.into())
+                            .pubsub_publish(topic.clone(), bytes)
                             .await
                             .is_err())
                 {
@@ -4571,7 +4569,7 @@ async fn process_queue(this: &mut ConversationTask) {
                 continue;
             };
 
-            if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes.into()).await {
+            if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes).await {
                 error!("Error publishing to topic: {e}");
                 continue;
             }

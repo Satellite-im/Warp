@@ -113,7 +113,7 @@ impl BlinkImpl {
                     None => bail!("Unable to use IPFS Handle"),
                 };
 
-                let _own_id = get_keypair_did(_ipfs.keypair()?)?;
+                let _own_id = get_keypair_did(_ipfs.keypair())?;
                 let public_did = identity.did_key();
                 // this one better not be cloned
                 own_id_private.write().replace(_own_id);

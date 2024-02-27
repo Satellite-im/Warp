@@ -295,11 +295,11 @@ impl IdentityCacheTask {
                     return Ok(None);
                 }
 
-                let cid = self.ipfs.dag().put().serialize(document)?.await?;
+                let cid = self.ipfs.dag().put().serialize(document).await?;
 
                 list.insert(did_str, cid);
 
-                let cid = self.ipfs.dag().put().serialize(list)?.await?;
+                let cid = self.ipfs.dag().put().serialize(list).await?;
 
                 if !self.ipfs.is_pinned(&cid).await? {
                     self.ipfs.insert_pin(&cid).recursive().local().await?;
@@ -332,11 +332,11 @@ impl IdentityCacheTask {
                 Ok(Some(old_document))
             }
             None => {
-                let cid = self.ipfs.dag().put().serialize(document)?.await?;
+                let cid = self.ipfs.dag().put().serialize(document).await?;
 
                 list.insert(did_str, cid);
 
-                let cid = self.ipfs.dag().put().serialize(list)?.await?;
+                let cid = self.ipfs.dag().put().serialize(list).await?;
 
                 if !self.ipfs.is_pinned(&cid).await? {
                     self.ipfs.insert_pin(&cid).recursive().local().await?;
@@ -407,7 +407,7 @@ impl IdentityCacheTask {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let cid = self.ipfs.dag().put().serialize(list)?.await?;
+        let cid = self.ipfs.dag().put().serialize(list).await?;
 
         if !self.ipfs.is_pinned(&cid).await? {
             self.ipfs.insert_pin(&cid).recursive().local().await?;
