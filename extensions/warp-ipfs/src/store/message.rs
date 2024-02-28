@@ -4411,17 +4411,21 @@ async fn pubkey_or_keystore(
 ) -> Result<Either<DID, Keystore>, Error> {
     let document = conversation.get(conversation_id).await?;
     let keystore = match document.conversation_type {
-        ConversationType::Direct => Either::Left({
-            document
-                .recipients()
-                .iter()
+        ConversationType::Direct => {
+            let list = document.recipients();
+
+            let recipients = list
+                .into_iter()
                 .filter(|did| keypair.ne(did))
-                .cloned()
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+
+            let member = recipients
                 .first()
                 .cloned()
-                .expect("Valid recipient")
-        }),
+                .ok_or(Error::InvalidConversation)?;
+
+            Either::Left(member)
+        }
         ConversationType::Group => Either::Right(conversation.get_keystore(conversation_id).await?),
     };
 
