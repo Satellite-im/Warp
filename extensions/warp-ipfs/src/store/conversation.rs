@@ -623,27 +623,6 @@ impl ConversationDocument {
     }
 }
 
-// impl From<ConversationDocument> for Conversation {
-//     fn from(document: ConversationDocument) -> Self {
-//         Conversation::from(&document)
-//     }
-// }
-
-// impl From<&ConversationDocument> for Conversation {
-//     fn from(document: &ConversationDocument) -> Self {
-//         let mut conversation = Conversation::default();
-//         conversation.set_id(document.id);
-//         conversation.set_name(document.name.clone());
-//         conversation.set_creator(document.creator.clone());
-//         conversation.set_conversation_type(document.conversation_type);
-//         conversation.set_recipients(document.recipients());
-//         conversation.set_created(document.created);
-//         conversation.set_settings(document.settings);
-//         conversation.set_modified(document.modified);
-//         conversation
-//     }
-// }
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageDocument {
     pub id: Uuid,
