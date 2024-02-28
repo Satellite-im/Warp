@@ -1077,13 +1077,13 @@ impl ConversationTask {
                 }
                 Some(item) = self.topic_stream.next() => {
                     match item {
-                        ConversationStreamData::RequestResponse(conversation_id, _) | 
-                            ConversationStreamData::Event(conversation_id, _) | 
+                        ConversationStreamData::RequestResponse(conversation_id, _) |
+                            ConversationStreamData::Event(conversation_id, _) |
                             ConversationStreamData::Message(conversation_id, _) if !self.contains(conversation_id).await => {
                                 // Note: If the conversation is deleted prior to processing the events from stream
                                 //       related to the specific we should then ignore those events.
                                 //       Additionally, we could switch back to `StreamMap` and remove the stream
-                                //       based on the conversation id to remove this check 
+                                //       based on the conversation id to remove this check
                                 continue
                         },
                         ConversationStreamData::RequestResponse(conversation_id, req) => {
@@ -2403,9 +2403,6 @@ impl ConversationTask {
                                 continue;
                             }
                         };
-
-                        let current_directory = current_directory.clone();
-                        let filename = filename.to_string();
 
                         let stream = async_stream::stream! {
                             while let Some(item) = progress.next().await {
