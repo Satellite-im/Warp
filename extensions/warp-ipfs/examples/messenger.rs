@@ -199,10 +199,14 @@ async fn main() -> anyhow::Result<()> {
     // loads all conversations, pushing their streams into the `StreamMap` to poll.
     for conversation in chat.list_conversations().await.unwrap_or_default() {
         let id = conversation.id();
-        // Use the last conversation on the list
-        topic = id;
+
         let stream = chat.get_conversation_stream(id).await?;
         stream_map.insert(id, stream);
+    }
+
+    // Use the last conversation on the list
+    if !stream_map.is_empty() {
+        topic = stream_map.keys().last().copied().expect("id exist");
     }
 
     // selects the last conversation
