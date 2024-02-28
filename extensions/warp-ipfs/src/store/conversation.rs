@@ -874,11 +874,7 @@ impl MessageDocument {
     pub async fn raw_encrypted_message(&self, ipfs: &Ipfs) -> Result<Vec<u8>, Error> {
         let cid = self.message.ok_or(Error::MessageNotFound)?;
 
-        let bytes: Vec<u8> = ipfs
-            .get_dag(cid)
-            .local()
-            .deserialized()
-            .await?;
+        let bytes: Vec<u8> = ipfs.get_dag(cid).local().deserialized().await?;
 
         Ok(bytes)
     }
