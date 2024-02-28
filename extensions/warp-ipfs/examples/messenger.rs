@@ -196,9 +196,10 @@ async fn main() -> anyhow::Result<()> {
     writeln!(stdout, "\n{}", list_commands_and_help())?;
     writeln!(stdout, "DID: {}", identity.did_key())?;
 
-    // loads all conversations into their own task to process events
+    // loads all conversations, pushing their streams into the `StreamMap` to poll.
     for conversation in chat.list_conversations().await.unwrap_or_default() {
         let id = conversation.id();
+        // Use the last conversation on the list
         topic = id;
         let stream = chat.get_conversation_stream(id).await?;
         stream_map.insert(id, stream);
@@ -774,44 +775,17 @@ async fn message_event_handle(
                     let username = get_username(multipass, message.sender()).await;
 
                     match message.message_type() {
-                        MessageType::Message => match message.metadata().get("is_spam") {
-                            Some(_) => {
-                                writeln!(
-                                    stdout,
-                                    "[{}] @> [SPAM!] {}",
-                                    username,
-                                    message.lines().join("\n")
-                                )?;
-                            }
-                            None => {
+                        MessageType::Message => {
+                            writeln!(stdout, "[{}] @> {}", username, message.lines().join("\n"))?
+                        }
+                        MessageType::Attachment => {
+                            if !message.lines().is_empty() {
                                 writeln!(
                                     stdout,
                                     "[{}] @> {}",
                                     username,
                                     message.lines().join("\n")
                                 )?;
-                            }
-                        },
-                        MessageType::Attachment => {
-                            if !message.lines().is_empty() {
-                                match message.metadata().get("is_spam") {
-                                    Some(_) => {
-                                        writeln!(
-                                            stdout,
-                                            "[{}] @> [SPAM!] {}",
-                                            username,
-                                            message.lines().join("\n")
-                                        )?;
-                                    }
-                                    None => {
-                                        writeln!(
-                                            stdout,
-                                            "[{}] @> {}",
-                                            username,
-                                            message.lines().join("\n")
-                                        )?;
-                                    }
-                                }
                             }
 
                             for attachment in message.attachments() {
