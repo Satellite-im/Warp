@@ -763,8 +763,6 @@ async fn message_event_handle(
     multipass: &dyn MultiPass,
     raygun: &dyn RayGun,
 ) -> anyhow::Result<()> {
-    let identity = multipass.get_own_identity().await?;
-
     match event {
         MessageEventKind::MessageReceived {
             conversation_id,
@@ -778,38 +776,31 @@ async fn message_event_handle(
                 if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
                     let username = get_username(multipass, message.sender()).await;
 
+                    let lines = message.lines();
+
                     match message.message_type() {
                         MessageType::Message => {
-                            writeln!(stdout, "[{}] @> {}", username, message.lines().join("\n"))?
+                            writeln!(stdout, "[{}] @> {}", username, lines.join("\n"))?
                         }
                         MessageType::Attachment => {
-                            if !message.lines().is_empty() {
-                                writeln!(
-                                    stdout,
-                                    "[{}] @> {}",
-                                    username,
-                                    message.lines().join("\n")
-                                )?;
+                            if !lines.is_empty() {
+                                writeln!(stdout, "[{}] @> {}", username, lines.join("\n"))?;
                             }
 
                             for attachment in message.attachments() {
-                                if message.sender() == identity.did_key() {
-                                    writeln!(stdout, ">> File {} attached", attachment.name())?;
-                                } else {
-                                    writeln!(
-                                        stdout,
-                                        ">> File {} been attached with size {} bytes",
-                                        attachment.name(),
-                                        attachment.size()
-                                    )?;
+                                writeln!(
+                                    stdout,
+                                    ">> File {} been attached with size {} bytes",
+                                    attachment.name(),
+                                    attachment.size()
+                                )?;
 
-                                    writeln!(
-                                        stdout,
-                                        ">> Do `/download {} {} <path>` to download",
-                                        message.id(),
-                                        attachment.name(),
-                                    )?;
-                                }
+                                writeln!(
+                                    stdout,
+                                    ">> Do `/download {} {} <path>` to download",
+                                    message.id(),
+                                    attachment.name(),
+                                )?;
                             }
                         }
                         MessageType::Event => {}
