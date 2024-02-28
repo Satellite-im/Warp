@@ -1189,20 +1189,13 @@ impl ConversationTask {
             return Err(Error::CannotCreateConversation);
         }
 
-        //TODO
-        // if let Some(conversation) = self
-        //     .list()
-        //     .await
-        //     .iter()
-        //     .find(|conversation| {
-        //         conversation.conversation_type == ConversationType::Direct
-        //             && conversation.recipients().contains(did)
-        //             && conversation.recipients().contains(&self.keypair)
-        //     })
-        //     .map(Conversation::from)
-        // {
-        //     return Err(Error::ConversationExist { conversation });
-        // }
+        if let Some(conversation) = self.list().await.iter().find(|conversation| {
+            conversation.conversation_type == ConversationType::Direct
+                && conversation.recipients().contains(did)
+                && conversation.recipients().contains(&self.keypair)
+        }) {
+            return Ok(conversation.id);
+        }
 
         //Temporary limit
         // if self.list_conversations().await.unwrap_or_default().len() >= 256 {
