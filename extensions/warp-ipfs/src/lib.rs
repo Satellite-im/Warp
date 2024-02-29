@@ -1432,7 +1432,7 @@ impl RayGun for WarpIpfs {
             .await
     }
 
-    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<(), Error> {
+    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<Uuid, Error> {
         self.messaging_store()?
             .send_message(conversation_id, value)
             .await
@@ -1489,7 +1489,7 @@ impl RayGun for WarpIpfs {
         conversation_id: Uuid,
         message_id: Uuid,
         value: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         self.messaging_store()?
             .reply(conversation_id, message_id, value)
             .await
