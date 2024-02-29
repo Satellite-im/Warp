@@ -295,7 +295,7 @@ mod test {
                 }
                 AttachmentKind::Pending(result) => {
                     result?;
-                },
+                }
             }
         }
 

@@ -1911,7 +1911,8 @@ impl ConversationTask {
         let event = MessagingEvents::New { message };
 
         self.publish(conversation_id, Some(message_id), event, true)
-            .await.map(|_| message_id)
+            .await
+            .map(|_| message_id)
     }
 
     pub async fn edit_message(
@@ -2116,7 +2117,8 @@ impl ConversationTask {
         let event = MessagingEvents::New { message };
 
         self.publish(conversation_id, Some(message_id), event, true)
-            .await.map(|_|message_id)
+            .await
+            .map(|_| message_id)
     }
 
     pub async fn delete_message(
