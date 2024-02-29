@@ -108,7 +108,7 @@ pub enum MessageEvent {
 
 pub enum AttachmentKind {
     AttachedProgress(Progression),
-    Pending(Result<(), Error>),
+    Pending(Result<Uuid, Error>),
 }
 
 pub type AttachmentEventStream = BoxStream<'static, AttachmentKind>;
@@ -974,7 +974,7 @@ pub trait RayGun:
     ) -> Result<Messages, Error>;
 
     /// Sends a message to a conversation.
-    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error>;
+    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<Uuid, Error>;
 
     /// Edit an existing message in a conversation.
     async fn edit(
@@ -1014,7 +1014,7 @@ pub trait RayGun:
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
-    ) -> Result<(), Error>;
+    ) -> Result<Uuid, Error>;
 
     async fn embeds(
         &mut self,

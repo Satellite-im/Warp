@@ -293,7 +293,9 @@ mod test {
                 AttachmentKind::AttachedProgress(Progression::ProgressFailed { .. }) => {
                     unreachable!("should not fail")
                 }
-                AttachmentKind::Pending(result) => result?,
+                AttachmentKind::Pending(result) => {
+                    result?;
+                }
             }
         }
 
