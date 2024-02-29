@@ -162,7 +162,7 @@ enum MessagingCommand {
     SendMessage {
         conversation_id: Uuid,
         lines: Vec<String>,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     EditMessage {
         conversation_id: Uuid,
@@ -174,7 +174,7 @@ enum MessagingCommand {
         conversation_id: Uuid,
         message_id: Uuid,
         lines: Vec<String>,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     DeleteMessage {
         conversation_id: Uuid,
@@ -658,7 +658,7 @@ impl MessageStore {
         &self,
         conversation_id: Uuid,
         lines: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -697,7 +697,7 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
         lines: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -1831,7 +1831,7 @@ impl ConversationTask {
         &mut self,
         conversation_id: Uuid,
         messages: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
@@ -1912,6 +1912,7 @@ impl ConversationTask {
 
         self.publish(conversation_id, Some(message_id), event, true)
             .await
+            .map(|_| message_id)
     }
 
     pub async fn edit_message(
@@ -2035,7 +2036,7 @@ impl ConversationTask {
         conversation_id: Uuid,
         message_id: Uuid,
         messages: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
@@ -2117,6 +2118,7 @@ impl ConversationTask {
 
         self.publish(conversation_id, Some(message_id), event, true)
             .await
+            .map(|_| message_id)
     }
 
     pub async fn delete_message(
@@ -2547,11 +2549,11 @@ impl ConversationTask {
                     let signature = sign_serde(own_did, &construct)?;
                     message.set_signature(Some(signature));
 
-
+                    let message_id = message.id();
                     let (tx, rx) = oneshot::channel();
                     _ = atx.send((conversation_id, message, tx)).await;
 
-                    rx.await.expect("shouldnt drop")
+                    rx.await.expect("shouldnt drop").map(|_|message_id)
                 }
             };
 
