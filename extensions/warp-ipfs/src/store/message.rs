@@ -2456,11 +2456,11 @@ impl ConversationTask {
                     let message =
                         MessageDocument::new(&ipfs, &keypair, message, keystore.as_ref()).await?;
 
-                    let message_id = message.id();
+                    let message_id = message.id;
                     let (tx, rx) = oneshot::channel();
                     _ = atx.send((conversation_id, message, tx)).await;
 
-                    rx.await.expect("shouldnt drop").map(|_|message_id)
+                    rx.await.expect("shouldnt drop").map(|_| message_id)
                 }
             };
 
