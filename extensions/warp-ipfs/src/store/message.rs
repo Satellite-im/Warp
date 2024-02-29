@@ -15,9 +15,10 @@ use std::{
 use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
+    future::BoxFuture,
     pin_mut,
     stream::{BoxStream, FuturesUnordered, SelectAll},
-    SinkExt, Stream, StreamExt, TryFutureExt,
+    FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs, IpfsPath, PeerId};
@@ -114,7 +115,7 @@ enum MessagingCommand {
     GetMessages {
         conversation_id: Uuid,
         opt: MessageOptions,
-        response: oneshot::Sender<Result<Messages, Error>>,
+        response: oneshot::Sender<Result<BoxFuture<'static, Result<Messages, Error>>, Error>>,
     },
     GetMessagesCount {
         conversation_id: Uuid,
@@ -506,7 +507,7 @@ impl MessageStore {
                 response: tx,
             })
             .await;
-        rx.await.map_err(anyhow::Error::from)?
+        rx.await.map_err(anyhow::Error::from)??.await
     }
 
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
@@ -1743,33 +1744,40 @@ impl ConversationTask {
         &self,
         conversation_id: Uuid,
         opt: MessageOptions,
-    ) -> Result<Messages, Error> {
+    ) -> Result<BoxFuture<'static, Result<Messages, Error>>, Error> {
         let conversation = self.get(conversation_id).await?;
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
             ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
         };
 
-        let m_type = opt.messages_type();
-        match m_type {
-            MessagesType::Stream => {
-                let stream = conversation
-                    .get_messages_stream(&self.ipfs, self.keypair.clone(), opt, keystore.as_ref())
-                    .await?;
-                Ok(Messages::Stream(stream))
+        Ok({
+            let ipfs = self.ipfs.clone();
+            let keypair = self.keypair.clone();
+            async move {
+                let m_type = opt.messages_type();
+                match m_type {
+                    MessagesType::Stream => {
+                        let stream = conversation
+                            .get_messages_stream(&ipfs, keypair, opt, keystore.as_ref())
+                            .await?;
+                        Ok(Messages::Stream(stream))
+                    }
+                    MessagesType::List => {
+                        let list = conversation
+                            .get_messages(&ipfs, keypair, opt, keystore.as_ref())
+                            .await?;
+                        Ok(Messages::List(list))
+                    }
+                    MessagesType::Pages { .. } => {
+                        conversation
+                            .get_messages_pages(&ipfs, &keypair, opt, keystore.as_ref())
+                            .await
+                    }
+                }
             }
-            MessagesType::List => {
-                let list = conversation
-                    .get_messages(&self.ipfs, self.keypair.clone(), opt, keystore.as_ref())
-                    .await?;
-                Ok(Messages::List(list))
-            }
-            MessagesType::Pages { .. } => {
-                conversation
-                    .get_messages_pages(&self.ipfs, &self.keypair, opt, keystore.as_ref())
-                    .await
-            }
-        }
+            .boxed()
+        })
     }
 
     //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself
