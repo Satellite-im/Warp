@@ -1,7 +1,6 @@
 #![allow(clippy::result_large_err)]
 pub mod directory;
 pub mod file;
-pub mod guard;
 pub mod item;
 
 use std::path::{Path, PathBuf};

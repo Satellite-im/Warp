@@ -1,6 +1,5 @@
 #![allow(clippy::result_large_err)]
 use super::file::File;
-use super::guard::SignalGuard;
 use super::item::{FormatType, Item};
 use crate::error::Error;
 use chrono::{DateTime, Utc};
