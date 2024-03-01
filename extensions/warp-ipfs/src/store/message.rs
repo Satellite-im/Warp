@@ -2552,11 +2552,10 @@ impl ConversationTask {
                     let signature = sign_serde(own_did, &construct)?;
                     message.set_signature(Some(signature));
 
-                    let message_id = message.id();
                     let (tx, rx) = oneshot::channel();
                     _ = atx.send((conversation_id, message, tx)).await;
 
-                    rx.await.expect("shouldnt drop").map(|_|message_id)
+                    rx.await.expect("shouldnt drop")
                 }
             };
 
