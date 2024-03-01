@@ -350,7 +350,6 @@ impl File {
 
         _ = signal.unbounded_send(());
     }
-
 }
 
 impl File {
