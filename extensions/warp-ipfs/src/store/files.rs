@@ -64,7 +64,7 @@ impl FileStore {
         let thumbnail_store = ThumbnailGenerator::new(ipfs.clone());
 
         let (command_sender, command_receiver) = futures::channel::mpsc::channel(1);
-        let (export_tx, export_rx) = futures::channel::mpsc::channel(1);
+        let (export_tx, export_rx) = futures::channel::mpsc::channel(0);
         let (signal_tx, signal_rx) = futures::channel::mpsc::unbounded();
 
         let mut task = FileTask {
@@ -396,8 +396,8 @@ struct FileTask {
     root: RootDocumentMap,
     config: config::Config,
     ipfs: Ipfs,
-    export_tx: futures::channel::mpsc::Sender<oneshot::Sender<Result<(), Error>>>,
-    export_rx: futures::channel::mpsc::Receiver<oneshot::Sender<Result<(), Error>>>,
+    export_tx: futures::channel::mpsc::Sender<()>,
+    export_rx: futures::channel::mpsc::Receiver<()>,
     signal_tx: futures::channel::mpsc::UnboundedSender<()>,
     signal_rx: futures::channel::mpsc::UnboundedReceiver<()>,
     thumbnail_store: ThumbnailGenerator,
@@ -473,8 +473,8 @@ impl FileTask {
                         },
                     }
                 },
-                Some(response) = self.export_rx.next() => {
-                    _ = response.send(self.export().await);
+                Some(_) = self.export_rx.next() => {
+                    _ = self.export().await;
                 }
                 Some(_) = self.signal_rx.next() => {
                     if let Err(_e) = self.export().await {
@@ -714,12 +714,7 @@ impl FileTask {
                 return;
             }
 
-            let (tx, rx) = oneshot::channel();
-            _ = export_tx.send(tx).await;
-
-            if let Err(e) = rx.await.expect("shouldnt drop") {
-                tracing::error!(error = %e, "unable to export index");
-            }
+            _ = export_tx.try_send(());
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
@@ -818,8 +813,6 @@ impl FileTask {
         };
 
         Ok(async move {
-            let _current_guard = current_directory.signal_guard();
-
             if current_directory.get_item_by_path(&name).is_ok() {
                 return Err(Error::FileExist);
             }
@@ -868,13 +861,7 @@ impl FileTask {
 
             current_directory.add_item(file)?;
 
-            let (exported_tx, exported_rx) = oneshot::channel();
-            _ = export_tx.send(exported_tx).await;
-
-            drop(_current_guard);
-            if let Err(e) = exported_rx.await.expect("shouldnt drop") {
-                tracing::error!(error = %e, "unable to export index");
-            }
+            _ = export_tx.try_send(());
 
             tx.emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
@@ -1015,8 +1002,6 @@ impl FileTask {
                     }
                 };
 
-            let _current_guard = current_directory.signal_guard();
-
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
@@ -1031,14 +1016,7 @@ impl FileTask {
                 return;
             }
 
-            let (tx, rx) = oneshot::channel();
-            _ = export_tx.send(tx).await;
-
-            drop(_current_guard);
-
-            if let Err(e) = rx.await.expect("shouldnt drop") {
-                tracing::error!(error = %e, "unable to export index");
-            }
+            _ = export_tx.try_send(());
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
@@ -1201,12 +1179,7 @@ impl FileTask {
                 file.set_thumbnail_reference(&path.to_string());
             }
 
-            let (tx, rx) = oneshot::channel();
-            _ = export_tx.send(tx).await;
-
-            if let Err(e) = rx.await.expect("shouldnt drop") {
-                tracing::error!(error = %e, "unable to export index");
-            }
+            _ = export_tx.send(()).await;
 
             Ok(())
         }
