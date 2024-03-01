@@ -132,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
                         println!(
                             "{name} failed to upload at {} MB due to: {}",
                             last_size.unwrap_or_default(),
-                            error.unwrap_or_default()
+                            error
                         );
                     }
                 }
