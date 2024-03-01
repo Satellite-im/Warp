@@ -2535,15 +2535,9 @@ impl ConversationTask {
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let ipfs = self.ipfs.clone();
-        let progress_stream = async_stream::stream! {
-            let stream = attachment.download(&ipfs, path, &members, None);
-            for await event in stream {
-                yield event;
-            }
-        };
+        let stream = attachment.download(&self.ipfs, path, &members, None);
 
-        Ok(progress_stream.boxed())
+        Ok(stream.boxed())
     }
 
     pub async fn download_stream(
@@ -2576,20 +2570,7 @@ impl ConversationTask {
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let ipfs = self.ipfs.clone();
-
-        let stream = attachment.download_stream(&ipfs, &members, None);
-
-        // let stream = ipfs
-        //     .unixfs()
-        //     .cat(reference)
-        //     .providers(&members)
-        //     .map(|result| {
-        //         result
-        //             .map(|b| b.into())
-        //             .map_err(anyhow::Error::from)
-        //             .map_err(Error::from)
-        //     });
+        let stream = attachment.download_stream(&self.ipfs, &members, None);
 
         Ok(stream.boxed())
     }
