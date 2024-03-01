@@ -108,7 +108,7 @@ pub enum MessageEvent {
 
 pub enum AttachmentKind {
     AttachedProgress(Progression),
-    Pending(Result<Uuid, Error>),
+    Pending(Result<(), Error>),
 }
 
 pub type AttachmentEventStream = BoxStream<'static, AttachmentKind>;
@@ -1062,7 +1062,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Option<Uuid>,
         _: Vec<Location>,
         _: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         Err(Error::Unimplemented)
     }
 

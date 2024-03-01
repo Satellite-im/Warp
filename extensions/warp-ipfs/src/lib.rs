@@ -1517,7 +1517,7 @@ impl RayGunAttachment for WarpIpfs {
         message_id: Option<Uuid>,
         locations: Vec<Location>,
         message: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         self.messaging_store()?
             .attach(conversation_id, message_id, locations, message)
             .await
