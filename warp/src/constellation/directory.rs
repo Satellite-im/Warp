@@ -670,13 +670,6 @@ impl Directory {
 
         _ = signal.unbounded_send(());
     }
-
-    /// Produce a guard that is used to signal change after it has been dropped
-    /// This would return `None` if `rebuild_paths` used or `set_signal` is used until the write has
-    /// been finished, unless a signal has not been set at all
-    pub fn signal_guard(&self) -> Option<SignalGuard> {
-        self.signal.try_write().map(|signal| SignalGuard { signal })
-    }
 }
 
 impl Directory {

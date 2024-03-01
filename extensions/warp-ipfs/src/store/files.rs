@@ -813,8 +813,6 @@ impl FileTask {
         };
 
         Ok(async move {
-            let _current_guard = current_directory.signal_guard();
-
             if current_directory.get_item_by_path(&name).is_ok() {
                 return Err(Error::FileExist);
             }
