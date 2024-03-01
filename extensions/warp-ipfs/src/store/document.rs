@@ -423,10 +423,11 @@ impl FileAttachmentDocument {
                         if let Err(e) = tokio::fs::remove_file(&path).await {
                             tracing::error!("Error removing file: {e}");
                         }
+                        let error = error.map(Error::Any).unwrap_or(Error::Other);
                         yield Progression::ProgressFailed {
                             name: name.clone(),
                             last_size: Some(written),
-                            error: error.map(|e| e.to_string()),
+                            error,
                         };
                     },
                 }

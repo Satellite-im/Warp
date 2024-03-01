@@ -577,7 +577,7 @@ async fn main() -> anyhow::Result<()> {
                                                 writeln!(stdout, "> {name} is uploaded")?;
                                             },
                                             AttachmentKind::AttachedProgress(Progression::ProgressFailed { name, error, .. }) => {
-                                                writeln!(stdout, "> {name} failed to upload: {}", error.unwrap_or_default())?;
+                                                writeln!(stdout, "> {name} failed to upload: {}", error)?;
                                             },
                                             AttachmentKind::Pending(Ok(_)) => {
                                                 writeln!(stdout, "> File sent")?;
@@ -636,7 +636,7 @@ async fn main() -> anyhow::Result<()> {
                                                 writeln!(stdout,
                                                     "{name} failed to download at {} MB due to: {}",
                                                     last_size.unwrap_or_default(),
-                                                    error.unwrap_or_default()
+                                                    error
                                                 )?;
                                             }
                                         }

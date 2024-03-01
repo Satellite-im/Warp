@@ -658,10 +658,11 @@ impl FileTask {
                         written, error, ..
                     } => {
                         last_written = written;
+                        let error = error.map(Error::Any).unwrap_or(Error::Other);
                         yield Progression::ProgressFailed {
                             name,
                             last_size: Some(last_written),
-                            error: error.map(|e| e.to_string()),
+                            error,
                         };
                         return;
                     }
@@ -682,7 +683,7 @@ impl FileTask {
                         yield Progression::ProgressFailed {
                             name,
                             last_size: Some(last_written),
-                            error: Some("IpfsPath not set".into()),
+                            error: Error::Other,
                         };
                         return;
                     }
@@ -708,7 +709,7 @@ impl FileTask {
                 yield Progression::ProgressFailed {
                     name,
                     last_size: Some(last_written),
-                    error: Some(e.to_string()),
+                    error: e,
                 };
                 return;
             }
@@ -757,10 +758,11 @@ impl FileTask {
                     UnixfsStatus::FailedStatus {
                         written, error, ..
                     } => {
+                        let error = error.map(Error::Any).unwrap_or(Error::Other);
                         yield Progression::ProgressFailed {
                             name: name.to_string(),
                             last_size: Some(written),
-                            error: error.map(|e| e.to_string()),
+                            error,
                         };
                         return;
                     }
@@ -967,10 +969,11 @@ impl FileTask {
                         written, error, ..
                     } => {
                         last_written = written;
+                        let error = error.map(Error::Any).unwrap_or(Error::Other);
                         yield Progression::ProgressFailed {
                             name: n,
                             last_size: Some(last_written),
-                            error: error.map(|e| e.to_string()),
+                            error,
                         };
                         return;
                     }
@@ -988,12 +991,12 @@ impl FileTask {
                     yield Progression::ProgressFailed {
                         name,
                         last_size: Some(last_written),
-                        error: Some(Error::InvalidLength {
+                        error: Error::InvalidLength {
                             context: "buffer".into(),
                             current: root.size() + last_written,
                             minimum: None,
                             maximum: Some(max_size),
-                        }).map(|e| e.to_string())
+                        }
                     };
                     return;
                 }
@@ -1006,7 +1009,7 @@ impl FileTask {
                         yield Progression::ProgressFailed {
                             name,
                             last_size: Some(last_written),
-                            error: Some("IpfsPath not set".into()),
+                            error: Error::Other,
                         };
                         return;
                     }
@@ -1023,7 +1026,7 @@ impl FileTask {
                 yield Progression::ProgressFailed {
                     name,
                     last_size: Some(last_written),
-                    error: Some(e.to_string()),
+                    error: e,
                 };
                 return;
             }
