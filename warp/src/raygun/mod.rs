@@ -1075,7 +1075,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Option<Uuid>,
         _: Vec<Location>,
         _: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         Err(Error::Unimplemented)
     }
 

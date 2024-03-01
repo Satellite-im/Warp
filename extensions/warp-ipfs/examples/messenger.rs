@@ -586,7 +586,7 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    let mut stream = match chat.attach(conversation_id, None, files, vec![]).await {
+                                    let (_, mut stream) = match chat.attach(conversation_id, None, files, vec![]).await {
                                         Ok(stream) => stream,
                                         Err(e) => {
                                             writeln!(stdout, "> Error: {e}")?;
