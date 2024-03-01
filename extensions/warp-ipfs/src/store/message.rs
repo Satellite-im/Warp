@@ -163,7 +163,7 @@ enum MessagingCommand {
     SendMessage {
         conversation_id: Uuid,
         lines: Vec<String>,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     EditMessage {
         conversation_id: Uuid,
@@ -175,7 +175,7 @@ enum MessagingCommand {
         conversation_id: Uuid,
         message_id: Uuid,
         lines: Vec<String>,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     DeleteMessage {
         conversation_id: Uuid,
@@ -200,7 +200,7 @@ enum MessagingCommand {
         message_id: Option<Uuid>,
         locations: Vec<Location>,
         messages: Vec<String>,
-        response: oneshot::Sender<Result<AttachmentEventStream, Error>>,
+        response: oneshot::Sender<Result<(Uuid, AttachmentEventStream), Error>>,
     },
     Download {
         conversation_id: Uuid,
@@ -659,7 +659,7 @@ impl MessageStore {
         &self,
         conversation_id: Uuid,
         lines: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -698,7 +698,7 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
         lines: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -780,7 +780,7 @@ impl MessageStore {
         message_id: Option<Uuid>,
         locations: Vec<Location>,
         messages: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -1839,7 +1839,7 @@ impl ConversationTask {
         &mut self,
         conversation_id: Uuid,
         messages: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
@@ -1920,6 +1920,7 @@ impl ConversationTask {
 
         self.publish(conversation_id, Some(message_id), event, true)
             .await
+            .map(|_| message_id)
     }
 
     pub async fn edit_message(
@@ -2043,7 +2044,7 @@ impl ConversationTask {
         conversation_id: Uuid,
         message_id: Uuid,
         messages: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
@@ -2125,6 +2126,7 @@ impl ConversationTask {
 
         self.publish(conversation_id, Some(message_id), event, true)
             .await
+            .map(|_| message_id)
     }
 
     pub async fn delete_message(
@@ -2325,10 +2327,10 @@ impl ConversationTask {
     pub async fn attach(
         &mut self,
         conversation_id: Uuid,
-        message_id: Option<Uuid>,
+        reply_id: Option<Uuid>,
         locations: Vec<Location>,
         messages: Vec<String>,
-    ) -> Result<BoxStream<'static, AttachmentKind>, Error> {
+    ) -> Result<(Uuid, BoxStream<'static, AttachmentKind>), Error> {
         if locations.len() > 8 {
             return Err(Error::InvalidLength {
                 context: "files".into(),
@@ -2375,6 +2377,8 @@ impl ConversationTask {
         }
 
         let mut atx = self.attachment_tx.clone();
+
+        let message_id = Uuid::new_v4();
 
         let stream = async_stream::stream! {
             let mut in_stack = vec![];
@@ -2533,12 +2537,13 @@ impl ConversationTask {
 
                     let own_did = &*keypair;
                     let mut message = warp::raygun::Message::default();
+                    message.set_id(message_id);
                     message.set_message_type(MessageType::Attachment);
                     message.set_conversation_id(conversation.id());
                     message.set_sender(own_did.clone());
                     message.set_attachment(attachments);
                     message.set_lines(messages.clone());
-                    message.set_replied(message_id);
+                    message.set_replied(reply_id);
                     let construct = [
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
@@ -2555,7 +2560,6 @@ impl ConversationTask {
                     let signature = sign_serde(own_did, &construct)?;
                     message.set_signature(Some(signature));
 
-
                     let (tx, rx) = oneshot::channel();
                     _ = atx.send((conversation_id, message, tx)).await;
 
@@ -2566,7 +2570,7 @@ impl ConversationTask {
             yield AttachmentKind::Pending(final_results.await)
         };
 
-        Ok(stream.boxed())
+        Ok((message_id, stream.boxed()))
     }
 
     // use specifically for attachment messages

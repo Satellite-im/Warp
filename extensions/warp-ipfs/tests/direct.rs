@@ -272,7 +272,7 @@ mod test {
 
         fs_a.put_buffer("image.png", PROFILE_IMAGE).await?;
 
-        let mut stream = chat_a
+        let (_, mut stream) = chat_a
             .attach(
                 id_a,
                 None,
@@ -293,7 +293,9 @@ mod test {
                 AttachmentKind::AttachedProgress(Progression::ProgressFailed { .. }) => {
                     unreachable!("should not fail")
                 }
-                AttachmentKind::Pending(result) => result?,
+                AttachmentKind::Pending(result) => {
+                    result?;
+                }
             }
         }
 
