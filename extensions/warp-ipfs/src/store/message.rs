@@ -2396,7 +2396,7 @@ impl ConversationTask {
                                 let constellation_path = PathBuf::from(&path);
                                 let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
                                 let stream = async_stream::stream! {
-                                    yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
+                                    yield (Progression::ProgressFailed { name, last_size: None, error: e }, None);
                                 };
                                 streams.push(stream.boxed());
                             },
@@ -2446,7 +2446,7 @@ impl ConversationTask {
 
                         if skip {
                             let stream = async_stream::stream! {
-                                yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None);
+                                yield (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None);
                             };
                             streams.push(stream.boxed());
                             continue;
@@ -2461,7 +2461,7 @@ impl ConversationTask {
                             Err(e) => {
                                 error!(%conversation_id, "Error uploading {filename}: {e}");
                                 let stream = async_stream::stream! {
-                                    yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
+                                    yield (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None);
                                 };
                                 streams.push(stream.boxed());
                                 continue;
@@ -2673,10 +2673,11 @@ impl ConversationTask {
                         if let Err(e) = tokio::fs::remove_file(&path).await {
                             error!("Error removing file: {e}");
                         }
+                        let error = error.map(Error::Any).unwrap_or(Error::Other);
                         yield Progression::ProgressFailed {
                             name: attachment.name(),
                             last_size: Some(written),
-                            error: error.map(|e| e.to_string()),
+                            error,
                         };
                     },
                 }
