@@ -21,40 +21,8 @@ pub enum DirectoryType {
 /// `Directory` handles folders and its contents.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Directory {
-    /// ID of the `Directory`
-    id: Arc<Uuid>,
-
-    /// Name of the `Directory`
-    name: Arc<RwLock<String>>,
-
-    /// Description of the `Directory`
-    /// TODO: Make this optional
-    description: Arc<RwLock<String>>,
-
-    /// Thumbnail of the `Directory`
-    thumbnail: Arc<RwLock<Vec<u8>>>,
-
-    /// Format of the thumbnail
-    thumbnail_format: Arc<RwLock<FormatType>>,
-
-    /// External reference pointing to the thumbnail
-    thumbnail_reference: Arc<RwLock<Option<String>>>,
-
-    /// Favorite Directory
-    favorite: Arc<RwLock<bool>>,
-
-    /// Timestamp of the creation of the directory
-    creation: Arc<RwLock<DateTime<Utc>>>,
-
-    /// Timestamp of the `Directory` when it is modified
-    modified: Arc<RwLock<DateTime<Utc>>>,
-
-    /// Type of `Directory`
-    directory_type: Arc<RwLock<DirectoryType>>,
-
-    /// List of `Item`, which would represents either `File` or `Directory`
-    items: Arc<RwLock<Vec<Item>>>,
-
+    #[serde(flatten)]
+    inner: Arc<RwLock<DirectoryInner>>,
     /// Path of directory
     #[serde(default)]
     path: Arc<String>,
@@ -71,9 +39,8 @@ impl std::fmt::Debug for Directory {
             .field("favorite", &self.favorite())
             .field("creation", &self.creation())
             .field("modified", &self.modified())
-            .field("items", &self.items)
+            .field("items", &self.get_items())
             .field("path", &self.path())
-            .field("signal", &self.signal)
             .finish()
     }
 }
@@ -90,23 +57,69 @@ impl PartialEq for Directory {
     }
 }
 
-impl Eq for Directory {}
+#[derive(Serialize, Deserialize)]
+struct DirectoryInner {
+    /// ID of the `Directory`
+    id: Uuid,
 
-impl Default for Directory {
+    /// Name of the `Directory`
+    name: String,
+
+    /// Description of the `Directory`
+    /// TODO: Make this optional
+    description: String,
+
+    /// Thumbnail of the `Directory`
+    thumbnail: Vec<u8>,
+
+    /// Format of the thumbnail
+    thumbnail_format: FormatType,
+
+    /// External reference pointing to the thumbnail
+    thumbnail_reference: Option<String>,
+
+    /// Favorite Directory
+    favorite: bool,
+
+    /// Timestamp of the creation of the directory
+    creation: DateTime<Utc>,
+
+    /// Timestamp of the `Directory` when it is modified
+    modified: DateTime<Utc>,
+
+    /// Type of `Directory`
+    directory_type: DirectoryType,
+
+    /// List of `Item`, which would represents either `File` or `Directory`
+    items: Vec<Item>,
+}
+
+impl Default for DirectoryInner {
     fn default() -> Self {
         let timestamp = Utc::now();
         Self {
-            id: Arc::new(Uuid::new_v4()),
-            name: Arc::new(RwLock::new(String::from("un-named directory"))),
+            id: Uuid::new_v4(),
+            name: String::from("un-named directory"),
             description: Default::default(),
             thumbnail: Default::default(),
             thumbnail_format: Default::default(),
             thumbnail_reference: Default::default(),
             favorite: Default::default(),
-            creation: Arc::new(RwLock::new(timestamp)),
-            modified: Arc::new(RwLock::new(timestamp)),
+            creation: timestamp,
+            modified: timestamp,
             directory_type: Default::default(),
             items: Default::default(),
+        }
+    }
+}
+
+impl Eq for Directory {}
+
+impl Default for Directory {
+    fn default() -> Self {
+        let inner = Arc::new(RwLock::new(DirectoryInner::default()));
+        Self {
+            inner,
             path: Arc::new("/".into()),
             signal: Arc::default(),
         }
@@ -132,6 +145,7 @@ impl Directory {
     /// ```
     pub fn new(name: &str) -> Self {
         let directory = Directory::default();
+
         // let name = name.trim();
         if name.is_empty() {
             return directory;
@@ -152,7 +166,10 @@ impl Directory {
             name = &name[..256];
         }
 
-        *directory.name.write() = name.to_string();
+        {
+            let inner = &mut *directory.inner.write();
+            inner.name = name.to_string();
+        }
 
         if !path.is_empty() {
             let sub = Self::new(path.join("/").as_str());
@@ -175,35 +192,36 @@ impl Directory {
     ///     assert_eq!(root.has_item("Sub Directory"), true);
     /// ```
     pub fn has_item(&self, item_name: &str) -> bool {
-        self.get_items()
-            .iter()
-            .filter(|item| item.name() == item_name)
-            .count()
-            == 1
+        let inner = self.inner.read();
+        inner.items.iter().any(|item| item.name() == item_name)
     }
 
     /// Add a file to the `Directory`
     pub fn add_file(&self, file: File) -> Result<(), Error> {
-        if self.has_item(&file.name()) {
+        let inner = &mut *self.inner.write();
+
+        if inner.items.iter().any(|item| item.name() == file.name()) {
             return Err(Error::DuplicateName);
         }
-        self.items.write().push(Item::new_file(file));
-        self.set_modified(None);
+        inner.items.push(Item::new_file(file));
+        inner.modified = Utc::now();
         Ok(())
     }
 
     /// Add a directory to the `Directory`
     pub fn add_directory(&self, directory: Directory) -> Result<(), Error> {
-        if self.has_item(&directory.name()) {
+        let inner = &mut *self.inner.write();
+
+        if inner
+            .items
+            .iter()
+            .any(|item| item.name() == directory.name())
+        {
             return Err(Error::DuplicateName);
         }
 
-        if directory == self.clone() {
-            return Err(Error::DirParadox);
-        }
-
-        self.items.write().push(Item::new_directory(directory));
-        self.set_modified(None);
+        inner.items.push(Item::new_directory(directory));
+        inner.modified = Utc::now();
         Ok(())
     }
 
@@ -225,8 +243,9 @@ impl Directory {
     ///
     /// ```
     pub fn get_item_index(&self, item_name: &str) -> Result<usize, Error> {
-        self.items
-            .read()
+        let inner = &*self.inner.read();
+        inner
+            .items
             .iter()
             .position(|item| item.name() == item_name)
             .ok_or(Error::ArrayPositionNotFound)
@@ -270,12 +289,16 @@ impl Directory {
     ///     assert_eq!(root.has_item("Sub Directory"), false);
     /// ```
     pub fn remove_item(&self, item_name: &str) -> Result<Item, Error> {
-        if !self.has_item(item_name) {
-            return Err(Error::InvalidItem);
-        }
-        let index = self.get_item_index(item_name)?;
-        let item = self.items.write().remove(index);
-        self.set_modified(None);
+        let inner = &mut *self.inner.write();
+
+        let index = inner
+            .items
+            .iter()
+            .position(|item| item.name() == item_name)
+            .ok_or(Error::InvalidItem)?;
+
+        let item = inner.items.remove(index);
+        inner.modified = Utc::now();
         Ok(item)
     }
 
@@ -338,17 +361,13 @@ impl Directory {
     /// ```
     pub fn move_item_to(&self, child: &str, dst: &str) -> Result<(), Error> {
         let (child, dst) = (child.trim(), dst.trim());
-
         if self.get_item_by_path(dst)?.is_file() {
             return Err(Error::ItemNotDirectory);
         }
-
         if self.get_item_by_path(dst)?.get_directory()?.has_item(child) {
             return Err(Error::DuplicateName);
         }
-
         let item = self.remove_item(child)?;
-
         // If there is an error, place the item back into the current directory
         match self
             .get_item_by_path(dst)
@@ -373,11 +392,13 @@ impl Directory {
 impl Directory {
     /// List all the `Item` within the `Directory`
     pub fn get_items(&self) -> Vec<Item> {
-        self.items.read().clone()
+        let inner = &*self.inner.read();
+        inner.items.clone()
     }
 
     pub fn set_items(&self, items: Vec<Item>) {
-        *self.items.write() = items;
+        let inner = &mut *self.inner.write();
+        inner.items = items;
     }
 
     /// Add an item to the `Directory`
@@ -392,11 +413,18 @@ impl Directory {
     ///     root.add_item(sub).unwrap();
     /// ```
     pub fn add_item<I: Into<Item>>(&self, item: I) -> Result<(), Error> {
+        let inner = &mut *self.inner.write();
         let item = item.into();
-        if self.has_item(&item.name()) {
+
+        if inner
+            .items
+            .iter()
+            .any(|inner_item| inner_item.name() == item.name())
+        {
             return Err(Error::DuplicateName);
         }
-        self.items.write().push(item);
+
+        inner.items.push(item);
         self.signal();
         Ok(())
     }
@@ -416,15 +444,15 @@ impl Directory {
     ///     assert_eq!(item.name(), "Sub Directory");
     /// ```
     pub fn get_item(&self, item_name: &str) -> Result<Item, Error> {
-        if !self.has_item(item_name) {
-            return Err(Error::InvalidItem);
-        }
-        let index = self.get_item_index(item_name)?;
-        self.items
-            .read()
-            .get(index)
-            .cloned()
-            .ok_or(Error::InvalidItem)
+        let inner = &*self.inner.read();
+
+        let index = inner
+            .items
+            .iter()
+            .position(|item| item.name() == item_name)
+            .ok_or(Error::InvalidItem)?;
+
+        inner.items.get(index).cloned().ok_or(Error::InvalidItem)
     }
 
     /// Used to find an item throughout the `Directory` and its children
@@ -446,7 +474,8 @@ impl Directory {
     ///     assert_eq!(item.name(), "Sub Directory 2");
     /// ```
     pub fn find_item(&self, item_name: &str) -> Result<Item, Error> {
-        for item in self.items.read().iter() {
+        let inner = &*self.inner.read();
+        for item in inner.items.iter() {
             if item.name().eq(item_name) {
                 return Ok(item.clone());
             }
@@ -467,8 +496,9 @@ impl Directory {
     ///
     /// TODO
     pub fn find_all_items<S: AsRef<str> + Clone>(&self, item_names: Vec<S>) -> Vec<Item> {
+        let inner = &*self.inner.read();
         let mut list = Vec::new();
-        for item in self.items.read().clone().iter() {
+        for item in inner.items.iter() {
             for name in item_names.iter().map(|name| name.as_ref()) {
                 if item.name().contains(name) {
                     list.push(item.clone());
@@ -571,62 +601,75 @@ impl Directory {
 
 impl Directory {
     pub fn name(&self) -> String {
-        self.name.read().to_owned()
+        let inner = &*self.inner.read();
+        inner.name.to_owned()
     }
 
     pub fn set_name(&self, name: &str) {
+        let inner = &mut *self.inner.write();
+
         let mut name = name.trim();
         if name.len() > 256 {
             name = &name[..256];
         }
-        *self.name.write() = name.to_string();
+        inner.name = name.to_string();
         self.signal();
     }
 
     pub fn set_thumbnail_format(&self, format: FormatType) {
-        *self.thumbnail_format.write() = format;
+        let inner = &mut *self.inner.write();
+        inner.thumbnail_format = format;
         self.signal();
     }
 
     pub fn thumbnail_format(&self) -> FormatType {
-        self.thumbnail_format.read().clone()
+        let inner = &*self.inner.read();
+        inner.thumbnail_format.clone()
     }
 
     pub fn set_thumbnail(&self, desc: &[u8]) {
-        *self.thumbnail.write() = desc.to_vec();
+        let inner = &mut *self.inner.write();
+        inner.thumbnail = desc.to_vec();
         self.signal();
     }
 
     pub fn thumbnail(&self) -> Vec<u8> {
-        self.thumbnail.read().to_vec()
+        let inner = &*self.inner.read();
+        inner.thumbnail.to_vec()
     }
 
     pub fn set_thumbnail_reference(&self, reference: &str) {
-        *self.thumbnail_reference.write() = Some(reference.to_string());
-        *self.modified.write() = Utc::now();
+        let inner = &mut *self.inner.write();
+        inner.thumbnail_reference = Some(reference.to_string());
+        inner.modified = Utc::now();
         self.signal();
     }
 
     pub fn thumbnail_reference(&self) -> Option<String> {
-        self.thumbnail_reference.read().clone()
+        let inner = &*self.inner.read();
+        inner.thumbnail_reference.clone()
     }
 
     pub fn set_favorite(&self, fav: bool) {
-        *self.favorite.write() = fav;
-        self.set_modified(None);
+        let inner = &mut *self.inner.write();
+        inner.favorite = fav;
+        inner.modified = Utc::now();
         self.signal();
     }
 
     pub fn favorite(&self) -> bool {
-        *self.favorite.read()
+        let inner = &*self.inner.read();
+        inner.favorite
     }
 
     pub fn description(&self) -> String {
-        self.description.read().to_owned()
+        let inner = &*self.inner.read();
+        inner.description.to_owned()
     }
 
     pub fn set_description(&self, desc: &str) {
-        *self.description.write() = desc.to_string();
+        let inner = &mut *self.inner.write();
+        inner.description = desc.to_string();
         self.signal();
     }
 
@@ -635,11 +678,13 @@ impl Directory {
     }
 
     pub fn set_creation(&self, creation: DateTime<Utc>) {
-        *self.creation.write() = creation
+        let inner = &mut *self.inner.write();
+        inner.creation = creation
     }
 
     pub fn set_modified(&self, modified: Option<DateTime<Utc>>) {
-        *self.modified.write() = modified.unwrap_or(Utc::now())
+        let inner = &mut *self.inner.write();
+        inner.modified = modified.unwrap_or(Utc::now())
     }
 
     pub fn path(&self) -> &str {
@@ -675,8 +720,8 @@ impl Directory {
     /// Rebuilds the items path after an update
     pub fn rebuild_paths(&mut self, signal: &Option<futures::channel::mpsc::UnboundedSender<()>>) {
         self.set_signal(signal.clone());
-        let items = &mut *self.items.write();
-        for item in items {
+        let inner = &mut *self.inner.write();
+        for item in &mut inner.items {
             match item {
                 Item::Directory(directory) => {
                     let mut path = self.path().to_string();
@@ -695,15 +740,18 @@ impl Directory {
 
 impl Directory {
     pub fn id(&self) -> Uuid {
-        *self.id
+        let inner = &*self.inner.read();
+        inner.id
     }
 
     pub fn creation(&self) -> DateTime<Utc> {
-        *self.creation.read()
+        let inner = &*self.inner.read();
+        inner.creation
     }
 
     pub fn modified(&self) -> DateTime<Utc> {
-        *self.modified.read()
+        let inner = &*self.inner.read();
+        inner.modified
     }
 }
 
