@@ -397,7 +397,8 @@ impl Tesseract {
 
             inner.internal.insert(key.into(), data);
         }
-        self.save()
+        self.save();
+        Ok(())
     }
 
     /// Check to see if the key store contains the key
@@ -512,7 +513,8 @@ impl Tesseract {
             let inner = &mut *self.inner.write();
             inner.internal.remove(key).ok_or(Error::ObjectNotFound)?;
         }
-        self.save()
+        self.save();
+        Ok(())
     }
 
     /// Used to clear the whole keystore.
@@ -531,7 +533,7 @@ impl Tesseract {
             let inner = &mut *self.inner.write();
             inner.internal.clear();
         }
-        _ = self.save();
+        self.save()
     }
 
     /// Checks to see if tesseract is secured and not "unlocked"
@@ -598,20 +600,18 @@ impl Tesseract {
     /// Note: Because we do not want to interrupt the functions due to it failing to
     ///       save for whatever reason, this function will return `Result::Ok`
     ///       regardless of success or error but would eventually log the error.
-    ///
-    /// TODO: Handle error without subjecting function to `Result::Err`
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) {
         if !self.autosave_enabled() {
-            return Ok(());
+            return;
         }
 
-        if let Some(path) = &self.file() {
-            if let Err(_e) = self.to_file(path) {
-                //TODO: Logging
-            }
-        }
+        let Some(path) = &self.file() else {
+            return;
+        };
 
-        Ok(())
+        if let Err(_e) = self.to_file(path) {
+            //TODO: Logging
+        }
     }
 }
 
