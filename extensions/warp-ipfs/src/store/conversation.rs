@@ -33,11 +33,13 @@ pub enum ConversationVersion {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(clippy::large_enum_variant)]
 pub enum ConversationDocument {
     Direct {
         inner: ConversationDocumentInner,
     },
     Group {
+        creator: DID,
         inner: ConversationDocumentInner,
         settings: GroupSettings,
     },
@@ -80,8 +82,6 @@ pub struct ConversationDocumentInner {
     pub version: ConversationVersion,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub creator: Option<DID>,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub recipients: Vec<DID>,
@@ -177,7 +177,6 @@ impl ConversationDocument {
             version: ConversationVersion::V1,
             name: None,
             recipients,
-            creator: None,
             created,
             modified,
             excluded,
@@ -217,7 +216,6 @@ impl ConversationDocument {
             version: ConversationVersion::V1,
             name,
             recipients,
-            creator: Some(did.clone()),
             created,
             modified,
             excluded,
@@ -227,7 +225,11 @@ impl ConversationDocument {
             deleted: false,
         };
 
-        let mut document = ConversationDocument::Group { inner, settings };
+        let mut document = ConversationDocument::Group {
+            creator: did.clone(),
+            inner,
+            settings,
+        };
 
         document.sign(did)?;
 
@@ -237,22 +239,85 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        if let ConversationDocument::Group { settings, .. } = self {
-            let settings = *settings;
+        if let ConversationDocument::Direct { .. } = self {
+            return Ok(());
+        }
 
-            let Some(creator) = self.creator.clone() else {
-                return Err(Error::PublicKeyInvalid);
-            };
+        let ConversationDocument::Group {
+            creator, settings, ..
+        } = self
+        else {
+            unreachable!()
+        };
 
-            if !settings.members_can_add_participants() && !creator.eq(did) {
-                return Err(Error::PublicKeyInvalid);
-            }
+        let creator = creator.clone();
+        let settings = *settings;
 
-            if self.version == ConversationVersion::V0 {
-                self.version = ConversationVersion::V1;
-            }
+        if !settings.members_can_add_participants() && !did.eq(&creator) {
+            return Err(Error::PublicKeyInvalid);
+        }
 
-            let construct = warp::crypto::hash::sha256_iter(
+        if self.version == ConversationVersion::V0 {
+            self.version = ConversationVersion::V1;
+        }
+
+        let construct = warp::crypto::hash::sha256_iter(
+            [
+                Some(self.id().into_bytes().to_vec()),
+                // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                Some(creator.to_string().as_bytes().to_vec()),
+                Some(Vec::from_iter(
+                    self.restrict
+                        .iter()
+                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                )),
+                (!settings.members_can_add_participants()).then_some(Vec::from_iter(
+                    self.recipients
+                        .iter()
+                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                )),
+            ]
+            .into_iter(),
+            None,
+        );
+
+        let signature = did.sign(&construct);
+        self.signature = Some(bs58::encode(signature).into_string());
+
+        Ok(())
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        if let ConversationDocument::Direct { .. } = self {
+            return Ok(());
+        }
+
+        let ConversationDocument::Group {
+            creator, settings, ..
+        } = self
+        else {
+            unreachable!()
+        };
+
+        let Some(signature) = &self.signature else {
+            return Err(Error::InvalidSignature);
+        };
+
+        let signature = bs58::decode(signature).into_vec()?;
+
+        let construct = match self.version {
+            ConversationVersion::V0 => [
+                self.id().into_bytes().to_vec(),
+                vec![0xdc, 0xfc],
+                creator.to_string().as_bytes().to_vec(),
+                Vec::from_iter(
+                    self.recipients
+                        .iter()
+                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                ),
+            ]
+            .concat(),
+            ConversationVersion::V1 => warp::crypto::hash::sha256_iter(
                 [
                     Some(self.id().into_bytes().to_vec()),
                     // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
@@ -270,63 +335,13 @@ impl ConversationDocument {
                 ]
                 .into_iter(),
                 None,
-            );
+            ),
+        };
 
-            let signature = did.sign(&construct);
-            self.signature = Some(bs58::encode(signature).into_string());
-        }
-        Ok(())
-    }
+        creator
+            .verify(&construct, &signature)
+            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
-    pub fn verify(&self) -> Result<(), Error> {
-        if let ConversationDocument::Group { settings, .. } = self {
-            let Some(creator) = &self.creator else {
-                return Err(Error::PublicKeyInvalid);
-            };
-
-            let Some(signature) = &self.signature else {
-                return Err(Error::InvalidSignature);
-            };
-
-            let signature = bs58::decode(signature).into_vec()?;
-
-            let construct = match self.version {
-                ConversationVersion::V0 => [
-                    self.id().into_bytes().to_vec(),
-                    vec![0xdc, 0xfc],
-                    creator.to_string().as_bytes().to_vec(),
-                    Vec::from_iter(
-                        self.recipients
-                            .iter()
-                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                    ),
-                ]
-                .concat(),
-                ConversationVersion::V1 => warp::crypto::hash::sha256_iter(
-                    [
-                        Some(self.id().into_bytes().to_vec()),
-                        // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
-                        Some(creator.to_string().as_bytes().to_vec()),
-                        Some(Vec::from_iter(
-                            self.restrict
-                                .iter()
-                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                        )),
-                        (!settings.members_can_add_participants()).then_some(Vec::from_iter(
-                            self.recipients
-                                .iter()
-                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                        )),
-                    ]
-                    .into_iter(),
-                    None,
-                ),
-            };
-
-            creator
-                .verify(&construct, &signature)
-                .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-        }
         Ok(())
     }
 
@@ -635,7 +650,9 @@ impl From<&ConversationDocument> for Conversation {
         let mut conversation = Conversation::default();
         conversation.set_id(document.id());
         conversation.set_name(document.name.clone());
-        conversation.set_creator(document.creator.clone());
+        if let ConversationDocument::Group { creator, .. } = document {
+            conversation.set_creator(Some(creator.clone()));
+        }
         let conversation_type = match document {
             ConversationDocument::Direct { .. } => ConversationType::Direct,
             ConversationDocument::Group { .. } => ConversationType::Group,

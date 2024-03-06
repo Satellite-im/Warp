@@ -1506,8 +1506,8 @@ impl ConversationTask {
     }
 
     pub async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
-        if let Some(creator) = document.creator.as_ref() {
-            if creator.eq(&self.keypair) && matches!(document, ConversationDocument::Group { .. }) {
+        if let ConversationDocument::Group { creator, .. } = &document {
+            if creator.eq(&self.keypair) {
                 document.sign(&self.keypair)?;
             }
         }
@@ -2738,7 +2738,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         }
 
-        let Some(creator) = conversation.creator.clone() else {
+        let ConversationDocument::Group { creator, .. } = &conversation else {
             return Err(Error::InvalidConversation);
         };
 
@@ -2786,7 +2786,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         }
 
-        let Some(creator) = conversation.creator.clone() else {
+        let ConversationDocument::Group { creator, .. } = &conversation else {
             return Err(Error::InvalidConversation);
         };
 
@@ -2849,7 +2849,7 @@ impl ConversationTask {
             _ => return Err(Error::InvalidConversation),
         };
 
-        let Some(creator) = conversation.creator.clone() else {
+        let ConversationDocument::Group { creator, .. } = &conversation else {
             return Err(Error::InvalidConversation);
         };
 
@@ -2887,7 +2887,7 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
 
-        let Some(creator) = conversation.creator.clone() else {
+        let ConversationDocument::Group { creator, .. } = &conversation else {
             return Err(Error::InvalidConversation);
         };
 
@@ -2959,7 +2959,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         }
 
-        let Some(creator) = conversation.creator.as_ref() else {
+        let ConversationDocument::Group { creator, .. } = &conversation else {
             return Err(Error::InvalidConversation);
         };
 
@@ -3021,12 +3021,8 @@ impl ConversationTask {
 
             let mut can_broadcast = true;
 
-            if matches!(document_type, ConversationDocument::Group { .. }) {
+            if let ConversationDocument::Group { creator, .. } = &document_type {
                 let own_did = &*self.keypair;
-                let creator = document_type
-                    .creator
-                    .as_ref()
-                    .ok_or(Error::InvalidConversation)?;
 
                 if creator.ne(own_did) {
                     can_broadcast = false;
@@ -3229,7 +3225,7 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         let own_did = &*self.keypair;
-        let Some(creator) = &conversation.creator else {
+        let ConversationDocument::Group { creator, .. } = &conversation else {
             return Err(Error::InvalidConversation);
         };
 
@@ -3578,8 +3574,8 @@ async fn process_conversation(
                 return Err(anyhow::anyhow!("Can only leave from a group conversation").into());
             }
 
-            let Some(creator) = conversation.creator.as_ref() else {
-                return Err(anyhow::anyhow!("Group conversation requires a creator").into());
+            let ConversationDocument::Group { creator, .. } = &conversation else {
+                return Err(Error::InvalidConversation);
             };
 
             let own_did = &*this.keypair;
@@ -3645,11 +3641,10 @@ async fn process_conversation(
             let sender = data.sender();
 
             match this.get(conversation_id).await {
-                Ok(conversation)
-                    if conversation.recipients().contains(&sender)
+                Ok(ref conversation)
+                    if (conversation.recipients().contains(&sender)
                         && matches!(conversation, ConversationDocument::Direct { .. })
-                        || matches!(conversation, ConversationDocument::Group { .. })
-                            && matches!(&conversation.creator, Some(creator) if creator.eq(&sender)) =>
+                        || matches!(conversation, ConversationDocument::Group { creator, .. } if creator.eq(&sender) )) =>
                 {
                     conversation
                 }
@@ -4177,8 +4172,8 @@ async fn process_identity_events(
                             continue;
                         }
                     }
-                    ConversationDocument::Group { .. } => {
-                        if conversation.creator != Some((*this.keypair).clone()) {
+                    ConversationDocument::Group { creator, .. } => {
+                        if creator != &*this.keypair {
                             continue;
                         }
 
@@ -4201,10 +4196,7 @@ async fn process_identity_events(
             for conversation in list
                 .iter()
                 .filter(|c| {
-                    c.creator
-                        .as_ref()
-                        .map(|creator| own_did.eq(creator))
-                        .unwrap_or_default()
+                    matches!(c, ConversationDocument::Group { creator,.. } if creator.eq(&own_did))
                 })
                 .filter(|c| matches!(c, ConversationDocument::Group { .. }))
                 .filter(|c| c.restrict.contains(&did))
@@ -4229,8 +4221,8 @@ async fn process_identity_events(
                             continue;
                         }
                     }
-                    ConversationDocument::Group { .. } => {
-                        if conversation.creator != Some((*this.keypair).clone()) {
+                    ConversationDocument::Group { creator, .. } => {
+                        if creator != &*this.keypair {
                             continue;
                         }
 
