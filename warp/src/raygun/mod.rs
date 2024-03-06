@@ -352,7 +352,6 @@ pub struct Conversation {
     creator: Option<DID>,
     created: DateTime<Utc>,
     modified: DateTime<Utc>,
-    conversation_type: ConversationType,
     settings: ConversationSettings,
     recipients: Vec<DID>,
 }
@@ -374,7 +373,6 @@ impl Default for Conversation {
         let id = Uuid::new_v4();
         let name = None;
         let creator = None;
-        let conversation_type = ConversationType::Direct;
         let recipients = Vec::new();
         let timestamp = Utc::now();
         Self {
@@ -383,7 +381,6 @@ impl Default for Conversation {
             creator,
             created: timestamp,
             modified: timestamp,
-            conversation_type,
             settings: ConversationSettings::default(),
             recipients,
         }
@@ -412,7 +409,10 @@ impl Conversation {
     }
 
     pub fn conversation_type(&self) -> ConversationType {
-        self.conversation_type
+        match self.settings {
+            ConversationSettings::Direct(_) => ConversationType::Direct,
+            ConversationSettings::Group(_) => ConversationType::Group,
+        }
     }
 
     pub fn settings(&self) -> ConversationSettings {
@@ -443,10 +443,6 @@ impl Conversation {
 
     pub fn set_modified(&mut self, modified: DateTime<Utc>) {
         self.modified = modified;
-    }
-
-    pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
-        self.conversation_type = conversation_type;
     }
 
     pub fn set_settings(&mut self, settings: ConversationSettings) {
