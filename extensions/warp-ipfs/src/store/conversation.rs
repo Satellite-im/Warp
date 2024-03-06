@@ -14,9 +14,8 @@ use warp::{
     crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{
-        Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
-        GroupSettings, Message, MessageOptions, MessagePage, MessageReference, Messages,
-        MessagesType,
+        Conversation, ConversationSettings, ConversationType, GroupSettings, Message,
+        MessageOptions, MessagePage, MessageReference, Messages, MessagesType,
     },
 };
 
@@ -32,8 +31,50 @@ pub enum ConversationVersion {
     V1,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
-pub struct ConversationDocument {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationDocument {
+    Direct {
+        inner: ConversationDocumentInner,
+    },
+    Group {
+        inner: ConversationDocumentInner,
+        settings: GroupSettings,
+    },
+}
+
+impl core::ops::Deref for ConversationDocument {
+    type Target = ConversationDocumentInner;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ConversationDocument::Direct { inner } => inner,
+            ConversationDocument::Group { inner, .. } => inner,
+        }
+    }
+}
+
+impl core::ops::DerefMut for ConversationDocument {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            ConversationDocument::Direct { inner } => inner,
+            ConversationDocument::Group { inner, .. } => inner,
+        }
+    }
+}
+
+impl Hash for ConversationDocument {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state)
+    }
+}
+
+impl PartialEq for ConversationDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationDocumentInner {
     pub id: Uuid,
     #[serde(default)]
     pub version: ConversationVersion,
@@ -43,8 +84,6 @@ pub struct ConversationDocument {
     pub creator: Option<DID>,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
-    pub conversation_type: ConversationType,
-    pub settings: ConversationSettings,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -57,18 +96,6 @@ pub struct ConversationDocument {
     pub signature: Option<String>,
 }
 
-impl Hash for ConversationDocument {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state)
-    }
-}
-
-impl PartialEq for ConversationDocument {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
 impl ConversationDocument {
     pub fn id(&self) -> Uuid {
         self.id
@@ -79,7 +106,12 @@ impl ConversationDocument {
     }
 
     pub fn topic(&self) -> String {
-        format!("{}/{}", self.conversation_type, self.id())
+        let conversation_type = match self {
+            ConversationDocument::Group { .. } => "group",
+            ConversationDocument::Direct { .. } => "direct",
+        };
+
+        format!("{}/{}", conversation_type, self.id())
     }
 
     pub fn event_topic(&self) -> String {
@@ -120,72 +152,8 @@ impl ConversationDocument {
 }
 
 impl ConversationDocument {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        did: &DID,
-        name: Option<String>,
-        mut recipients: Vec<DID>,
-        restrict: Vec<DID>,
-        id: Option<Uuid>,
-        conversation_type: ConversationType,
-        settings: ConversationSettings,
-        created: Option<DateTime<Utc>>,
-        modified: Option<DateTime<Utc>>,
-        creator: Option<DID>,
-        signature: Option<String>,
-    ) -> Result<Self, Error> {
-        let id = id.unwrap_or_else(Uuid::new_v4);
-
-        if !recipients.contains(did) {
-            recipients.push(did.clone());
-        }
-
-        if recipients.is_empty() {
-            return Err(Error::CannotCreateConversation);
-        }
-
-        let messages = None;
-        let excluded = Default::default();
-
-        let created = created.unwrap_or(Utc::now());
-        let modified = modified.unwrap_or(created);
-
-        let mut document = Self {
-            id,
-            version: ConversationVersion::V1,
-            name,
-            recipients,
-            creator,
-            created,
-            modified,
-            conversation_type,
-            settings,
-            excluded,
-            messages,
-            signature,
-            restrict,
-            deleted: false,
-        };
-
-        if document.signature.is_some() {
-            document.verify()?;
-        }
-
-        if let Some(creator) = document.creator.as_ref() {
-            if creator.eq(did) {
-                document.sign(did)?;
-            }
-        }
-
-        Ok(document)
-    }
-
-    pub fn new_direct(
-        did: &DID,
-        recipients: [DID; 2],
-        settings: DirectConversationSettings,
-    ) -> Result<Self, Error> {
-        let conversation_id = Some(super::generate_shared_topic(
+    pub fn new_direct(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
+        let id = super::generate_shared_topic(
             did,
             recipients
                 .iter()
@@ -194,21 +162,32 @@ impl ConversationDocument {
                 .first()
                 .ok_or(Error::Other)?,
             Some("direct-conversation"),
-        )?);
+        )?;
 
-        Self::new(
-            did,
-            None,
-            recipients.to_vec(),
-            vec![],
-            conversation_id,
-            ConversationType::Direct,
-            ConversationSettings::Direct(settings),
-            None,
-            None,
-            None,
-            None,
-        )
+        let recipients = recipients.to_vec();
+
+        let messages = None;
+        let excluded = Default::default();
+
+        let created = Utc::now();
+        let modified = created;
+
+        let inner = ConversationDocumentInner {
+            id,
+            version: ConversationVersion::V1,
+            name: None,
+            recipients,
+            creator: None,
+            created,
+            modified,
+            excluded,
+            messages,
+            signature: None,
+            restrict: Vec::new(),
+            deleted: false,
+        };
+
+        Ok(ConversationDocument::Direct { inner })
     }
 
     pub fn new_group(
@@ -218,27 +197,49 @@ impl ConversationDocument {
         restrict: &[DID],
         settings: GroupSettings,
     ) -> Result<Self, Error> {
-        let conversation_id = Some(Uuid::new_v4());
-        Self::new(
-            did,
+        let id = Uuid::new_v4();
+
+        let mut recipients = recipients.to_vec();
+
+        if !recipients.contains(did) {
+            recipients.push(did.clone());
+        }
+
+        let messages = None;
+        let excluded = Default::default();
+
+        let created = Utc::now();
+        let modified = created;
+        let restrict = restrict.to_vec();
+
+        let inner = ConversationDocumentInner {
+            id,
+            version: ConversationVersion::V1,
             name,
-            recipients.to_vec(),
-            restrict.to_vec(),
-            conversation_id,
-            ConversationType::Group,
-            ConversationSettings::Group(settings),
-            None,
-            None,
-            Some(did.clone()),
-            None,
-        )
+            recipients,
+            creator: Some(did.clone()),
+            created,
+            modified,
+            excluded,
+            messages,
+            signature: None,
+            restrict,
+            deleted: false,
+        };
+
+        let mut document = ConversationDocument::Group { inner, settings };
+
+        document.sign(did)?;
+
+        Ok(document)
     }
 }
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        if let ConversationSettings::Group(settings) = self.settings {
-            assert_eq!(self.conversation_type, ConversationType::Group);
+        if let ConversationDocument::Group { settings, .. } = self {
+            let settings = *settings;
+
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -278,8 +279,7 @@ impl ConversationDocument {
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        if let ConversationSettings::Group(settings) = self.settings {
-            assert_eq!(self.conversation_type, ConversationType::Group);
+        if let ConversationDocument::Group { settings, .. } = self {
             let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -633,13 +633,20 @@ impl From<ConversationDocument> for Conversation {
 impl From<&ConversationDocument> for Conversation {
     fn from(document: &ConversationDocument) -> Self {
         let mut conversation = Conversation::default();
-        conversation.set_id(document.id);
+        conversation.set_id(document.id());
         conversation.set_name(document.name.clone());
         conversation.set_creator(document.creator.clone());
-        conversation.set_conversation_type(document.conversation_type);
+        let conversation_type = match document {
+            ConversationDocument::Direct { .. } => ConversationType::Direct,
+            ConversationDocument::Group { .. } => ConversationType::Group,
+        };
+
+        conversation.set_conversation_type(conversation_type);
         conversation.set_recipients(document.recipients());
         conversation.set_created(document.created);
-        conversation.set_settings(document.settings);
+        if let ConversationDocument::Group { settings, .. } = document {
+            conversation.set_settings(ConversationSettings::Group(*settings));
+        }
         conversation.set_modified(document.modified);
         conversation
     }

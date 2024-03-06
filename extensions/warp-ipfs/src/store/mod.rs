@@ -28,10 +28,7 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{
-        ConversationSettings, DirectConversationSettings, Message, MessageEvent, PinState,
-        ReactionState,
-    },
+    raygun::{ConversationSettings, Message, MessageEvent, PinState, ReactionState},
     tesseract::Tesseract,
 };
 
@@ -137,12 +134,11 @@ where
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationEvents {
     NewConversation {
         recipient: DID,
-        settings: DirectConversationSettings,
     },
     NewGroupConversation {
         conversation: ConversationDocument,
@@ -200,7 +196,7 @@ impl std::fmt::Debug for ConversationResponseKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[allow(clippy::large_enum_variant)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum MessagingEvents {
