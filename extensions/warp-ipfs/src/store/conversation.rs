@@ -50,7 +50,6 @@ pub struct ConversationDocument {
     pub creator: Option<DID>,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
-    pub conversation_type: ConversationType,
     pub settings: ConversationSettings,
     pub recipients: Vec<DID>,
     pub excluded: HashMap<DID, String>,
@@ -86,7 +85,7 @@ impl ConversationDocument {
     }
 
     pub fn topic(&self) -> String {
-        format!("{}/{}", self.conversation_type, self.id())
+        format!("{}/{}", self.conversation_type(), self.id())
     }
 
     pub fn event_topic(&self) -> String {
@@ -124,6 +123,13 @@ impl ConversationDocument {
             .cloned()
             .collect()
     }
+
+    pub fn conversation_type(&self) -> ConversationType {
+        match self.settings {
+            ConversationSettings::Direct(_) => ConversationType::Direct,
+            ConversationSettings::Group(_) => ConversationType::Group,
+        }
+    }
 }
 
 impl ConversationDocument {
@@ -134,7 +140,6 @@ impl ConversationDocument {
         mut recipients: Vec<DID>,
         restrict: Vec<DID>,
         id: Option<Uuid>,
-        conversation_type: ConversationType,
         settings: ConversationSettings,
         created: Option<DateTime<Utc>>,
         modified: Option<DateTime<Utc>>,
@@ -165,7 +170,6 @@ impl ConversationDocument {
             creator,
             created,
             modified,
-            conversation_type,
             settings,
             excluded,
             messages,
@@ -209,7 +213,6 @@ impl ConversationDocument {
             recipients.to_vec(),
             vec![],
             conversation_id,
-            ConversationType::Direct,
             ConversationSettings::Direct(settings),
             None,
             None,
@@ -232,7 +235,6 @@ impl ConversationDocument {
             recipients.into_iter().collect(),
             restrict.to_vec(),
             conversation_id,
-            ConversationType::Group,
             ConversationSettings::Group(settings),
             None,
             None,
@@ -245,7 +247,7 @@ impl ConversationDocument {
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
         if let ConversationSettings::Group(settings) = self.settings {
-            assert_eq!(self.conversation_type, ConversationType::Group);
+            assert_eq!(self.conversation_type(), ConversationType::Group);
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -286,7 +288,7 @@ impl ConversationDocument {
 
     pub fn verify(&self) -> Result<(), Error> {
         if let ConversationSettings::Group(settings) = self.settings {
-            assert_eq!(self.conversation_type, ConversationType::Group);
+            assert_eq!(self.conversation_type(), ConversationType::Group);
             let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -669,7 +671,6 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_id(document.id);
         conversation.set_name(document.name.clone());
         conversation.set_creator(document.creator.clone());
-        conversation.set_conversation_type(document.conversation_type);
         conversation.set_recipients(document.recipients());
         conversation.set_created(document.created);
         conversation.set_settings(document.settings);
