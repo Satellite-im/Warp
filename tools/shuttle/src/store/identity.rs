@@ -658,17 +658,11 @@ impl IdentityStorageTask {
 
         mailbox.sort_by(|a, b| b.cmp(a));
 
-        let mut requests = vec![];
+        let mut mailbox = mailbox.into_iter();
 
-        let mut counter = 0;
+        let requests = mailbox.by_ref().take(50).collect::<Vec<_>>();
 
-        while let Some(req) = mailbox.pop() {
-            if counter > 50 {
-                break;
-            }
-            requests.push(req);
-            counter += 1;
-        }
+        let mailbox = mailbox.collect::<Vec<_>>();
 
         let remaining = mailbox.len();
 
