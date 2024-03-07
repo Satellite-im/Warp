@@ -196,6 +196,11 @@ impl ShuttleServer {
         let root = crate::store::root::RootStorage::new(&ipfs, path).await;
         let identity = crate::store::identity::IdentityStorage::new(&ipfs, &root).await;
 
+        println!(
+            "Identities Registered: {}",
+            identity.list().await?.count().await
+        );
+
         let mut subscriptions = Subscriptions::new(&ipfs, &identity);
         _ = subscriptions
             .subscribe("/identity/announce/v0".into())
@@ -411,7 +416,7 @@ impl ShuttleTask {
 
                             continue;
                         }
-                        tracing::info!(did = %did, event = ?event);
+
                         match event {
                             identity::protocol::Mailbox::FetchAll => {
                                 let (reqs, remaining) = self
