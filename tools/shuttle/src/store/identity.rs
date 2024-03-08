@@ -381,12 +381,7 @@ impl IdentityStorageTask {
             None => HashMap::new(),
         };
 
-        let pkg_path = self
-            .ipfs
-            .add_unixfs(
-                futures::stream::once(async move { Ok::<_, std::io::Error>(package) }).boxed(),
-            )
-            .await?;
+        let pkg_path = self.ipfs.add_unixfs(package).await?;
 
         let pkg_cid = pkg_path.root().cid().copied().expect("Cid available");
 
