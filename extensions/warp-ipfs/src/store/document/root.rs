@@ -1,5 +1,3 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
-
 use chrono::Utc;
 use futures::{
     channel::{mpsc::Receiver, oneshot},
@@ -7,6 +5,7 @@ use futures::{
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use uuid::Uuid;
@@ -15,7 +14,7 @@ use warp::{
     multipass::identity::IdentityStatus,
 };
 
-use crate::store::{ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
+use crate::store::{ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
 
 use super::{
     files::DirectoryDocument, identity::IdentityDocument, ExtractedRootDocument, RootDocument,
@@ -672,9 +671,14 @@ impl RootDocumentTask {
             .ipfs
             .get_dag(path)
             .local()
-            .deserialized()
+            .deserialized::<Vec<u8>>()
             .await
+            .and_then(|bytes| {
+                let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+            })
             .unwrap_or_default();
+
         Ok(list)
     }
 
@@ -686,8 +690,12 @@ impl RootDocumentTask {
                 .ipfs
                 .get_dag(cid)
                 .local()
-                .deserialized()
+                .deserialized::<Vec<u8>>()
                 .await
+                .and_then(|bytes| {
+                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+                })
                 .unwrap_or_default(),
             None => vec![],
         };
@@ -696,8 +704,13 @@ impl RootDocumentTask {
             return Err(Error::FriendRequestExist);
         }
 
-        document.request =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
+        document.request = match !list.is_empty() {
+            true => {
+                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                Some(self.ipfs.dag().put().serialize(bytes).await?)
+            }
+            false => None,
+        };
 
         self.set_root_document(document).await?;
 
@@ -718,8 +731,12 @@ impl RootDocumentTask {
                 .ipfs
                 .get_dag(cid)
                 .local()
-                .deserialized()
+                .deserialized::<Vec<u8>>()
                 .await
+                .and_then(|bytes| {
+                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+                })
                 .unwrap_or_default(),
             None => vec![],
         };
@@ -728,8 +745,13 @@ impl RootDocumentTask {
             return Err(Error::FriendRequestExist);
         }
 
-        document.request =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
+        document.request = match !list.is_empty() {
+            true => {
+                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                Some(self.ipfs.dag().put().serialize(bytes).await?)
+            }
+            false => None,
+        };
 
         self.set_root_document(document).await?;
 
@@ -752,8 +774,12 @@ impl RootDocumentTask {
             .ipfs
             .get_dag(path)
             .local()
-            .deserialized()
+            .deserialized::<Vec<u8>>()
             .await
+            .and_then(|bytes| {
+                let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+            })
             .unwrap_or_default();
         Ok(list)
     }
@@ -766,8 +792,12 @@ impl RootDocumentTask {
                 .ipfs
                 .get_dag(cid)
                 .local()
-                .deserialized()
+                .deserialized::<Vec<u8>>()
                 .await
+                .and_then(|bytes| {
+                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+                })
                 .unwrap_or_default(),
             None => vec![],
         };
@@ -776,8 +806,13 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::FriendExist);
         }
 
-        document.friends =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
+        document.friends = match !list.is_empty() {
+            true => {
+                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                Some(self.ipfs.dag().put().serialize(bytes).await?)
+            }
+            false => None,
+        };
 
         self.set_root_document(document).await?;
 
@@ -835,8 +870,12 @@ impl RootDocumentTask {
                 .ipfs
                 .get_dag(cid)
                 .local()
-                .deserialized()
+                .deserialized::<Vec<u8>>()
                 .await
+                .and_then(|bytes| {
+                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+                })
                 .unwrap_or_default(),
             None => vec![],
         };
@@ -845,8 +884,13 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::FriendDoesntExist);
         }
 
-        document.friends =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
+        document.friends = match !list.is_empty() {
+            true => {
+                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                Some(self.ipfs.dag().put().serialize(bytes).await?)
+            }
+            false => None,
+        };
 
         self.set_root_document(document).await?;
 
@@ -869,8 +913,12 @@ impl RootDocumentTask {
             .ipfs
             .get_dag(path)
             .local()
-            .deserialized()
+            .deserialized::<Vec<u8>>()
             .await
+            .and_then(|bytes| {
+                let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+            })
             .unwrap_or_default();
         Ok(list)
     }
@@ -895,8 +943,12 @@ impl RootDocumentTask {
                 .ipfs
                 .get_dag(cid)
                 .local()
-                .deserialized()
+                .deserialized::<Vec<u8>>()
                 .await
+                .and_then(|bytes| {
+                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+                })
                 .unwrap_or_default(),
             None => vec![],
         };
@@ -905,8 +957,13 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::PublicKeyIsBlocked);
         }
 
-        document.blocks =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
+        document.blocks = match !list.is_empty() {
+            true => {
+                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                Some(self.ipfs.dag().put().serialize(bytes).await?)
+            }
+            false => None,
+        };
 
         self.set_root_document(document).await?;
 
@@ -926,8 +983,12 @@ impl RootDocumentTask {
                 .ipfs
                 .get_dag(cid)
                 .local()
-                .deserialized()
+                .deserialized::<Vec<u8>>()
                 .await
+                .and_then(|bytes| {
+                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+                })
                 .unwrap_or_default(),
             None => vec![],
         };
@@ -936,8 +997,13 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
-        document.blocks =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
+        document.blocks = match !list.is_empty() {
+            true => {
+                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                Some(self.ipfs.dag().put().serialize(bytes).await?)
+            }
+            false => None,
+        };
 
         self.set_root_document(document).await?;
 
@@ -959,8 +1025,12 @@ impl RootDocumentTask {
             .ipfs
             .get_dag(path)
             .local()
-            .deserialized()
+            .deserialized::<Vec<u8>>()
             .await
+            .and_then(|bytes| {
+                let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+            })
             .unwrap_or_default();
         Ok(list)
     }
@@ -973,8 +1043,12 @@ impl RootDocumentTask {
                 .ipfs
                 .get_dag(cid)
                 .local()
-                .deserialized()
+                .deserialized::<Vec<u8>>()
                 .await
+                .and_then(|bytes| {
+                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+                })
                 .unwrap_or_default(),
             None => vec![],
         };
@@ -983,8 +1057,13 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
-        document.block_by =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
+        document.block_by = match !list.is_empty() {
+            true => {
+                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                Some(self.ipfs.dag().put().serialize(bytes).await?)
+            }
+            false => None,
+        };
 
         self.set_root_document(document).await?;
 
@@ -1004,8 +1083,12 @@ impl RootDocumentTask {
                 .ipfs
                 .get_dag(cid)
                 .local()
-                .deserialized()
+                .deserialized::<Vec<u8>>()
                 .await
+                .and_then(|bytes| {
+                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
+                })
                 .unwrap_or_default(),
             None => vec![],
         };
@@ -1014,8 +1097,13 @@ impl RootDocumentTask {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
-        document.block_by =
-            (!list.is_empty()).then_some(self.ipfs.dag().put().serialize(list).await?);
+        document.block_by = match !list.is_empty() {
+            true => {
+                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                Some(self.ipfs.dag().put().serialize(bytes).await?)
+            }
+            false => None,
+        };
 
         self.set_root_document(document).await?;
 
