@@ -23,24 +23,24 @@ use crate::store::get_keypair_did;
 
 use self::{files::DirectoryDocument, identity::IdentityDocument};
 
-use super::{identity::Request, keystore::Keystore};
+use super::keystore::Keystore;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct ExtractedRootDocument {
+pub struct ResolvedRootDocument {
     pub identity: Identity,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
-    pub friends: Vec<DID>,
-    pub block_list: Vec<DID>,
-    pub block_by_list: Vec<DID>,
+    pub friends: Vec<u8>,
+    pub block_list: Vec<u8>,
+    pub block_by_list: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_index: Option<Directory>,
-    pub request: Vec<Request>,
+    pub request: Vec<u8>,
     pub conversation_keystore: BTreeMap<Uuid, Keystore>,
     pub signature: Option<Vec<u8>>,
 }
 
-impl ExtractedRootDocument {
+impl ResolvedRootDocument {
     pub fn verify(&self) -> Result<(), Error> {
         let mut doc = self.clone();
         let signature = doc.signature.take().ok_or(Error::InvalidSignature)?;
@@ -134,7 +134,7 @@ impl RootDocument {
         &self,
         ipfs: &Ipfs,
         keypair: Option<&Keypair>,
-    ) -> Result<ExtractedRootDocument, Error> {
+    ) -> Result<ResolvedRootDocument, Error> {
         let document: IdentityDocument = ipfs
             .get_dag(self.identity)
             .local()
@@ -222,7 +222,7 @@ impl RootDocument {
 
         let file_index = None;
 
-        let mut exported = ExtractedRootDocument {
+        let mut exported = ResolvedRootDocument {
             identity,
             created: self.created,
             modified: self.modified,
@@ -243,7 +243,7 @@ impl RootDocument {
         Ok(exported)
     }
 
-    pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
+    pub async fn import(ipfs: &Ipfs, data: ResolvedRootDocument) -> Result<Self, Error> {
         data.verify()?;
 
         let keypair = ipfs.keypair();
@@ -254,62 +254,67 @@ impl RootDocument {
         let document = document.sign(&did_kp)?;
 
         let identity = ipfs.dag().put().serialize(document).await?;
+
+        let mut root_document = RootDocument {
+            identity,
+            created: data.created,
+            modified: data.modified,
+            friends: None,
+            blocks: None,
+            block_by: None,
+            request: None,
+            conversations: None,
+            conversations_keystore: None,
+            file_index: None,
+            status: None,
+            signature: None,
+        };
+
         let has_friends = !data.friends.is_empty();
         let has_blocks = !data.block_list.is_empty();
         let has_block_by_list = !data.block_by_list.is_empty();
         let has_requests = !data.request.is_empty();
         let has_keystore = !data.conversation_keystore.is_empty();
 
-        let friends = has_friends
-            .then_some(ipfs.dag().put().serialize(data.friends).await.ok())
-            .flatten();
+        if has_friends {
+            root_document.friends = ipfs.dag().put().serialize(data.friends).await.ok();
+        }
 
-        let blocks = has_blocks
-            .then_some(ipfs.dag().put().serialize(data.block_list).await.ok())
-            .flatten();
-        let block_by = has_block_by_list
-            .then_some(ipfs.dag().put().serialize(data.block_by_list).await.ok())
-            .flatten();
-        let request = has_requests
-            .then_some(ipfs.dag().put().serialize(data.request).await.ok())
-            .flatten();
+        if has_blocks {
+            root_document.blocks = ipfs.dag().put().serialize(data.block_list).await.ok();
+        }
 
-        let conversations_keystore = has_keystore
-            .then_some({
-                let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
-                for (k, v) in data.conversation_keystore {
-                    if let Ok(cid) = ipfs.dag().put().serialize(v).await {
-                        pointer_map.insert(k.to_string(), cid);
-                    }
+        if has_block_by_list {
+            root_document.block_by = ipfs.dag().put().serialize(data.block_by_list).await.ok();
+        }
+
+        if has_requests {
+            root_document.request = ipfs.dag().put().serialize(data.request).await.ok();
+        }
+
+        if has_keystore {
+            let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
+            for (k, v) in data.conversation_keystore {
+                if let Ok(cid) = ipfs.dag().put().serialize(v).await {
+                    pointer_map.insert(k.to_string(), cid);
                 }
+            }
 
-                ipfs.dag().put().serialize(pointer_map).await.ok()
-            })
-            .flatten();
+            root_document.conversations_keystore =
+                ipfs.dag().put().serialize(pointer_map).await.ok();
+        }
 
-        let file_index = futures::future::ready(data.file_index.ok_or(Error::Other))
-            .and_then(|root| async move {
-                let document = DirectoryDocument::new(ipfs, &root).await?;
-                let cid = ipfs.dag().put().serialize(document).await?;
-                Ok::<_, Error>(cid)
-            })
-            .await
-            .ok();
+        if let Some(root) = data.file_index {
+            let cid = DirectoryDocument::new(ipfs, &root)
+                .and_then(|document| async move {
+                    let cid = ipfs.dag().put().serialize(document).await?;
+                    Ok(cid)
+                })
+                .await
+                .ok();
+            root_document.file_index = cid;
+        }
 
-        let root_document = RootDocument {
-            identity,
-            created: data.created,
-            modified: data.modified,
-            conversations: None,
-            conversations_keystore,
-            friends,
-            blocks,
-            block_by,
-            file_index,
-            request,
-            status: None,
-            signature: None,
-        };
         let root_document = root_document.sign(&did_kp)?;
 
         Ok(root_document)
