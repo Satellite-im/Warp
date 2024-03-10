@@ -26,7 +26,7 @@ use self::{files::DirectoryDocument, identity::IdentityDocument};
 use super::keystore::Keystore;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct ExtractedRootDocument {
+pub struct ResolvedRootDocument {
     pub identity: Identity,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
@@ -40,7 +40,7 @@ pub struct ExtractedRootDocument {
     pub signature: Option<Vec<u8>>,
 }
 
-impl ExtractedRootDocument {
+impl ResolvedRootDocument {
     pub fn verify(&self) -> Result<(), Error> {
         let mut doc = self.clone();
         let signature = doc.signature.take().ok_or(Error::InvalidSignature)?;
@@ -134,7 +134,7 @@ impl RootDocument {
         &self,
         ipfs: &Ipfs,
         keypair: Option<&Keypair>,
-    ) -> Result<ExtractedRootDocument, Error> {
+    ) -> Result<ResolvedRootDocument, Error> {
         let document: IdentityDocument = ipfs
             .get_dag(self.identity)
             .local()
@@ -222,7 +222,7 @@ impl RootDocument {
 
         let file_index = None;
 
-        let mut exported = ExtractedRootDocument {
+        let mut exported = ResolvedRootDocument {
             identity,
             created: self.created,
             modified: self.modified,
@@ -243,7 +243,7 @@ impl RootDocument {
         Ok(exported)
     }
 
-    pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
+    pub async fn import(ipfs: &Ipfs, data: ResolvedRootDocument) -> Result<Self, Error> {
         data.verify()?;
 
         let keypair = ipfs.keypair();

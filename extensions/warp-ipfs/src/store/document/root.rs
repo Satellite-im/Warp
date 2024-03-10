@@ -17,7 +17,7 @@ use warp::{
 use crate::store::{ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
 
 use super::{
-    files::DirectoryDocument, identity::IdentityDocument, ExtractedRootDocument, RootDocument,
+    files::DirectoryDocument, identity::IdentityDocument, ResolvedRootDocument, RootDocument,
 };
 
 #[allow(clippy::large_enum_variant)]
@@ -107,7 +107,7 @@ pub enum RootDocumentCommand {
         response: oneshot::Sender<Result<Keystore, Error>>,
     },
     Export {
-        response: oneshot::Sender<Result<ExtractedRootDocument, Error>>,
+        response: oneshot::Sender<Result<ResolvedRootDocument, Error>>,
     },
     ExportEncrypted {
         response: oneshot::Sender<Result<Vec<u8>, Error>>,
@@ -372,7 +372,7 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn export(&self) -> Result<ExtractedRootDocument, Error> {
+    pub async fn export(&self) -> Result<ResolvedRootDocument, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -1154,7 +1154,7 @@ impl RootDocumentTask {
             .map_err(Error::from)
     }
 
-    async fn export(&self) -> Result<ExtractedRootDocument, Error> {
+    async fn export(&self) -> Result<ResolvedRootDocument, Error> {
         let document = self.get_root_document().await?;
         document.resolve(&self.ipfs, None).await
     }
