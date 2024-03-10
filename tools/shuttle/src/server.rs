@@ -1,6 +1,6 @@
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, time::Duration};
 
-use futures::{SinkExt, StreamExt};
+use futures::{channel::mpsc, SinkExt, StreamExt};
 use rust_ipfs::{
     libp2p::{
         core::{
@@ -12,7 +12,7 @@ use rust_ipfs::{
         swarm::behaviour::toggle::Toggle,
         Transport,
     },
-    p2p::{IdentifyConfiguration, RateLimit, RelayConfig, TransportConfig},
+    p2p::{IdentifyConfiguration, RelayConfig, TransportConfig},
     FDLimit, Ipfs, Keypair, Multiaddr, NetworkBehaviour, PeerId, UninitializedIpfs,
 };
 
@@ -39,6 +39,18 @@ use crate::{
     PayloadRequest, PeerIdExt, PeerTopic,
 };
 
+type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
+type IdentityMessage = identity::protocol::Message;
+type IdentityReceiver = (
+    InboundRequestId,
+    ResponseChannel<PayloadRequest<IdentityMessage>>,
+    PayloadRequest<IdentityMessage>,
+    OntshotSender<(
+        ResponseChannel<PayloadRequest<IdentityMessage>>,
+        PayloadRequest<IdentityMessage>,
+    )>,
+);
+
 #[derive(NetworkBehaviour)]
 #[behaviour(prelude = "libp2p::swarm::derive_prelude", to_swarm = "void::Void")]
 struct Behaviour {
@@ -49,7 +61,7 @@ struct Behaviour {
 #[allow(dead_code)]
 pub struct ShuttleServer {
     ipfs: Ipfs,
-    task: Arc<JoinHandle<()>>,
+    task: JoinHandle<()>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -59,17 +71,8 @@ struct ShuttleTask {
     root_storage: crate::store::root::RootStorage,
     identity_storage: crate::store::identity::IdentityStorage,
     subscriptions: crate::subscription_stream::Subscriptions,
-
-    identity_rx: futures::channel::mpsc::Receiver<(
-        InboundRequestId,
-        ResponseChannel<PayloadRequest<identity::protocol::Message>>,
-        PayloadRequest<identity::protocol::Message>,
-        futures::channel::oneshot::Sender<(
-            ResponseChannel<PayloadRequest<identity::protocol::Message>>,
-            PayloadRequest<identity::protocol::Message>,
-        )>,
-    )>,
-    precord_tx: futures::channel::mpsc::Sender<PeerRecord>,
+    identity_rx: mpsc::Receiver<IdentityReceiver>,
+    precord_tx: mpsc::Sender<PeerRecord>,
 }
 
 impl ShuttleServer {
@@ -97,6 +100,7 @@ impl ShuttleServer {
                 max_transmit_size: 4 * 1024 * 1024,
                 ..Default::default()
             })
+            .with_relay(true)
             .with_custom_behaviour(Behaviour {
                 identity: identity::server::Behaviour::new(keypair, id_event_tx, precord_rx),
                 dummy: ext
@@ -119,33 +123,15 @@ impl ShuttleServer {
 
         if enable_relay_server {
             uninitialized = uninitialized.with_relay_server(RelayConfig {
-                max_circuits: 8198,
-                max_circuits_per_peer: 8198,
-                max_circuit_duration: Duration::from_secs(2 * 60),
-                max_circuit_bytes: 8 * 1024 * 1024,
-                circuit_src_rate_limiters: vec![
-                    RateLimit::PerIp {
-                        limit: 256.try_into().expect("Greater than 0"),
-                        interval: Duration::from_secs(60 * 2),
-                    },
-                    RateLimit::PerPeer {
-                        limit: 256.try_into().expect("Greater than 0"),
-                        interval: Duration::from_secs(60),
-                    },
-                ],
-                max_reservations_per_peer: 512,
-                max_reservations: 8198,
-                reservation_duration: Duration::from_secs(60 * 60),
-                reservation_rate_limiters: vec![
-                    RateLimit::PerIp {
-                        limit: 256.try_into().expect("Greater than 0"),
-                        interval: Duration::from_secs(60),
-                    },
-                    RateLimit::PerPeer {
-                        limit: 256.try_into().expect("Greater than 0"),
-                        interval: Duration::from_secs(60),
-                    },
-                ],
+                max_circuits: usize::MAX,
+                max_circuits_per_peer: usize::MAX,
+                max_circuit_duration: Duration::MAX,
+                max_circuit_bytes: u64::MAX,
+                circuit_src_rate_limiters: vec![],
+                max_reservations_per_peer: usize::MAX / 2,
+                max_reservations: usize::MAX / 2,
+                reservation_duration: Duration::MAX,
+                reservation_rate_limiters: vec![],
             });
         }
 
@@ -196,6 +182,11 @@ impl ShuttleServer {
         let root = crate::store::root::RootStorage::new(&ipfs, path).await;
         let identity = crate::store::identity::IdentityStorage::new(&ipfs, &root).await;
 
+        println!(
+            "Identities Registered: {}",
+            identity.list().await?.count().await
+        );
+
         let mut subscriptions = Subscriptions::new(&ipfs, &identity);
         _ = subscriptions
             .subscribe("/identity/announce/v0".into())
@@ -213,10 +204,7 @@ impl ShuttleServer {
             server_event.start().await;
         });
 
-        Ok(ShuttleServer {
-            ipfs,
-            task: Arc::new(task),
-        })
+        Ok(ShuttleServer { ipfs, task })
     }
 
     pub async fn addresses(&self) -> impl Iterator<Item = Multiaddr> {
@@ -411,7 +399,7 @@ impl ShuttleTask {
 
                             continue;
                         }
-                        tracing::info!(did = %did, event = ?event);
+
                         match event {
                             identity::protocol::Mailbox::FetchAll => {
                                 let (reqs, remaining) = self
