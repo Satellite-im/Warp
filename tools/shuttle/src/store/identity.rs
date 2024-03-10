@@ -474,19 +474,9 @@ impl IdentityStorageTask {
         let old_cid = self.list.replace(cid);
 
         if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                _ = self.ipfs.remove_pin(&old_cid).await;
             }
         }
         self.root.set_identity_list(cid).await?;
