@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 
-use futures::{SinkExt, StreamExt};
+use futures::{channel::mpsc, SinkExt, StreamExt};
 use rust_ipfs::{
     libp2p::{
         core::{
@@ -39,6 +39,18 @@ use crate::{
     PayloadRequest, PeerIdExt, PeerTopic,
 };
 
+type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
+type IdentityMessage = identity::protocol::Message;
+type IdentityReceiver = (
+    InboundRequestId,
+    ResponseChannel<PayloadRequest<IdentityMessage>>,
+    PayloadRequest<IdentityMessage>,
+    OntshotSender<(
+        ResponseChannel<PayloadRequest<IdentityMessage>>,
+        PayloadRequest<IdentityMessage>,
+    )>,
+);
+
 #[derive(NetworkBehaviour)]
 #[behaviour(prelude = "libp2p::swarm::derive_prelude", to_swarm = "void::Void")]
 struct Behaviour {
@@ -59,17 +71,8 @@ struct ShuttleTask {
     root_storage: crate::store::root::RootStorage,
     identity_storage: crate::store::identity::IdentityStorage,
     subscriptions: crate::subscription_stream::Subscriptions,
-
-    identity_rx: futures::channel::mpsc::Receiver<(
-        InboundRequestId,
-        ResponseChannel<PayloadRequest<identity::protocol::Message>>,
-        PayloadRequest<identity::protocol::Message>,
-        futures::channel::oneshot::Sender<(
-            ResponseChannel<PayloadRequest<identity::protocol::Message>>,
-            PayloadRequest<identity::protocol::Message>,
-        )>,
-    )>,
-    precord_tx: futures::channel::mpsc::Sender<PeerRecord>,
+    identity_rx: mpsc::Receiver<IdentityReceiver>,
+    precord_tx: mpsc::Sender<PeerRecord>,
 }
 
 impl ShuttleServer {
