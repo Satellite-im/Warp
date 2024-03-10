@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, time::Duration};
 
 use futures::{SinkExt, StreamExt};
 use rust_ipfs::{
@@ -49,7 +49,7 @@ struct Behaviour {
 #[allow(dead_code)]
 pub struct ShuttleServer {
     ipfs: Ipfs,
-    task: Arc<JoinHandle<()>>,
+    task: JoinHandle<()>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -201,10 +201,7 @@ impl ShuttleServer {
             server_event.start().await;
         });
 
-        Ok(ShuttleServer {
-            ipfs,
-            task: Arc::new(task),
-        })
+        Ok(ShuttleServer { ipfs, task })
     }
 
     pub async fn addresses(&self) -> impl Iterator<Item = Multiaddr> {
