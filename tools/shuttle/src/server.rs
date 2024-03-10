@@ -12,7 +12,7 @@ use rust_ipfs::{
         swarm::behaviour::toggle::Toggle,
         Transport,
     },
-    p2p::{IdentifyConfiguration, RateLimit, RelayConfig, TransportConfig},
+    p2p::{IdentifyConfiguration, RelayConfig, TransportConfig},
     FDLimit, Ipfs, Keypair, Multiaddr, NetworkBehaviour, PeerId, UninitializedIpfs,
 };
 
@@ -97,6 +97,7 @@ impl ShuttleServer {
                 max_transmit_size: 4 * 1024 * 1024,
                 ..Default::default()
             })
+            .with_relay(true)
             .with_custom_behaviour(Behaviour {
                 identity: identity::server::Behaviour::new(keypair, id_event_tx, precord_rx),
                 dummy: ext
