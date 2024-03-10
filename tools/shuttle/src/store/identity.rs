@@ -67,7 +67,7 @@ pub struct IdentityStorage {
 
 impl IdentityStorage {
     pub async fn new(ipfs: &Ipfs, root: &RootStorage) -> Self {
-        let root_dag = root.get_root().await.unwrap_or_default();
+        let root_dag = root.get_root().await;
 
         let list = root_dag.identities;
         let mailbox = root_dag.mailbox;

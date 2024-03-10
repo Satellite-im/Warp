@@ -1,17 +1,10 @@
 use std::{path::PathBuf, sync::Arc};
 
-use futures::{
-    channel::{
-        mpsc::{Receiver, Sender},
-        oneshot::Sender as OneshotSender,
-    },
-    SinkExt, StreamExt, TryFutureExt,
-};
+use futures::TryFutureExt;
 use libipld::Cid;
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
-use tokio::select;
-use tokio_util::sync::{CancellationToken, DropGuard};
+use tokio::sync::RwLock;
 use warp::error::Error;
 
 #[derive(Default, Serialize, Deserialize, Clone, Copy, Debug)]
@@ -24,35 +17,21 @@ pub struct Root {
     pub mailbox: Option<Cid>,
 }
 
-#[allow(clippy::large_enum_variant)]
-#[allow(clippy::enum_variant_names)]
-enum RootCommand {
-    SetIdentityList {
-        link: Cid,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    SetPackages {
-        link: Cid,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    SetMailBox {
-        link: Cid,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    GetRoot {
-        response: OneshotSender<Root>,
-    },
+#[derive(Debug)]
+struct RootInner {
+    root: Root,
+    cid: Option<Cid>,
+    path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
 pub struct RootStorage {
-    tx: Sender<RootCommand>,
-    _task_cancellation: Arc<DropGuard>,
+    ipfs: Ipfs,
+    inner: Arc<RwLock<RootInner>>,
 }
 
 impl RootStorage {
     pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
-        let (tx, rx) = futures::channel::mpsc::channel(0);
         let root_cid = match path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".root_v0"))
                 .await
@@ -75,171 +54,76 @@ impl RootStorage {
             .await
             .unwrap_or_default();
 
-        let mut task = RootStorageTask {
-            ipfs: ipfs.clone(),
+        let inner = RootInner {
             root,
             cid: root_cid,
             path,
-            rx,
         };
 
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
-        tokio::spawn(async move {
-            select! {
-                _ = token.cancelled() => {}
-                _ = task.run() => {}
-            }
-        });
-
         Self {
-            tx,
-            _task_cancellation: Arc::new(drop_guard),
+            ipfs: ipfs.clone(),
+            inner: Arc::new(RwLock::new(inner)),
         }
     }
 
     pub async fn set_identity_list(&self, cid: Cid) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(RootCommand::SetIdentityList {
-                link: cid,
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_identity_list(&self.ipfs, cid).await
     }
 
     pub async fn set_package(&self, cid: Cid) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(RootCommand::SetPackages {
-                link: cid,
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_package(&self.ipfs, cid).await
     }
 
     pub async fn set_mailbox(&self, cid: Cid) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(RootCommand::SetMailBox {
-                link: cid,
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_mailbox(&self.ipfs, cid).await
     }
 
-    pub async fn get_root(&self) -> Result<Root, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(RootCommand::GetRoot { response: tx })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from).map_err(Error::from)
+    pub async fn get_root(&self) -> Root {
+        let inner = &*self.inner.read().await;
+        inner.root
     }
 }
 
-struct RootStorageTask {
-    ipfs: Ipfs,
-    root: Root,
-    cid: Option<Cid>,
-    path: Option<PathBuf>,
-    rx: Receiver<RootCommand>,
-}
-
-impl RootStorageTask {
-    pub async fn run(&mut self) {
-        while let Some(command) = self.rx.next().await {
-            match command {
-                RootCommand::SetIdentityList { link, response } => {
-                    _ = response.send(self.set_identity_list(link).await)
-                }
-                RootCommand::SetMailBox { link, response } => {
-                    _ = response.send(self.set_mailbox(link).await)
-                }
-                RootCommand::SetPackages { link, response } => {
-                    _ = response.send(self.set_packages(link).await)
-                }
-                RootCommand::GetRoot { response } => {
-                    _ = response.send(self.root);
-                }
-            }
-        }
-    }
-
-    async fn set_identity_list(&mut self, cid: Cid) -> Result<(), Error> {
+impl RootInner {
+    pub async fn set_identity_list(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
         self.root.identities.replace(cid);
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(self.root)
-            .pin(false)
-            .await?;
+        let cid = ipfs.dag().put().serialize(self.root).pin(false).await?;
 
         tracing::info!(cid = %cid, "storing root");
-        self.save(cid).await?;
+        self.save(ipfs, cid).await?;
         tracing::info!(cid = %cid, "root is stored");
 
         //TODO: Broadcast root document to nodes
         Ok(())
     }
 
-    async fn set_packages(&mut self, cid: Cid) -> Result<(), Error> {
+    pub async fn set_package(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
         self.root.packages.replace(cid);
         tracing::debug!(cid = %cid, "New cid for root. Store and pinning");
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(self.root)
-            .pin(false)
-            .await?;
+        let cid = ipfs.dag().put().serialize(self.root).pin(false).await?;
         tracing::info!(cid = %cid, "root stored");
 
         tracing::info!(cid = %cid, "storing root");
-        self.save(cid).await?;
+        self.save(ipfs, cid).await?;
         tracing::info!(cid = %cid, "root is stored");
-
-        //TODO: Broadcast root document to nodes
         Ok(())
     }
 
-    async fn set_mailbox(&mut self, cid: Cid) -> Result<(), Error> {
+    async fn set_mailbox(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
         self.root.mailbox.replace(cid);
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(self.root)
-            .pin(false)
-            .await?;
+        let cid = ipfs.dag().put().serialize(self.root).pin(false).await?;
 
         tracing::info!(cid = %cid, "storing root");
-        self.save(cid).await?;
+        self.save(ipfs, cid).await?;
         tracing::info!(cid = %cid, "root is stored");
         //TODO: Broadcast root document to nodes
         Ok(())
     }
 
-    async fn save(&mut self, cid: Cid) -> std::io::Result<()> {
+    async fn save(&mut self, ipfs: &Ipfs, cid: Cid) -> std::io::Result<()> {
         //TODO: Reenable ipns
         // self.ipfs
         // .ipns()
@@ -249,9 +133,9 @@ impl RootStorageTask {
         let old_cid = self.cid.replace(cid);
 
         if let Some(old_cid) = old_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+            if old_cid != cid && ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning root block");
-                _ = self.ipfs.remove_pin(&old_cid).await;
+                _ = ipfs.remove_pin(&old_cid).await;
             }
         }
 
