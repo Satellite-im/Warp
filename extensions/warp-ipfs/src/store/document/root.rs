@@ -1,10 +1,13 @@
 use chrono::Utc;
 use futures::{
-    channel::{mpsc::Receiver, oneshot},
+    channel::{
+        mpsc::{self, Receiver},
+        oneshot,
+    },
     SinkExt, StreamExt,
 };
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath};
+use rust_ipfs::{p2p::MultiaddrExt, Ipfs, IpfsPath};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -14,7 +17,12 @@ use warp::{
     multipass::identity::IdentityStatus,
 };
 
-use crate::store::{ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
+use crate::{
+    config,
+    store::{
+        ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt, SHUTTLE_TIMEOUT,
+    },
+};
 
 use super::{
     files::DirectoryDocument, identity::IdentityDocument, ResolvedRootDocument, RootDocument,
@@ -128,8 +136,13 @@ pub struct RootDocumentMap {
 }
 
 impl RootDocumentMap {
-    pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>, path: Option<PathBuf>) -> Self {
-        let cid = match path.as_ref() {
+    pub async fn new(
+        ipfs: &Ipfs,
+        keypair: Arc<DID>,
+        config: &config::Config,
+        identity_command: Option<mpsc::Sender<shuttle::identity::client::IdentityCommand>>,
+    ) -> Self {
+        let cid = match config.path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".id"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
@@ -138,14 +151,19 @@ impl RootDocumentMap {
             None => None,
         };
 
+        let path = config.path.clone();
+        let discovery = config.store_setting.discovery.clone();
+
         let (tx, rx) = futures::channel::mpsc::channel(0);
 
         let mut task = RootDocumentTask {
             ipfs: ipfs.clone(),
             keypair,
             path,
+            discovery,
             cid,
             rx,
+            identity_command,
         };
 
         let token = CancellationToken::new();
@@ -480,8 +498,10 @@ struct RootDocumentTask {
     keypair: Arc<DID>,
     path: Option<PathBuf>,
     ipfs: Ipfs,
+    discovery: config::Discovery,
     cid: Option<Cid>,
     rx: Receiver<RootDocumentCommand>,
+    identity_command: Option<mpsc::Sender<shuttle::identity::client::IdentityCommand>>,
 }
 
 impl RootDocumentTask {
@@ -680,6 +700,44 @@ impl RootDocumentTask {
                     }
                 }
                 _ = self.ipfs.remove_block(old_cid, false).await;
+            }
+        }
+
+        let Some(identity_command) = self.identity_command.as_mut() else {
+            // If the channel is not available, we should not assume this whole function should fail since the
+            // channel purpose is to send a request to the behaviour to export the root document
+            return Ok(());
+        };
+
+        if let config::Discovery::Shuttle { addresses } = &self.discovery {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = identity_command
+                    .send(shuttle::identity::client::IdentityCommand::UpdatePackage {
+                        peer_id,
+                        package: root_cid,
+                        response: tx,
+                    })
+                    .await;
+
+                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        tracing::info!(%peer_id, "document successfully exported");
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!(%peer_id, error = %e, "error exporting document");
+                        break;
+                    }
+                    Ok(Err(_)) => {
+                        tracing::error!(%peer_id, "channel been unexpectedly closed");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!(%peer_id, "request timeout");
+                        continue;
+                    }
+                }
             }
         }
 
