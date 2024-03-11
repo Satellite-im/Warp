@@ -15,7 +15,9 @@ use warp::{
     multipass::identity::IdentityStatus,
 };
 
-use crate::store::{ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
+use crate::store::{
+    conversation::ConversationDocument, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt,
+};
 
 use super::{
     files::DirectoryDocument, identity::IdentityDocument, ExtractedRootDocument, RootDocument,
@@ -95,6 +97,14 @@ pub enum RootDocumentCommand {
     IsBlockedBy {
         did: DID,
         response: oneshot::Sender<Result<bool, Error>>,
+    },
+    GetConversationDocument {
+        id: Uuid,
+        response: oneshot::Sender<Result<ConversationDocument, Error>>,
+    },
+    SetConversationDocument {
+        document: ConversationDocument,
+        response: oneshot::Sender<Result<(), Error>>,
     },
     SetKeystore {
         document: BTreeMap<String, Cid>,
@@ -403,6 +413,32 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn get_conversation_document(&self, id: Uuid) -> Result<ConversationDocument, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::GetConversationDocument { id, response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn set_conversation_document(
+        &self,
+        document: ConversationDocument,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::SetConversationDocument {
+                document,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -538,6 +574,12 @@ impl RootDocumentTask {
                 }
                 RootDocumentCommand::SetRootIndex { root, response } => {
                     let _ = response.send(self.set_root_index(root).await);
+                }
+                RootDocumentCommand::GetConversationDocument { id, response } => {
+                    let _ = response.send(self.get_conversation_document(id).await);
+                }
+                RootDocumentCommand::SetConversationDocument { document, response } => {
+                    let _ = response.send(self.set_conversation_document(document).await);
                 }
             }
         }
@@ -1064,6 +1106,60 @@ impl RootDocumentTask {
             .deserialized()
             .await
             .map_err(Error::from)
+    }
+
+    async fn get_conversation_document(&self, id: Uuid) -> Result<ConversationDocument, Error> {
+        let document = self.get_root_document().await?;
+
+        let cid = match document.conversations {
+            Some(cid) => cid,
+            None => return Err(Error::InvalidConversation),
+        };
+
+        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
+        self.ipfs
+            .get_dag(path)
+            .local()
+            .deserialized()
+            .await
+            .map_err(Error::from)
+    }
+
+    async fn set_conversation_document(
+        &mut self,
+        conversation_document: ConversationDocument,
+    ) -> Result<(), Error> {
+        conversation_document.verify()?;
+        let mut document = self.get_root_document().await?;
+
+        let mut list = match document.conversations {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => BTreeMap::new(),
+        };
+
+        let id = conversation_document.id().to_string();
+        let cid = self
+            .ipfs
+            .dag()
+            .put()
+            .serialize(conversation_document)
+            .await?;
+
+        list.insert(id, cid);
+
+        let cid = self.ipfs.dag().put().serialize(list).await?;
+
+        document.conversations.replace(cid);
+
+        self.set_root_document(document).await?;
+
+        Ok(())
     }
 
     async fn export(&self) -> Result<ExtractedRootDocument, Error> {

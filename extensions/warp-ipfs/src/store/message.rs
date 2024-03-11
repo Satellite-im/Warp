@@ -1488,27 +1488,6 @@ impl ConversationTask {
         self.root.set_conversation_keystore_map(map).await
     }
 
-    pub async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let cid = self.ipfs.dag().put().serialize(map).pin(true).await?;
-
-        let old_map_cid = self.cid.replace(cid);
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".message_id"), cid).await {
-                tracing::error!("Error writing to '.message_id': {e}.")
-            }
-        }
-
-        if let Some(old_cid) = old_map_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                self.ipfs.remove_pin(&old_cid).recursive().await?;
-            }
-        }
-
-        Ok(())
-    }
-
     pub async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
         if let Some(creator) = document.creator.as_ref() {
             if creator.eq(&self.keypair)
@@ -1520,17 +1499,7 @@ impl ConversationTask {
 
         document.verify()?;
 
-        let mut map = match self.cid {
-            Some(cid) => self.ipfs.get_dag(cid).local().deserialized().await?,
-            None => BTreeMap::new(),
-        };
-
-        let id = document.id().to_string();
-        let cid = self.ipfs.dag().put().serialize(document).await?;
-
-        map.insert(id, cid);
-
-        self.set_map(map).await
+        self.root.set_conversation_document(document).await
     }
 
     pub async fn subscribe(
