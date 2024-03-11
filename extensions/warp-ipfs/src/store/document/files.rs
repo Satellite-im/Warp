@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -188,7 +189,7 @@ pub struct FileDocument {
     pub creation: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub file_type: FileType,
-    pub reference: Option<Cid>,
+    pub reference: Option<String>,
     pub hash: Hash,
 }
 
@@ -217,7 +218,7 @@ impl FileDocument {
                 .contains(&cid)
                 .await
                 .unwrap_or_default()
-                .then_some(cid)
+                .then(|| cid.to_string())
         }
 
         if let Some(cid) = file
@@ -268,7 +269,11 @@ impl FileDocument {
             }
         }
 
-        if let Some(cid) = self.reference {
+        if let Some(cid) = self
+            .reference
+            .as_ref()
+            .and_then(|cid| Cid::from_str(cid).ok())
+        {
             let path = IpfsPath::from(cid);
             file.set_reference(&path.to_string());
         }
