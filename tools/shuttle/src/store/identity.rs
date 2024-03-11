@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use futures::{
     channel::{
@@ -323,7 +323,7 @@ impl IdentityStorageTask {
     async fn register(&mut self, document: IdentityDocument) -> Result<(), Error> {
         document.verify()?;
 
-        let mut list: HashMap<String, Cid> = match self.list {
+        let mut list: BTreeMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -331,7 +331,7 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         let did_str = document.did.to_string();
@@ -370,7 +370,7 @@ impl IdentityStorageTask {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let mut list: HashMap<String, Cid> = match self.packages {
+        let mut list: BTreeMap<String, Cid> = match self.packages {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -378,7 +378,7 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         list.insert(did.to_string(), package);
@@ -404,7 +404,7 @@ impl IdentityStorageTask {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let list: HashMap<String, Cid> = match self.packages {
+        let list: BTreeMap<String, Cid> = match self.packages {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -425,7 +425,7 @@ impl IdentityStorageTask {
     async fn update(&mut self, document: IdentityDocument) -> Result<(), Error> {
         document.verify()?;
 
-        let mut list: HashMap<String, Cid> = match self.list {
+        let mut list: BTreeMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -433,7 +433,7 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         let did_str = document.did.to_string();
@@ -483,7 +483,7 @@ impl IdentityStorageTask {
     }
 
     async fn list(&self) -> BoxStream<'static, IdentityDocument> {
-        let list: HashMap<String, Cid> = match self.list {
+        let list: BTreeMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -491,7 +491,7 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         let ipfs = self.ipfs.clone();
@@ -613,7 +613,7 @@ impl IdentityStorageTask {
 
     async fn fetch_requests(&mut self, did: DID) -> Result<(Vec<RequestPayload>, usize), Error> {
         let key_str = did.to_string();
-        let mut list: HashMap<String, Cid> = match self.mailbox {
+        let mut list: BTreeMap<String, Cid> = match self.mailbox {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -676,7 +676,7 @@ impl IdentityStorageTask {
 
         request.verify().map_err(|_| Error::InvalidSignature)?;
         let key_str = to.to_string();
-        let mut list: HashMap<String, Cid> = match self.mailbox {
+        let mut list: BTreeMap<String, Cid> = match self.mailbox {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -684,7 +684,7 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         let mut mailbox = match list.get(&key_str) {
