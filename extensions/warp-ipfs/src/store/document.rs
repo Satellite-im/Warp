@@ -6,7 +6,10 @@ pub mod root;
 
 use chrono::{DateTime, Utc};
 
-use futures::{stream::BoxStream, StreamExt, TryFutureExt};
+use futures::{
+    stream::{self, BoxStream},
+    StreamExt, TryFutureExt,
+};
 use ipfs::{Ipfs, Keypair, PeerId};
 use libipld::Cid;
 use rust_ipfs as ipfs;
@@ -333,7 +336,7 @@ pub struct FileAttachmentDocument {
     pub creation: DateTime<Utc>,
     pub thumbnail: Option<Cid>,
     pub file_type: FileType,
-    pub data: Cid,
+    pub data: String,
 }
 
 impl FileAttachmentDocument {
@@ -389,13 +392,27 @@ impl FileAttachmentDocument {
     ) -> BoxStream<'static, Progression> {
         let path = path.as_ref().to_path_buf();
         let size = self.size;
-        let stream = ipfs
-            .unixfs()
-            .get(self.data.into(), &path)
-            .providers(members)
-            .timeout(timeout.unwrap_or(Duration::from_secs(60)));
 
         let name = self.name.clone();
+
+        let stream = match Cid::from_str(&self.data).map(|cid| {
+            ipfs.unixfs()
+                .get(cid.into(), &path)
+                .providers(members)
+                .timeout(timeout.unwrap_or(Duration::from_secs(60)))
+        }) {
+            Ok(stream) => stream,
+            Err(e) => {
+                return stream::once(async move {
+                    Progression::ProgressFailed {
+                        name,
+                        last_size: None,
+                        error: anyhow::Error::from(e).into(),
+                    }
+                })
+                .boxed();
+            }
+        };
 
         let progress_stream = async_stream::stream! {
             yield Progression::CurrentProgress {
@@ -443,9 +460,14 @@ impl FileAttachmentDocument {
         members: &[PeerId],
         timeout: Option<Duration>,
     ) -> BoxStream<'static, Result<Vec<u8>, Error>> {
+        let link = match Cid::from_str(&self.data) {
+            Ok(link) => link,
+            Err(e) => return stream::once(async { Err(anyhow::Error::from(e).into()) }).boxed(),
+        };
+
         let stream = ipfs
             .unixfs()
-            .cat(self.data)
+            .cat(link)
             .providers(members)
             .timeout(timeout.unwrap_or(Duration::from_secs(60)))
             .map(|result| {

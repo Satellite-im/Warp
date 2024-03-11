@@ -241,7 +241,7 @@ impl FileDocument {
     }
 
     pub fn to_attachment(&self) -> Result<FileAttachmentDocument, Error> {
-        let data = self.reference.ok_or(Error::FileNotFound)?;
+        let data = self.reference.clone().ok_or(Error::FileNotFound)?;
         Ok(FileAttachmentDocument {
             id: Uuid::new_v4(),
             name: self.name.clone(),
