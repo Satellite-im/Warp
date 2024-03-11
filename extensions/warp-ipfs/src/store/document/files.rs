@@ -274,6 +274,7 @@ impl FileDocument {
             .as_ref()
             .and_then(|cid| Cid::from_str(cid).ok())
         {
+            // Since the cid is valid, we will convert it to a ipfs path to store as a reference in `File::reference`
             let path = IpfsPath::from(cid);
             file.set_reference(&path.to_string());
         }
