@@ -5,7 +5,6 @@ use std::{
         btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet,
     },
     ffi::OsStr,
-    future::IntoFuture,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -16,7 +15,7 @@ use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
-    stream::{BoxStream, FuturesUnordered, SelectAll},
+    stream::{BoxStream, SelectAll},
     SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
@@ -253,15 +252,6 @@ impl MessageStore {
             }
         }
 
-        let cid = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".message_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .ok()
-                .and_then(|cid_str| cid_str.parse().ok()),
-            None => None,
-        };
-
         let (tx, rx) = futures::channel::mpsc::channel(0);
 
         let token = CancellationToken::new();
@@ -278,7 +268,6 @@ impl MessageStore {
                     event_handler: Default::default(),
                     keypair,
                     path,
-                    cid,
                     topic_stream: Default::default(),
                     conversation_task: HashMap::new(),
                     identity,
@@ -887,7 +876,6 @@ type AttachmentChan = (
 
 struct ConversationTask {
     ipfs: Ipfs,
-    cid: Option<Cid>,
     path: Option<PathBuf>,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
@@ -1111,7 +1099,7 @@ impl ConversationTask {
     }
 
     async fn load_conversations(&mut self) -> Result<(), Error> {
-        let mut stream = self.list_stream();
+        let mut stream = self.list_stream().await?;
         while let Some(conversation) = stream.next().await {
             let id = conversation.id();
 
@@ -1363,26 +1351,7 @@ impl ConversationTask {
     }
 
     async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let cid = match self.cid {
-            Some(cid) => cid,
-            None => return Err(Error::InvalidConversation),
-        };
-
-        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
-
-        let document: ConversationDocument =
-            match self.ipfs.get_dag(path).local().deserialized().await {
-                Ok(d) => d,
-                Err(_) => return Err(Error::InvalidConversation),
-            };
-
-        document.verify()?;
-
-        if document.deleted {
-            return Err(Error::InvalidConversation);
-        }
-
-        Ok(document)
+        self.root.get_conversation_document(id).await
     }
 
     pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
@@ -1440,48 +1409,27 @@ impl ConversationTask {
     }
 
     pub async fn list(&self) -> Vec<ConversationDocument> {
-        self.list_stream().collect::<Vec<_>>().await
+        self.list_stream()
+            .and_then(|stream| async move { Ok(stream.collect::<Vec<_>>().await) })
+            .await
+            .unwrap_or_default()
     }
 
-    pub fn list_stream(&self) -> impl Stream<Item = ConversationDocument> + Unpin {
-        let cid = match self.cid {
-            Some(cid) => cid,
-            None => return futures::stream::empty().boxed(),
-        };
-
-        let ipfs = self.ipfs.clone();
-
-        let stream = async_stream::stream! {
-            let conversation_map: BTreeMap<String, Cid> = ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default();
-
-            let unordered = FuturesUnordered::from_iter(
-                conversation_map
-                    .values()
-                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
-            )
-            .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
-            .filter(|document| {
-                let deleted = document.deleted;
-                async move { !deleted }
-            });
-
-            for await conversation in unordered {
-                yield conversation;
-            }
-        };
-
-        stream.boxed()
+    pub async fn list_stream(
+        &self,
+    ) -> Result<impl Stream<Item = ConversationDocument> + Unpin, Error> {
+        self.root.list_conversation_document().await
     }
 
     pub async fn contains(&self, id: Uuid) -> bool {
         self.list_stream()
-            .any(|conversation| async move { conversation.id() == id })
+            .and_then(|stream| async move {
+                Ok(stream
+                    .any(|conversation| async move { conversation.id() == id })
+                    .await)
+            })
             .await
+            .unwrap_or_default()
     }
 
     pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
