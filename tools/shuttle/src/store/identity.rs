@@ -47,12 +47,12 @@ enum IdentityStorageCommand {
     },
     StorePackage {
         did: DID,
-        pkg: Vec<u8>,
+        pkg: Cid,
         response: OneshotSender<Result<(), Error>>,
     },
     GetPackage {
         did: DID,
-        response: OneshotSender<Result<Vec<u8>, Error>>,
+        response: OneshotSender<Result<Cid, Error>>,
     },
     List {
         response: OneshotSender<Result<BoxStream<'static, IdentityDocument>, Error>>,
@@ -184,7 +184,7 @@ impl IdentityStorage {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn store_package(&self, did: &DID, data: Vec<u8>) -> Result<(), Error> {
+    pub async fn store_package(&self, did: &DID, data: Cid) -> Result<(), Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
         let _ = self
@@ -200,7 +200,7 @@ impl IdentityStorage {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn get_package(&self, did: &DID) -> Result<Vec<u8>, Error> {
+    pub async fn get_package(&self, did: &DID) -> Result<Cid, Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
 
         let _ = self
@@ -365,7 +365,7 @@ impl IdentityStorageTask {
         Ok(())
     }
 
-    async fn store_package(&mut self, did: DID, package: Vec<u8>) -> Result<(), Error> {
+    async fn store_package(&mut self, did: DID, package: Cid) -> Result<(), Error> {
         if !self.contains(did.clone()).await {
             return Err(Error::IdentityDoesntExist);
         }
@@ -381,13 +381,11 @@ impl IdentityStorageTask {
             None => HashMap::new(),
         };
 
-        let pkg_path = self.ipfs.add_unixfs(package).await?;
+        list.insert(did.to_string(), package);
 
-        let pkg_cid = pkg_path.root().cid().copied().expect("Cid available");
+        let cid = self.ipfs.dag().put().serialize(list).await?;
 
-        list.insert(did.to_string(), pkg_cid);
-
-        let cid = self.ipfs.dag().put().pin(true).serialize(list).await?;
+        self.ipfs.insert_pin(&cid).recursive().await?;
 
         let old_cid = self.packages.replace(cid);
         if let Some(old_cid) = old_cid {
@@ -401,27 +399,27 @@ impl IdentityStorageTask {
         Ok(())
     }
 
-    async fn get_package(&mut self, did: DID) -> Result<Vec<u8>, Error> {
+    async fn get_package(&mut self, did: DID) -> Result<Cid, Error> {
         if !self.contains(did.clone()).await {
             return Err(Error::IdentityDoesntExist);
         }
 
-        if self.packages.is_none() {
-            return Err(Error::IdentityDoesntExist);
-        }
+        let list: HashMap<String, Cid> = match self.packages {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => return Err(Error::IdentityDoesntExist),
+        };
 
         let did_str = did.to_string();
 
-        let path = IpfsPath::from(self.packages.expect("Valid")).sub_path(&did_str)?;
-
-        let pkg_path = self
-            .ipfs
-            .cat_unixfs(path)
-            .local()
-            .await
-            .map_err(anyhow::Error::from)?;
-
-        Ok(pkg_path.into())
+        list.get(&did_str)
+            .ok_or(Error::IdentityDoesntExist)
+            .copied()
     }
 
     async fn update(&mut self, document: IdentityDocument) -> Result<(), Error> {
