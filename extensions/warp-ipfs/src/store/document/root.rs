@@ -1117,12 +1117,21 @@ impl RootDocumentTask {
         };
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
-        self.ipfs
+        let document: ConversationDocument = self
+            .ipfs
             .get_dag(path)
             .local()
             .deserialized()
             .await
-            .map_err(Error::from)
+            .map_err(Error::from)?;
+
+        document.verify()?;
+
+        if document.deleted {
+            return Err(Error::InvalidConversation);
+        }
+
+        Ok(document)
     }
 
     async fn set_conversation_document(
