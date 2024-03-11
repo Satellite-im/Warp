@@ -1,3 +1,4 @@
+use libipld::Cid;
 use rust_ipfs::{libp2p::StreamProtocol, Keypair};
 use serde::{Deserialize, Serialize};
 use warp::{crypto::DID, multipass::identity::ShortId};
@@ -196,7 +197,7 @@ pub enum RegisterError {
 pub enum Synchronized {
     PeerRecord { record: Vec<u8> },
     Update { document: IdentityDocument },
-    Store { package: Vec<u8> },
+    Store { package: Cid },
     Fetch { did: DID },
 }
 
@@ -205,7 +206,7 @@ pub enum Synchronized {
 pub enum SynchronizedResponse {
     RecordStored,
     IdentityUpdated,
-    Package(Vec<u8>),
+    Package(Cid),
     Error(SynchronizedError),
 }
 
