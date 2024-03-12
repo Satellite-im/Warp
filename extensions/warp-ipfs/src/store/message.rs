@@ -253,45 +253,42 @@ impl MessageStore {
             }
         }
 
-        let cid = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".message_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .ok()
-                .and_then(|cid_str| cid_str.parse().ok()),
-            None => None,
-        };
-
         let (tx, rx) = futures::channel::mpsc::channel(0);
 
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
 
+        let root = identity.root_document().clone();
+        let (atx, arx) = mpsc::channel(1);
+        let mut task = ConversationTask {
+            ipfs: ipfs.clone(),
+            event_handler: Default::default(),
+            keypair,
+            path,
+            topic_stream: Default::default(),
+            conversation_task: HashMap::new(),
+            identity,
+            command_rx: rx,
+            root,
+            discovery,
+            file,
+            event,
+            attachment_rx: arx,
+            attachment_tx: atx,
+            pending_key_exchange: Default::default(),
+            queue: Default::default(),
+        };
+
+        if let Err(e) = task.migrate().await {
+            tracing::warn!(error = %e, "unable to migrate conversations to root document");
+        }
+
+        if let Err(e) = task.load_conversations().await {
+            tracing::warn!("Unable to load conversations: {e}");
+        }
+
         tokio::spawn({
-            let ipfs = ipfs.clone();
-            let keypair = keypair.clone();
             async move {
-                let root = identity.root_document().clone();
-                let (atx, arx) = mpsc::channel(1);
-                let mut task = ConversationTask {
-                    ipfs,
-                    event_handler: Default::default(),
-                    keypair,
-                    path,
-                    cid,
-                    topic_stream: Default::default(),
-                    conversation_task: HashMap::new(),
-                    identity,
-                    command_rx: rx,
-                    root,
-                    discovery,
-                    file,
-                    event,
-                    attachment_rx: arx,
-                    attachment_tx: atx,
-                    pending_key_exchange: Default::default(),
-                    queue: Default::default(),
-                };
                 select! {
                     _ = token.cancelled() => {}
                     _ = task.run() => {}
@@ -299,16 +296,10 @@ impl MessageStore {
             }
         });
 
-        let conversation = Self {
+        Self {
             command_tx: tx,
             _task_cancellation: Arc::new(drop_guard),
-        };
-
-        if let Err(e) = conversation.load_conversations().await {
-            tracing::warn!("Unable to load conversations: {e}");
         }
-
-        conversation
     }
 }
 
@@ -887,7 +878,6 @@ type AttachmentChan = (
 
 struct ConversationTask {
     ipfs: Ipfs,
-    cid: Option<Cid>,
     path: Option<PathBuf>,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
@@ -1110,8 +1100,43 @@ impl ConversationTask {
         }
     }
 
+    async fn migrate(&mut self) -> Result<(), Error> {
+        if let Some(path) = self.path.as_ref() {
+            let mid_file = path.join(".message_id");
+            if !mid_file.is_file() {
+                return Ok(());
+            }
+            let cid = tokio::fs::read(&mid_file)
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                .and_then(|cid_str| {
+                    Cid::from_str(&cid_str)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })?;
+
+            let list: BTreeMap<String, Cid> = self.ipfs.get_dag(cid).local().deserialized().await?;
+
+            let mut stream = FuturesUnordered::from_iter(list.values().copied().map(|cid| {
+                self.ipfs
+                    .get_dag(cid)
+                    .local()
+                    .deserialized::<ConversationDocument>()
+                    .into_future()
+            }))
+            .filter_map(|result| async move { result.ok() })
+            .boxed();
+
+            while let Some(document) = stream.next().await {
+                let _ = self.root.set_conversation_document(document).await;
+            }
+
+            _ = tokio::fs::remove_file(mid_file).await;
+        }
+        Ok(())
+    }
+
     async fn load_conversations(&mut self) -> Result<(), Error> {
-        let mut stream = self.list_stream();
+        let mut stream = self.list_stream().await?;
         while let Some(conversation) = stream.next().await {
             let id = conversation.id();
 
@@ -1363,26 +1388,7 @@ impl ConversationTask {
     }
 
     async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let cid = match self.cid {
-            Some(cid) => cid,
-            None => return Err(Error::InvalidConversation),
-        };
-
-        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
-
-        let document: ConversationDocument =
-            match self.ipfs.get_dag(path).local().deserialized().await {
-                Ok(d) => d,
-                Err(_) => return Err(Error::InvalidConversation),
-            };
-
-        document.verify()?;
-
-        if document.deleted {
-            return Err(Error::InvalidConversation);
-        }
-
-        Ok(document)
+        self.root.get_conversation_document(id).await
     }
 
     pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
@@ -1440,73 +1446,31 @@ impl ConversationTask {
     }
 
     pub async fn list(&self) -> Vec<ConversationDocument> {
-        self.list_stream().collect::<Vec<_>>().await
+        self.list_stream()
+            .and_then(|stream| async move { Ok(stream.collect::<Vec<_>>().await) })
+            .await
+            .unwrap_or_default()
     }
 
-    pub fn list_stream(&self) -> impl Stream<Item = ConversationDocument> + Unpin {
-        let cid = match self.cid {
-            Some(cid) => cid,
-            None => return futures::stream::empty().boxed(),
-        };
-
-        let ipfs = self.ipfs.clone();
-
-        let stream = async_stream::stream! {
-            let conversation_map: BTreeMap<String, Cid> = ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default();
-
-            let unordered = FuturesUnordered::from_iter(
-                conversation_map
-                    .values()
-                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
-            )
-            .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
-            .filter(|document| {
-                let deleted = document.deleted;
-                async move { !deleted }
-            });
-
-            for await conversation in unordered {
-                yield conversation;
-            }
-        };
-
-        stream.boxed()
+    pub async fn list_stream(
+        &self,
+    ) -> Result<impl Stream<Item = ConversationDocument> + Unpin, Error> {
+        self.root.list_conversation_document().await
     }
 
     pub async fn contains(&self, id: Uuid) -> bool {
         self.list_stream()
-            .any(|conversation| async move { conversation.id() == id })
+            .and_then(|stream| async move {
+                Ok(stream
+                    .any(|conversation| async move { conversation.id() == id })
+                    .await)
+            })
             .await
+            .unwrap_or_default()
     }
 
     pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         self.root.set_conversation_keystore_map(map).await
-    }
-
-    pub async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let cid = self.ipfs.dag().put().serialize(map).pin(true).await?;
-
-        let old_map_cid = self.cid.replace(cid);
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".message_id"), cid).await {
-                tracing::error!("Error writing to '.message_id': {e}.")
-            }
-        }
-
-        if let Some(old_cid) = old_map_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                self.ipfs.remove_pin(&old_cid).recursive().await?;
-            }
-        }
-
-        Ok(())
     }
 
     pub async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
@@ -1520,17 +1484,7 @@ impl ConversationTask {
 
         document.verify()?;
 
-        let mut map = match self.cid {
-            Some(cid) => self.ipfs.get_dag(cid).local().deserialized().await?,
-            None => BTreeMap::new(),
-        };
-
-        let id = document.id().to_string();
-        let cid = self.ipfs.dag().put().serialize(document).await?;
-
-        map.insert(id, cid);
-
-        self.set_map(map).await
+        self.root.set_conversation_document(document).await
     }
 
     pub async fn subscribe(
