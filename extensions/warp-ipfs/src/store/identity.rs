@@ -53,9 +53,8 @@ use super::{
     phonebook::PhoneBook,
     queue::Queue,
     request::PayloadRequest,
+    SHUTTLE_TIMEOUT,
 };
-
-const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
@@ -380,7 +379,17 @@ impl IdentityStore {
 
         let did_key = Arc::new(did_keypair(&tesseract)?);
 
-        let root_document = RootDocumentMap::new(&ipfs, did_key.clone(), path.clone()).await;
+        let root_document = RootDocumentMap::new(
+            &ipfs,
+            did_key.clone(),
+            &config,
+            matches!(
+                discovery.discovery_config(),
+                DiscoveryConfig::Shuttle { .. }
+            )
+            .then(|| identity_command.clone()),
+        )
+        .await;
 
         let queue = Queue::new(
             ipfs.clone(),
@@ -736,8 +745,6 @@ impl IdentityStore {
 
                     self.root_document.add_request(&req).await?;
 
-                    _ = self.export_root_document().await;
-
                     if self.identity_cache.get(&from).await.is_err() {
                         // Attempt to send identity request to peer if identity is not available locally.
                         if self.request(&from, RequestOption::Identity).await.is_err() {
@@ -767,8 +774,6 @@ impl IdentityStore {
 
                 self.root_document.remove_request(internal_request).await?;
 
-                _ = self.export_root_document().await;
-
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
                     did: data.sender,
                 })
@@ -789,8 +794,6 @@ impl IdentityStore {
                     .ok_or(Error::FriendRequestDoesntExist)?;
 
                 self.root_document.remove_request(internal_request).await?;
-
-                _ = self.export_root_document().await;
 
                 self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
                     did: data.sender,
@@ -823,8 +826,6 @@ impl IdentityStore {
 
                 let completed = self.root_document.add_block_by(&sender).await.is_ok();
                 if completed {
-                    _ = self.export_root_document().await;
-
                     let _ = futures::join!(
                         self.push(&sender),
                         self.request(&sender, RequestOption::Identity)
@@ -844,8 +845,6 @@ impl IdentityStore {
                 let completed = self.root_document.remove_block_by(&sender).await.is_ok();
 
                 if completed {
-                    _ = self.export_root_document().await;
-
                     let _ = futures::join!(
                         self.push(&sender),
                         self.request(&sender, RequestOption::Identity)
@@ -1553,6 +1552,7 @@ impl IdentityStore {
             }
             false => {
                 let id = self.own_identity_document().await.expect("Valid identity");
+
                 if let Err(e) = self.register(&id).await {
                     tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                 }
@@ -2156,7 +2156,8 @@ impl IdentityStore {
                 tracing::error!("Updating root document failed: {e}");
                 e
             })?;
-        let _ = futures::join!(self.export_identity_document(), self.export_root_document());
+
+        let _ = self.export_identity_document().await;
 
         Ok(())
     }
@@ -2209,7 +2210,7 @@ impl IdentityStore {
     pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
         self.root_document.set_status_indicator(status).await?;
 
-        let _ = futures::join!(self.export_identity_document(), self.export_root_document());
+        let _ = self.export_identity_document().await;
 
         self.push_to_all().await;
         Ok(())
@@ -2462,8 +2463,6 @@ impl IdentityStore {
 
             self.root_document.remove_request(internal_request).await?;
 
-            _ = self.export_root_document().await;
-
             return Ok(());
         }
 
@@ -2499,8 +2498,6 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
-        _ = self.export_root_document().await;
-
         self.broadcast_request(pubkey, &payload, false, true).await
     }
 
@@ -2516,8 +2513,6 @@ impl IdentityStore {
         let payload = RequestResponsePayload::new(&self.did_key, Event::Retract)?;
 
         self.root_document.remove_request(internal_request).await?;
-
-        _ = self.export_root_document().await;
 
         if let Some(entry) = self.queue.get(pubkey).await {
             if entry.event == Event::Request {
@@ -2569,8 +2564,6 @@ impl IdentityStore {
 
         self.root_document.add_block(pubkey).await?;
 
-        _ = self.export_root_document().await;
-
         // Remove anything from queue related to the key
         self.queue.remove(pubkey).await;
 
@@ -2612,8 +2605,6 @@ impl IdentityStore {
 
         self.root_document.remove_block(pubkey).await?;
 
-        _ = self.export_root_document().await;
-
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
 
@@ -2651,8 +2642,6 @@ impl IdentityStore {
 
         self.root_document.add_friend(pubkey).await?;
 
-        _ = self.export_root_document().await;
-
         let phonebook = self.phonebook();
         if let Err(_e) = phonebook.add_friend(pubkey).await {
             error!("Error: {_e}");
@@ -2679,7 +2668,6 @@ impl IdentityStore {
         }
 
         self.root_document.remove_friend(pubkey).await?;
-        _ = self.export_root_document().await;
 
         let phonebook = self.phonebook();
 
@@ -2782,7 +2770,6 @@ impl IdentityStore {
             let list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
                 self.root_document.add_request(&outgoing_request).await?;
-                _ = self.export_root_document().await;
             }
         }
 
