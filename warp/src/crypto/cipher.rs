@@ -66,7 +66,14 @@ impl Cipher {
     /// Used to generate and encrypt data with a random key
     pub fn self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::new();
-        let mut data = cipher.encrypt(data)?;
+        let mut data = cipher.encrypt(data, None)?;
+        data.extend(cipher.private_key());
+        Ok(data)
+    }
+
+    pub fn self_encrypt_with_nonce(data: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
+        let cipher = Cipher::new();
+        let mut data = cipher.encrypt(data, Some(nonce))?;
         data.extend(cipher.private_key());
         Ok(data)
     }
@@ -82,7 +89,12 @@ impl Cipher {
     /// Used to encrypt data directly with key
     pub fn direct_encrypt(data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::from(key);
-        cipher.encrypt(data)
+        cipher.encrypt(data, None)
+    }
+
+    pub fn direct_encrypt_with_nonce(data: &[u8], key: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
+        let cipher = Cipher::from(key);
+        cipher.encrypt(data, Some(nonce))
     }
 
     /// Used to decrypt data directly with key
@@ -92,8 +104,11 @@ impl Cipher {
     }
 
     /// Used to encrypt data
-    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let nonce = crate::crypto::generate::<12>();
+    pub fn encrypt(&self, data: &[u8], nonce: Option<&[u8]>) -> Result<Vec<u8>> {
+        let nonce = match nonce {
+            Some(nonce) => nonce.try_into().map_err(|_| Error::InvalidConversion)?,
+            None => crate::crypto::generate::<12>(),
+        };
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
@@ -493,7 +508,7 @@ mod test {
         let cipher = Cipher::from(b"this is my secret cipher key!");
         let message = b"Hello, World!";
 
-        let cipher_data = cipher.encrypt(message)?;
+        let cipher_data = cipher.encrypt(message, None)?;
 
         let plaintext = cipher.decrypt(&cipher_data)?;
 

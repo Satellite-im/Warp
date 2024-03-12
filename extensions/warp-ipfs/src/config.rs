@@ -213,8 +213,6 @@ pub struct StoreSetting {
     pub update_events: UpdateEvents,
     /// Disable providing images for identities
     pub disable_images: bool,
-    /// Enables spam check
-    pub check_spam: bool,
     /// Announce to mesh network
     pub announce_to_mesh: bool,
     /// Function to call to provide data for a default profile picture if one is not apart of the identity
@@ -246,7 +244,6 @@ impl Default for StoreSetting {
             emit_online_event: false,
             update_events: Default::default(),
             disable_images: false,
-            check_spam: true,
             with_friends: false,
             default_profile_picture: None,
             announce_to_mesh: false,
