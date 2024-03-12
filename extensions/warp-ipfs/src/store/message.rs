@@ -5,6 +5,7 @@ use std::{
         btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet,
     },
     ffi::OsStr,
+    future::IntoFuture,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -15,7 +16,7 @@ use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
-    stream::{BoxStream, SelectAll},
+    stream::{BoxStream, FuturesUnordered, SelectAll},
     SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
@@ -257,30 +258,37 @@ impl MessageStore {
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
 
+        let root = identity.root_document().clone();
+        let (atx, arx) = mpsc::channel(1);
+        let mut task = ConversationTask {
+            ipfs: ipfs.clone(),
+            event_handler: Default::default(),
+            keypair,
+            path,
+            topic_stream: Default::default(),
+            conversation_task: HashMap::new(),
+            identity,
+            command_rx: rx,
+            root,
+            discovery,
+            file,
+            event,
+            attachment_rx: arx,
+            attachment_tx: atx,
+            pending_key_exchange: Default::default(),
+            queue: Default::default(),
+        };
+
+        if let Err(e) = task.migrate().await {
+            tracing::warn!(error = %e, "unable to migrate conversations to root document");
+        }
+
+        if let Err(e) = task.load_conversations().await {
+            tracing::warn!("Unable to load conversations: {e}");
+        }
+
         tokio::spawn({
-            let ipfs = ipfs.clone();
-            let keypair = keypair.clone();
             async move {
-                let root = identity.root_document().clone();
-                let (atx, arx) = mpsc::channel(1);
-                let mut task = ConversationTask {
-                    ipfs,
-                    event_handler: Default::default(),
-                    keypair,
-                    path,
-                    topic_stream: Default::default(),
-                    conversation_task: HashMap::new(),
-                    identity,
-                    command_rx: rx,
-                    root,
-                    discovery,
-                    file,
-                    event,
-                    attachment_rx: arx,
-                    attachment_tx: atx,
-                    pending_key_exchange: Default::default(),
-                    queue: Default::default(),
-                };
                 select! {
                     _ = token.cancelled() => {}
                     _ = task.run() => {}
@@ -288,16 +296,10 @@ impl MessageStore {
             }
         });
 
-        let conversation = Self {
+        Self {
             command_tx: tx,
             _task_cancellation: Arc::new(drop_guard),
-        };
-
-        if let Err(e) = conversation.load_conversations().await {
-            tracing::warn!("Unable to load conversations: {e}");
         }
-
-        conversation
     }
 }
 
@@ -1096,6 +1098,41 @@ impl ConversationTask {
                 }
             }
         }
+    }
+
+    async fn migrate(&mut self) -> Result<(), Error> {
+        if let Some(path) = self.path.as_ref() {
+            let mid_file = path.join(".message_id");
+            if !mid_file.is_file() {
+                return Ok(());
+            }
+            let cid = tokio::fs::read(&mid_file)
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                .and_then(|cid_str| {
+                    Cid::from_str(&cid_str)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })?;
+
+            let list: BTreeMap<String, Cid> = self.ipfs.get_dag(cid).local().deserialized().await?;
+
+            let mut stream = FuturesUnordered::from_iter(list.values().copied().map(|cid| {
+                self.ipfs
+                    .get_dag(cid)
+                    .local()
+                    .deserialized::<ConversationDocument>()
+                    .into_future()
+            }))
+            .filter_map(|result| async move { result.ok() })
+            .boxed();
+
+            while let Some(document) = stream.next().await {
+                let _ = self.root.set_conversation_document(document).await;
+            }
+
+            _ = tokio::fs::remove_file(mid_file).await;
+        }
+        Ok(())
     }
 
     async fn load_conversations(&mut self) -> Result<(), Error> {
