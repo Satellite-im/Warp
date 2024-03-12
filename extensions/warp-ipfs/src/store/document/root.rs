@@ -17,7 +17,8 @@ use warp::{
 };
 
 use crate::store::{
-    conversation::ConversationDocument, ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt
+    conversation::ConversationDocument, ecdh_decrypt, ecdh_encrypt, identity::Request,
+    keystore::Keystore, VecExt,
 };
 
 use super::{
