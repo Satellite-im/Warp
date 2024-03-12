@@ -7,7 +7,9 @@ use futures::{
     SinkExt, StreamExt,
 };
 use libipld::Cid;
+
 use rust_ipfs::{p2p::MultiaddrExt, Ipfs, IpfsPath};
+
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -17,12 +19,14 @@ use warp::{
     multipass::identity::IdentityStatus,
 };
 
+
 use crate::{
     config,
     store::{
         ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt, SHUTTLE_TIMEOUT,
     },
 };
+
 
 use super::{
     files::DirectoryDocument, identity::IdentityDocument, ResolvedRootDocument, RootDocument,
