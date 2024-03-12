@@ -19,14 +19,12 @@ use warp::{
     multipass::identity::IdentityStatus,
 };
 
-
 use crate::{
     config,
     store::{
         ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt, SHUTTLE_TIMEOUT,
     },
 };
-
 
 use super::{
     files::DirectoryDocument, identity::IdentityDocument, ResolvedRootDocument, RootDocument,
