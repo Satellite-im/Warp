@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use store::document::ExtractedRootDocument;
+use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
 use store::files::FileStore;
 use store::identity::{IdentityStore, LookupBy};
@@ -1105,7 +1105,7 @@ impl MultiPassImportExport for WarpIpfs {
                 let bytes = tokio::fs::read(path).await?;
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
                 let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                    serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
 
@@ -1139,7 +1139,7 @@ impl MultiPassImportExport for WarpIpfs {
 
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
                 let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                    serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
 
@@ -1188,7 +1188,7 @@ impl MultiPassImportExport for WarpIpfs {
                 let package = store.import_identity_remote(keypair.clone()).await?;
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, package)?;
                 let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                    serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
                 return store.import_identity(exported_document).await;

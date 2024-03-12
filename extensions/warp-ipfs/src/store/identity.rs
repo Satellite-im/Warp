@@ -46,7 +46,7 @@ use super::{
     connected_to_peer, did_keypair,
     document::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
-        root::RootDocumentMap, ExtractedRootDocument, RootDocument,
+        root::RootDocumentMap, ResolvedRootDocument, RootDocument,
     },
     ecdh_decrypt, ecdh_encrypt,
     event_subscription::EventSubscription,
@@ -1523,7 +1523,7 @@ impl IdentityStore {
     #[tracing::instrument(skip(self, extracted))]
     pub async fn import_identity(
         &mut self,
-        extracted: ExtractedRootDocument,
+        extracted: ResolvedRootDocument,
     ) -> Result<Identity, Error> {
         extracted.verify()?;
 
