@@ -16,8 +16,8 @@ use uuid::Uuid;
 use warp::constellation::{Constellation, Progression};
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
-use warp::multipass::identity::Identifier;
-use warp::multipass::MultiPass;
+use warp::multipass::identity::{Identifier, IdentityProfile};
+use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
 use warp::raygun::{
     AttachmentKind, ConversationSettings, GroupSettings, Location, Message, MessageEvent,
     MessageEventKind, MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState,
@@ -57,13 +57,22 @@ struct Opt {
     provide_platform_info: bool,
     #[clap(long)]
     wait: Option<u64>,
+    #[clap(long)]
+    phrase: Option<String>,
+    #[clap(long)]
+    shuttle_point: Option<Multiaddr>,
+    #[clap(long)]
+    import: Option<PathBuf>,
 }
 
 async fn setup<P: AsRef<Path>>(
     path: Option<P>,
     passphrase: Zeroizing<String>,
     opt: &Opt,
-) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>)> {
+) -> anyhow::Result<(
+    (Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>),
+    Option<IdentityProfile>,
+)> {
     let tesseract = match path.as_ref() {
         Some(path) => {
             let path = path.as_ref();
@@ -83,19 +92,27 @@ async fn setup<P: AsRef<Path>>(
     };
 
     if opt.enable_discovery {
-        let discovery_type = match &opt.discovery_point {
-            Some(addr) => {
+        let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
+            (Some(addr), None) => {
                 config.ipfs_setting.bootstrap = false;
                 DiscoveryType::RzPoint {
                     addresses: vec![addr.clone()],
                 }
             }
-            None => DiscoveryType::DHT,
+            (Some(_), Some(_)) => unimplemented!(),
+            _ => DiscoveryType::DHT,
         };
-        config.store_setting.discovery = Discovery::Namespace {
-            namespace: opt.context.clone(),
-            discovery_type,
+
+        let dis_ty = match &opt.shuttle_point {
+            Some(addr) => Discovery::Shuttle {
+                addresses: { vec![addr.clone()] },
+            },
+            None => Discovery::Namespace {
+                namespace: opt.context.clone(),
+                discovery_type,
+            },
         };
+        config.store_setting.discovery = dis_ty;
         if let Some(bootstrap) = opt.bootstrap {
             config.ipfs_setting.bootstrap = bootstrap;
         }
@@ -104,6 +121,7 @@ async fn setup<P: AsRef<Path>>(
         config.bootstrap = Bootstrap::None;
         config.ipfs_setting.bootstrap = false;
     }
+
     if opt.disable_relay {
         config.enable_relay = false;
     }
@@ -126,10 +144,32 @@ async fn setup<P: AsRef<Path>>(
         .finalize()
         .await?;
 
+    let mut profile = None;
+
     if account.get_own_identity().await.is_err() {
-        account.create_identity(None, None).await?;
+        match (opt.import.clone(), opt.phrase.clone()) {
+            (Some(path), Some(passphrase)) => {
+                account
+                    .import_identity(IdentityImportOption::Locate {
+                        location: ImportLocation::Local { path },
+                        passphrase,
+                    })
+                    .await?;
+            }
+            (None, Some(passphrase)) => {
+                account
+                    .import_identity(IdentityImportOption::Locate {
+                        location: ImportLocation::Remote,
+                        passphrase,
+                    })
+                    .await?;
+            }
+            _ => {
+                profile = Some(account.create_identity(None, None).await?);
+            }
+        };
     }
-    Ok((account, raygun, filesystem))
+    Ok(((account, raygun, filesystem), profile))
 }
 
 #[allow(clippy::clone_on_copy)]
@@ -157,11 +197,24 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Creating or obtaining account...");
-    let (new_account, mut chat, _) =
+    let ((new_account, mut chat, _), profile) =
         setup(opt.path.clone(), Zeroizing::new(password), &opt).await?;
 
     println!("Obtaining identity....");
-    let identity = new_account.get_own_identity().await?;
+    let identity = match profile {
+        Some(profile) => {
+            println!("Identity created");
+            if let Some(phrase) = profile.passphrase() {
+                println!("Identity mnemonic phrase: {phrase}");
+            }
+            profile.identity().clone()
+        }
+        None => {
+            println!("Obtained identity....");
+            new_account.get_own_identity().await?
+        }
+    };
+
     println!(
         "Registered user {}#{}",
         identity.username(),
