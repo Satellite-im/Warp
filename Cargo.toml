@@ -16,7 +16,6 @@ resolver = "2"
 
 # Async and futures crates
 futures = { version = "0.3" }
-futures-timer = "3.0"
 async-trait = { version = "0.1" }
 async-stream = "0.3"
 async-broadcast = "0.5"
@@ -25,13 +24,8 @@ tokio-util = { version = "0.7" }
 tokio-stream = { version = "0.1" }
 
 # Crypto crates
-x25519-dalek = { version = "1" }
 ed25519-dalek = { version = "1" }
-curve25519-dalek = "3.2"
-blake2 = { version = "0.10" }
-sha1 = { version = "0.10" }
 sha2 = { version = "0.10" }
-sha3 = { version = "0.10" }
 hmac = { version = "0.12.0", default-features = false }
 digest = { version = "0.10" }
 aes-gcm = { version = "0.10" }
@@ -47,7 +41,6 @@ thiserror = "1.0"
 
 # Sync crates
 parking_lot = { version = "0.12" }
-cfg-if = "1.0"
 once_cell = "1.16"
 
 # Time crate
@@ -72,16 +65,15 @@ dyn-clone = "1.0"
 uuid = { version = "1", features = ["serde", "v4"] }
 derive_more = "0.99"
 paste = "1.0"
-libc = "0.2"
 sata = { git = "https://github.com/Satellite-im/Sata", rev = "9b5a5d441c816968bc75ea8b99335f728be259ef" }
 tracing = { version = "0.1" }
-tracing-futures = { version = "0.2" }
-getrandom = { version = "0.2" }
 either = "1"
 void = "1"
 
-# ipfs dependency
-rust-ipfs = "0.11.0"
+#ipfs dependency
+rust-ipfs = { version = "0.11.0", default-features = false, features = [
+    "libp2p_bitswap",
+] }
 
 
 # Blink related crates

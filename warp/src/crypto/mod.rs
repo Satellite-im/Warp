@@ -2,15 +2,12 @@
 use std::{fmt::Display, str::FromStr};
 
 pub use aes_gcm;
-pub use curve25519_dalek;
 pub use did_key::{self, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial};
 use did_key::{Generate, P256KeyPair, Secp256k1KeyPair, X25519KeyPair};
 pub use digest;
 pub use ed25519_dalek;
-pub use getrandom;
 pub use rand;
 pub use sha2;
-pub use x25519_dalek;
 pub use zeroize;
 
 pub mod cipher;
@@ -160,6 +157,8 @@ impl From<ed25519_dalek::SecretKey> for DID {
 
 pub fn generate<const N: usize>() -> [u8; N] {
     let mut buf = [0u8; N];
-    getrandom::getrandom(&mut buf).unwrap();
+    for x in buf.iter_mut() {
+        *x = rand::random()
+    }
     buf
 }
