@@ -64,6 +64,81 @@ mod test {
     }
 
     #[tokio::test]
+    async fn destroy_conversation() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![
+            (None, None, Some("test::destroy_conversation".into())),
+            (None, None, Some("test::destroy_conversation".into())),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+
+        chat_a.create_conversation(&did_b).await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        assert_eq!(id_a, id_b);
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.conversation_type(), ConversationType::Direct);
+        assert_eq!(conversation.recipients().len(), 2);
+        assert!(conversation.recipients().contains(&did_a));
+        assert!(conversation.recipients().contains(&did_b));
+        let id = conversation.id();
+
+        chat_a.delete(id, None).await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    assert_eq!(conversation_id, id);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    assert_eq!(conversation_id, id);
+                    break;
+                }
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn send_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -197,7 +272,7 @@ mod test {
 
         fs_a.put_buffer("image.png", PROFILE_IMAGE).await?;
 
-        let mut stream = chat_a
+        let (_, mut stream) = chat_a
             .attach(
                 id_a,
                 None,
@@ -218,7 +293,9 @@ mod test {
                 AttachmentKind::AttachedProgress(Progression::ProgressFailed { .. }) => {
                     unreachable!("should not fail")
                 }
-                AttachmentKind::Pending(result) => result?,
+                AttachmentKind::Pending(result) => {
+                    result?;
+                }
             }
         }
 

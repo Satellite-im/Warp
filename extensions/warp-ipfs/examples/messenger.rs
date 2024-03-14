@@ -1,18 +1,16 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
-use parking_lot::RwLock;
+use futures::stream::BoxStream;
 use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, SharedWriter};
-use std::collections::HashMap;
 use std::env::temp_dir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
-use tokio::task::JoinHandle;
+use tokio_stream::StreamMap;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use warp::constellation::{Constellation, Progression};
@@ -22,8 +20,8 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     AttachmentKind, ConversationSettings, GroupSettings, Location, Message, MessageEvent,
-    MessageEventKind, MessageEventStream, MessageOptions, MessageStream, MessageType, Messages,
-    MessagesType, PinState, RayGun, ReactionState,
+    MessageEventKind, MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState,
+    RayGun, ReactionState,
 };
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
@@ -175,10 +173,11 @@ async fn main() -> anyhow::Result<()> {
         identity.username(),
         identity.short_id()
     ))?;
+    rl.should_print_line_on(false, true);
 
-    let topic = Arc::new(RwLock::new(Uuid::nil()));
+    let mut topic = Uuid::nil();
 
-    let mut stream_map: HashMap<Uuid, JoinHandle<()>> = HashMap::new();
+    let mut stream_map: StreamMap<Uuid, BoxStream<'static, MessageEventKind>> = StreamMap::new();
 
     let message = r#"
         Use `/create <did>` to create the conversation
@@ -197,76 +196,54 @@ async fn main() -> anyhow::Result<()> {
     writeln!(stdout, "\n{}", list_commands_and_help())?;
     writeln!(stdout, "DID: {}", identity.did_key())?;
 
-    // loads all conversations into their own task to process events
+    // loads all conversations, pushing their streams into the `StreamMap` to poll.
     for conversation in chat.list_conversations().await.unwrap_or_default() {
-        {
-            let topic = topic.clone();
-            let id = conversation.id();
-            *topic.write() = id;
-        }
-        let mut stdout = stdout.clone();
+        let id = conversation.id();
 
-        let topic = topic.clone();
-        let stream = chat.get_conversation_stream(conversation.id()).await?;
-        let account = new_account.clone();
-        let chat = chat.clone();
-        let raw_id = { *topic.read() };
-        stream_map.insert(
-            raw_id,
-            tokio::spawn(async move {
-                if let Err(e) =
-                    message_event_handle(stdout.clone(), account, chat, stream, topic.clone()).await
-                {
-                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
-                }
-            }),
-        );
+        let stream = chat.get_conversation_stream(id).await?;
+        stream_map.insert(id, stream);
+    }
+
+    // Use the last conversation on the list
+    if !stream_map.is_empty() {
+        topic = stream_map.keys().last().copied().expect("id exist");
     }
 
     // selects the last conversation
-    if *topic.read() != Uuid::nil() {
-        writeln!(stdout, "Set conversation to {}", *topic.read())?;
+    if topic != Uuid::nil() {
+        writeln!(stdout, "Set conversation to {}", topic)?;
     }
 
     let mut event_stream = chat.subscribe().await?;
 
     loop {
         tokio::select! {
+            biased;
             event = event_stream.next() => {
                 if let Some(event) = event {
                     match event {
                         warp::raygun::RayGunEventKind::ConversationCreated { conversation_id } => {
-                            *topic.write() = conversation_id;
-                            writeln!(stdout, "Set conversation to {}", *topic.read())?;
-                            let mut stdout = stdout.clone();
-                            let account = new_account.clone();
-                            let stream = chat.get_conversation_stream(conversation_id).await?;
-                            let chat = chat.clone();
-                            let topic = topic.clone();
-                            let raw_id = { *topic.read() };
-                            stream_map.insert(raw_id, tokio::spawn(async move {
+                            topic = conversation_id;
+                            writeln!(stdout, "Set conversation to {}", topic)?;
 
-                                if let Err(e) = message_event_handle(
-                                    stdout.clone(),
-                                    account.clone(),
-                                    chat.clone(),
-                                    stream,
-                                    topic.clone(),
-                                ).await {
-                                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
-                                }
-                            }));
+                            let stream = chat.get_conversation_stream(conversation_id).await?;
+
+                            stream_map.insert(conversation_id, stream);
                         },
                         warp::raygun::RayGunEventKind::ConversationDeleted { conversation_id } => {
-                            if let std::collections::hash_map::Entry::Occupied(entry) = stream_map.entry(conversation_id) {
-                                entry.get().abort();
-                            }
+                            stream_map.remove(&conversation_id);
 
-                            if *topic.read() == conversation_id {
+                            if topic == conversation_id {
                                 writeln!(stdout, "Conversation {conversation_id} has been deleted")?;
                             }
                         },
                     }
+                }
+            }
+            Some((conversation_id, event)) = stream_map.next() => {
+                if let Err(e) = message_event_handle(topic, event, &mut stdout, &*new_account, &*chat).await {
+                    writeln!(stdout, "error while processing event from {conversation_id}: {e}")?;
+                    continue;
                 }
             }
             line = rl.readline().fuse() => match line {
@@ -277,7 +254,7 @@ async fn main() -> anyhow::Result<()> {
                     if !line.starts_with('/') {
                         if !line.is_empty() {
                             // All commands start with a `/`. Everything else is a message.
-                            if let Err(e) = chat.send(*topic.read(), vec![line.to_string()]).await {
+                            if let Err(e) = chat.send(topic, vec![line.to_string()]).await {
                                 writeln!(stdout, "Error sending message: {e}")?;
                             }
                         }
@@ -300,7 +277,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                         },
                         AddRecipient(did) => {
-                            let local_topic = *topic.read();
+                            let local_topic = topic;
                             if let Err(e) = chat.add_recipient(local_topic, &did).await {
                                 writeln!(stdout, "Error adding recipient: {e}")?;
                                 continue
@@ -309,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
 
                         },
                         RemoveRecipient(did) => {
-                            let local_topic = *topic.read();
+                            let local_topic = topic;
                             if let Err(e) = chat.remove_recipient(local_topic, &did).await {
                                 writeln!(stdout, "Error removing recipient: {e}")?;
                                 continue
@@ -320,6 +297,7 @@ async fn main() -> anyhow::Result<()> {
                         CreateGroupConversation(name, did_keys, open) => {
                             let mut settings = GroupSettings::default();
                             settings.set_members_can_add_participants(open);
+                            settings.set_members_can_change_name(open);
                             if let Err(e) = chat.create_group_conversation(
                                 Some(name.to_string()),
                                 did_keys,
@@ -338,11 +316,11 @@ async fn main() -> anyhow::Result<()> {
                         }
                         //Temporary since topic is set outside
                         SetConversation(conversation_id) => {
-                            *topic.write() = conversation_id;
+                            topic = conversation_id;
                             writeln!(stdout, "Conversation is set to {conversation_id}")?;
                         }
                         SetConversationName(name) => {
-                            let topic = *topic.read();
+                            let topic = topic;
 
                             if let Err(e) = chat.update_conversation_name(topic, &name).await {
                                 writeln!(stdout, "Error updating conversation: {e}")?;
@@ -366,16 +344,17 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{table}")?;
                         },
                         SetGroupOpen(open) => {
-                            let topic = *topic.read();
+                            let topic = topic;
                             let mut settings = GroupSettings::default();
                             settings.set_members_can_add_participants(open);
+                            settings.set_members_can_change_name(open);
                             if let Err(e) = chat.update_conversation_settings(topic, ConversationSettings::Group(settings)).await {
                                 writeln!(stdout, "Error updating group settings: {e}")?;
                                 continue
                             }
                         },
                         ListReferences(opt) => {
-                            let local_topic = *topic.read();
+                            let local_topic = topic;
                             let mut messages_stream = match chat.get_message_references(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -401,7 +380,7 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{table}")?
                         }
                         ListMessages(opt) => {
-                            let local_topic = *topic.read();
+                            let local_topic = topic;
 
                             let mut messages_stream = match chat.get_messages(local_topic, opt.set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
                                 Ok(list) => list,
@@ -435,7 +414,7 @@ async fn main() -> anyhow::Result<()> {
 
                         },
                         ListPages(opt) => {
-                            let local_topic = *topic.read();
+                            let local_topic = topic;
                             let pages = match chat.get_messages(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -476,7 +455,7 @@ async fn main() -> anyhow::Result<()> {
                         GetFirst => {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
-                            let local_topic = *topic.read();
+                            let local_topic = topic;
                             let messages = match chat.get_messages(local_topic, MessageOptions::default().set_first_message()).await.and_then(Vec::<Message>::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -505,7 +484,7 @@ async fn main() -> anyhow::Result<()> {
                         GetLast => {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
-                            let local_topic = *topic.read();
+                            let local_topic = topic;
 
                             let messages = match chat.get_messages(local_topic, MessageOptions::default().set_last_message()).await.and_then(Vec::<Message>::try_from) {
                                 Ok(list) => list,
@@ -535,7 +514,7 @@ async fn main() -> anyhow::Result<()> {
                         Search(keywords) => {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
-                            let local_topic = *topic.read();
+                            let local_topic = topic;
 
                             let mut messages_stream = match chat.get_messages(local_topic, MessageOptions::default().set_keyword(&keywords).set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
                                 Ok(list) => list,
@@ -565,7 +544,7 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{table}")?;
                         },
                         EditMessage(message_id, message) => {
-                            let conversation_id = topic.read().clone();
+                            let conversation_id = topic;
                             if let Err(e) = chat.edit(conversation_id, message_id, vec![message]).await {
                                 writeln!(stdout, "Error: {e}")?;
                                 continue
@@ -578,13 +557,13 @@ async fn main() -> anyhow::Result<()> {
                                 continue
                             }
 
-                            let conversation_id = topic.read().clone();
+                            let conversation_id = topic;
                             tokio::spawn({
                                 let mut chat = chat.clone();
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    let mut stream = match chat.attach(conversation_id, None, files, vec![]).await {
+                                    let (_, mut stream) = match chat.attach(conversation_id, None, files, vec![]).await {
                                         Ok(stream) => stream,
                                         Err(e) => {
                                             writeln!(stdout, "> Error: {e}")?;
@@ -598,7 +577,7 @@ async fn main() -> anyhow::Result<()> {
                                                 writeln!(stdout, "> {name} is uploaded")?;
                                             },
                                             AttachmentKind::AttachedProgress(Progression::ProgressFailed { name, error, .. }) => {
-                                                writeln!(stdout, "> {name} failed to upload: {}", error.unwrap_or_default())?;
+                                                writeln!(stdout, "> {name} failed to upload: {}", error)?;
                                             },
                                             AttachmentKind::Pending(Ok(_)) => {
                                                 writeln!(stdout, "> File sent")?;
@@ -614,7 +593,7 @@ async fn main() -> anyhow::Result<()> {
 
                         },
                         Download(message_id, file, path) => {
-                            let conversation_id = topic.read().clone();
+                            let conversation_id = topic;
 
                             writeln!(stdout, "Downloading....")?;
                             let mut stream = match chat.download(conversation_id, message_id, file, path).await {
@@ -657,7 +636,7 @@ async fn main() -> anyhow::Result<()> {
                                                 writeln!(stdout,
                                                     "{name} failed to download at {} MB due to: {}",
                                                     last_size.unwrap_or_default(),
-                                                    error.unwrap_or_default()
+                                                    error
                                                 )?;
                                             }
                                         }
@@ -667,7 +646,7 @@ async fn main() -> anyhow::Result<()> {
                             });
                         },
                         React(message_id, state, code) => {
-                            let conversation_id = topic.read().clone();
+                            let conversation_id = topic;
 
                             if let Err(e) = chat.react(conversation_id, message_id, state.into(), code).await {
                                 writeln!(stdout, "Error: {e}")?;
@@ -677,7 +656,7 @@ async fn main() -> anyhow::Result<()> {
 
                         }
                         Status(id) => {
-                            let topic = topic.read().clone();
+                            let topic = topic;
                             let status = match chat.message_status(topic, id).await {
                                 Ok(status) => status,
                                 Err(_e) => {
@@ -689,7 +668,7 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Message Status: {status}")?;
                         }
                         Pin(target) => {
-                            let topic = topic.read().clone();
+                            let topic = topic;
                             match target {
                                 PinTarget::All => {
                                     tokio::spawn({
@@ -721,7 +700,7 @@ async fn main() -> anyhow::Result<()> {
                                     tokio::spawn({
                                         let mut chat = chat.clone();
                                         let mut stdout = stdout.clone();
-                                        let topic = topic.read().clone();
+                                        let topic = topic;
                                         async move {
                                             let messages = chat
                                                 .get_messages(topic, MessageOptions::default())
@@ -736,20 +715,20 @@ async fn main() -> anyhow::Result<()> {
                                     });
                                 },
                                 PinTarget::Message(id) => {
-                                    chat.pin(*topic.read(), id, PinState::Unpin).await?;
+                                    chat.pin(topic, id, PinState::Unpin).await?;
                                     writeln!(stdout, "Unpinned {id}")?;
                                 },
                             }
                         }
                         RemoveMessage(id) => {
-                            let topic = topic.read().clone();
+                            let topic = topic;
                             match chat.delete(topic, Some(id)).await {
                                 Ok(_) => writeln!(stdout, "Message {id} removed")?,
                                 Err(e) => writeln!(stdout, "Error removing message: {e}")?,
                             }
                         }
                         CountMessages => {
-                            let amount = chat.get_message_count(*topic.read()).await?;
+                            let amount = chat.get_message_count(topic).await?;
                             writeln!(stdout, "Conversation contains {amount} messages")?;
                         }
                     }
@@ -778,221 +757,184 @@ async fn get_username(account: &dyn MultiPass, did: DID) -> String {
 }
 
 async fn message_event_handle(
-    mut stdout: SharedWriter,
-    multipass: Box<dyn MultiPass>,
-    raygun: Box<dyn RayGun>,
-    mut stream: MessageEventStream,
-    conversation_id: Arc<RwLock<Uuid>>,
+    main_conversation_id: Uuid,
+    event: MessageEventKind,
+    stdout: &mut SharedWriter,
+    multipass: &dyn MultiPass,
+    raygun: &dyn RayGun,
 ) -> anyhow::Result<()> {
-    let identity = multipass.get_own_identity().await?;
-    let topic = conversation_id.clone();
-    while let Some(event) = stream.next().await {
-        match event {
-            MessageEventKind::MessageReceived {
-                conversation_id,
-                message_id,
-            }
-            | MessageEventKind::MessageSent {
-                conversation_id,
-                message_id,
-            } => {
-                if *topic.read() == conversation_id {
-                    if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
-                        let username = get_username(&*multipass, message.sender()).await;
+    match event {
+        MessageEventKind::MessageReceived {
+            conversation_id,
+            message_id,
+        }
+        | MessageEventKind::MessageSent {
+            conversation_id,
+            message_id,
+        } => {
+            if main_conversation_id == conversation_id {
+                if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
+                    let username = get_username(multipass, message.sender()).await;
 
-                        match message.message_type() {
-                            MessageType::Message => match message.metadata().get("is_spam") {
-                                Some(_) => {
-                                    writeln!(
-                                        stdout,
-                                        "[{}] @> [SPAM!] {}",
-                                        username,
-                                        message.lines().join("\n")
-                                    )?;
-                                }
-                                None => {
-                                    writeln!(
-                                        stdout,
-                                        "[{}] @> {}",
-                                        username,
-                                        message.lines().join("\n")
-                                    )?;
-                                }
-                            },
-                            MessageType::Attachment => {
-                                if !message.lines().is_empty() {
-                                    match message.metadata().get("is_spam") {
-                                        Some(_) => {
-                                            writeln!(
-                                                stdout,
-                                                "[{}] @> [SPAM!] {}",
-                                                username,
-                                                message.lines().join("\n")
-                                            )?;
-                                        }
-                                        None => {
-                                            writeln!(
-                                                stdout,
-                                                "[{}] @> {}",
-                                                username,
-                                                message.lines().join("\n")
-                                            )?;
-                                        }
-                                    }
-                                }
+                    let lines = message.lines();
 
-                                for attachment in message.attachments() {
-                                    if message.sender() == identity.did_key() {
-                                        writeln!(stdout, ">> File {} attached", attachment.name())?;
-                                    } else {
-                                        writeln!(
-                                            stdout,
-                                            ">> File {} been attached with size {} bytes",
-                                            attachment.name(),
-                                            attachment.size()
-                                        )?;
-
-                                        writeln!(
-                                            stdout,
-                                            ">> Do `/download {} {} <path>` to download",
-                                            message.id(),
-                                            attachment.name(),
-                                        )?;
-                                    }
-                                }
+                    match message.message_type() {
+                        MessageType::Message => {
+                            writeln!(stdout, "[{}] @> {}", username, lines.join("\n"))?
+                        }
+                        MessageType::Attachment => {
+                            if !lines.is_empty() {
+                                writeln!(stdout, "[{}] @> {}", username, lines.join("\n"))?;
                             }
-                            MessageType::Event => {}
-                        }
-                    }
-                }
-            }
-            MessageEventKind::MessagePinned {
-                conversation_id,
-                message_id,
-            } => {
-                if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {message_id} has been pinned")?;
-                }
-            }
-            MessageEventKind::MessageUnpinned {
-                conversation_id,
-                message_id,
-            } => {
-                if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {message_id} has been unpinned")?;
-                }
-            }
-            MessageEventKind::MessageEdited {
-                conversation_id,
-                message_id,
-            } => {
-                if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {message_id} has been edited")?;
-                }
-            }
-            MessageEventKind::MessageDeleted {
-                conversation_id,
-                message_id,
-            } => {
-                if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {message_id} has been deleted")?;
-                }
-            }
-            MessageEventKind::MessageReactionAdded {
-                conversation_id,
-                message_id,
-                did_key,
-                reaction,
-            } => {
-                if *topic.read() == conversation_id {
-                    let username = get_username(&*multipass, did_key.clone()).await;
-                    writeln!(
-                        stdout,
-                        "> {username} has reacted to {message_id} with {reaction}"
-                    )?;
-                }
-            }
-            MessageEventKind::MessageReactionRemoved {
-                conversation_id,
-                message_id,
-                did_key,
-                reaction,
-            } => {
-                if *topic.read() == conversation_id {
-                    let username = get_username(&*multipass, did_key.clone()).await;
-                    writeln!(
-                        stdout,
-                        "> {username} has removed reaction {reaction} from {message_id}"
-                    )?;
-                }
-            }
-            MessageEventKind::EventReceived {
-                conversation_id,
-                did_key,
-                event,
-            } => {
-                if *topic.read() == conversation_id {
-                    let username = get_username(&*multipass, did_key.clone()).await;
-                    match event {
-                        MessageEvent::Typing => {
-                            writeln!(stdout, ">>> {username} is typing",)?;
-                        }
-                    }
-                }
-            }
-            MessageEventKind::EventCancelled {
-                conversation_id,
-                did_key,
-                event,
-            } => {
-                if *topic.read() == conversation_id {
-                    let username = get_username(&*multipass, did_key.clone()).await;
 
-                    match event {
-                        MessageEvent::Typing => {
-                            writeln!(stdout, ">>> {username} is no longer typing",)?;
+                            for attachment in message.attachments() {
+                                writeln!(
+                                    stdout,
+                                    ">> File {} been attached with size {} bytes",
+                                    attachment.name(),
+                                    attachment.size()
+                                )?;
+
+                                writeln!(
+                                    stdout,
+                                    ">> Do `/download {} {} <path>` to download",
+                                    message.id(),
+                                    attachment.name(),
+                                )?;
+                            }
                         }
+                        MessageType::Event => {}
                     }
-                }
-            }
-            MessageEventKind::ConversationNameUpdated {
-                conversation_id,
-                name,
-            } => {
-                if *topic.read() == conversation_id {
-                    writeln!(stdout, ">>> Conversation was named to {name}")?;
-                }
-            }
-            MessageEventKind::RecipientAdded {
-                conversation_id,
-                recipient,
-            } => {
-                if *topic.read() == conversation_id {
-                    let username = get_username(&*multipass, recipient.clone()).await;
-
-                    writeln!(stdout, ">>> {username} was added to {conversation_id}")?;
-                }
-            }
-            MessageEventKind::RecipientRemoved {
-                conversation_id,
-                recipient,
-            } => {
-                if *topic.read() == conversation_id {
-                    let username = get_username(&*multipass, recipient.clone()).await;
-
-                    writeln!(stdout, ">>> {username} was removed from {conversation_id}")?;
-                }
-            }
-            MessageEventKind::ConversationSettingsUpdated {
-                conversation_id,
-                settings,
-            } => {
-                if *topic.read() == conversation_id {
-                    writeln!(stdout, ">>> Conversation settings updated: {settings}")?;
                 }
             }
         }
+        MessageEventKind::MessagePinned {
+            conversation_id,
+            message_id,
+        } => {
+            if main_conversation_id == conversation_id {
+                writeln!(stdout, "> Message {message_id} has been pinned")?;
+            }
+        }
+        MessageEventKind::MessageUnpinned {
+            conversation_id,
+            message_id,
+        } => {
+            if main_conversation_id == conversation_id {
+                writeln!(stdout, "> Message {message_id} has been unpinned")?;
+            }
+        }
+        MessageEventKind::MessageEdited {
+            conversation_id,
+            message_id,
+        } => {
+            if main_conversation_id == conversation_id {
+                writeln!(stdout, "> Message {message_id} has been edited")?;
+            }
+        }
+        MessageEventKind::MessageDeleted {
+            conversation_id,
+            message_id,
+        } => {
+            if main_conversation_id == conversation_id {
+                writeln!(stdout, "> Message {message_id} has been deleted")?;
+            }
+        }
+        MessageEventKind::MessageReactionAdded {
+            conversation_id,
+            message_id,
+            did_key,
+            reaction,
+        } => {
+            if main_conversation_id == conversation_id {
+                let username = get_username(multipass, did_key.clone()).await;
+                writeln!(
+                    stdout,
+                    "> {username} has reacted to {message_id} with {reaction}"
+                )?;
+            }
+        }
+        MessageEventKind::MessageReactionRemoved {
+            conversation_id,
+            message_id,
+            did_key,
+            reaction,
+        } => {
+            if main_conversation_id == conversation_id {
+                let username = get_username(multipass, did_key.clone()).await;
+                writeln!(
+                    stdout,
+                    "> {username} has removed reaction {reaction} from {message_id}"
+                )?;
+            }
+        }
+        MessageEventKind::EventReceived {
+            conversation_id,
+            did_key,
+            event,
+        } => {
+            if main_conversation_id == conversation_id {
+                let username = get_username(multipass, did_key.clone()).await;
+                match event {
+                    MessageEvent::Typing => {
+                        writeln!(stdout, ">>> {username} is typing",)?;
+                    }
+                }
+            }
+        }
+        MessageEventKind::EventCancelled {
+            conversation_id,
+            did_key,
+            event,
+        } => {
+            if main_conversation_id == conversation_id {
+                let username = get_username(multipass, did_key.clone()).await;
+
+                match event {
+                    MessageEvent::Typing => {
+                        writeln!(stdout, ">>> {username} is no longer typing",)?;
+                    }
+                }
+            }
+        }
+        MessageEventKind::ConversationNameUpdated {
+            conversation_id,
+            name,
+        } => {
+            if main_conversation_id == conversation_id {
+                writeln!(stdout, ">>> Conversation was named to {name}")?;
+            }
+        }
+        MessageEventKind::RecipientAdded {
+            conversation_id,
+            recipient,
+        } => {
+            if main_conversation_id == conversation_id {
+                let username = get_username(multipass, recipient.clone()).await;
+
+                writeln!(stdout, ">>> {username} was added to {conversation_id}")?;
+            }
+        }
+        MessageEventKind::RecipientRemoved {
+            conversation_id,
+            recipient,
+        } => {
+            if main_conversation_id == conversation_id {
+                let username = get_username(multipass, recipient.clone()).await;
+
+                writeln!(stdout, ">>> {username} was removed from {conversation_id}")?;
+            }
+        }
+        MessageEventKind::ConversationSettingsUpdated {
+            conversation_id,
+            settings,
+        } => {
+            if main_conversation_id == conversation_id {
+                writeln!(stdout, ">>> Conversation settings updated: {settings}")?;
+            }
+        }
     }
+
     Ok(())
 }
 

@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -49,7 +50,7 @@ impl DirectoryDocument {
         .collect::<Vec<_>>()
         .await;
 
-        let cid = ipfs.dag().put().serialize(items)?.await?;
+        let cid = ipfs.dag().put().serialize(items).await?;
 
         document.items = Some(cid);
 
@@ -70,7 +71,7 @@ impl DirectoryDocument {
     }
 
     #[async_recursion::async_recursion]
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<Directory, Error> {
+    pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<Directory, Error> {
         let mut directory = Directory::new(&self.name);
         directory.set_description(&self.description);
         directory.set_favorite(self.favorite);
@@ -86,7 +87,8 @@ impl DirectoryDocument {
                 .unwrap_or_default();
 
             let items_resolved = FuturesUnordered::from_iter(
-                list.iter().map(|item| item.resolve(ipfs).into_future()),
+                list.iter()
+                    .map(|item| item.resolve(ipfs, resolve_thumbnail).into_future()),
             )
             .filter_map(|item| async { item.ok() });
 
@@ -98,6 +100,7 @@ impl DirectoryDocument {
         }
 
         if let Some(cid) = self.thumbnail {
+            directory.set_thumbnail_reference(&IpfsPath::from(cid).to_string());
             let image: ImageDag = ipfs
                 .get_dag(cid)
                 .timeout(Duration::from_secs(10))
@@ -106,13 +109,16 @@ impl DirectoryDocument {
 
             directory.set_thumbnail_format(image.mime.into());
 
-            let data = ipfs
-                .unixfs()
-                .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
-                .await
-                .unwrap_or_default();
+            if resolve_thumbnail {
+                let data = ipfs
+                    .unixfs()
+                    .cat(image.link)
+                    .timeout(Duration::from_secs(10))
+                    .await
+                    .unwrap_or_default();
 
-            directory.set_thumbnail(&data);
+                directory.set_thumbnail(&data);
+            }
         }
 
         directory.rebuild_paths(&None);
@@ -132,12 +138,12 @@ impl ItemDocument {
         let document = match item {
             Item::File(file) => {
                 let document = FileDocument::new(ipfs, file).await?;
-                let cid = ipfs.dag().put().serialize(document)?.await?;
+                let cid = ipfs.dag().put().serialize(document).await?;
                 ItemDocument::File(cid)
             }
             Item::Directory(directory) => {
                 let document = DirectoryDocument::new(ipfs, directory).await?;
-                let cid = ipfs.dag().put().serialize(document)?.await?;
+                let cid = ipfs.dag().put().serialize(document).await?;
                 ItemDocument::Directory(cid)
             }
         };
@@ -145,7 +151,7 @@ impl ItemDocument {
         Ok(document)
     }
 
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<Item, Error> {
+    pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<Item, Error> {
         let item = match *self {
             ItemDocument::Directory(cid) => {
                 let document: DirectoryDocument = ipfs
@@ -154,7 +160,7 @@ impl ItemDocument {
                     .await
                     .map_err(anyhow::Error::from)?;
 
-                let directory = document.resolve(ipfs).await?;
+                let directory = document.resolve(ipfs, resolve_thumbnail).await?;
                 Item::Directory(directory)
             }
             ItemDocument::File(cid) => {
@@ -164,7 +170,7 @@ impl ItemDocument {
                     .await
                     .map_err(anyhow::Error::from)?;
 
-                let file = document.resolve(ipfs).await?;
+                let file = document.resolve(ipfs, resolve_thumbnail).await?;
                 Item::File(file)
             }
         };
@@ -183,7 +189,7 @@ pub struct FileDocument {
     pub creation: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub file_type: FileType,
-    pub reference: Option<Cid>,
+    pub reference: Option<String>,
     pub hash: Hash,
 }
 
@@ -212,7 +218,7 @@ impl FileDocument {
                 .contains(&cid)
                 .await
                 .unwrap_or_default()
-                .then_some(cid)
+                .then(|| cid.to_string())
         }
 
         if let Some(cid) = file
@@ -231,7 +237,7 @@ impl FileDocument {
         Ok(document)
     }
 
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<File, Error> {
+    pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<File, Error> {
         let file = File::new(&self.name);
         file.set_description(&self.description);
         file.set_size(self.size);
@@ -242,6 +248,7 @@ impl FileDocument {
         file.set_file_type(self.file_type.clone());
 
         if let Some(cid) = self.thumbnail {
+            file.set_thumbnail_reference(&IpfsPath::from(cid).to_string());
             let image: ImageDag = ipfs
                 .get_dag(cid)
                 .timeout(Duration::from_secs(10))
@@ -250,16 +257,24 @@ impl FileDocument {
 
             file.set_thumbnail_format(image.mime.into());
 
-            let data = ipfs
-                .unixfs()
-                .cat(image.link, None, &[], false, Some(Duration::from_secs(10)))
-                .await
-                .unwrap_or_default();
+            if resolve_thumbnail {
+                let data = ipfs
+                    .unixfs()
+                    .cat(image.link)
+                    .timeout(Duration::from_secs(10))
+                    .await
+                    .unwrap_or_default();
 
-            file.set_thumbnail(&data);
+                file.set_thumbnail(&data);
+            }
         }
 
-        if let Some(cid) = self.reference {
+        if let Some(cid) = self
+            .reference
+            .as_ref()
+            .and_then(|cid| Cid::from_str(cid).ok())
+        {
+            // Since the cid is valid, we will convert it to a ipfs path to store as a reference in `File::reference`
             let path = IpfsPath::from(cid);
             file.set_reference(&path.to_string());
         }
@@ -270,6 +285,8 @@ impl FileDocument {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use rust_ipfs::{Ipfs, UninitializedIpfsNoop};
     use tracing::Span;
     use warp::constellation::directory::Directory;
@@ -278,14 +295,20 @@ mod test {
 
     use super::DirectoryDocument;
     use crate::config::Config;
+    use crate::store::document::root::RootDocumentMap;
+    use crate::store::get_keypair_did;
     use crate::store::{event_subscription::EventSubscription, files::FileStore};
 
     async fn file_store(
         ipfs: &Ipfs,
         event: &EventSubscription<ConstellationEventKind>,
     ) -> Result<FileStore, Error> {
+        let key = get_keypair_did(ipfs.keypair())?;
+
+        let root_document = RootDocumentMap::new(ipfs, Arc::new(key), None).await;
         let store = FileStore::new(
             ipfs.clone(),
+            root_document,
             &Config::development(),
             event.clone(),
             Span::current(),
@@ -318,7 +341,7 @@ mod test {
             .and_then(|i| i.get_file())?;
 
         let document = DirectoryDocument::new(&ipfs, &directory).await?;
-        let resolved_document = document.resolve(&ipfs).await?;
+        let resolved_document = document.resolve(&ipfs, true).await?;
 
         let resolved_file = resolved_document
             .get_item_by_path("/storage/image.png")
@@ -326,6 +349,10 @@ mod test {
 
         assert_eq!(image_file.name(), resolved_file.name());
         assert_eq!(image_file.thumbnail(), resolved_file.thumbnail());
+        assert!(image_file.reference().is_some());
+        assert!(image_file.thumbnail_reference().is_some());
+        assert!(resolved_file.reference().is_some());
+        assert!(resolved_file.thumbnail_reference().is_some());
 
         Ok(())
     }

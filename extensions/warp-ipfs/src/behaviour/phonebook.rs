@@ -227,7 +227,7 @@ impl NetworkBehaviour for Behaviour {
                 }
 
                 if remaining_established == 0 && self.entry.contains(&peer_id) {
-                    //In case peer disconnects due to keep-alive, we should wait before emitting an event for the client to reestablish connection
+                    // Delay emitting event in case of reconnection
                     self.backoff
                         .insert(peer_id, Delay::new(Duration::from_secs(2)));
                 }
@@ -279,8 +279,7 @@ impl NetworkBehaviour for Behaviour {
 
                     let _ = response.send(Ok(()));
                 }
-                Poll::Ready(None) => unreachable!("Channels are owned"),
-                Poll::Pending => break,
+                Poll::Ready(None) | Poll::Pending => break,
             }
         }
 

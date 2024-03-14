@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use store::document::ExtractedRootDocument;
+use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
 use store::files::FileStore;
 use store::identity::{IdentityStore, LookupBy};
@@ -68,7 +68,7 @@ use warp::multipass::{
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
-use crate::store::{ecdh_decrypt, PeerIdExt};
+use crate::store::{ecdh_decrypt, get_keypair_did, PeerIdExt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
@@ -253,7 +253,7 @@ impl WarpIpfs {
 
         info!("Starting ipfs");
         let mut uninitialized = UninitializedIpfs::new()
-            .with_identify(Some({
+            .with_identify({
                 let mut idconfig = IdentifyConfiguration {
                     protocol_version: "/satellite/warp/0.1".into(),
                     ..Default::default()
@@ -262,17 +262,17 @@ impl WarpIpfs {
                     idconfig.agent_version = agent.clone();
                 }
                 idconfig
-            }))
+            })
             .with_bitswap()
-            .with_ping(None)
-            .with_pubsub(Some(PubsubConfig {
+            .with_ping(Default::default())
+            .with_pubsub(PubsubConfig {
                 max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
-            }))
+            })
             .with_relay(true)
             .set_listening_addrs(config.listen_on.clone())
             .with_custom_behaviour(behaviour)
-            .set_keypair(keypair)
+            .set_keypair(&keypair)
             .with_rendezvous_client()
             .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
@@ -300,13 +300,13 @@ impl WarpIpfs {
             }
         ) {
             uninitialized = uninitialized.with_kademlia(
-                Some(either::Either::Left(KadConfig {
+                either::Either::Left(KadConfig {
                     query_timeout: std::time::Duration::from_secs(60),
                     publication_interval: Some(Duration::from_secs(30 * 60)),
                     provider_record_ttl: Some(Duration::from_secs(60 * 60)),
                     insert_method: KadInserts::Manual,
                     ..Default::default()
-                })),
+                }),
                 Default::default(),
             );
 
@@ -529,6 +529,11 @@ impl WarpIpfs {
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
+        let keypair = {
+            let keypair = ipfs.keypair();
+            Arc::new(get_keypair_did(keypair).expect("valid keypair"))
+        };
+
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
@@ -549,8 +554,11 @@ impl WarpIpfs {
 
         *self.ipfs.write() = Some(ipfs.clone());
 
+        let root = identity_store.root_document();
+
         let filestore = FileStore::new(
             ipfs.clone(),
+            root.clone(),
             &config,
             self.constellation_tx.clone(),
             span.clone(),
@@ -560,21 +568,15 @@ impl WarpIpfs {
         *self.file_store.write() = Some(filestore.clone());
 
         let message_store = MessageStore::new(
-            ipfs.clone(),
+            &ipfs,
             config.path.map(|path| path.join("messages")),
-            identity_store,
             discovery,
+            keypair,
             filestore,
-            false,
-            1000,
             self.raygun_tx.clone(),
-            span.clone(),
-            (
-                config.store_setting.check_spam,
-                config.store_setting.with_friends,
-            ),
+            identity_store,
         )
-        .await?;
+        .await;
 
         *self.message_store.write() = Some(message_store);
 
@@ -1104,7 +1106,7 @@ impl MultiPassImportExport for WarpIpfs {
                 let bytes = tokio::fs::read(path).await?;
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
                 let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                    serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
 
@@ -1138,7 +1140,7 @@ impl MultiPassImportExport for WarpIpfs {
 
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
                 let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                    serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
 
@@ -1187,7 +1189,7 @@ impl MultiPassImportExport for WarpIpfs {
                 let package = store.import_identity_remote(keypair.clone()).await?;
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, package)?;
                 let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                    serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
                 return store.import_identity(exported_document).await;
@@ -1430,9 +1432,10 @@ impl RayGun for WarpIpfs {
             .await
     }
 
-    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
-        store.send_message(conversation_id, value).await
+    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<Uuid, Error> {
+        self.messaging_store()?
+            .send_message(conversation_id, value)
+            .await
     }
 
     async fn edit(
@@ -1441,8 +1444,9 @@ impl RayGun for WarpIpfs {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
-        store.edit_message(conversation_id, message_id, value).await
+        self.messaging_store()?
+            .edit_message(conversation_id, message_id, value)
+            .await
     }
 
     async fn delete(
@@ -1450,13 +1454,10 @@ impl RayGun for WarpIpfs {
         conversation_id: Uuid,
         message_id: Option<Uuid>,
     ) -> Result<(), Error> {
-        let mut store = self.messaging_store()?;
+        let store = self.messaging_store()?;
         match message_id {
-            Some(id) => store.delete_message(conversation_id, id, true).await,
-            None => store
-                .delete_conversation(conversation_id, true)
-                .await
-                .map(|_| ()),
+            Some(id) => store.delete_message(conversation_id, id).await,
+            None => store.delete_conversation(conversation_id).await.map(|_| ()),
         }
     }
 
@@ -1488,21 +1489,14 @@ impl RayGun for WarpIpfs {
         conversation_id: Uuid,
         message_id: Uuid,
         value: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         self.messaging_store()?
-            .reply_message(conversation_id, message_id, value)
+            .reply(conversation_id, message_id, value)
             .await
     }
 
-    async fn embeds(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: EmbedState,
-    ) -> Result<(), Error> {
-        self.messaging_store()?
-            .embeds(conversation_id, message_id, state)
-            .await
+    async fn embeds(&mut self, _: Uuid, _: Uuid, _: EmbedState) -> Result<(), Error> {
+        Err(Error::Unimplemented)
     }
 
     async fn update_conversation_settings(
@@ -1524,7 +1518,7 @@ impl RayGunAttachment for WarpIpfs {
         message_id: Option<Uuid>,
         locations: Vec<Location>,
         message: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         self.messaging_store()?
             .attach(conversation_id, message_id, locations, message)
             .await
@@ -1538,7 +1532,7 @@ impl RayGunAttachment for WarpIpfs {
         path: PathBuf,
     ) -> Result<ConstellationProgressStream, Error> {
         self.messaging_store()?
-            .download(conversation_id, message_id, &file, path, false)
+            .download(conversation_id, message_id, &file, path)
             .await
     }
 
@@ -1578,7 +1572,7 @@ impl RayGunGroupConversation for WarpIpfs {
         did_key: &DID,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .remove_recipient(conversation_id, did_key, true)
+            .remove_recipient(conversation_id, did_key)
             .await
     }
 }

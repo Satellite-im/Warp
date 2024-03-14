@@ -29,9 +29,9 @@ impl Subscriptions {
         let identity = identity.clone();
         tokio::spawn(async move {
             {
-                let list = identity.list().await.unwrap_or_default();
+                let mut list = identity.list().await.expect("infallible");
 
-                for id in list {
+                while let Some(id) = list.next().await {
                     _ = task.subscribe(id.did.inbox()).await;
                     _ = task.subscribe(id.did.messaging()).await;
                 }

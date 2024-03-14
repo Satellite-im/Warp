@@ -352,7 +352,6 @@ pub struct Conversation {
     creator: Option<DID>,
     created: DateTime<Utc>,
     modified: DateTime<Utc>,
-    conversation_type: ConversationType,
     settings: ConversationSettings,
     recipients: Vec<DID>,
 }
@@ -374,7 +373,6 @@ impl Default for Conversation {
         let id = Uuid::new_v4();
         let name = None;
         let creator = None;
-        let conversation_type = ConversationType::Direct;
         let recipients = Vec::new();
         let timestamp = Utc::now();
         Self {
@@ -383,7 +381,6 @@ impl Default for Conversation {
             creator,
             created: timestamp,
             modified: timestamp,
-            conversation_type,
             settings: ConversationSettings::default(),
             recipients,
         }
@@ -412,7 +409,10 @@ impl Conversation {
     }
 
     pub fn conversation_type(&self) -> ConversationType {
-        self.conversation_type
+        match self.settings {
+            ConversationSettings::Direct(_) => ConversationType::Direct,
+            ConversationSettings::Group(_) => ConversationType::Group,
+        }
     }
 
     pub fn settings(&self) -> ConversationSettings {
@@ -443,10 +443,6 @@ impl Conversation {
 
     pub fn set_modified(&mut self, modified: DateTime<Utc>) {
         self.modified = modified;
-    }
-
-    pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
-        self.conversation_type = conversation_type;
     }
 
     pub fn set_settings(&mut self, settings: ConversationSettings) {
@@ -482,13 +478,18 @@ pub struct DirectConversationSettings {}
 
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[display(
-    fmt = "Everyone can add participants: {}",
-    "if self.members_can_add_participants {\"✅\"} else {\"❌\"}"
+    fmt = "Everyone can add participants: {}, Everyone can change name: {}",
+    "if self.members_can_add_participants {\"✅\"} else {\"❌\"}",
+    "if self.members_can_change_name {\"✅\"} else {\"❌\"}"
 )]
 #[repr(C)]
 pub struct GroupSettings {
     // Everyone can add participants, if set to `true``.
+    #[serde(default)]
     members_can_add_participants: bool,
+    // Everyone can change the name of the group.
+    #[serde(default)]
+    members_can_change_name: bool,
 }
 
 impl GroupSettings {
@@ -496,8 +497,16 @@ impl GroupSettings {
         self.members_can_add_participants
     }
 
+    pub fn members_can_change_name(&self) -> bool {
+        self.members_can_change_name
+    }
+
     pub fn set_members_can_add_participants(&mut self, val: bool) {
         self.members_can_add_participants = val;
+    }
+
+    pub fn set_members_can_change_name(&mut self, val: bool) {
+        self.members_can_change_name = val;
     }
 }
 
@@ -974,7 +983,7 @@ pub trait RayGun:
     ) -> Result<Messages, Error>;
 
     /// Sends a message to a conversation.
-    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error>;
+    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<Uuid, Error>;
 
     /// Edit an existing message in a conversation.
     async fn edit(
@@ -1014,7 +1023,7 @@ pub trait RayGun:
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
-    ) -> Result<(), Error>;
+    ) -> Result<Uuid, Error>;
 
     async fn embeds(
         &mut self,
@@ -1062,7 +1071,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Option<Uuid>,
         _: Vec<Location>,
         _: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         Err(Error::Unimplemented)
     }
 

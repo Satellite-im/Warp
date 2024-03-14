@@ -1,5 +1,4 @@
 pub mod cache;
-pub mod conversation;
 pub mod files;
 pub mod identity;
 pub mod image_dag;
@@ -7,13 +6,14 @@ pub mod root;
 
 use chrono::{DateTime, Utc};
 use futures::TryFutureExt;
-use ipfs::Ipfs;
+use ipfs::{Ipfs, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, str::FromStr};
 use uuid::Uuid;
 use warp::{
+    constellation::directory::Directory,
     crypto::{did_key::CoreSign, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus},
@@ -21,24 +21,26 @@ use warp::{
 
 use crate::store::get_keypair_did;
 
-use self::identity::IdentityDocument;
+use self::{files::DirectoryDocument, identity::IdentityDocument};
 
-use super::{identity::Request, keystore::Keystore};
+use super::keystore::Keystore;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct ExtractedRootDocument {
+pub struct ResolvedRootDocument {
     pub identity: Identity,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
-    pub friends: Vec<DID>,
-    pub block_list: Vec<DID>,
-    pub block_by_list: Vec<DID>,
-    pub request: Vec<Request>,
+    pub friends: Vec<u8>,
+    pub block_list: Vec<u8>,
+    pub block_by_list: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_index: Option<Directory>,
+    pub request: Vec<u8>,
     pub conversation_keystore: BTreeMap<Uuid, Keystore>,
     pub signature: Option<Vec<u8>>,
 }
 
-impl ExtractedRootDocument {
+impl ResolvedRootDocument {
     pub fn verify(&self) -> Result<(), Error> {
         let mut doc = self.clone();
         let signature = doc.signature.take().ok_or(Error::InvalidSignature)?;
@@ -79,6 +81,9 @@ pub struct RootDocument {
     /// map of keystore for group chat conversations
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversations_keystore: Option<Cid>,
+    /// index to constellation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_index: Option<Cid>,
     /// Online/Away/Busy/Offline status
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
@@ -125,7 +130,11 @@ impl RootDocument {
     }
 
     #[tracing::instrument(skip(self, ipfs))]
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<ExtractedRootDocument, Error> {
+    pub async fn resolve(
+        &self,
+        ipfs: &Ipfs,
+        keypair: Option<&Keypair>,
+    ) -> Result<ResolvedRootDocument, Error> {
         let document: IdentityDocument = ipfs
             .get_dag(self.identity)
             .local()
@@ -198,7 +207,22 @@ impl RootDocument {
                 .await
                 .unwrap_or_default();
 
-        let mut exported = ExtractedRootDocument {
+        // TODO: Uncomment when tying the files portion to shuttle
+        // let file_index = futures::future::ready(self.file_index.ok_or(Error::Other))
+        //     .and_then(|document| async move {
+        //         ipfs.get_dag(document)
+        //             .local()
+        //             .deserialized::<DirectoryDocument>()
+        //             .await
+        //             .map_err(Error::from)
+        //     })
+        //     .and_then(|document| async move { document.resolve(ipfs, false).await })
+        //     .await
+        //     .ok();
+
+        let file_index = None;
+
+        let mut exported = ResolvedRootDocument {
             identity,
             created: self.created,
             modified: self.modified,
@@ -206,75 +230,91 @@ impl RootDocument {
             block_list,
             block_by_list,
             request,
+            file_index,
             conversation_keystore,
             signature: None,
         };
 
         let bytes = serde_json::to_vec(&exported)?;
-        let kp = ipfs.keypair()?;
+        let kp = keypair.unwrap_or_else(|| ipfs.keypair());
         let signature = kp.sign(&bytes).map_err(anyhow::Error::from)?;
 
         exported.signature = Some(signature);
         Ok(exported)
     }
 
-    pub async fn import(ipfs: &Ipfs, data: ExtractedRootDocument) -> Result<Self, Error> {
+    pub async fn import(ipfs: &Ipfs, data: ResolvedRootDocument) -> Result<Self, Error> {
         data.verify()?;
 
-        let keypair = ipfs.keypair()?;
+        let keypair = ipfs.keypair();
         let did_kp = get_keypair_did(keypair)?;
 
         let document: IdentityDocument = data.identity.into();
 
         let document = document.sign(&did_kp)?;
 
-        let identity = ipfs.dag().put().serialize(document)?.await?;
+        let identity = ipfs.dag().put().serialize(document).await?;
+
+        let mut root_document = RootDocument {
+            identity,
+            created: data.created,
+            modified: data.modified,
+            friends: None,
+            blocks: None,
+            block_by: None,
+            request: None,
+            conversations: None,
+            conversations_keystore: None,
+            file_index: None,
+            status: None,
+            signature: None,
+        };
+
         let has_friends = !data.friends.is_empty();
         let has_blocks = !data.block_list.is_empty();
         let has_block_by_list = !data.block_by_list.is_empty();
         let has_requests = !data.request.is_empty();
         let has_keystore = !data.conversation_keystore.is_empty();
 
-        let friends = has_friends
-            .then_some(ipfs.dag().put().serialize(data.friends)?.await.ok())
-            .flatten();
+        if has_friends {
+            root_document.friends = ipfs.dag().put().serialize(data.friends).await.ok();
+        }
 
-        let blocks = has_blocks
-            .then_some(ipfs.dag().put().serialize(data.block_list)?.await.ok())
-            .flatten();
-        let block_by = has_block_by_list
-            .then_some(ipfs.dag().put().serialize(data.block_by_list)?.await.ok())
-            .flatten();
-        let request = has_requests
-            .then_some(ipfs.dag().put().serialize(data.request)?.await.ok())
-            .flatten();
+        if has_blocks {
+            root_document.blocks = ipfs.dag().put().serialize(data.block_list).await.ok();
+        }
 
-        let conversations_keystore = has_keystore
-            .then_some({
-                let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
-                for (k, v) in data.conversation_keystore {
-                    if let Ok(cid) = ipfs.dag().put().serialize(v)?.await {
-                        pointer_map.insert(k.to_string(), cid);
-                    }
+        if has_block_by_list {
+            root_document.block_by = ipfs.dag().put().serialize(data.block_by_list).await.ok();
+        }
+
+        if has_requests {
+            root_document.request = ipfs.dag().put().serialize(data.request).await.ok();
+        }
+
+        if has_keystore {
+            let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
+            for (k, v) in data.conversation_keystore {
+                if let Ok(cid) = ipfs.dag().put().serialize(v).await {
+                    pointer_map.insert(k.to_string(), cid);
                 }
+            }
 
-                ipfs.dag().put().serialize(pointer_map)?.await.ok()
-            })
-            .flatten();
+            root_document.conversations_keystore =
+                ipfs.dag().put().serialize(pointer_map).await.ok();
+        }
 
-        let root_document = RootDocument {
-            identity,
-            created: data.created,
-            modified: data.modified,
-            conversations: None,
-            conversations_keystore,
-            friends,
-            blocks,
-            block_by,
-            request,
-            status: None,
-            signature: None,
-        };
+        if let Some(root) = data.file_index {
+            let cid = DirectoryDocument::new(ipfs, &root)
+                .and_then(|document| async move {
+                    let cid = ipfs.dag().put().serialize(document).await?;
+                    Ok(cid)
+                })
+                .await
+                .ok();
+            root_document.file_index = cid;
+        }
+
         let root_document = root_document.sign(&did_kp)?;
 
         Ok(root_document)
