@@ -27,17 +27,17 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
 
-use warp::constellation::directory::Directory;
-use warp::constellation::{ConstellationProgressStream, Progression};
-use warp::crypto::cipher::Cipher;
-use warp::crypto::{generate, DID};
-use warp::error::Error;
-use warp::multipass::MultiPassEventKind;
-use warp::raygun::{
-    AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType,
-    DirectConversationSettings, GroupSettings, Location, MessageEvent, MessageEventKind,
-    MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType, PinState,
-    RayGunEventKind, ReactionState,
+use warp::{
+    constellation::{directory::Directory, ConstellationProgressStream, Progression},
+    crypto::{cipher::Cipher, generate, DID},
+    error::Error,
+    multipass::MultiPassEventKind,
+    raygun::{
+        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
+        ConversationType, DirectConversationSettings, GroupSettings, Location, MessageEvent,
+        MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
+        MessagesType, PinState, RayGunEventKind, ReactionState,
+    },
 };
 
 use crate::store::{
