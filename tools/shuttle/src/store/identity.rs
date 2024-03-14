@@ -263,7 +263,7 @@ impl IdentityStorageInner {
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                tracing::debug!(cid = %old_cid, "unpinning identity block");
                 _ = self.ipfs.remove_pin(&old_cid).await;
             }
         }
@@ -274,7 +274,7 @@ impl IdentityStorageInner {
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                tracing::debug!(cid = %old_cid, "unpinning identity block");
                 _ = self.ipfs.remove_pin(&old_cid).await;
             }
         }
