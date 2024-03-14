@@ -302,25 +302,22 @@ impl RootDocumentTask {
                         response: tx,
                     })
                     .await;
-
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
-                    Ok(Ok(Ok(_))) => {
-                        tracing::info!(%peer_id, "document successfully exported");
-                        break;
+                tokio::spawn(async move {
+                    match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                        Ok(Ok(Ok(_))) => {
+                            tracing::info!(%peer_id, "document successfully exported");
+                        }
+                        Ok(Ok(Err(e))) => {
+                            tracing::error!(%peer_id, error = %e, "error exporting document");
+                        }
+                        Ok(Err(_)) => {
+                            tracing::error!(%peer_id, "channel been unexpectedly closed");
+                        }
+                        Err(_) => {
+                            tracing::error!(%peer_id, "request timeout");
+                        }
                     }
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!(%peer_id, error = %e, "error exporting document");
-                        break;
-                    }
-                    Ok(Err(_)) => {
-                        tracing::error!(%peer_id, "channel been unexpectedly closed");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::error!(%peer_id, "request timeout");
-                        continue;
-                    }
-                }
+                });
             }
         }
 
