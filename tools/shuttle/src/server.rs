@@ -227,7 +227,7 @@ impl ShuttleTask {
             //       in a future that will be queued after so many request from that peer as a way to throttle the number of
             //       active request. If that exceeds a specific limit from that peer, or proceed to continue up,
             //       we can drop all requests and temporarily disconnect that peer
-            // TODO: Implement throttling in the behaviour and queue active request after a specific number of requests.   
+            // TODO: Implement throttling in the behaviour and queue active request after a specific number of requests.
             tokio::spawn(async move {
                 match payload.message() {
                     Message::Request(req) => match req {
@@ -741,7 +741,6 @@ impl ShuttleTask {
 
                                 return;
                             };
-
 
                             if !identity_storage.contains(&did).await {
                                 let payload = payload_message_construct(
