@@ -319,6 +319,7 @@ impl IdentityStorageInner {
 
     //TODO: Use a map instead with the key linked to the content pointer
     //      and resolve within a stream while matching conditions
+    //TODO: Filter stream instead
     async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
         let list_stream = self.list().await;
 
