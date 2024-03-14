@@ -1,18 +1,12 @@
 use std::{collections::BTreeMap, future::IntoFuture, path::PathBuf, sync::Arc};
 
-use chrono::Utc;
 use futures::{
-    channel::{
-        mpsc::{self, Receiver},
-        oneshot,
-    },
+    channel::mpsc,
     stream::{BoxStream, FuturesUnordered},
     SinkExt, StreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{p2p::MultiaddrExt, Ipfs, IpfsPath};
-use tokio::select;
-use tokio_util::sync::{CancellationToken, DropGuard};
 use uuid::Uuid;
 use warp::{
     constellation::directory::Directory, crypto::DID, error::Error,
@@ -31,122 +25,9 @@ use super::{
     files::DirectoryDocument, identity::IdentityDocument, ResolvedRootDocument, RootDocument,
 };
 
-#[allow(clippy::large_enum_variant)]
-pub enum RootDocumentCommand {
-    Get {
-        response: oneshot::Sender<Result<RootDocument, Error>>,
-    },
-    Set {
-        document: RootDocument,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    Identity {
-        response: oneshot::Sender<Result<IdentityDocument, Error>>,
-    },
-    SetIdentityStatus {
-        status: IdentityStatus,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    AddFriend {
-        did: DID,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    RemoveFriend {
-        did: DID,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    GetFriendList {
-        response: oneshot::Sender<Result<Vec<DID>, Error>>,
-    },
-    AddRequest {
-        request: Request,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    RemoveRequest {
-        request: Request,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    GetRequestList {
-        response: oneshot::Sender<Result<Vec<Request>, Error>>,
-    },
-    GetRootIndex {
-        response: oneshot::Sender<Result<Directory, Error>>,
-    },
-    SetRootIndex {
-        root: Directory,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    AddBlock {
-        did: DID,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    RemoveBlock {
-        did: DID,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    GetBlockList {
-        response: oneshot::Sender<Result<Vec<DID>, Error>>,
-    },
-    IsBlocked {
-        did: DID,
-        response: oneshot::Sender<Result<bool, Error>>,
-    },
-    AddBlockBy {
-        did: DID,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    RemoveBlockBy {
-        did: DID,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    GetBlockByList {
-        response: oneshot::Sender<Result<Vec<DID>, Error>>,
-    },
-    IsBlockedBy {
-        did: DID,
-        response: oneshot::Sender<Result<bool, Error>>,
-    },
-    GetConversationDocument {
-        id: Uuid,
-        response: oneshot::Sender<Result<ConversationDocument, Error>>,
-    },
-    SetConversationDocument {
-        document: ConversationDocument,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    ListConversationDocument {
-        response: oneshot::Sender<Result<BoxStream<'static, ConversationDocument>, Error>>,
-    },
-    SetKeystore {
-        document: BTreeMap<String, Cid>,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    GetKeystoreMap {
-        response: oneshot::Sender<Result<BTreeMap<String, Cid>, Error>>,
-    },
-    GetKeystore {
-        id: Uuid,
-        response: oneshot::Sender<Result<Keystore, Error>>,
-    },
-    Export {
-        response: oneshot::Sender<Result<ResolvedRootDocument, Error>>,
-    },
-    ExportEncrypted {
-        response: oneshot::Sender<Result<Vec<u8>, Error>>,
-    },
-    ExportRootCid {
-        response: oneshot::Sender<Result<Cid, Error>>,
-    },
-    SetRootCid {
-        cid: Cid,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-}
-
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RootDocumentMap {
-    tx: futures::channel::mpsc::Sender<RootDocumentCommand>,
-    _task_cancellation: Arc<DropGuard>,
+    inner: Arc<tokio::sync::RwLock<RootDocumentTask>>,
 }
 
 impl RootDocumentMap {
@@ -168,381 +49,176 @@ impl RootDocumentMap {
         let path = config.path.clone();
         let discovery = config.store_setting.discovery.clone();
 
-        let (tx, rx) = futures::channel::mpsc::channel(0);
-
-        let mut task = RootDocumentTask {
+        let task = RootDocumentTask {
             ipfs: ipfs.clone(),
             keypair,
             path,
             discovery,
             cid,
-            rx,
             identity_command,
         };
 
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
-        tokio::spawn(async move {
-            select! {
-                _ = token.cancelled() => {}
-                _ = task.run() => {}
-            }
-        });
-
         Self {
-            tx,
-            _task_cancellation: Arc::new(drop_guard),
+            inner: Arc::new(tokio::sync::RwLock::new(task)),
         }
     }
 
     pub async fn get(&self) -> Result<RootDocument, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::Get { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_root_document().await
     }
 
     pub async fn set(&mut self, document: RootDocument) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::Set {
-                document,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_root_document(document).await
     }
 
     pub async fn identity(&self) -> Result<IdentityDocument, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::Identity { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.identity().await
     }
 
     pub async fn set_status_indicator(&self, status: IdentityStatus) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::SetIdentityStatus {
-                status,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_identity_status(status).await
     }
 
     pub async fn add_friend(&self, did: &DID) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::AddFriend {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.add_friend(did).await
     }
 
     pub async fn remove_friend(&self, did: &DID) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::RemoveFriend {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.remove_friend(did).await
     }
 
     pub async fn add_block(&self, did: &DID) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::AddBlock {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.block_key(did).await
     }
 
     pub async fn remove_block(&self, did: &DID) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::RemoveBlock {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.unblock_key(did).await
     }
 
     pub async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::IsBlocked {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.is_blocked(did).await
     }
 
     pub async fn add_block_by(&self, did: &DID) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::AddBlockBy {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.add_blockby_key(did).await
     }
 
     pub async fn remove_block_by(&self, did: &DID) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::RemoveBlockBy {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.remove_blockby_key(did).await
     }
 
     pub async fn add_request(&self, request: &Request) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::AddRequest {
-                request: request.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.add_request(request).await
     }
 
     pub async fn remove_request(&self, request: &Request) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::RemoveRequest {
-                request: request.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.remove_request(request).await
     }
 
     pub async fn get_friends(&self) -> Result<Vec<DID>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::GetFriendList { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.friend_list().await
     }
 
     pub async fn get_requests(&self) -> Result<Vec<Request>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::GetRequestList { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.request_list().await
     }
 
     pub async fn get_blocks(&self) -> Result<Vec<DID>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::GetBlockList { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.block_list().await
     }
 
     pub async fn get_block_by(&self) -> Result<Vec<DID>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::GetBlockByList { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.blockby_list().await
     }
 
     pub async fn is_blocked_by(&self, did: &DID) -> Result<bool, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::IsBlockedBy {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.is_blocked_by(did).await
     }
 
     pub async fn export_root_cid(&self) -> Result<Cid, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::ExportRootCid { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.cid.ok_or(Error::IdentityDoesntExist)
     }
 
     pub async fn import_root_cid(&self, cid: Cid) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::SetRootCid { cid, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_root_cid(cid).await
     }
 
     pub async fn export(&self) -> Result<ResolvedRootDocument, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::Export { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.export().await
     }
 
     pub async fn export_bytes(&self) -> Result<Vec<u8>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::ExportEncrypted { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.export_bytes().await
     }
 
     pub async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::GetKeystoreMap { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_conversation_keystore_map().await
     }
 
     pub async fn list_conversation_document(
         &self,
     ) -> Result<BoxStream<'static, ConversationDocument>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::ListConversationDocument { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.list_conversation_stream().await
     }
 
     pub async fn get_conversation_document(&self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::GetConversationDocument { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_conversation_document(id).await
     }
 
     pub async fn set_conversation_document(
         &self,
         document: ConversationDocument,
     ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::SetConversationDocument {
-                document,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_conversation_document(document).await
     }
 
     pub async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::GetKeystore { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_conversation_keystore(id).await
     }
 
     pub async fn set_conversation_keystore_map(
         &self,
         document: BTreeMap<String, Cid>,
     ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::SetKeystore {
-                document,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_conversation_keystore(document).await
     }
 
     pub async fn get_directory_index(&self) -> Result<Directory, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::GetRootIndex { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_root_index().await
     }
 
     pub async fn set_directory_index(&self, root: Directory) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RootDocumentCommand::SetRootIndex { root, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_root_index(root).await
     }
 }
 
@@ -552,161 +228,7 @@ struct RootDocumentTask {
     ipfs: Ipfs,
     discovery: config::Discovery,
     cid: Option<Cid>,
-    rx: Receiver<RootDocumentCommand>,
     identity_command: Option<mpsc::Sender<shuttle::identity::client::IdentityCommand>>,
-}
-
-impl RootDocumentTask {
-    pub async fn run(&mut self) {
-        self.migrate().await;
-
-        while let Some(command) = self.rx.next().await {
-            match command {
-                RootDocumentCommand::Get { response } => {
-                    let _ = response.send(self.get_root_document().await);
-                }
-                RootDocumentCommand::Set { document, response } => {
-                    let _ = response.send(self.set_root_document(document).await);
-                }
-                RootDocumentCommand::Identity { response } => {
-                    let _ = response.send(self.identity().await);
-                }
-                RootDocumentCommand::AddFriend { did, response } => {
-                    let _ = response.send(self.add_friend(did).await);
-                }
-                RootDocumentCommand::RemoveFriend { did, response } => {
-                    let _ = response.send(self.remove_friend(did).await);
-                }
-                RootDocumentCommand::GetFriendList { response } => {
-                    let _ = response.send(self.friend_list().await);
-                }
-                RootDocumentCommand::AddRequest { request, response } => {
-                    let _ = response.send(self.add_request(request).await);
-                }
-                RootDocumentCommand::RemoveRequest { request, response } => {
-                    let _ = response.send(self.remove_request(request).await);
-                }
-                RootDocumentCommand::GetRequestList { response } => {
-                    let _ = response.send(self.request_list().await);
-                }
-                RootDocumentCommand::AddBlock { did, response } => {
-                    let _ = response.send(self.block_key(did).await);
-                }
-                RootDocumentCommand::RemoveBlock { did, response } => {
-                    let _ = response.send(self.unblock_key(did).await);
-                }
-                RootDocumentCommand::GetBlockList { response } => {
-                    let _ = response.send(self.block_list().await);
-                }
-                RootDocumentCommand::AddBlockBy { did, response } => {
-                    let _ = response.send(self.add_blockby_key(did).await);
-                }
-                RootDocumentCommand::RemoveBlockBy { did, response } => {
-                    let _ = response.send(self.remove_blockby_key(did).await);
-                }
-                RootDocumentCommand::GetBlockByList { response } => {
-                    let _ = response.send(self.blockby_list().await);
-                }
-                RootDocumentCommand::SetKeystore { document, response } => {
-                    let _ = response.send(self.set_conversation_keystore(document).await);
-                }
-                RootDocumentCommand::GetKeystore { id, response } => {
-                    let _ = response.send(self.get_conversation_keystore(id).await);
-                }
-                RootDocumentCommand::GetKeystoreMap { response } => {
-                    let _ = response.send(self.get_conversation_keystore_map().await);
-                }
-                RootDocumentCommand::Export { response } => {
-                    let _ = response.send(self.export().await);
-                }
-                RootDocumentCommand::ExportRootCid { response } => {
-                    let _ = response.send(self.cid.ok_or(Error::IdentityDoesntExist));
-                }
-                RootDocumentCommand::ExportEncrypted { response } => {
-                    let _ = response.send(self.export_bytes().await);
-                }
-                RootDocumentCommand::SetIdentityStatus { status, response } => {
-                    let _ = response.send(self.set_identity_status(status).await);
-                }
-                RootDocumentCommand::IsBlocked { did, response } => {
-                    _ = response.send(self.is_blocked(&did).await);
-                }
-                RootDocumentCommand::IsBlockedBy { did, response } => {
-                    _ = response.send(self.is_blocked_by(&did).await);
-                }
-                RootDocumentCommand::GetRootIndex { response } => {
-                    let _ = response.send(self.get_root_index().await);
-                }
-                RootDocumentCommand::SetRootIndex { root, response } => {
-                    let _ = response.send(self.set_root_index(root).await);
-                }
-                RootDocumentCommand::GetConversationDocument { id, response } => {
-                    let _ = response.send(self.get_conversation_document(id).await);
-                }
-                RootDocumentCommand::SetConversationDocument { document, response } => {
-                    let _ = response.send(self.set_conversation_document(document).await);
-                }
-                RootDocumentCommand::ListConversationDocument { response } => {
-                    let _ = response.send(self.list_conversation_stream().await);
-                }
-                RootDocumentCommand::SetRootCid { cid, response } => {
-                    let _ = response.send(self.set_root_cid(cid).await);
-                }
-            }
-        }
-    }
-
-    async fn migrate(&mut self) {
-        let mut root = match self.get_root_document().await {
-            Ok(r) => r,
-            Err(_) => return,
-        };
-
-        #[derive(serde::Serialize, serde::Deserialize)]
-        enum OldRequest {
-            In(DID),
-            Out(DID),
-        }
-
-        let Some(cid) = root.request else {
-            return;
-        };
-
-        let list = self
-            .ipfs
-            .get_dag(cid)
-            .local()
-            .deserialized::<Vec<OldRequest>>()
-            .await
-            .unwrap_or_default();
-
-        if list.is_empty() {
-            return;
-        }
-
-        let list = list
-            .iter()
-            .map(|item| match item {
-                OldRequest::In(did) => Request::In {
-                    did: did.clone(),
-                    date: Utc::now(),
-                },
-                OldRequest::Out(did) => Request::Out {
-                    did: did.clone(),
-                    date: Utc::now(),
-                },
-            })
-            .collect::<Vec<_>>();
-
-        let new_cid = match self.ipfs.dag().put().serialize(list).await {
-            Ok(cid) => cid,
-            Err(_) => return,
-        };
-
-        root.request = Some(new_cid);
-
-        _ = self.set_root_document(root).await;
-    }
 }
 
 impl RootDocumentTask {
@@ -836,7 +358,7 @@ impl RootDocumentTask {
         Ok(list)
     }
 
-    async fn add_request(&mut self, request: Request) -> Result<(), Error> {
+    async fn add_request(&mut self, request: &Request) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.request;
         let mut list: Vec<Request> = match document.request {
@@ -854,7 +376,7 @@ impl RootDocumentTask {
             None => vec![],
         };
 
-        if !list.insert_item(&request) {
+        if !list.insert_item(request) {
             return Err(Error::FriendRequestExist);
         }
 
@@ -877,7 +399,7 @@ impl RootDocumentTask {
         Ok(())
     }
 
-    async fn remove_request(&mut self, request: Request) -> Result<(), Error> {
+    async fn remove_request(&mut self, request: &Request) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.request;
         let mut list: Vec<Request> = match document.request {
@@ -895,7 +417,7 @@ impl RootDocumentTask {
             None => vec![],
         };
 
-        if !list.remove_item(&request) {
+        if !list.remove_item(request) {
             return Err(Error::FriendRequestExist);
         }
 
@@ -938,7 +460,7 @@ impl RootDocumentTask {
         Ok(list)
     }
 
-    async fn add_friend(&mut self, did: DID) -> Result<(), Error> {
+    async fn add_friend(&mut self, did: &DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.friends;
         let mut list: Vec<DID> = match document.friends {
@@ -956,7 +478,7 @@ impl RootDocumentTask {
             None => vec![],
         };
 
-        if !list.insert_item(&did) {
+        if !list.insert_item(did) {
             return Err::<_, Error>(Error::FriendExist);
         }
 
@@ -1016,7 +538,7 @@ impl RootDocumentTask {
         Ok(())
     }
 
-    async fn remove_friend(&mut self, did: DID) -> Result<(), Error> {
+    async fn remove_friend(&mut self, did: &DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.friends;
         let mut list: Vec<DID> = match document.friends {
@@ -1034,7 +556,7 @@ impl RootDocumentTask {
             None => vec![],
         };
 
-        if !list.remove_item(&did) {
+        if !list.remove_item(did) {
             return Err::<_, Error>(Error::FriendDoesntExist);
         }
 
@@ -1089,7 +611,7 @@ impl RootDocumentTask {
             .map(|list| list.contains(public_key))
     }
 
-    async fn block_key(&mut self, did: DID) -> Result<(), Error> {
+    async fn block_key(&mut self, did: &DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.blocks;
         let mut list: Vec<DID> = match document.blocks {
@@ -1107,7 +629,7 @@ impl RootDocumentTask {
             None => vec![],
         };
 
-        if !list.insert_item(&did) {
+        if !list.insert_item(did) {
             return Err::<_, Error>(Error::PublicKeyIsBlocked);
         }
 
@@ -1129,7 +651,7 @@ impl RootDocumentTask {
         Ok(())
     }
 
-    async fn unblock_key(&mut self, did: DID) -> Result<(), Error> {
+    async fn unblock_key(&mut self, did: &DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.blocks;
         let mut list: Vec<DID> = match document.blocks {
@@ -1147,7 +669,7 @@ impl RootDocumentTask {
             None => vec![],
         };
 
-        if !list.remove_item(&did) {
+        if !list.remove_item(did) {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
@@ -1189,7 +711,7 @@ impl RootDocumentTask {
         Ok(list)
     }
 
-    async fn add_blockby_key(&mut self, did: DID) -> Result<(), Error> {
+    async fn add_blockby_key(&mut self, did: &DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.block_by;
         let mut list: Vec<DID> = match document.block_by {
@@ -1207,7 +729,7 @@ impl RootDocumentTask {
             None => vec![],
         };
 
-        if !list.insert_item(&did) {
+        if !list.insert_item(did) {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
@@ -1229,7 +751,7 @@ impl RootDocumentTask {
         Ok(())
     }
 
-    async fn remove_blockby_key(&mut self, did: DID) -> Result<(), Error> {
+    async fn remove_blockby_key(&mut self, did: &DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
         let old_document = document.block_by;
         let mut list: Vec<DID> = match document.block_by {
@@ -1247,7 +769,7 @@ impl RootDocumentTask {
             None => vec![],
         };
 
-        if !list.remove_item(&did) {
+        if !list.remove_item(did) {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
