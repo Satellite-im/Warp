@@ -1,68 +1,21 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use futures::{
-    channel::{
-        mpsc::{Receiver, Sender},
-        oneshot::Sender as OneshotSender,
-    },
     stream::{BoxStream, FuturesUnordered},
-    SinkExt, StreamExt,
+    StreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
-use tokio::select;
-use tokio_util::sync::{CancellationToken, DropGuard};
+use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
 
 use crate::identity::{document::IdentityDocument, protocol::Lookup, RequestPayload};
 
 use super::root::RootStorage;
 
-#[allow(clippy::large_enum_variant)]
-enum IdentityStorageCommand {
-    Register {
-        document: IdentityDocument,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    Update {
-        document: IdentityDocument,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    Lookup {
-        kind: Lookup,
-        response: OneshotSender<Result<Vec<IdentityDocument>, Error>>,
-    },
-    Contains {
-        did: DID,
-        response: OneshotSender<bool>,
-    },
-    DeliverRequest {
-        to: DID,
-        request: RequestPayload,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    FetchAll {
-        did: DID,
-        response: OneshotSender<Result<(Vec<RequestPayload>, usize), Error>>,
-    },
-    StorePackage {
-        did: DID,
-        pkg: Cid,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    GetPackage {
-        did: DID,
-        response: OneshotSender<Result<Cid, Error>>,
-    },
-    List {
-        response: OneshotSender<Result<BoxStream<'static, IdentityDocument>, Error>>,
-    },
-}
-
 #[derive(Debug, Clone)]
 pub struct IdentityStorage {
-    tx: Sender<IdentityStorageCommand>,
-    _task_cancellation: Arc<DropGuard>,
+    inner: Arc<RwLock<IdentityStorageInner>>,
 }
 
 impl IdentityStorage {
@@ -73,158 +26,60 @@ impl IdentityStorage {
         let mailbox = root_dag.mailbox;
         let packages = root_dag.packages;
 
-        let (tx, rx) = futures::channel::mpsc::channel(0);
-
-        let mut task = IdentityStorageTask {
+        let inner = Arc::new(RwLock::new(IdentityStorageInner {
             ipfs: ipfs.clone(),
             root: root.clone(),
             mailbox,
             packages,
             list,
-            rx,
-        };
+        }));
 
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
-        tokio::spawn(async move {
-            select! {
-                _ = token.cancelled() => {}
-                _ = task.run() => {}
-            }
-        });
-
-        Self {
-            tx,
-            _task_cancellation: Arc::new(drop_guard),
-        }
+        Self { inner }
     }
 
     pub async fn register(&self, document: IdentityDocument) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::Register {
-                document,
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.register(document).await
     }
 
     pub async fn update(&self, document: &IdentityDocument) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::Update {
-                document: document.clone(),
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.update(document).await
     }
 
     pub async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::Lookup { kind, response: tx })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.lookup(kind).await
     }
 
-    pub async fn contains(&self, did: &DID) -> Result<bool, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::Contains {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from).map_err(Error::from)
+    pub async fn contains(&self, did: &DID) -> bool {
+        let inner = &*self.inner.read().await;
+        inner.contains(did).await
     }
 
     pub async fn fetch_mailbox(&self, did: DID) -> Result<(Vec<RequestPayload>, usize), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::FetchAll { did, response: tx })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.fetch_requests(did).await
     }
 
     pub async fn deliver_request(&self, to: &DID, request: &RequestPayload) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::DeliverRequest {
-                to: to.clone(),
-                request: request.clone(),
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.deliver_request(to, request).await
     }
 
     pub async fn store_package(&self, did: &DID, data: Cid) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::StorePackage {
-                did: did.clone(),
-                pkg: data,
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.store_package(did, data).await
     }
 
     pub async fn get_package(&self, did: &DID) -> Result<Cid, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::GetPackage {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_package(did).await
     }
 
-    pub async fn list(&self) -> Result<BoxStream<'static, IdentityDocument>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::List { response: tx })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+    pub async fn list(&self) -> BoxStream<'static, IdentityDocument> {
+        let inner = &*self.inner.read().await;
+        inner.list().await
     }
 
     // pub async fn remove(&self, did: &DID) -> Result<(), Error> {
@@ -256,53 +111,17 @@ impl IdentityStorage {
 }
 
 //Note: Maybe migrate to using a map where the public key points to the cid of the identity document instead
-struct IdentityStorageTask {
+#[derive(Debug)]
+struct IdentityStorageInner {
     ipfs: Ipfs,
     list: Option<Cid>,
     packages: Option<Cid>,
     mailbox: Option<Cid>,
     root: RootStorage,
-    rx: Receiver<IdentityStorageCommand>,
 }
 
-impl IdentityStorageTask {
-    pub async fn run(&mut self) {
-        while let Some(command) = self.rx.next().await {
-            match command {
-                IdentityStorageCommand::Register { document, response } => {
-                    _ = response.send(self.register(document).await);
-                }
-                IdentityStorageCommand::Update { document, response } => {
-                    _ = response.send(self.update(document).await);
-                }
-                IdentityStorageCommand::Lookup { kind, response } => {
-                    _ = response.send(self.lookup(kind).await);
-                }
-                IdentityStorageCommand::Contains { did, response } => {
-                    _ = response.send(self.contains(did).await);
-                }
-                IdentityStorageCommand::DeliverRequest {
-                    to,
-                    request,
-                    response,
-                } => _ = response.send(self.deliver_request(to, request).await),
-                IdentityStorageCommand::FetchAll { did, response } => {
-                    _ = response.send(self.fetch_requests(did).await)
-                }
-                IdentityStorageCommand::StorePackage { did, pkg, response } => {
-                    _ = response.send(self.store_package(did, pkg).await)
-                }
-                IdentityStorageCommand::GetPackage { did, response } => {
-                    _ = response.send(self.get_package(did).await)
-                }
-                IdentityStorageCommand::List { response } => {
-                    _ = response.send(Ok(self.list().await))
-                }
-            }
-        }
-    }
-
-    async fn contains(&self, did: DID) -> bool {
+impl IdentityStorageInner {
+    async fn contains(&self, did: &DID) -> bool {
         let cid = match self.list {
             Some(cid) => cid,
             None => return false,
@@ -365,8 +184,8 @@ impl IdentityStorageTask {
         Ok(())
     }
 
-    async fn store_package(&mut self, did: DID, package: Cid) -> Result<(), Error> {
-        if !self.contains(did.clone()).await {
+    async fn store_package(&mut self, did: &DID, package: Cid) -> Result<(), Error> {
+        if !self.contains(did).await {
             return Err(Error::IdentityDoesntExist);
         }
 
@@ -399,8 +218,8 @@ impl IdentityStorageTask {
         Ok(())
     }
 
-    async fn get_package(&mut self, did: DID) -> Result<Cid, Error> {
-        if !self.contains(did.clone()).await {
+    async fn get_package(&self, did: &DID) -> Result<Cid, Error> {
+        if !self.contains(did).await {
             return Err(Error::IdentityDoesntExist);
         }
 
@@ -422,7 +241,7 @@ impl IdentityStorageTask {
             .copied()
     }
 
-    async fn update(&mut self, document: IdentityDocument) -> Result<(), Error> {
+    async fn update(&mut self, document: &IdentityDocument) -> Result<(), Error> {
         document.verify()?;
 
         let mut list: BTreeMap<String, Cid> = match self.list {
@@ -452,7 +271,7 @@ impl IdentityStorageTask {
             .await
             .map_err(|_| Error::IdentityDoesntExist)?;
 
-        if !internal_document.different(&document) {
+        if !internal_document.different(document) {
             return Err(Error::CannotUpdateIdentity);
         }
 
@@ -669,8 +488,8 @@ impl IdentityStorageTask {
         Ok((requests, remaining))
     }
 
-    async fn deliver_request(&mut self, to: DID, request: RequestPayload) -> Result<(), Error> {
-        if !self.contains(to.clone()).await {
+    async fn deliver_request(&mut self, to: &DID, request: &RequestPayload) -> Result<(), Error> {
+        if !self.contains(to).await {
             return Err(Error::IdentityDoesntExist);
         }
 
@@ -706,7 +525,7 @@ impl IdentityStorageTask {
             return Err(Error::FriendRequestExist);
         }
 
-        mailbox.push(request);
+        mailbox.push(request.clone());
 
         let cid = self.ipfs.dag().put().serialize(mailbox).await?;
 

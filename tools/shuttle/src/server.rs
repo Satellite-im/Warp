@@ -184,7 +184,7 @@ impl ShuttleServer {
 
         println!(
             "Identities Registered: {}",
-            identity.list().await?.count().await
+            identity.list().await.count().await
         );
 
         let mut subscriptions = Subscriptions::new(&ipfs, &identity);
@@ -239,12 +239,7 @@ impl ShuttleTask {
                             continue;
                         };
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -272,12 +267,7 @@ impl ShuttleTask {
                         document,
                     }) => {
                         tracing::info!(%document.did, "Receive register request");
-                        if self
-                            .identity_storage
-                            .contains(&document.did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if self.identity_storage.contains(&document.did).await {
                             tracing::warn!(%document.did, "Identity is already registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -377,12 +367,7 @@ impl ShuttleTask {
                             continue;
                         };
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -442,7 +427,7 @@ impl ShuttleTask {
                                 continue;
                             }
                             identity::protocol::Mailbox::Send { did: to, request } => {
-                                if !self.identity_storage.contains(to).await.unwrap_or_default() {
+                                if !self.identity_storage.contains(to).await {
                                     tracing::warn!(%did, "Identity is not registered");
                                     let payload = payload_message_construct(
                                     keypair,
@@ -550,12 +535,7 @@ impl ShuttleTask {
                             continue;
                         };
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -622,12 +602,7 @@ impl ShuttleTask {
                         }
                         let did = document.did.clone();
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -756,12 +731,7 @@ impl ShuttleTask {
                             continue;
                         };
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
@@ -791,12 +761,7 @@ impl ShuttleTask {
                     }
                     identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
                         tracing::info!(%did, "Fetching document");
-                        if !self
-                            .identity_storage
-                            .contains(did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
