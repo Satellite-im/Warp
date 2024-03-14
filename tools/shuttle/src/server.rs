@@ -64,6 +64,12 @@ pub struct ShuttleServer {
     task: JoinHandle<()>,
 }
 
+impl Drop for ShuttleServer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 struct ShuttleTask {
