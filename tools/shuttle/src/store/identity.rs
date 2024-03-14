@@ -576,19 +576,4 @@ impl IdentityStorageInner {
 
     //     Ok(())
     // }
-
-    // async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
-    //     let list: HashSet<IdentityDocument> = match self.list {
-    //         Some(cid) => self
-    //             .ipfs
-    //             .get_dag(IpfsPath::from(cid))
-    //             .local()
-    //             .deserialized()
-    //             .await
-    //             .unwrap_or_default(),
-    //         None => HashSet::new(),
-    //     };
-
-    //     Ok(Vec::from_iter(list))
-    // }
 }
