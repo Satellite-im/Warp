@@ -97,17 +97,7 @@ impl IdentityStorage {
     //     rx.await.map_err(anyhow::Error::from)?
     // }
 
-    // pub async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
-    //     let (tx, rx) = futures::channel::oneshot::channel();
 
-    //     let _ = self
-    //         .tx
-    //         .clone()
-    //         .send(IdentityStorageCommand::List { response: tx })
-    //         .await;
-
-    //     rx.await.map_err(anyhow::Error::from)?
-    // }
 }
 
 //Note: Maybe migrate to using a map where the public key points to the cid of the identity document instead
