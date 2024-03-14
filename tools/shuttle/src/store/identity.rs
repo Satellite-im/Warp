@@ -147,13 +147,7 @@ impl IdentityStorageInner {
             return Err(Error::IdentityExist);
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(document.clone())
-            .pin(false)
-            .await?;
+        let cid = self.ipfs.dag().put().serialize(document).pin(false).await?;
 
         list.insert(did_str, cid);
 
