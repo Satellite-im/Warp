@@ -57,6 +57,8 @@ use crate::store::{
 
 use super::document::root::RootDocumentMap;
 
+const CHAT_DIRECTORY: &str = "chat_media";
+
 pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
 
 #[allow(clippy::large_enum_variant)]
@@ -2368,19 +2370,19 @@ impl ConversationTask {
 
         let root_directory = constellation.root_directory();
 
-        if !root_directory.has_item("chat_media") {
-            let new_dir = Directory::new("chat_media");
+        if !root_directory.has_item(CHAT_DIRECTORY) {
+            let new_dir = Directory::new(CHAT_DIRECTORY);
             root_directory.add_directory(new_dir)?;
         }
 
         let mut media_dir = root_directory
-            .get_last_directory_from_path(&format!("/chat_media/{conversation_id}"))?;
+            .get_last_directory_from_path(&format!("/{CHAT_DIRECTORY}/{conversation_id}"))?;
 
-        if media_dir.name() == "chat_media" {
+        // if the directory that returned is the chat directory, this means we should create
+        // the directory specific to the conversation
+        if media_dir.name() == CHAT_DIRECTORY {
             let new_dir = Directory::new(&conversation_id.to_string());
             media_dir.add_directory(new_dir)?;
-            // in case the index isnt rebuilt from signaling
-            // _ = constellation.export().await;
             media_dir = media_dir.get_last_directory_from_path(&conversation_id.to_string())?;
         }
 
@@ -2470,7 +2472,7 @@ impl ConversationTask {
 
                         in_stack.push(filename.clone());
 
-                        let filename = format!("/chat_media/{conversation_id}/{filename}");
+                        let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
 
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
