@@ -1484,7 +1484,9 @@ impl ConversationTask {
 
         document.verify()?;
 
-        self.root.set_conversation_document(document).await
+        self.root.set_conversation_document(document).await?;
+        self.identity.export_root_document().await?;
+        Ok(())
     }
 
     pub async fn subscribe(
