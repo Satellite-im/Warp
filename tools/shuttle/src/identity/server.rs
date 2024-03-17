@@ -19,7 +19,10 @@ use rust_ipfs::{
 
 use rust_ipfs::libp2p::request_response;
 
-use crate::{identity::protocol::payload_message_construct, PayloadRequest};
+use crate::{
+    identity::protocol::{payload_message_construct, Request, Synchronized},
+    PayloadRequest,
+};
 
 use super::protocol::{self, Message, Response};
 
@@ -39,9 +42,9 @@ pub struct Behaviour {
 
     process_event: futures::channel::mpsc::Sender<(
         InboundRequestId,
-        ResponseChannel<Payload>,
+        Option<ResponseChannel<Payload>>,
         Payload,
-        futures::channel::oneshot::Sender<(ResponseChannel<Payload>, Payload)>,
+        Option<futures::channel::oneshot::Sender<(ResponseChannel<Payload>, Payload)>>,
     )>,
 
     queue_event: HashMap<InboundRequestId, (Option<ResponseChannel<Payload>>, Payload)>,
@@ -56,9 +59,9 @@ impl Behaviour {
         keypair: &Keypair,
         process_event: futures::channel::mpsc::Sender<(
             InboundRequestId,
-            ResponseChannel<Payload>,
+            Option<ResponseChannel<Payload>>,
             Payload,
-            futures::channel::oneshot::Sender<(ResponseChannel<Payload>, Payload)>,
+            Option<futures::channel::oneshot::Sender<(ResponseChannel<Payload>, Payload)>>,
         )>,
         precord_rx: futures::channel::mpsc::Receiver<PeerRecord>,
     ) -> Self {
@@ -97,21 +100,22 @@ impl Behaviour {
             _ = self.inner.send_response(channel, payload);
             return;
         }
-        // if let Message::Request(Request::Lookup(Lookup::Locate { peer_id, kind })) =
-        //     request.message()
-        // {
-        //     match kind {
-        //         protocol::LocateKind::Record => {
-        //             if !self.inner.is_connected(peer_id) {
-        //                //TODO:
-        //             }
-        //         }
-        //         protocol::LocateKind::Connect => todo!(),
-        //     }
-        //     return;
-        // }
-        self.queue_event
-            .insert(request_id, (Some(channel), request));
+
+        match matches!(
+            request.message(),
+            Message::Request(Request::Synchronized(Synchronized::Store { .. }))
+                | Message::Request(Request::Synchronized(Synchronized::Update { .. }))
+        ) {
+            true => {
+                let payload = payload_message_construct(&self.keypair, None, Response::Ack)
+                    .expect("Valid construction of payload");
+                _ = self.inner.send_response(channel, payload);
+                self.queue_event.insert(request_id, (None, request))
+            }
+            false => self
+                .queue_event
+                .insert(request_id, (Some(channel), request)),
+        };
     }
 }
 
@@ -248,14 +252,18 @@ impl NetworkBehaviour for Behaviour {
                 Poll::Ready(Ok(_)) => {
                     tracing::info!(id = ?id, from = %req_res.sender(), "Preparing payload");
                     let (tx, rx) = futures::channel::oneshot::channel();
-                    if let Some(channel) = channel.take() {
-                        tracing::info!(id = ?id, from = %req_res.sender(), "Sending payload to stream");
-                        self.waiting_on_request.insert(*id, rx);
-                        let _ = self
-                            .process_event
-                            .start_send((*id, channel, req_res.clone(), tx));
-                        tracing::info!(id = ?id, from = %req_res.sender(), "Payload sent");
-                    }
+                    let (ch, tx) = match channel.take() {
+                        Some(ch) => {
+                            self.waiting_on_request.insert(*id, rx);
+                            (Some(ch), Some(tx))
+                        }
+                        None => (None, None),
+                    };
+
+                    let _ = self
+                        .process_event
+                        .start_send((*id, ch, req_res.clone(), tx));
+                    tracing::info!(id = ?id, from = %req_res.sender(), "Payload sent");
 
                     false
                 }

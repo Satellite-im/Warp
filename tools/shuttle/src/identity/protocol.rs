@@ -78,6 +78,7 @@ pub enum Response {
     SynchronizedResponse(SynchronizedResponse),
     MailboxResponse(MailboxResponse),
     LookupResponse(LookupResponse),
+    Ack,
     Error(String),
 }
 

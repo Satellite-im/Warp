@@ -1709,34 +1709,14 @@ impl IdentityStore {
 
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
                     .clone()
                     .send(shuttle::identity::client::IdentityCommand::UpdateIdentity {
                         peer_id,
                         identity: identity.clone().into(),
-                        response: tx,
                     })
                     .await;
-
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
-                    Ok(Ok(Ok(_))) => {
-                        break;
-                    }
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!("Error exporting to {peer_id}: {e}");
-                        break;
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
-                        continue;
-                    }
-                }
             }
         }
         Ok(())
@@ -1747,34 +1727,14 @@ impl IdentityStore {
 
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
                     .clone()
                     .send(shuttle::identity::client::IdentityCommand::UpdatePackage {
                         peer_id,
                         package,
-                        response: tx,
                     })
                     .await;
-
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
-                    Ok(Ok(Ok(_))) => {
-                        break;
-                    }
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!("Error exporting to {peer_id}: {e}");
-                        break;
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
-                        continue;
-                    }
-                }
             }
         }
         Ok(())
@@ -1915,7 +1875,6 @@ impl IdentityStore {
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
                     .clone()
@@ -1923,23 +1882,8 @@ impl IdentityStore {
                         peer_id,
                         to: did.clone(),
                         request: request.clone(),
-                        response: tx,
                     })
                     .await;
-
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
-                    Ok(Ok(result)) => {
-                        return result;
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
-                        continue;
-                    }
-                }
             }
         }
         Ok(())

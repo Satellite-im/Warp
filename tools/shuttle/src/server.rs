@@ -43,12 +43,14 @@ type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
 type IdentityMessage = identity::protocol::Message;
 type IdentityReceiver = (
     InboundRequestId,
-    ResponseChannel<PayloadRequest<IdentityMessage>>,
+    Option<ResponseChannel<PayloadRequest<IdentityMessage>>>,
     PayloadRequest<IdentityMessage>,
-    OntshotSender<(
-        ResponseChannel<PayloadRequest<IdentityMessage>>,
-        PayloadRequest<IdentityMessage>,
-    )>,
+    Option<
+        OntshotSender<(
+            ResponseChannel<PayloadRequest<IdentityMessage>>,
+            PayloadRequest<IdentityMessage>,
+        )>,
+    >,
 );
 
 #[derive(NetworkBehaviour)]
@@ -217,7 +219,7 @@ impl ShuttleTask {
     async fn start(&mut self) {
         let keypair = self.ipfs.keypair();
 
-        while let Some((id, ch, payload, resp)) = self.identity_rx.next().await {
+        while let Some((id, mut ch, payload, mut resp)) = self.identity_rx.next().await {
             tracing::info!(request_id = ?id, "Processing Incoming Request");
 
             match payload.message() {
@@ -235,7 +237,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         };
@@ -251,7 +255,10 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -262,7 +269,9 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
                     }
                     identity::protocol::Request::Register(Register::RegisterIdentity {
                         document,
@@ -279,7 +288,10 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -294,7 +306,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
@@ -315,7 +329,10 @@ impl ShuttleTask {
                             let payload = payload_message_construct(keypair, None, res_error)
                                 .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -347,8 +364,9 @@ impl ShuttleTask {
                             Response::RegisterResponse(RegisterResponse::Ok),
                         )
                         .expect("Valid payload construction");
-
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
                     }
                     identity::protocol::Request::Mailbox(event) => {
                         let peer_id = payload.sender();
@@ -363,7 +381,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         };
@@ -381,7 +401,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
@@ -408,7 +430,9 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
                             }
                             identity::protocol::Mailbox::FetchFrom { .. } => {
                                 tracing::warn!(%did, "accessed to unimplemented request");
@@ -424,7 +448,10 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
+
                                 continue;
                             }
                             identity::protocol::Mailbox::Send { did: to, request } => {
@@ -441,7 +468,9 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                    let _ = resp.send((ch, payload));
+                                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                        let _ = resp.send((ch, payload));
+                                    }
 
                                     continue;
                                 }
@@ -459,7 +488,10 @@ impl ShuttleTask {
                                     )
                                     .expect("Valid payload construction");
 
-                                    let _ = resp.send((ch, payload));
+                                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                        let _ = resp.send((ch, payload));
+                                    }
+
                                     continue;
                                 }
 
@@ -480,7 +512,10 @@ impl ShuttleTask {
                                         )
                                         .expect("Valid payload construction");
 
-                                            let _ = resp.send((ch, payload));
+                                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take())
+                                            {
+                                                let _ = resp.send((ch, payload));
+                                            }
                                         }
                                         e => {
                                             tracing::warn!(%did, to = %to, "could not deliver request");
@@ -497,7 +532,10 @@ impl ShuttleTask {
                                             )
                                             .expect("Valid payload construction");
 
-                                            let _ = resp.send((ch, payload));
+                                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take())
+                                            {
+                                                let _ = resp.send((ch, payload));
+                                            }
                                         }
                                     }
                                     continue;
@@ -514,7 +552,9 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
                             }
                         }
                     }
@@ -531,7 +571,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         };
@@ -549,7 +591,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
@@ -565,8 +609,10 @@ impl ShuttleTask {
                                 ),
                             )
                             .expect("Valid payload construction");
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
-                            let _ = resp.send((ch, payload));
                             continue;
                         }
 
@@ -579,7 +625,10 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
                         continue;
                     }
                     identity::protocol::Request::Synchronized(Synchronized::Update {
@@ -597,7 +646,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
@@ -614,7 +665,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
@@ -642,7 +695,10 @@ impl ShuttleTask {
                                 .expect("Valid payload construction"),
                             };
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -667,7 +723,10 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
                         continue;
                     }
                     identity::protocol::Request::Synchronized(Synchronized::PeerRecord {
@@ -688,7 +747,10 @@ impl ShuttleTask {
                                     ),
                                 )
                                 .expect("Valid payload construction");
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
+
                                 continue;
                             }
                         };
@@ -707,7 +769,10 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
+
                                 continue;
                             }
                         };
@@ -727,7 +792,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         };
@@ -744,7 +811,10 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -757,7 +827,10 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
                         continue;
                     }
                     identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
@@ -775,7 +848,10 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -800,7 +876,9 @@ impl ShuttleTask {
                         let payload = payload_message_construct(keypair, None, event)
                             .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
 
                         continue;
                     }
@@ -819,7 +897,9 @@ impl ShuttleTask {
                         let payload = payload_message_construct(keypair, None, event)
                             .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
                     }
                 },
                 Message::Response(_) => {}
