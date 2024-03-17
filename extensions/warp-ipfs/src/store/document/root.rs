@@ -599,7 +599,7 @@ impl RootDocumentTask {
                     let _ = response.send(self.set_conversation_document(document).await);
                 }
                 RootDocumentCommand::ListConversationDocument { response } => {
-                    let _ = response.send(self.list_conversation_stream().await);
+                    let _ = response.send(Ok(self.list_conversation_stream().await));
                 }
             }
         }
@@ -1280,17 +1280,15 @@ impl RootDocumentTask {
         Ok(())
     }
 
-    pub async fn list_conversation_stream(
-        &self,
-    ) -> Result<BoxStream<'static, ConversationDocument>, Error> {
+    pub async fn list_conversation_stream(&self) -> BoxStream<'static, ConversationDocument> {
         let document = match self.get_root_document().await.ok() {
             Some(document) => document,
-            None => return Ok(futures::stream::empty().boxed()),
+            None => return futures::stream::empty().boxed(),
         };
 
         let cid = match document.conversations {
             Some(cid) => cid,
-            None => return Ok(futures::stream::empty().boxed()),
+            None => return futures::stream::empty().boxed(),
         };
 
         let ipfs = self.ipfs.clone();
@@ -1319,7 +1317,7 @@ impl RootDocumentTask {
             }
         };
 
-        Ok(stream.boxed())
+        stream.boxed()
     }
 
     async fn export(&self) -> Result<ResolvedRootDocument, Error> {
