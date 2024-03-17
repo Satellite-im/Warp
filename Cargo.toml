@@ -80,17 +80,17 @@ getrandom = { version = "0.2" }
 either = "1"
 void = "1"
 
-#ipfs dependency
-rust-ipfs = { version = "0.10", default-features = false, features = ["libp2p_bitswap"] }
+# ipfs dependency
+rust-ipfs = "0.11.0"
 
 
 # Blink related crates
 # av-data is needed to use libaom. need to ensure that Warp and libaom use the same version of av-data
 av-data = "*"
-libaom = { git="https://github.com/Satellite-im/aom-rs", branch="feat/windows-build" }
-mp4 = { git="https://github.com/satellite-im/mp4-rust", rev="9abb40d9a7690c3d5012a9f259f4b22adab06ec3" }
-eye = { git="https://github.com/raymanfx/eye-rs.git", rev="24324eb629dd73f349d0b4678cb0dd4dc5d75f1c" }
-opus = { git = "https://github.com/Satellite-im/opus-rs", rev="893b9f7e7e0cd00d13a64533967c6d2d6b1cb044" }
+libaom = { git = "https://github.com/Satellite-im/aom-rs", branch = "feat/windows-build" }
+mp4 = { git = "https://github.com/satellite-im/mp4-rust", rev = "9abb40d9a7690c3d5012a9f259f4b22adab06ec3" }
+eye = { git = "https://github.com/raymanfx/eye-rs.git", rev = "24324eb629dd73f349d0b4678cb0dd4dc5d75f1c" }
+opus = { git = "https://github.com/Satellite-im/opus-rs", rev = "893b9f7e7e0cd00d13a64533967c6d2d6b1cb044" }
 
 warp = { path = "./warp" }
 warp-ipfs = { path = "./extensions/warp-ipfs" }
