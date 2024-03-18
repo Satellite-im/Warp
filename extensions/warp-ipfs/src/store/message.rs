@@ -21,7 +21,7 @@ use futures::{
     SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::{libp2p::gossipsub::Message, Ipfs, IpfsPath, PeerId};
+use rust_ipfs::{libp2p::gossipsub::Message, Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
 use tokio::{select, task::JoinHandle};
