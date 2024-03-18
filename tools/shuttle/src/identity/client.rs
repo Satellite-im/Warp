@@ -5,6 +5,7 @@ use std::{
 };
 
 use futures::{channel::oneshot, FutureExt, StreamExt};
+use libipld::Cid;
 use rust_ipfs::{
     libp2p::{
         core::Endpoint,
@@ -70,18 +71,15 @@ pub enum IdentityCommand {
     UpdateIdentity {
         peer_id: PeerId,
         identity: IdentityDocument,
-        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
     },
     UpdatePackage {
         peer_id: PeerId,
-        package: Vec<u8>,
-        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
+        package: Cid,
     },
     SendRequest {
         peer_id: PeerId,
         to: DID,
         request: RequestPayload,
-        response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
     },
     FetchAllRequests {
         peer_id: PeerId,
@@ -91,7 +89,7 @@ pub enum IdentityCommand {
     Fetch {
         peer_id: PeerId,
         did: DID,
-        response: futures::channel::oneshot::Sender<Result<Vec<u8>, warp::error::Error>>,
+        response: futures::channel::oneshot::Sender<Result<Cid, warp::error::Error>>,
     },
 }
 
@@ -121,7 +119,7 @@ enum IdentityResponse {
         response: futures::channel::oneshot::Sender<Result<(), warp::error::Error>>,
     },
     Fetch {
-        response: futures::channel::oneshot::Sender<Result<Vec<u8>, warp::error::Error>>,
+        response: futures::channel::oneshot::Sender<Result<Cid, warp::error::Error>>,
     },
 }
 
@@ -544,13 +542,9 @@ impl NetworkBehaviour for Behaviour {
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Lookup { response });
                     }
-                    IdentityCommand::UpdatePackage {
-                        peer_id,
-                        package,
-                        response,
-                    } => {
+                    IdentityCommand::UpdatePackage { peer_id, package } => {
                         tracing::info!(
-                            package_size = package.len(),
+                            package = %package,
                             "Sending package to {peer_id}"
                         );
                         let payload = payload_message_construct(
@@ -562,9 +556,6 @@ impl NetworkBehaviour for Behaviour {
 
                         let id = self.inner.send_request(&peer_id, payload);
                         tracing::debug!(?id, "Request sent");
-
-                        self.waiting_on_response
-                            .insert(id, IdentityResponse::Store { response });
                     }
                     IdentityCommand::Fetch {
                         peer_id,
@@ -585,11 +576,7 @@ impl NetworkBehaviour for Behaviour {
                         self.waiting_on_response
                             .insert(id, IdentityResponse::Fetch { response });
                     }
-                    IdentityCommand::UpdateIdentity {
-                        peer_id,
-                        identity,
-                        response,
-                    } => {
+                    IdentityCommand::UpdateIdentity { peer_id, identity } => {
                         tracing::info!(?identity, "Updating identity");
                         let payload = payload_message_construct(
                             &self.keypair,
@@ -602,15 +589,11 @@ impl NetworkBehaviour for Behaviour {
 
                         let id = self.inner.send_request(&peer_id, payload);
                         tracing::debug!(?id, "Request sent");
-
-                        self.waiting_on_response
-                            .insert(id, IdentityResponse::Store { response });
                     }
                     IdentityCommand::SendRequest {
                         peer_id,
                         to,
                         request,
-                        response,
                     } => {
                         tracing::info!(to = %to, request = ?request.event, "Sending request");
                         let payload = payload_message_construct(
@@ -622,9 +605,6 @@ impl NetworkBehaviour for Behaviour {
 
                         let id = self.inner.send_request(&peer_id, payload);
                         tracing::debug!(?id, "Request sent");
-
-                        self.waiting_on_response
-                            .insert(id, IdentityResponse::RequestSent { response });
                     }
                     IdentityCommand::FetchAllRequests { peer_id, response } => {
                         tracing::info!("Fetching mailbox from {peer_id}");

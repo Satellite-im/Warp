@@ -128,6 +128,13 @@ pub enum RootDocumentCommand {
     ExportEncrypted {
         response: oneshot::Sender<Result<Vec<u8>, Error>>,
     },
+    ExportRootCid {
+        response: oneshot::Sender<Result<Cid, Error>>,
+    },
+    SetRootCid {
+        cid: Cid,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -388,6 +395,26 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn export_root_cid(&self) -> Result<Cid, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::ExportRootCid { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn import_root_cid(&self, cid: Cid) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::SetRootCid { cid, response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn export(&self) -> Result<ResolvedRootDocument, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -574,6 +601,9 @@ impl RootDocumentTask {
                 RootDocumentCommand::Export { response } => {
                     let _ = response.send(self.export().await);
                 }
+                RootDocumentCommand::ExportRootCid { response } => {
+                    let _ = response.send(self.cid.ok_or(Error::IdentityDoesntExist));
+                }
                 RootDocumentCommand::ExportEncrypted { response } => {
                     let _ = response.send(self.export_bytes().await);
                 }
@@ -591,6 +621,9 @@ impl RootDocumentTask {
                 }
                 RootDocumentCommand::SetRootIndex { root, response } => {
                     let _ = response.send(self.set_root_index(root).await);
+                }
+                RootDocumentCommand::SetRootCid { cid, response } => {
+                    let _ = response.send(self.set_root_cid(cid).await);
                 }
                 RootDocumentCommand::GetConversationDocument { id, response } => {
                     let _ = response.send(self.get_conversation_document(id).await);
@@ -689,7 +722,9 @@ impl RootDocumentTask {
         //Precautionary check
         document.verify(&self.ipfs).await?;
 
-        let root_cid = self.ipfs.dag().put().serialize(document).pin(true).await?;
+        let root_cid = self.ipfs.dag().put().serialize(document).await?;
+
+        self.ipfs.insert_pin(&root_cid).recursive().await?;
 
         let old_cid = self.cid.replace(root_cid);
 
@@ -1330,5 +1365,17 @@ impl RootDocumentTask {
 
         let bytes = serde_json::to_vec(&export)?;
         ecdh_encrypt(&self.keypair, None, bytes)
+    }
+
+    async fn set_root_cid(&mut self, cid: Cid) -> Result<(), Error> {
+        let root_document = self
+            .ipfs
+            .get_dag(cid)
+            .deserialized::<RootDocument>()
+            .await?;
+        // Step down through each field to resolve them
+        root_document.resolve2(&self.ipfs).await?;
+        self.set_root_document(root_document).await?;
+        Ok(())
     }
 }
