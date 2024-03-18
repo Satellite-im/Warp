@@ -156,9 +156,9 @@ impl From<ed25519_dalek::SecretKey> for DID {
 }
 
 pub fn generate<const N: usize>() -> [u8; N] {
+    use rand::{rngs::OsRng, RngCore};
+
     let mut buf = [0u8; N];
-    for x in buf.iter_mut() {
-        *x = rand::random()
-    }
+    OsRng.fill_bytes(&mut buf);
     buf
 }
