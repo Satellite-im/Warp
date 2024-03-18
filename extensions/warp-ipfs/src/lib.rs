@@ -1,6 +1,5 @@
 mod behaviour;
 pub mod config;
-mod spam_filter;
 pub mod store;
 mod thumbnail;
 mod utils;
@@ -354,6 +353,8 @@ impl WarpIpfs {
         }
 
         let ipfs = uninitialized.start().await?;
+
+        _ = ipfs.gc().await;
 
         if config.enable_relay {
             let mut relay_peers = HashSet::new();
