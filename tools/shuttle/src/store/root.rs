@@ -15,6 +15,8 @@ pub struct Root {
     pub packages: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mailbox: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_mailbox: Option<Cid>,
 }
 
 #[derive(Debug)]
