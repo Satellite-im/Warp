@@ -1,11 +1,13 @@
+use std::{collections::BTreeMap, future::IntoFuture, path::PathBuf, sync::Arc};
+
 use chrono::Utc;
 use futures::{
     channel::{mpsc::Receiver, oneshot},
+    stream::{BoxStream, FuturesUnordered},
     SinkExt, StreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use uuid::Uuid;
@@ -14,7 +16,10 @@ use warp::{
     multipass::identity::IdentityStatus,
 };
 
-use crate::store::{ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt};
+use crate::store::{
+    conversation::ConversationDocument, ecdh_decrypt, ecdh_encrypt, identity::Request,
+    keystore::Keystore, VecExt,
+};
 
 use super::{
     files::DirectoryDocument, identity::IdentityDocument, ResolvedRootDocument, RootDocument,
@@ -94,6 +99,17 @@ pub enum RootDocumentCommand {
     IsBlockedBy {
         did: DID,
         response: oneshot::Sender<Result<bool, Error>>,
+    },
+    GetConversationDocument {
+        id: Uuid,
+        response: oneshot::Sender<Result<ConversationDocument, Error>>,
+    },
+    SetConversationDocument {
+        document: ConversationDocument,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    ListConversationDocument {
+        response: oneshot::Sender<Result<BoxStream<'static, ConversationDocument>, Error>>,
     },
     SetKeystore {
         document: BTreeMap<String, Cid>,
@@ -402,6 +418,44 @@ impl RootDocumentMap {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    pub async fn list_conversation_document(
+        &self,
+    ) -> Result<BoxStream<'static, ConversationDocument>, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::ListConversationDocument { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get_conversation_document(&self, id: Uuid) -> Result<ConversationDocument, Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::GetConversationDocument { id, response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn set_conversation_document(
+        &self,
+        document: ConversationDocument,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RootDocumentCommand::SetConversationDocument {
+                document,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     pub async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -537,6 +591,15 @@ impl RootDocumentTask {
                 }
                 RootDocumentCommand::SetRootIndex { root, response } => {
                     let _ = response.send(self.set_root_index(root).await);
+                }
+                RootDocumentCommand::GetConversationDocument { id, response } => {
+                    let _ = response.send(self.get_conversation_document(id).await);
+                }
+                RootDocumentCommand::SetConversationDocument { document, response } => {
+                    let _ = response.send(self.set_conversation_document(document).await);
+                }
+                RootDocumentCommand::ListConversationDocument { response } => {
+                    let _ = response.send(Ok(self.list_conversation_stream().await));
                 }
             }
         }
@@ -1152,6 +1215,109 @@ impl RootDocumentTask {
             .deserialized()
             .await
             .map_err(Error::from)
+    }
+
+    async fn get_conversation_document(&self, id: Uuid) -> Result<ConversationDocument, Error> {
+        let document = self.get_root_document().await?;
+
+        let cid = match document.conversations {
+            Some(cid) => cid,
+            None => return Err(Error::InvalidConversation),
+        };
+
+        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
+        let document: ConversationDocument = self
+            .ipfs
+            .get_dag(path)
+            .local()
+            .deserialized()
+            .await
+            .map_err(Error::from)?;
+
+        document.verify()?;
+
+        if document.deleted {
+            return Err(Error::InvalidConversation);
+        }
+
+        Ok(document)
+    }
+
+    async fn set_conversation_document(
+        &mut self,
+        conversation_document: ConversationDocument,
+    ) -> Result<(), Error> {
+        conversation_document.verify()?;
+        let mut document = self.get_root_document().await?;
+
+        let mut list = match document.conversations {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => BTreeMap::new(),
+        };
+
+        let id = conversation_document.id().to_string();
+        let cid = self
+            .ipfs
+            .dag()
+            .put()
+            .serialize(conversation_document)
+            .await?;
+
+        list.insert(id, cid);
+
+        let cid = self.ipfs.dag().put().serialize(list).await?;
+
+        document.conversations.replace(cid);
+
+        self.set_root_document(document).await?;
+
+        Ok(())
+    }
+
+    pub async fn list_conversation_stream(&self) -> BoxStream<'static, ConversationDocument> {
+        let document = match self.get_root_document().await.ok() {
+            Some(document) => document,
+            None => return futures::stream::empty().boxed(),
+        };
+
+        let cid = match document.conversations {
+            Some(cid) => cid,
+            None => return futures::stream::empty().boxed(),
+        };
+
+        let ipfs = self.ipfs.clone();
+
+        let stream = async_stream::stream! {
+            let conversation_map: BTreeMap<String, Cid> = ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default();
+
+            let unordered = FuturesUnordered::from_iter(
+                conversation_map
+                    .values()
+                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
+            )
+            .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
+            .filter(|document| {
+                let deleted = document.deleted;
+                async move { !deleted }
+            });
+
+            for await conversation in unordered {
+                yield conversation;
+            }
+        };
+
+        stream.boxed()
     }
 
     async fn export(&self) -> Result<ResolvedRootDocument, Error> {
