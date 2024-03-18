@@ -10,7 +10,7 @@ repository.workspace = true
 
 [dependencies]
 rust-ipfs = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["net"] }
 futures.workspace = true

@@ -15,7 +15,7 @@ warp-blink-wrtc = { path = "../../extensions/warp-blink-wrtc" }
 warp-ipfs = { path = "../../extensions/warp-ipfs" }
 
 uuid = { workspace = true, features = ["serde", "v4"] }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 
 rand= { workspace = true }
 

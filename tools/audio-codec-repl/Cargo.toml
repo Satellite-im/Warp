@@ -21,4 +21,4 @@ bytes.workspace = true
 once_cell.workspace = true
 rand.workspace = true
 serde.workspace = true
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
