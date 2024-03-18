@@ -26,8 +26,9 @@ use tokio::{select, task::JoinHandle};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
+
 use warp::{
-    constellation::{ConstellationProgressStream, Progression},
+    constellation::{directory::Directory, ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
     error::Error,
     multipass::MultiPassEventKind,
@@ -55,6 +56,8 @@ use crate::store::{
 };
 
 use super::document::root::RootDocumentMap;
+
+const CHAT_DIRECTORY: &str = "chat_media";
 
 pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
 
@@ -2321,6 +2324,26 @@ impl ConversationTask {
             return Err(Error::NoAttachments);
         }
 
+        let root_directory = constellation.root_directory();
+
+        if !root_directory.has_item(CHAT_DIRECTORY) {
+            let new_dir = Directory::new(CHAT_DIRECTORY);
+            root_directory.add_directory(new_dir)?;
+        }
+
+        let mut media_dir = root_directory
+            .get_last_directory_from_path(&format!("/{CHAT_DIRECTORY}/{conversation_id}"))?;
+
+        // if the directory that returned is the chat directory, this means we should create
+        // the directory specific to the conversation
+        if media_dir.name() == CHAT_DIRECTORY {
+            let new_dir = Directory::new(&conversation_id.to_string());
+            media_dir.add_directory(new_dir)?;
+            media_dir = media_dir.get_last_directory_from_path(&conversation_id.to_string())?;
+        }
+
+        assert_eq!(media_dir.name(), conversation_id.to_string());
+
         let mut atx = self.attachment_tx.clone();
 
         let message_id = Uuid::new_v4();
@@ -2365,13 +2388,7 @@ impl ConversationTask {
 
                         let original = filename.clone();
 
-                        let current_directory = match constellation.current_directory() {
-                            Ok(directory) => directory,
-                            Err(e) => {
-                                yield AttachmentKind::Pending(Err(e));
-                                return;
-                            }
-                        };
+                        let current_directory = media_dir.clone();
 
                         let mut interval = 0;
                         let skip;
@@ -2411,6 +2428,8 @@ impl ConversationTask {
 
                         in_stack.push(filename.clone());
 
+                        let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
+
                         let mut progress = match constellation.put(&filename, &file).await {
                             Ok(stream) => stream,
                             Err(e) => {
@@ -2423,7 +2442,7 @@ impl ConversationTask {
                             }
                         };
 
-                        let current_directory = current_directory.clone();
+                        let directory = root_directory.clone();
                         let filename = filename.to_string();
 
                         let stream = async_stream::stream! {
@@ -2433,7 +2452,7 @@ impl ConversationTask {
                                         yield (item, None);
                                     },
                                     item @ Progression::ProgressComplete { .. } => {
-                                        let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
+                                        let file = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
                                         yield (item, file);
                                         break;
                                     },
