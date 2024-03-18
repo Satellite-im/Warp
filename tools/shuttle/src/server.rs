@@ -43,12 +43,14 @@ type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
 type IdentityMessage = identity::protocol::Message;
 type IdentityReceiver = (
     InboundRequestId,
-    ResponseChannel<PayloadRequest<IdentityMessage>>,
+    Option<ResponseChannel<PayloadRequest<IdentityMessage>>>,
     PayloadRequest<IdentityMessage>,
-    OntshotSender<(
-        ResponseChannel<PayloadRequest<IdentityMessage>>,
-        PayloadRequest<IdentityMessage>,
-    )>,
+    Option<
+        OntshotSender<(
+            ResponseChannel<PayloadRequest<IdentityMessage>>,
+            PayloadRequest<IdentityMessage>,
+        )>,
+    >,
 );
 
 #[derive(NetworkBehaviour)]
@@ -184,7 +186,7 @@ impl ShuttleServer {
 
         println!(
             "Identities Registered: {}",
-            identity.list().await?.count().await
+            identity.list().await.count().await
         );
 
         let mut subscriptions = Subscriptions::new(&ipfs, &identity);
@@ -217,8 +219,9 @@ impl ShuttleTask {
     async fn start(&mut self) {
         let keypair = self.ipfs.keypair();
 
-        while let Some((id, ch, payload, resp)) = self.identity_rx.next().await {
+        while let Some((id, mut ch, payload, mut resp)) = self.identity_rx.next().await {
             tracing::info!(request_id = ?id, "Processing Incoming Request");
+
             match payload.message() {
                 Message::Request(req) => match req {
                     identity::protocol::Request::Register(Register::IsRegistered) => {
@@ -234,17 +237,14 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         };
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -255,7 +255,10 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -266,18 +269,15 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
                     }
                     identity::protocol::Request::Register(Register::RegisterIdentity {
                         document,
                     }) => {
                         tracing::info!(%document.did, "Receive register request");
-                        if self
-                            .identity_storage
-                            .contains(&document.did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if self.identity_storage.contains(&document.did).await {
                             tracing::warn!(%document.did, "Identity is already registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -288,7 +288,10 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -303,7 +306,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
@@ -324,7 +329,10 @@ impl ShuttleTask {
                             let payload = payload_message_construct(keypair, None, res_error)
                                 .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -356,8 +364,9 @@ impl ShuttleTask {
                             Response::RegisterResponse(RegisterResponse::Ok),
                         )
                         .expect("Valid payload construction");
-
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
                     }
                     identity::protocol::Request::Mailbox(event) => {
                         let peer_id = payload.sender();
@@ -372,17 +381,14 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         };
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -395,7 +401,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
@@ -422,7 +430,9 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
                             }
                             identity::protocol::Mailbox::FetchFrom { .. } => {
                                 tracing::warn!(%did, "accessed to unimplemented request");
@@ -438,11 +448,14 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
+
                                 continue;
                             }
                             identity::protocol::Mailbox::Send { did: to, request } => {
-                                if !self.identity_storage.contains(to).await.unwrap_or_default() {
+                                if !self.identity_storage.contains(to).await {
                                     tracing::warn!(%did, "Identity is not registered");
                                     let payload = payload_message_construct(
                                     keypair,
@@ -455,7 +468,9 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                    let _ = resp.send((ch, payload));
+                                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                        let _ = resp.send((ch, payload));
+                                    }
 
                                     continue;
                                 }
@@ -473,7 +488,10 @@ impl ShuttleTask {
                                     )
                                     .expect("Valid payload construction");
 
-                                    let _ = resp.send((ch, payload));
+                                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                        let _ = resp.send((ch, payload));
+                                    }
+
                                     continue;
                                 }
 
@@ -494,7 +512,10 @@ impl ShuttleTask {
                                         )
                                         .expect("Valid payload construction");
 
-                                            let _ = resp.send((ch, payload));
+                                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take())
+                                            {
+                                                let _ = resp.send((ch, payload));
+                                            }
                                         }
                                         e => {
                                             tracing::warn!(%did, to = %to, "could not deliver request");
@@ -511,7 +532,10 @@ impl ShuttleTask {
                                             )
                                             .expect("Valid payload construction");
 
-                                            let _ = resp.send((ch, payload));
+                                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take())
+                                            {
+                                                let _ = resp.send((ch, payload));
+                                            }
                                         }
                                     }
                                     continue;
@@ -528,7 +552,9 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
                             }
                         }
                     }
@@ -545,17 +571,14 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         };
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -568,38 +591,14 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
 
-                        if package.is_empty() {
-                            tracing::warn!(%did, "package supplied is zero. Will skip");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::InvalidPayload {
-                                            msg: "package cannot be empty".into(),
-                                        },
-                                    ),
-                                ),
-                            )
-                            .expect("Valid payload construction");
-
-                            let _ = resp.send((ch, payload));
-
-                            continue;
-                        }
-
-                        tracing::info!(%did, package_size=package.len());
-
-                        if let Err(e) = self
-                            .identity_storage
-                            .store_package(&did, package.clone())
-                            .await
-                        {
+                        if let Err(e) = self.identity_storage.store_package(&did, *package).await {
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
@@ -610,12 +609,14 @@ impl ShuttleTask {
                                 ),
                             )
                             .expect("Valid payload construction");
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
-                            let _ = resp.send((ch, payload));
                             continue;
                         }
 
-                        tracing::info!(%did, package_size=package.len(), "package is stored");
+                        tracing::info!(%did, %package, "package is stored");
 
                         let payload = payload_message_construct(
                             keypair,
@@ -624,7 +625,10 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
                         continue;
                     }
                     identity::protocol::Request::Synchronized(Synchronized::Update {
@@ -642,18 +646,15 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
                         let did = document.did.clone();
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -664,7 +665,9 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         }
@@ -692,7 +695,10 @@ impl ShuttleTask {
                                 .expect("Valid payload construction"),
                             };
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -717,7 +723,10 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
                         continue;
                     }
                     identity::protocol::Request::Synchronized(Synchronized::PeerRecord {
@@ -738,7 +747,10 @@ impl ShuttleTask {
                                     ),
                                 )
                                 .expect("Valid payload construction");
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
+
                                 continue;
                             }
                         };
@@ -757,7 +769,10 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                let _ = resp.send((ch, payload));
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
+
                                 continue;
                             }
                         };
@@ -777,17 +792,14 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
 
                             continue;
                         };
 
-                        if !self
-                            .identity_storage
-                            .contains(&did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(&did).await {
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
@@ -799,7 +811,10 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
@@ -812,17 +827,15 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
                         continue;
                     }
                     identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
                         tracing::info!(%did, "Fetching document");
-                        if !self
-                            .identity_storage
-                            .contains(did)
-                            .await
-                            .unwrap_or_default()
-                        {
+                        if !self.identity_storage.contains(did).await {
                             tracing::warn!(%did, "Identity is not registered");
                             let payload = payload_message_construct(
                                 keypair,
@@ -835,16 +848,19 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            let _ = resp.send((ch, payload));
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
                             continue;
                         }
 
                         tracing::info!(%did, "looking for package");
                         let event = match self.identity_storage.get_package(did).await {
                             Ok(package) => {
-                                tracing::info!(%did, package_size = package.len(), "package found");
+                                tracing::info!(%did, package = %package, "package found");
                                 Response::SynchronizedResponse(SynchronizedResponse::Package(
-                                    package.clone(),
+                                    package,
                                 ))
                             }
                             Err(_) => {
@@ -860,7 +876,9 @@ impl ShuttleTask {
                         let payload = payload_message_construct(keypair, None, event)
                             .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
 
                         continue;
                     }
@@ -879,137 +897,10 @@ impl ShuttleTask {
                         let payload = payload_message_construct(keypair, None, event)
                             .expect("Valid payload construction");
 
-                        let _ = resp.send((ch, payload));
-                    } // identity::protocol::Request::Lookup(Lookup::PublicKeys { dids }) => {
-                      //     tracing::trace!(list_size = dids.len());
-
-                      //     let list = dids
-                      //         .iter()
-                      //         .filter_map(|did| temp_registration.get(did))
-                      //         .cloned()
-                      //         .collect::<Vec<_>>();
-
-                      //     tracing::info!(list_size = list.len(), "Found");
-
-                      //     let event = match list.is_empty() {
-                      //         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
-                      //         true => Response::LookupResponse(LookupResponse::Error(
-                      //             identity::protocol::LookupError::DoesntExist,
-                      //         )),
-                      //     };
-
-                      //     let payload =
-                      //         payload_message_construct(keypair, None, event).expect("Valid payload construction");
-
-                      //     let _ = resp.send((ch, payload));
-                      // }
-
-                      // identity::protocol::Request::Lookup(Lookup::Username { username, .. })
-                      //     if username.contains('#') =>
-                      // {
-                      //     //TODO: Score against invalid username scheme
-                      //     let split_data = username.split('#').collect::<Vec<&str>>();
-
-                      //     let list = if split_data.len() != 2 {
-                      //         temp_registration
-                      //             .values()
-                      //             .filter(|document| {
-                      //                 document
-                      //                     .username
-                      //                     .to_lowercase()
-                      //                     .eq(&username.to_lowercase())
-                      //             })
-                      //             .cloned()
-                      //             .collect::<Vec<_>>()
-                      //     } else {
-                      //         match (
-                      //             split_data.first().map(|s| s.to_lowercase()),
-                      //             split_data.last().map(|s| s.to_lowercase()),
-                      //         ) {
-                      //             (Some(name), Some(code)) => temp_registration
-                      //                 .values()
-                      //                 .filter(|ident| {
-                      //                     ident.username.to_lowercase().eq(&name)
-                      //                         && String::from_utf8_lossy(&ident.short_id)
-                      //                             .to_lowercase()
-                      //                             .eq(&code)
-                      //                 })
-                      //                 .cloned()
-                      //                 .collect::<Vec<_>>(),
-                      //             _ => vec![],
-                      //         }
-                      //     };
-
-                      //     tracing::info!(list_size = list.len(), "Found identities");
-
-                      //     let event = match list.is_empty() {
-                      //         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
-                      //         true => Response::LookupResponse(LookupResponse::Error(
-                      //             identity::protocol::LookupError::DoesntExist,
-                      //         )),
-                      //     };
-
-                      //     let payload =
-                      //         payload_message_construct(keypair, None, event).expect("Valid payload construction");
-
-                      //     let _ = resp.send((ch, payload));
-                      // }
-                      // identity::protocol::Request::Lookup(Lookup::Username { username, .. }) => {
-                      //     //TODO: Score against invalid username scheme
-                      //     let list = temp_registration
-                      //         .values()
-                      //         .filter(|document| {
-                      //             document
-                      //                 .username
-                      //                 .to_lowercase()
-                      //                 .contains(&username.to_lowercase())
-                      //         })
-                      //         .cloned()
-                      //         .collect::<Vec<_>>();
-
-                      //     tracing::info!(list_size = list.len(), "Found identities");
-
-                      //     let event = match list.is_empty() {
-                      //         false => Response::LookupResponse(LookupResponse::Ok { identity: list }),
-                      //         true => Response::LookupResponse(LookupResponse::Error(
-                      //             identity::protocol::LookupError::DoesntExist,
-                      //         )),
-                      //     };
-
-                      //     let payload =
-                      //         payload_message_construct(keypair, None, event).expect("Valid payload construction");
-
-                      //     let _ = resp.send((ch, payload));
-                      // }
-                      // identity::protocol::Request::Lookup(Lookup::ShortId { short_id }) => {
-                      //     let Some(document) = temp_registration
-                      //         .values()
-                      //         .find(|document| document.short_id.eq(short_id.as_ref()))
-                      //     else {
-                      //         let payload = payload_message_construct(
-                      //             keypair,
-                      //             None,
-                      //             Response::LookupResponse(LookupResponse::Error(
-                      //                 identity::protocol::LookupError::DoesntExist,
-                      //             )),
-                      //         )
-                      //         .expect("Valid payload construction");
-
-                      //         let _ = resp.send((ch, payload));
-                      //         continue;
-                      //     };
-
-                      //     let payload = payload_message_construct(
-                      //         keypair,
-                      //         None,
-                      //         Response::LookupResponse(LookupResponse::Ok {
-                      //             identity: vec![document.clone()],
-                      //         }),
-                      //     )
-                      //     .expect("Valid payload construction");
-
-                      //     let _ = resp.send((ch, payload));
-                      // }
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+                    }
                 },
                 Message::Response(_) => {}
             }

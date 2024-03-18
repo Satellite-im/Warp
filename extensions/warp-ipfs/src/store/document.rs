@@ -255,6 +255,71 @@ impl RootDocument {
         Ok(exported)
     }
 
+    #[tracing::instrument(skip(self, ipfs))]
+    pub async fn resolve2(&self, ipfs: &Ipfs) -> Result<(), Error> {
+        let document: IdentityDocument = ipfs
+            .get_dag(self.identity)
+            .deserialized()
+            .await
+            .map_err(|_| Error::IdentityInvalid)?;
+
+        document.resolve()?;
+
+        _ = futures::future::ready(self.friends.ok_or(Error::Other))
+            .and_then(|document| async move {
+                ipfs.get_dag(document)
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)
+            })
+            .await;
+
+        _ = futures::future::ready(self.blocks.ok_or(Error::Other))
+            .and_then(|document| async move {
+                ipfs.get_dag(document)
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)
+            })
+            .await;
+
+        _ = futures::future::ready(self.block_by.ok_or(Error::Other))
+            .and_then(|document| async move {
+                ipfs.get_dag(document)
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)
+            })
+            .await;
+
+        _ = futures::future::ready(self.request.ok_or(Error::Other))
+            .and_then(|document| async move {
+                ipfs.get_dag(document)
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)
+            })
+            .await;
+
+        _ = futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
+            .and_then(|document| async move {
+                let map: BTreeMap<String, Cid> = ipfs.get_dag(document).deserialized().await?;
+                let mut resolved_map: BTreeMap<Uuid, _> = BTreeMap::new();
+                for (k, v) in map
+                    .iter()
+                    .filter_map(|(k, v)| Uuid::from_str(k).map(|k| (k, *v)).ok())
+                {
+                    if let Ok(store) = ipfs.get_dag(v).await {
+                        resolved_map.insert(k, store);
+                    }
+                }
+                Ok(resolved_map)
+            })
+            .await;
+
+        self.verify(ipfs).await
+    }
+
     pub async fn import(ipfs: &Ipfs, data: ResolvedRootDocument) -> Result<Self, Error> {
         data.verify()?;
 
