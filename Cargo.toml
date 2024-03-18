@@ -71,9 +71,7 @@ either = "1"
 void = "1"
 
 #ipfs dependency
-rust-ipfs = { version = "0.11.0", default-features = false, features = [
-    "libp2p_bitswap",
-] }
+rust-ipfs = "0.11.0"
 
 
 # Blink related crates
