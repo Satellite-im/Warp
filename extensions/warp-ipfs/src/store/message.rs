@@ -9,6 +9,7 @@ use std::{
     ffi::OsStr,
     future::IntoFuture,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
 };
