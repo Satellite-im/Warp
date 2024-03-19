@@ -9,7 +9,10 @@ use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
 
-use crate::identity::{document::IdentityDocument, protocol::Lookup, RequestPayload};
+use crate::{
+    identity::{document::IdentityDocument, protocol::Lookup, RequestPayload, RootDocument},
+    DidExt,
+};
 
 use super::root::RootStorage;
 
@@ -147,11 +150,11 @@ impl IdentityStorageInner {
             return Err(Error::IdentityExist);
         }
 
-        let cid = self.ipfs.dag().put().serialize(document).pin(false).await?;
+        let cid = self.ipfs.dag().put().serialize(document).await?;
 
         list.insert(did_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list).pin(false).await?;
+        let cid = self.ipfs.dag().put().serialize(list).await?;
 
         let old_cid = self.list.replace(cid);
 
@@ -171,6 +174,8 @@ impl IdentityStorageInner {
             return Err(Error::IdentityDoesntExist);
         }
 
+        let identity_peer_id = did.to_peer_id()?;
+
         let mut list: BTreeMap<String, Cid> = match self.packages {
             Some(cid) => self
                 .ipfs
@@ -181,6 +186,34 @@ impl IdentityStorageInner {
                 .unwrap_or_default(),
             None => BTreeMap::new(),
         };
+
+        if let Some(cid) = list.get(&did.to_string()) {
+            tracing::info!(%did, %package, "loading previous document");
+            let old_document = self
+                .ipfs
+                .get_dag(*cid)
+                .local()
+                .deserialized::<RootDocument>()
+                .await
+                .map_err(anyhow::Error::from)?;
+
+            let new_document = self
+                .ipfs
+                .get_dag(package)
+                .provider(identity_peer_id)
+                .deserialized::<RootDocument>()
+                .await
+                .map_err(anyhow::Error::from)?;
+
+            tracing::info!(%did, %package, new = old_document.modified >= new_document.modified);
+
+            if old_document.modified >= new_document.modified {
+                tracing::warn!(%did, %package, "document provided is older or same as the current document");
+                return Err(Error::Other);
+            }
+
+            tracing::info!(%did, %package, new = old_document.modified >= new_document.modified, "storing new root document");
+        }
 
         list.insert(did.to_string(), package);
 

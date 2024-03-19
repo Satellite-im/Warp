@@ -597,39 +597,26 @@ impl ShuttleTask {
 
                             continue;
                         }
+                        tokio::spawn({
+                            let identity_storage = self.identity_storage.clone();
+                            let ipfs = self.ipfs.clone();
+                            let package = *package;
+                            async move {
+                                tracing::debug!(%did, %package, "preloading root document");
+                                if let Err(e) = ipfs.fetch(&package).recursive().await {
+                                    tracing::warn!(%did, %package, error = %e, "unable to preload root document");
+                                    return;
+                                }
+                                tracing::debug!(%did, %package, "root document preloaded");
+                                if let Err(e) = identity_storage.store_package(&did, package).await
+                                {
+                                    tracing::warn!(%did, %package, error = %e, "unable to store document");
+                                    return;
+                                }
 
-                        if let Err(e) = self.identity_storage.store_package(&did, *package).await {
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::InvalidPayload { msg: e.to_string() },
-                                    ),
-                                ),
-                            )
-                            .expect("Valid payload construction");
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
+                                tracing::info!(%did, %package, "root document is stored");
                             }
-
-                            continue;
-                        }
-
-                        tracing::info!(%did, %package, "package is stored");
-
-                        let payload = payload_message_construct(
-                            keypair,
-                            None,
-                            Response::SynchronizedResponse(SynchronizedResponse::IdentityUpdated),
-                        )
-                        .expect("Valid payload construction");
-
-                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                            let _ = resp.send((ch, payload));
-                        }
-
-                        continue;
+                        });
                     }
                     identity::protocol::Request::Synchronized(Synchronized::Update {
                         document,

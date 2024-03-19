@@ -109,6 +109,7 @@ impl Behaviour {
             true => {
                 let payload = payload_message_construct(&self.keypair, None, Response::Ack)
                     .expect("Valid construction of payload");
+                tracing::info!(id = ?request_id, ?payload, "constructed payload");
                 _ = self.inner.send_response(channel, payload);
                 self.queue_event.insert(request_id, (None, request))
             }
