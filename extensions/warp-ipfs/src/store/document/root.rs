@@ -736,11 +736,9 @@ impl RootDocumentTask {
         }
 
         if let Some(old_cid) = old_cid {
-            if old_cid != root_cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    if let Err(e) = self.ipfs.remove_pin(&old_cid).recursive().await {
-                        tracing::warn!(cid =? old_cid, "Failed to unpin root document: {e}");
-                    }
+            if old_cid != root_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                if let Err(e) = self.ipfs.remove_pin(&old_cid).recursive().await {
+                    tracing::warn!(cid =? old_cid, "Failed to unpin root document: {e}");
                 }
             }
         }
@@ -781,7 +779,6 @@ impl RootDocumentTask {
 
     async fn add_request(&mut self, request: Request) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        let old_document = document.request;
         let mut list: Vec<Request> = match document.request {
             Some(cid) => self
                 .ipfs
@@ -815,7 +812,7 @@ impl RootDocumentTask {
 
     async fn remove_request(&mut self, request: Request) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        let old_document = document.request;
+
         let mut list: Vec<Request> = match document.request {
             Some(cid) => self
                 .ipfs
@@ -869,7 +866,7 @@ impl RootDocumentTask {
 
     async fn add_friend(&mut self, did: DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        let old_document = document.friends;
+
         let mut list: Vec<DID> = match document.friends {
             Some(cid) => self
                 .ipfs
@@ -925,7 +922,7 @@ impl RootDocumentTask {
 
         let cid = self.ipfs.dag().put().serialize(index_document).await?;
 
-        let old_document = document.file_index.replace(cid);
+        document.file_index.replace(cid);
 
         self.set_root_document(document).await?;
 
@@ -934,7 +931,7 @@ impl RootDocumentTask {
 
     async fn remove_friend(&mut self, did: DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        let old_document = document.friends;
+
         let mut list: Vec<DID> = match document.friends {
             Some(cid) => self
                 .ipfs
@@ -1001,7 +998,7 @@ impl RootDocumentTask {
 
     async fn block_key(&mut self, did: DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        let old_document = document.blocks;
+
         let mut list: Vec<DID> = match document.blocks {
             Some(cid) => self
                 .ipfs
@@ -1036,7 +1033,7 @@ impl RootDocumentTask {
 
     async fn unblock_key(&mut self, did: DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        let old_document = document.blocks;
+
         let mut list: Vec<DID> = match document.blocks {
             Some(cid) => self
                 .ipfs
@@ -1091,7 +1088,7 @@ impl RootDocumentTask {
 
     async fn add_blockby_key(&mut self, did: DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        let old_document = document.block_by;
+
         let mut list: Vec<DID> = match document.block_by {
             Some(cid) => self
                 .ipfs
@@ -1126,7 +1123,7 @@ impl RootDocumentTask {
 
     async fn remove_blockby_key(&mut self, did: DID) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        let old_document = document.block_by;
+
         let mut list: Vec<DID> = match document.block_by {
             Some(cid) => self
                 .ipfs
