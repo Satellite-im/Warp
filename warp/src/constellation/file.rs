@@ -39,46 +39,8 @@ impl From<FileType> for FormatType {
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
 #[derive(Clone, Deserialize, Serialize)]
 pub struct File {
-    /// ID of the `File`
-    id: Arc<Uuid>,
-
-    /// Name of the `File`
-    name: Arc<RwLock<String>>,
-
-    /// Size of the `File`.
-    size: Arc<RwLock<usize>>,
-
-    /// Thumbnail of the `File`
-    /// Note: This should be set if the file is an image, unless
-    ///       one plans to add a generic thumbnail for the file
-    thumbnail: Arc<RwLock<Vec<u8>>>,
-
-    /// Format of the thumbnail
-    thumbnail_format: Arc<RwLock<FormatType>>,
-
-    /// External reference pointing to the thumbnail
-    thumbnail_reference: Arc<RwLock<Option<String>>>,
-
-    /// Favorite File
-    favorite: Arc<RwLock<bool>>,
-
-    /// Description of the `File`. TODO: Make this optional
-    description: Arc<RwLock<String>>,
-
-    /// Timestamp of the creation of the `File`
-    creation: Arc<RwLock<DateTime<Utc>>>,
-
-    /// Timestamp of the `File` when it is modified
-    modified: Arc<RwLock<DateTime<Utc>>>,
-
-    /// Type of the `File`.
-    file_type: Arc<RwLock<FileType>>,
-
-    /// Hash of the `File`
-    hash: Arc<RwLock<Hash>>,
-
-    /// External reference pointing to the source of the file
-    reference: Arc<RwLock<Option<String>>>,
+    #[serde(flatten)]
+    inner: Arc<RwLock<FileInner>>,
 
     /// Path to file
     #[serde(default)]
@@ -86,6 +48,71 @@ pub struct File {
 
     #[serde(skip)]
     signal: Arc<RwLock<Option<futures::channel::mpsc::UnboundedSender<()>>>>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct FileInner {
+    /// ID of the `File`
+    id: Uuid,
+
+    /// Name of the `File`
+    name: String,
+
+    /// Size of the `File`.
+    size: usize,
+
+    /// Thumbnail of the `File`
+    /// Note: This should be set if the file is an image, unless
+    ///       one plans to add a generic thumbnail for the file
+    thumbnail: Vec<u8>,
+
+    /// Format of the thumbnail
+    thumbnail_format: FormatType,
+
+    /// External reference pointing to the thumbnail
+    thumbnail_reference: Option<String>,
+
+    /// Favorite File
+    favorite: bool,
+
+    /// Description of the `File`. TODO: Make this optional
+    description: String,
+
+    /// Timestamp of the creation of the `File`
+    creation: DateTime<Utc>,
+
+    /// Timestamp of the `File` when it is modified
+    modified: DateTime<Utc>,
+
+    /// Type of the `File`.
+    file_type: FileType,
+
+    /// Hash of the `File`
+    hash: Hash,
+
+    /// External reference pointing to the source of the file
+    reference: Option<String>,
+}
+
+impl Default for FileInner {
+    fn default() -> Self {
+        let timestamp = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            name: String::from("un-named file"),
+            description: Default::default(),
+            size: Default::default(),
+            thumbnail: Default::default(),
+            thumbnail_format: Default::default(),
+            thumbnail_reference: Default::default(),
+            favorite: Default::default(),
+            creation: timestamp,
+            modified: timestamp,
+            file_type: Default::default(),
+            hash: Default::default(),
+            reference: Default::default(),
+        }
+    }
 }
 
 impl std::fmt::Debug for File {
@@ -119,21 +146,9 @@ impl Eq for File {}
 
 impl Default for File {
     fn default() -> Self {
-        let timestamp = Utc::now();
+        let inner = Arc::new(RwLock::new(FileInner::default()));
         Self {
-            id: Arc::new(Uuid::new_v4()),
-            name: Arc::new(RwLock::new(String::from("un-named file"))),
-            description: Default::default(),
-            size: Default::default(),
-            thumbnail: Default::default(),
-            thumbnail_format: Default::default(),
-            thumbnail_reference: Default::default(),
-            favorite: Default::default(),
-            creation: Arc::new(RwLock::new(timestamp)),
-            modified: Arc::new(RwLock::new(timestamp)),
-            file_type: Default::default(),
-            hash: Default::default(),
-            reference: Default::default(),
+            inner,
             path: Arc::new("/".into()),
             signal: Arc::default(),
         }
@@ -154,32 +169,39 @@ impl File {
     /// ```
     pub fn new(name: &str) -> File {
         let file = File::default();
-        let mut name = name.trim();
-        if name.len() > 256 {
-            name = &name[..256];
-        }
-        if !name.is_empty() {
-            *file.name.write() = name.to_string();
+        {
+            let inner = &mut *file.inner.write();
+
+            let mut name = name.trim();
+            if name.len() > 256 {
+                name = &name[..256];
+            }
+            if !name.is_empty() {
+                inner.name = name.to_string();
+            }
         }
         file
     }
 
     pub fn name(&self) -> String {
-        self.name.read().to_owned()
+        let inner = self.inner.read();
+        inner.name.to_owned()
     }
 
     pub fn set_name(&self, name: &str) {
+        let inner = &mut *self.inner.write();
         let mut name = name.trim();
         if name.len() > 256 {
             name = &name[..256];
         }
-        *self.name.write() = name.to_string();
-        *self.modified.write() = Utc::now();
+        inner.name = name.to_string();
+        inner.modified = Utc::now();
         self.signal();
     }
 
     pub fn description(&self) -> String {
-        self.description.read().to_owned()
+        let inner = self.inner.read();
+        inner.description.to_owned()
     }
 
     /// Set the description of the file
@@ -195,43 +217,50 @@ impl File {
     /// assert_eq!(file.description().as_str(), "test file");
     /// ```
     pub fn set_description(&self, desc: &str) {
-        *self.description.write() = desc.to_string();
-        *self.modified.write() = Utc::now();
+        let inner = &mut *self.inner.write();
+        inner.description = desc.to_string();
+        inner.modified = Utc::now();
         self.signal();
     }
 
     /// Set thumbnail format
     pub fn set_thumbnail_format(&self, format: FormatType) {
-        *self.thumbnail_format.write() = format;
-        *self.modified.write() = Utc::now();
+        let inner = &mut *self.inner.write();
+        inner.thumbnail_format = format;
+        inner.modified = Utc::now();
         self.signal();
     }
 
     /// Get the thumbnail format
     pub fn thumbnail_format(&self) -> FormatType {
-        self.thumbnail_format.read().clone()
+        let inner = self.inner.read();
+        inner.thumbnail_format.clone()
     }
 
     /// Set the thumbnail to the file
     pub fn set_thumbnail(&self, data: &[u8]) {
-        *self.thumbnail.write() = data.to_vec();
-        *self.modified.write() = Utc::now();
+        let inner = &mut *self.inner.write();
+        inner.thumbnail = data.to_vec();
+        inner.modified = Utc::now();
         self.signal();
     }
 
     /// Get the thumbnail from the file
     pub fn thumbnail(&self) -> Vec<u8> {
-        self.thumbnail.read().clone()
+        let inner = self.inner.read();
+        inner.thumbnail.clone()
     }
 
     pub fn set_favorite(&self, fav: bool) {
-        *self.favorite.write() = fav;
-        *self.modified.write() = Utc::now();
+        let inner = &mut *self.inner.write();
+        inner.favorite = fav;
+        inner.modified = Utc::now();
         self.signal();
     }
 
     pub fn favorite(&self) -> bool {
-        *self.favorite.read()
+        let inner = self.inner.read();
+        inner.favorite
     }
 
     /// Set the reference of the file
@@ -248,27 +277,32 @@ impl File {
     /// assert_eq!(file.reference().unwrap().as_str(), "test_file.txt");
     /// ```
     pub fn set_reference(&self, reference: &str) {
-        *self.reference.write() = Some(reference.to_string());
-        *self.modified.write() = Utc::now();
+        let inner = &mut *self.inner.write();
+        inner.reference = Some(reference.to_string());
+        inner.modified = Utc::now();
         self.signal();
     }
 
     pub fn set_thumbnail_reference(&self, reference: &str) {
-        *self.thumbnail_reference.write() = Some(reference.to_string());
-        *self.modified.write() = Utc::now();
+        let inner = &mut *self.inner.write();
+        inner.thumbnail_reference = Some(reference.to_string());
+        inner.modified = Utc::now();
         self.signal();
     }
 
     pub fn reference(&self) -> Option<String> {
-        self.reference.read().clone()
+        let inner = self.inner.read();
+        inner.reference.clone()
     }
 
     pub fn thumbnail_reference(&self) -> Option<String> {
-        self.thumbnail_reference.read().clone()
+        let inner = self.inner.read();
+        inner.thumbnail_reference.clone()
     }
 
     pub fn size(&self) -> usize {
-        *self.size.read()
+        let inner = self.inner.read();
+        inner.size
     }
 
     /// Set the size the file
@@ -284,35 +318,42 @@ impl File {
     /// assert_eq!(Item::from(file).size(), 100000);
     /// ```
     pub fn set_size(&self, size: usize) {
-        *self.size.write() = size;
-        *self.modified.write() = Utc::now();
+        let inner = &mut *self.inner.write();
+        inner.size = size;
+        inner.modified = Utc::now();
         self.signal();
     }
 
     pub fn set_creation(&self, creation: DateTime<Utc>) {
-        *self.creation.write() = creation
+        let inner = &mut *self.inner.write();
+        inner.creation = creation
     }
 
     pub fn set_modified(&self, modified: Option<DateTime<Utc>>) {
-        *self.modified.write() = modified.unwrap_or(Utc::now());
+        let inner = &mut *self.inner.write();
+        inner.modified = modified.unwrap_or(Utc::now());
         self.signal()
     }
 
     pub fn hash(&self) -> Hash {
-        self.hash.read().clone()
+        let inner = self.inner.read();
+        inner.hash.clone()
     }
 
     pub fn set_hash(&self, hash: Hash) {
-        *self.hash.write() = hash;
+        let inner = &mut *self.inner.write();
+        inner.hash = hash;
     }
 
     pub fn set_file_type(&self, file_type: FileType) {
-        *self.file_type.write() = file_type;
+        let inner = &mut *self.inner.write();
+        inner.file_type = file_type;
         self.signal();
     }
 
     pub fn file_type(&self) -> FileType {
-        self.file_type.read().clone()
+        let inner = self.inner.read();
+        inner.file_type.clone()
     }
 
     pub fn path(&self) -> &str {
@@ -353,27 +394,24 @@ impl File {
 }
 
 impl File {
-    pub fn hash_mut(&self) -> parking_lot::RwLockWriteGuard<Hash> {
-        self.hash.write()
-    }
-}
-
-impl File {
     pub fn id(&self) -> Uuid {
-        *self.id
+        let inner = self.inner.read();
+        inner.id
     }
 
     pub fn creation(&self) -> DateTime<Utc> {
-        *self.creation.read()
+        let inner = self.inner.read();
+        inner.creation
     }
 
     pub fn modified(&self) -> DateTime<Utc> {
-        *self.modified.read()
+        let inner = self.inner.read();
+        inner.modified
     }
 
     pub fn update<F: Fn(File)>(&self, f: F) {
         f(self.clone());
-        *self.modified.write() = Utc::now()
+        // *self.modified.write() = Utc::now()
     }
 }
 
