@@ -741,16 +741,6 @@ impl MessageDocument {
         Ok(document)
     }
 
-    // pub async fn remove(&self, ipfs: &Ipfs) -> Result<(), Error> {
-    //     let cid = self.message;
-    //     if ipfs.is_pinned(&cid).await? {
-    //         ipfs.remove_pin(&cid, false).await?;
-    //     }
-    //     ipfs.remove_block(cid).await?;
-
-    //     Ok(())
-    // }
-
     pub async fn update(
         &mut self,
         ipfs: &Ipfs,

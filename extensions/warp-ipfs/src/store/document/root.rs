@@ -742,7 +742,6 @@ impl RootDocumentTask {
                         tracing::warn!(cid =? old_cid, "Failed to unpin root document: {e}");
                     }
                 }
-                _ = self.ipfs.remove_block(old_cid, false).await;
             }
         }
 
@@ -811,13 +810,6 @@ impl RootDocumentTask {
         };
 
         self.set_root_document(document).await?;
-
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
-
         Ok(())
     }
 
@@ -852,13 +844,6 @@ impl RootDocumentTask {
         };
 
         self.set_root_document(document).await?;
-
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
-
         Ok(())
     }
 
@@ -913,13 +898,6 @@ impl RootDocumentTask {
         };
 
         self.set_root_document(document).await?;
-
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
-
         Ok(())
     }
 
@@ -950,12 +928,6 @@ impl RootDocumentTask {
         let old_document = document.file_index.replace(cid);
 
         self.set_root_document(document).await?;
-
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
 
         Ok(())
     }
@@ -991,12 +963,6 @@ impl RootDocumentTask {
         };
 
         self.set_root_document(document).await?;
-
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
 
         Ok(())
     }
@@ -1065,11 +1031,6 @@ impl RootDocumentTask {
 
         self.set_root_document(document).await?;
 
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
         Ok(())
     }
 
@@ -1105,11 +1066,6 @@ impl RootDocumentTask {
 
         self.set_root_document(document).await?;
 
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
         Ok(())
     }
 
@@ -1165,11 +1121,6 @@ impl RootDocumentTask {
 
         self.set_root_document(document).await?;
 
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
         Ok(())
     }
 
@@ -1204,12 +1155,6 @@ impl RootDocumentTask {
         };
 
         self.set_root_document(document).await?;
-
-        if let Some(cid) = old_document {
-            if !self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_block(cid, false).await?;
-            }
-        }
         Ok(())
     }
 

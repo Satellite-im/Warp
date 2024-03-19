@@ -1441,10 +1441,6 @@ impl ConversationTask {
             }
         }
 
-        if let Some(cid) = list {
-            let _ = self.ipfs.remove_block(cid, true).await;
-        }
-
         Ok(conversation)
     }
 
