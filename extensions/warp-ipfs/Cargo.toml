@@ -16,7 +16,6 @@ tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["net"] }
 futures.workspace = true
-futures-timer.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
 anyhow.workspace = true
