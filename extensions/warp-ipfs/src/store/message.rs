@@ -1428,7 +1428,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         }
 
-        let list = conversation.messages.take();
+        conversation.messages.take();
         conversation.deleted = true;
 
         self.set_document(conversation.clone()).await?;
@@ -1439,10 +1439,6 @@ impl ConversationTask {
                     warn!(conversation_id = %id, "Failed to remove keystore: {e}");
                 }
             }
-        }
-
-        if let Some(cid) = list {
-            let _ = self.ipfs.remove_block(cid, true).await;
         }
 
         Ok(conversation)

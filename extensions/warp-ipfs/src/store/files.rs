@@ -526,7 +526,6 @@ impl FileTask {
                 self.ipfs.remove_pin(&cid).recursive().await?;
             }
 
-            self.ipfs.remove_block(cid, true).await?;
             _ = tokio::fs::remove_file(path.join(".index_id")).await;
         }
 
@@ -1086,9 +1085,6 @@ impl FileTask {
         }
 
         directory.remove_item(&item.name())?;
-
-        let blocks = ipfs.remove_block(cid, true).await.unwrap_or_default();
-        tracing::info!(blocks = blocks.len(), "blocks removed");
 
         _ = self.export().await;
 
