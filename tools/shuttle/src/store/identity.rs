@@ -205,14 +205,14 @@ impl IdentityStorageInner {
                 .await
                 .map_err(anyhow::Error::from)?;
 
-            tracing::info!(%did, %package, new = old_document.modified >= new_document.modified);
+            tracing::info!(%did, %package, new = new_document.modified >= old_document.modified);
 
             if old_document.modified >= new_document.modified {
                 tracing::warn!(%did, %package, "document provided is older or same as the current document");
                 return Err(Error::Other);
             }
 
-            tracing::info!(%did, %package, new = old_document.modified >= new_document.modified, "storing new root document");
+            tracing::info!(%did, %package, new = new_document.modified >= old_document.modified, "storing new root document");
         }
 
         list.insert(did.to_string(), package);
