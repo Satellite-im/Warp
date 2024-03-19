@@ -678,10 +678,6 @@ pub struct Message {
     /// List of Attachment
     attachment: Vec<File>,
 
-    /// Signature of the message
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<Vec<u8>>,
-
     /// Metadata related to the message. Can be used externally, but more internally focused
     #[serde(flatten)]
     metadata: HashMap<String, String>,
@@ -702,7 +698,6 @@ impl Default for Message {
             replied: None,
             lines: Vec::new(),
             attachment: Vec::new(),
-            signature: Default::default(),
             metadata: HashMap::new(),
         }
     }
@@ -772,10 +767,6 @@ impl Message {
         self.attachment.clone()
     }
 
-    pub fn signature(&self) -> Vec<u8> {
-        self.signature.clone().unwrap_or_default()
-    }
-
     pub fn metadata(&self) -> HashMap<String, String> {
         self.metadata.clone()
     }
@@ -828,10 +819,6 @@ impl Message {
 
     pub fn set_attachment(&mut self, attachments: Vec<File>) {
         self.attachment = attachments
-    }
-
-    pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
-        self.signature = signature
     }
 
     pub fn set_metadata(&mut self, metadata: HashMap<String, String>) {
