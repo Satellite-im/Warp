@@ -29,13 +29,12 @@ use warp::{
     error::Error,
     multipass::identity::IdentityStatus,
     raygun::{
-        ConversationSettings, DirectConversationSettings, Message, MessageEvent, PinState,
-        ReactionState,
+        ConversationSettings, DirectConversationSettings, MessageEvent, PinState, ReactionState,
     },
     tesseract::Tesseract,
 };
 
-use self::conversation::ConversationDocument;
+use self::conversation::{ConversationDocument, MessageDocument};
 
 pub trait PeerTopic: Display {
     fn inbox(&self) -> String {
@@ -205,13 +204,14 @@ impl std::fmt::Debug for ConversationResponseKind {
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum MessagingEvents {
     New {
-        message: Message,
+        message: MessageDocument,
     },
     Edit {
         conversation_id: Uuid,
         message_id: Uuid,
         modified: DateTime<Utc>,
         lines: Vec<String>,
+        nonce: Vec<u8>,
         signature: Vec<u8>,
     },
     Delete {
@@ -333,6 +333,25 @@ pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
     Ok(data)
 }
 
+pub(crate) fn ecdh_encrypt_with_nonce<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+    nonce: &[u8],
+) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_encrypt_with_nonce(data.as_ref(), &prik, nonce)?;
+
+    Ok(data)
+}
+
 pub(crate) fn ecdh_decrypt<K: AsRef<[u8]>>(
     did: &DID,
     recipient: Option<&DID>,
@@ -405,6 +424,12 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
+}
+
+pub fn extract_data_slice<const N: usize>(data: &[u8]) -> (&[u8], &[u8]) {
+    let extracted = &data[data.len() - N..];
+    let payload = &data[..data.len() - N];
+    (extracted, payload)
 }
 
 #[cfg(test)]
