@@ -53,9 +53,8 @@ use super::{
     phonebook::PhoneBook,
     queue::Queue,
     request::PayloadRequest,
+    SHUTTLE_TIMEOUT,
 };
-
-const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]

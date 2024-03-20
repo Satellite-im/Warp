@@ -373,20 +373,22 @@ impl ConversationDocument {
         &mut self,
         ipfs: &Ipfs,
         message_document: MessageDocument,
-    ) -> Result<(), Error> {
+    ) -> Result<Cid, Error> {
         let mut list = self.message_reference_list(ipfs).await?;
-        list.insert(ipfs, message_document).await?;
-        self.set_message_reference_list(ipfs, list).await
+        let cid = list.insert(ipfs, message_document).await?;
+        self.set_message_reference_list(ipfs, list).await?;
+        Ok(cid)
     }
 
     pub async fn update_message_document(
         &mut self,
         ipfs: &Ipfs,
         message_document: MessageDocument,
-    ) -> Result<(), Error> {
+    ) -> Result<Cid, Error> {
         let mut list = self.message_reference_list(ipfs).await?;
-        list.update(ipfs, message_document).await?;
-        self.set_message_reference_list(ipfs, list).await
+        let cid = list.update(ipfs, message_document).await?;
+        self.set_message_reference_list(ipfs, list).await?;
+        Ok(cid)
     }
 
     pub async fn messages_length(&self, ipfs: &Ipfs) -> Result<usize, Error> {
@@ -1221,7 +1223,7 @@ pub struct MessageReferenceList {
 
 impl MessageReferenceList {
     #[async_recursion::async_recursion]
-    pub async fn insert(&mut self, ipfs: &Ipfs, message: MessageDocument) -> Result<(), Error> {
+    pub async fn insert(&mut self, ipfs: &Ipfs, message: MessageDocument) -> Result<Cid, Error> {
         let mut list_refs = match self.messages {
             Some(cid) => {
                 ipfs.get_dag(cid)
@@ -1247,10 +1249,10 @@ impl MessageReferenceList {
                 None => MessageReferenceList::default(),
             };
 
-            next_ref.insert(ipfs, message).await?;
+            let cid = next_ref.insert(ipfs, message).await?;
             let next_cid = ipfs.dag().put().serialize(next_ref).await?;
             self.next.replace(next_cid);
-            return Ok(());
+            return Ok(cid);
         }
 
         let id = message.id.to_string();
@@ -1261,11 +1263,11 @@ impl MessageReferenceList {
         let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
         self.messages.replace(ref_cid);
 
-        Ok(())
+        Ok(cid)
     }
 
     #[async_recursion::async_recursion]
-    pub async fn update(&mut self, ipfs: &Ipfs, message: MessageDocument) -> Result<(), Error> {
+    pub async fn update(&mut self, ipfs: &Ipfs, message: MessageDocument) -> Result<Cid, Error> {
         let mut list_refs = match self.messages {
             Some(cid) => {
                 ipfs.get_dag(cid)
@@ -1287,10 +1289,10 @@ impl MessageReferenceList {
                 None => return Err(Error::MessageNotFound),
             };
 
-            next_ref.update(ipfs, message).await?;
+            let cid = next_ref.update(ipfs, message).await?;
             let next_cid = ipfs.dag().put().serialize(next_ref).await?;
             self.next.replace(next_cid);
-            return Ok(());
+            return Ok(cid);
         }
 
         let id = message.id.to_string();
@@ -1301,7 +1303,7 @@ impl MessageReferenceList {
         let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
         self.messages.replace(ref_cid);
 
-        Ok(())
+        Ok(cid)
     }
 
     #[async_recursion::async_recursion]

@@ -14,7 +14,7 @@ pub mod request;
 use chrono::{DateTime, Utc};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::{fmt::Display, time::Duration};
 use uuid::Uuid;
 
 use ipfs::{Keypair, PeerId, PublicKey};
@@ -33,6 +33,8 @@ use warp::{
     },
     tesseract::Tesseract,
 };
+
+pub(crate) const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 use self::conversation::{ConversationDocument, MessageDocument};
 

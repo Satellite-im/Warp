@@ -128,7 +128,7 @@ impl Behaviour {
         keypair: &Keypair,
         primary_keypair: Option<&Keypair>,
         process_command: futures::channel::mpsc::Receiver<IdentityCommand>,
-        addresses: Vec<Multiaddr>,
+        addresses: &[Multiaddr],
     ) -> Self {
         let mut client = Self {
             inner: request_response::json::Behaviour::new(

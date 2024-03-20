@@ -35,28 +35,37 @@ use crate::{
             Response, Synchronized, SynchronizedError, SynchronizedResponse,
         },
     },
+    message::{self, protocol::RegisterConversation, protocol::Response as MessageResponse},
     subscription_stream::Subscriptions,
     PayloadRequest, PeerIdExt, PeerTopic,
 };
 
 type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
 type IdentityMessage = identity::protocol::Message;
+type IdentityPayload = PayloadRequest<IdentityMessage>;
+
+type MessageProtocol = message::protocol::Message;
+type MessagePayload = PayloadRequest<MessageProtocol>;
+
 type IdentityReceiver = (
     InboundRequestId,
-    Option<ResponseChannel<PayloadRequest<IdentityMessage>>>,
-    PayloadRequest<IdentityMessage>,
-    Option<
-        OntshotSender<(
-            ResponseChannel<PayloadRequest<IdentityMessage>>,
-            PayloadRequest<IdentityMessage>,
-        )>,
-    >,
+    Option<ResponseChannel<IdentityPayload>>,
+    IdentityPayload,
+    Option<OntshotSender<(ResponseChannel<IdentityPayload>, IdentityPayload)>>,
+);
+
+type MessageReceiver = (
+    InboundRequestId,
+    Option<ResponseChannel<MessagePayload>>,
+    PayloadRequest<MessageProtocol>,
+    Option<OntshotSender<(ResponseChannel<MessagePayload>, MessagePayload)>>,
 );
 
 #[derive(NetworkBehaviour)]
 #[behaviour(prelude = "libp2p::swarm::derive_prelude", to_swarm = "void::Void")]
 struct Behaviour {
     identity: identity::server::Behaviour,
+    message: message::server::Behaviour,
     dummy: Toggle<ext_behaviour::Behaviour>,
 }
 
@@ -72,8 +81,10 @@ struct ShuttleTask {
     ipfs: Ipfs,
     root_storage: crate::store::root::RootStorage,
     identity_storage: crate::store::identity::IdentityStorage,
+    message_storage: crate::store::messages::MessageStorage,
     subscriptions: crate::subscription_stream::Subscriptions,
     identity_rx: mpsc::Receiver<IdentityReceiver>,
+    message_rx: mpsc::Receiver<MessageReceiver>,
     precord_tx: mpsc::Sender<PeerRecord>,
 }
 
@@ -90,6 +101,7 @@ impl ShuttleServer {
 
         let local_peer_id = keypair.public().to_peer_id();
         let (id_event_tx, id_event_rx) = futures::channel::mpsc::channel(1);
+        let (msg_event_tx, msg_event_rx) = futures::channel::mpsc::channel(1);
         let (precord_tx, precord_rx) = futures::channel::mpsc::channel(256);
         let mut uninitialized = UninitializedIpfs::new()
             .with_identify(IdentifyConfiguration {
@@ -105,6 +117,7 @@ impl ShuttleServer {
             .with_relay(true)
             .with_custom_behaviour(Behaviour {
                 identity: identity::server::Behaviour::new(keypair, id_event_tx, precord_rx),
+                message: message::server::Behaviour::new(keypair, msg_event_tx),
                 dummy: ext
                     .then_some(ext_behaviour::Behaviour::new(local_peer_id))
                     .into(),
@@ -183,6 +196,8 @@ impl ShuttleServer {
 
         let root = crate::store::root::RootStorage::new(&ipfs, path).await;
         let identity = crate::store::identity::IdentityStorage::new(&ipfs, &root).await;
+        let message =
+            crate::store::messages::MessageStorage::new(&ipfs, &root, &identity, None).await;
 
         println!(
             "Identities Registered: {}",
@@ -198,7 +213,9 @@ impl ShuttleServer {
             subscriptions,
             root_storage: root,
             identity_storage: identity,
+            message_storage: message,
             identity_rx: id_event_rx,
+            message_rx: msg_event_rx,
             precord_tx,
         };
 
@@ -217,186 +234,245 @@ impl ShuttleServer {
 
 impl ShuttleTask {
     async fn start(&mut self) {
-        let keypair = self.ipfs.keypair();
-
         //TODO: push each request into its own task or queue and poll to completion (in which it would respond accordingly)
-        while let Some((id, mut ch, payload, mut resp)) = self.identity_rx.next().await {
-            tracing::info!(request_id = ?id, "Processing Incoming Request");
+        loop {
+            tokio::select! {
+                Some((id, ch, payload, resp)) = self.identity_rx.next() => {
+                    self.process_identity_events(id, ch, payload, resp).await
+                }
+                Some((id, ch, payload, resp)) = self.message_rx.next() => {
+                    self.process_message_events(id, ch, payload, resp).await
+                }
+            }
+        }
+    }
 
-            match payload.message() {
-                Message::Request(req) => match req {
-                    identity::protocol::Request::Register(Register::IsRegistered) => {
-                        let peer_id = payload.sender();
-                        let Ok(did) = peer_id.to_did() else {
-                            tracing::warn!(%peer_id, "Could not convert to did key");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::IdentityVerificationFailed,
-                                )),
-                            )
-                            .expect("Valid payload construction");
+    async fn process_identity_events(
+        &mut self,
+        id: InboundRequestId,
+        mut ch: Option<ResponseChannel<IdentityPayload>>,
+        payload: IdentityPayload,
+        mut resp: Option<OntshotSender<(ResponseChannel<IdentityPayload>, IdentityPayload)>>,
+    ) {
+        let keypair = self.ipfs.keypair();
+        tracing::info!(request_id = ?id, "Processing Incoming Request");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
-                        };
-
-                        if !self.identity_storage.contains(&did).await {
-                            tracing::warn!(%did, "Identity is not registered");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::NotRegistered,
-                                )),
-                            )
-                            .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
-                        }
-
+        match payload.message() {
+            Message::Request(req) => match req {
+                identity::protocol::Request::Register(Register::IsRegistered) => {
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
                         let payload = payload_message_construct(
                             keypair,
                             None,
-                            Response::RegisterResponse(RegisterResponse::Ok),
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
                         )
                         .expect("Valid payload construction");
 
                         if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
                             let _ = resp.send((ch, payload));
                         }
+
+                        return;
+                    };
+
+                    if !self.identity_storage.contains(&did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::NotRegistered,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
                     }
-                    identity::protocol::Request::Register(Register::RegisterIdentity {
-                        document,
-                    }) => {
-                        tracing::info!(%document.did, "Receive register request");
-                        if self.identity_storage.contains(&document.did).await {
-                            tracing::warn!(%document.did, "Identity is already registered");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
+
+                    let payload = payload_message_construct(
+                        keypair,
+                        None,
+                        Response::RegisterResponse(RegisterResponse::Ok),
+                    )
+                    .expect("Valid payload construction");
+
+                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        let _ = resp.send((ch, payload));
+                    }
+                }
+                identity::protocol::Request::Register(Register::RegisterIdentity { document }) => {
+                    tracing::info!(%document.did, "Receive register request");
+                    if self.identity_storage.contains(&document.did).await {
+                        tracing::warn!(%document.did, "Identity is already registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityExist,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
+                    }
+
+                    if document.verify().is_err() {
+                        tracing::warn!(%document.did, "Identity cannot be verified");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
+                    }
+
+                    if let Err(e) = self.identity_storage.register(document.clone()).await {
+                        tracing::warn!(%document.did, "Unable to register identity");
+                        let res_error = match e {
+                            WarpError::IdentityExist => {
                                 Response::RegisterResponse(RegisterResponse::Error(
                                     identity::protocol::RegisterError::IdentityExist,
-                                )),
-                            )
+                                ))
+                            }
+                            _ => Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::None,
+                            )),
+                        };
+
+                        let payload = payload_message_construct(keypair, None, res_error)
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
-                        }
-
-                        if document.verify().is_err() {
-                            tracing::warn!(%document.did, "Identity cannot be verified");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::IdentityVerificationFailed,
-                                )),
-                            )
-                            .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
-                        }
-
-                        if let Err(e) = self.identity_storage.register(document.clone()).await {
-                            tracing::warn!(%document.did, "Unable to register identity");
-                            let res_error = match e {
-                                WarpError::IdentityExist => {
-                                    Response::RegisterResponse(RegisterResponse::Error(
-                                        identity::protocol::RegisterError::IdentityExist,
-                                    ))
-                                }
-                                _ => Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::None,
-                                )),
-                            };
-
-                            let payload = payload_message_construct(keypair, None, res_error)
-                                .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
-                        }
-
-                        if let Err(e) = self.subscriptions.subscribe(document.did.inbox()).await {
-                            tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
-                            // Although we arent able to subscribe, we can still process the request while leaving this as a warning
-                        }
-
-                        if let Err(e) = self.subscriptions.subscribe(document.did.messaging()).await
-                        {
-                            tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
-                            // Although we arent able to subscribe, we can still process the request while leaving this as a warning
-                        }
-
-                        let payload = PayloadRequest::new(keypair, None, document.clone())
-                            .expect("Valid payload construction");
-
-                        let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
-
-                        _ = self
-                            .ipfs
-                            .pubsub_publish("/identity/announce/v0", bytes)
-                            .await;
-
-                        tracing::info!(%document.did, "identity registered");
-                        let payload = payload_message_construct(
-                            keypair,
-                            None,
-                            Response::RegisterResponse(RegisterResponse::Ok),
-                        )
-                        .expect("Valid payload construction");
                         if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
                             let _ = resp.send((ch, payload));
                         }
+
+                        return;
                     }
-                    identity::protocol::Request::Mailbox(event) => {
-                        let peer_id = payload.sender();
-                        let Ok(did) = peer_id.to_did() else {
-                            tracing::warn!(%peer_id, "Could not convert to did key");
+
+                    if let Err(e) = self.subscriptions.subscribe(document.did.inbox()).await {
+                        tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
+                        // Although we arent able to subscribe, we can still process the request while leaving this as a warning
+                    }
+
+                    if let Err(e) = self.subscriptions.subscribe(document.did.messaging()).await {
+                        tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
+                        // Although we arent able to subscribe, we can still process the request while leaving this as a warning
+                    }
+
+                    let payload = PayloadRequest::new(keypair, None, document.clone())
+                        .expect("Valid payload construction");
+
+                    let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
+
+                    _ = self
+                        .ipfs
+                        .pubsub_publish("/identity/announce/v0", bytes)
+                        .await;
+
+                    tracing::info!(%document.did, "identity registered");
+                    let payload = payload_message_construct(
+                        keypair,
+                        None,
+                        Response::RegisterResponse(RegisterResponse::Ok),
+                    )
+                    .expect("Valid payload construction");
+                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        let _ = resp.send((ch, payload));
+                    }
+                }
+                identity::protocol::Request::Mailbox(event) => {
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
+                    };
+
+                    if !self.identity_storage.contains(&did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::MailboxResponse(identity::protocol::MailboxResponse::Error(
+                                identity::protocol::MailboxError::IdentityNotRegistered,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
+                    }
+
+                    match event {
+                        identity::protocol::Mailbox::FetchAll => {
+                            let (reqs, remaining) = self
+                                .identity_storage
+                                .fetch_mailbox(did.clone())
+                                .await
+                                .unwrap_or_default();
+
+                            tracing::info!(%did, request = reqs.len(), remaining = remaining);
+
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::IdentityVerificationFailed,
-                                )),
+                                Response::MailboxResponse(
+                                    identity::protocol::MailboxResponse::Receive {
+                                        list: reqs,
+                                        remaining,
+                                    },
+                                ),
                             )
                             .expect("Valid payload construction");
 
                             if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
                                 let _ = resp.send((ch, payload));
                             }
-
-                            continue;
-                        };
-
-                        if !self.identity_storage.contains(&did).await {
-                            tracing::warn!(%did, "Identity is not registered");
+                        }
+                        identity::protocol::Mailbox::FetchFrom { .. } => {
+                            tracing::warn!(%did, "accessed to unimplemented request");
+                            //TODO
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
                                 Response::MailboxResponse(
                                     identity::protocol::MailboxResponse::Error(
-                                        identity::protocol::MailboxError::IdentityNotRegistered,
+                                        identity::protocol::MailboxError::NoRequests,
                                     ),
                                 ),
                             )
@@ -405,60 +481,11 @@ impl ShuttleTask {
                             if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
                                 let _ = resp.send((ch, payload));
                             }
-
-                            continue;
                         }
-
-                        match event {
-                            identity::protocol::Mailbox::FetchAll => {
-                                let (reqs, remaining) = self
-                                    .identity_storage
-                                    .fetch_mailbox(did.clone())
-                                    .await
-                                    .unwrap_or_default();
-
-                                tracing::info!(%did, request = reqs.len(), remaining = remaining);
-
+                        identity::protocol::Mailbox::Send { did: to, request } => {
+                            if !self.identity_storage.contains(to).await {
+                                tracing::warn!(%did, "Identity is not registered");
                                 let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::MailboxResponse(
-                                        identity::protocol::MailboxResponse::Receive {
-                                            list: reqs,
-                                            remaining,
-                                        },
-                                    ),
-                                )
-                                .expect("Valid payload construction");
-
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                    let _ = resp.send((ch, payload));
-                                }
-                            }
-                            identity::protocol::Mailbox::FetchFrom { .. } => {
-                                tracing::warn!(%did, "accessed to unimplemented request");
-                                //TODO
-                                let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::MailboxResponse(
-                                        identity::protocol::MailboxResponse::Error(
-                                            identity::protocol::MailboxError::NoRequests,
-                                        ),
-                                    ),
-                                )
-                                .expect("Valid payload construction");
-
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                    let _ = resp.send((ch, payload));
-                                }
-
-                                continue;
-                            }
-                            identity::protocol::Mailbox::Send { did: to, request } => {
-                                if !self.identity_storage.contains(to).await {
-                                    tracing::warn!(%did, "Identity is not registered");
-                                    let payload = payload_message_construct(
                                     keypair,
                                     None,
                                     Response::MailboxResponse(
@@ -469,16 +496,39 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                        let _ = resp.send((ch, payload));
-                                    }
-
-                                    continue;
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
                                 }
 
-                                if request.verify().is_err() {
-                                    tracing::warn!(%did, to = %to, "request could not be vertified");
-                                    let payload = payload_message_construct(
+                                return;
+                            }
+
+                            if request.verify().is_err() {
+                                tracing::warn!(%did, to = %to, "request could not be vertified");
+                                let payload = payload_message_construct(
+                                    keypair,
+                                    None,
+                                    Response::MailboxResponse(
+                                        identity::protocol::MailboxResponse::Error(
+                                            identity::protocol::MailboxError::InvalidRequest,
+                                        ),
+                                    ),
+                                )
+                                .expect("Valid payload construction");
+
+                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    let _ = resp.send((ch, payload));
+                                }
+
+                                return;
+                            }
+
+                            if let Err(e) = self.identity_storage.deliver_request(to, request).await
+                            {
+                                match e {
+                                    WarpError::InvalidSignature => {
+                                        tracing::warn!(%did, to = %to, "request could not be vertified");
+                                        let payload = payload_message_construct(
                                         keypair,
                                         None,
                                         Response::MailboxResponse(
@@ -489,105 +539,40 @@ impl ShuttleTask {
                                     )
                                     .expect("Valid payload construction");
 
-                                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                        let _ = resp.send((ch, payload));
+                                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                            let _ = resp.send((ch, payload));
+                                        }
                                     }
-
-                                    continue;
-                                }
-
-                                if let Err(e) =
-                                    self.identity_storage.deliver_request(to, request).await
-                                {
-                                    match e {
-                                        WarpError::InvalidSignature => {
-                                            tracing::warn!(%did, to = %to, "request could not be vertified");
-                                            let payload = payload_message_construct(
+                                    e => {
+                                        tracing::warn!(%did, to = %to, "could not deliver request");
+                                        let payload = payload_message_construct(
                                             keypair,
                                             None,
                                             Response::MailboxResponse(
                                                 identity::protocol::MailboxResponse::Error(
-                                                    identity::protocol::MailboxError::InvalidRequest,
+                                                    identity::protocol::MailboxError::Other(
+                                                        e.to_string(),
+                                                    ),
                                                 ),
                                             ),
                                         )
                                         .expect("Valid payload construction");
 
-                                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take())
-                                            {
-                                                let _ = resp.send((ch, payload));
-                                            }
-                                        }
-                                        e => {
-                                            tracing::warn!(%did, to = %to, "could not deliver request");
-                                            let payload = payload_message_construct(
-                                                keypair,
-                                                None,
-                                                Response::MailboxResponse(
-                                                    identity::protocol::MailboxResponse::Error(
-                                                        identity::protocol::MailboxError::Other(
-                                                            e.to_string(),
-                                                        ),
-                                                    ),
-                                                ),
-                                            )
-                                            .expect("Valid payload construction");
-
-                                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take())
-                                            {
-                                                let _ = resp.send((ch, payload));
-                                            }
+                                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                            let _ = resp.send((ch, payload));
                                         }
                                     }
-                                    continue;
                                 }
-
-                                tracing::info!(%did, to = %to, "request has been stored");
-
-                                let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::MailboxResponse(
-                                        identity::protocol::MailboxResponse::Sent,
-                                    ),
-                                )
-                                .expect("Valid payload construction");
-
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                    let _ = resp.send((ch, payload));
-                                }
+                                return;
                             }
-                        }
-                    }
-                    identity::protocol::Request::Synchronized(Synchronized::Store { package }) => {
-                        let peer_id = payload.sender();
-                        let Ok(did) = peer_id.to_did() else {
-                            tracing::warn!(%peer_id, "Could not convert to did key");
+
+                            tracing::info!(%did, to = %to, "request has been stored");
+
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::IdentityVerificationFailed,
-                                )),
-                            )
-                            .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
-                        };
-
-                        if !self.identity_storage.contains(&did).await {
-                            tracing::warn!(%did, "Identity is not registered");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::NotRegistered,
-                                    ),
+                                Response::MailboxResponse(
+                                    identity::protocol::MailboxResponse::Sent,
                                 ),
                             )
                             .expect("Valid payload construction");
@@ -595,119 +580,218 @@ impl ShuttleTask {
                             if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
                                 let _ = resp.send((ch, payload));
                             }
-
-                            continue;
                         }
-                        tokio::spawn({
-                            let identity_storage = self.identity_storage.clone();
-                            let ipfs = self.ipfs.clone();
-                            let package = *package;
-                            async move {
-                                tracing::debug!(%did, %package, "preloading root document");
-                                if let Err(e) = ipfs.fetch(&package).recursive().await {
-                                    tracing::warn!(%did, %package, error = %e, "unable to preload root document");
-                                    return;
-                                }
-                                tracing::debug!(%did, %package, "root document preloaded");
-                                if let Err(e) = identity_storage.store_package(&did, package).await
-                                {
-                                    tracing::warn!(%did, %package, error = %e, "unable to store document");
-                                    return;
-                                }
-
-                                tracing::info!(%did, %package, "root document is stored");
-                            }
-                        });
                     }
-                    identity::protocol::Request::Synchronized(Synchronized::Update {
-                        document,
-                    }) => {
-                        tracing::info!(%document.did, "Receive identity update");
-                        if document.verify().is_err() {
-                            tracing::warn!(%document.did, "identity is not valid or corrupted");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(SynchronizedResponse::Error(
-                                    SynchronizedError::Invalid,
-                                )),
-                            )
-                            .expect("Valid payload construction");
+                }
+                identity::protocol::Request::Synchronized(Synchronized::Store { package }) => {
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
+                        )
+                        .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
                         }
-                        let did = document.did.clone();
 
-                        if !self.identity_storage.contains(&did).await {
-                            tracing::warn!(%did, "Identity is not registered");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(SynchronizedResponse::Error(
+                        return;
+                    };
+
+                    if !self.identity_storage.contains(&did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
                                     SynchronizedError::NotRegistered,
-                                )),
-                            )
-                            .expect("Valid payload construction");
+                                ),
+                            ),
+                        )
+                        .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
                         }
 
-                        if let Err(e) = self.identity_storage.update(document).await {
-                            let payload = match e {
-                                WarpError::InvalidSignature => {
-                                    tracing::warn!(%did, "Identity is not registered");
-                                    payload_message_construct(
-                                        keypair,
-                                        None,
-                                        Response::SynchronizedResponse(
-                                            SynchronizedResponse::Error(SynchronizedError::Invalid),
-                                        ),
-                                    )
-                                    .expect("Valid payload construction")
-                                }
-                                _ => payload_message_construct(
+                        return;
+                    }
+                    tokio::spawn({
+                        let identity_storage = self.identity_storage.clone();
+                        let ipfs = self.ipfs.clone();
+                        let package = *package;
+                        async move {
+                            tracing::debug!(%did, %package, "preloading root document");
+                            if let Err(e) = ipfs.fetch(&package).recursive().await {
+                                tracing::warn!(%did, %package, error = %e, "unable to preload root document");
+                                return;
+                            }
+                            tracing::debug!(%did, %package, "root document preloaded");
+                            if let Err(e) = identity_storage.store_package(&did, package).await {
+                                tracing::warn!(%did, %package, error = %e, "unable to store document");
+                                return;
+                            }
+
+                            tracing::info!(%did, %package, "root document is stored");
+                        }
+                    });
+                }
+                identity::protocol::Request::Synchronized(Synchronized::Update { document }) => {
+                    tracing::info!(%document.did, "Receive identity update");
+                    if document.verify().is_err() {
+                        tracing::warn!(%document.did, "identity is not valid or corrupted");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(SynchronizedResponse::Error(
+                                SynchronizedError::Invalid,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
+                    }
+                    let did = document.did.clone();
+
+                    if !self.identity_storage.contains(&did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(SynchronizedResponse::Error(
+                                SynchronizedError::NotRegistered,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
+                    }
+
+                    if let Err(e) = self.identity_storage.update(document).await {
+                        let payload = match e {
+                            WarpError::InvalidSignature => {
+                                tracing::warn!(%did, "Identity is not registered");
+                                payload_message_construct(
                                     keypair,
                                     None,
                                     Response::SynchronizedResponse(SynchronizedResponse::Error(
                                         SynchronizedError::Invalid,
                                     )),
                                 )
-                                .expect("Valid payload construction"),
-                            };
+                                .expect("Valid payload construction")
+                            }
+                            _ => payload_message_construct(
+                                keypair,
+                                None,
+                                Response::SynchronizedResponse(SynchronizedResponse::Error(
+                                    SynchronizedError::Invalid,
+                                )),
+                            )
+                            .expect("Valid payload construction"),
+                        };
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
+                    }
+
+                    tracing::info!(%did, "Identity updated");
+
+                    tracing::info!(%did, "Announcing to mesh");
+
+                    let payload = PayloadRequest::new(keypair, None, document.clone())
+                        .expect("Valid payload construction");
+
+                    let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
+
+                    _ = self
+                        .ipfs
+                        .pubsub_publish("/identity/announce/v0", bytes)
+                        .await;
+
+                    let payload = payload_message_construct(
+                        keypair,
+                        None,
+                        Response::SynchronizedResponse(SynchronizedResponse::IdentityUpdated),
+                    )
+                    .expect("Valid payload construction");
+
+                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        let _ = resp.send((ch, payload));
+                    }
+                }
+                identity::protocol::Request::Synchronized(Synchronized::PeerRecord { record }) => {
+                    let signed_envelope = match SignedEnvelope::from_protobuf_encoding(record) {
+                        Ok(signed_envelope) => signed_envelope,
+                        Err(e) => {
+                            let payload = payload_message_construct(
+                                keypair,
+                                None,
+                                Response::SynchronizedResponse(
+                                    identity::protocol::SynchronizedResponse::Error(
+                                        SynchronizedError::InvalidPayload { msg: e.to_string() },
+                                    ),
+                                ),
+                            )
+                            .expect("Valid payload construction");
+                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                let _ = resp.send((ch, payload));
+                            }
+
+                            return;
+                        }
+                    };
+
+                    let record = match PeerRecord::from_signed_envelope(signed_envelope) {
+                        Ok(record) => record,
+                        Err(e) => {
+                            let payload = payload_message_construct(
+                                keypair,
+                                None,
+                                Response::SynchronizedResponse(
+                                    identity::protocol::SynchronizedResponse::Error(
+                                        SynchronizedError::InvalodRecord { msg: e.to_string() },
+                                    ),
+                                ),
+                            )
+                            .expect("Valid payload construction");
 
                             if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
                                 let _ = resp.send((ch, payload));
                             }
 
-                            continue;
+                            return;
                         }
+                    };
 
-                        tracing::info!(%did, "Identity updated");
+                    let peer_id = record.peer_id();
 
-                        tracing::info!(%did, "Announcing to mesh");
-
-                        let payload = PayloadRequest::new(keypair, None, document.clone())
-                            .expect("Valid payload construction");
-
-                        let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
-
-                        _ = self
-                            .ipfs
-                            .pubsub_publish("/identity/announce/v0", bytes)
-                            .await;
-
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
                         let payload = payload_message_construct(
                             keypair,
                             None,
-                            Response::SynchronizedResponse(SynchronizedResponse::IdentityUpdated),
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::Invalid,
+                                ),
+                            ),
                         )
                         .expect("Valid payload construction");
 
@@ -715,103 +799,18 @@ impl ShuttleTask {
                             let _ = resp.send((ch, payload));
                         }
 
-                        continue;
-                    }
-                    identity::protocol::Request::Synchronized(Synchronized::PeerRecord {
-                        record,
-                    }) => {
-                        let signed_envelope = match SignedEnvelope::from_protobuf_encoding(record) {
-                            Ok(signed_envelope) => signed_envelope,
-                            Err(e) => {
-                                let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::SynchronizedResponse(
-                                        identity::protocol::SynchronizedResponse::Error(
-                                            SynchronizedError::InvalidPayload {
-                                                msg: e.to_string(),
-                                            },
-                                        ),
-                                    ),
-                                )
-                                .expect("Valid payload construction");
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                    let _ = resp.send((ch, payload));
-                                }
+                        return;
+                    };
 
-                                continue;
-                            }
-                        };
-
-                        let record = match PeerRecord::from_signed_envelope(signed_envelope) {
-                            Ok(record) => record,
-                            Err(e) => {
-                                let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::SynchronizedResponse(
-                                        identity::protocol::SynchronizedResponse::Error(
-                                            SynchronizedError::InvalodRecord { msg: e.to_string() },
-                                        ),
-                                    ),
-                                )
-                                .expect("Valid payload construction");
-
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                    let _ = resp.send((ch, payload));
-                                }
-
-                                continue;
-                            }
-                        };
-
-                        let peer_id = record.peer_id();
-
-                        let Ok(did) = peer_id.to_did() else {
-                            tracing::warn!(%peer_id, "Could not convert to did key");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::Invalid,
-                                    ),
-                                ),
-                            )
-                            .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
-                        };
-
-                        if !self.identity_storage.contains(&did).await {
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::NotRegistered,
-                                    ),
-                                ),
-                            )
-                            .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
-                        }
-
-                        _ = self.precord_tx.send(record).await;
-
+                    if !self.identity_storage.contains(&did).await {
                         let payload = payload_message_construct(
                             keypair,
                             None,
-                            Response::SynchronizedResponse(SynchronizedResponse::RecordStored),
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::NotRegistered,
+                                ),
+                            ),
                         )
                         .expect("Valid payload construction");
 
@@ -819,79 +818,222 @@ impl ShuttleTask {
                             let _ = resp.send((ch, payload));
                         }
 
-                        continue;
+                        return;
                     }
-                    identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
-                        tracing::info!(%did, "Fetching document");
-                        if !self.identity_storage.contains(did).await {
-                            tracing::warn!(%did, "Identity is not registered");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::NotRegistered,
-                                    ),
+
+                    _ = self.precord_tx.send(record).await;
+
+                    let payload = payload_message_construct(
+                        keypair,
+                        None,
+                        Response::SynchronizedResponse(SynchronizedResponse::RecordStored),
+                    )
+                    .expect("Valid payload construction");
+
+                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        let _ = resp.send((ch, payload));
+                    }
+                }
+                identity::protocol::Request::Synchronized(Synchronized::Fetch { did }) => {
+                    tracing::info!(%did, "Fetching document");
+                    if !self.identity_storage.contains(did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::NotRegistered,
+                                ),
+                            ),
+                        )
+                        .expect("Valid payload construction");
+
+                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            let _ = resp.send((ch, payload));
+                        }
+
+                        return;
+                    }
+
+                    tracing::info!(%did, "looking for package");
+                    let event = match self.identity_storage.get_package(did).await {
+                        Ok(package) => {
+                            tracing::info!(%did, package = %package, "package found");
+                            Response::SynchronizedResponse(SynchronizedResponse::Package(package))
+                        }
+                        Err(_) => {
+                            tracing::warn!(%did, "package not found");
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::DoesntExist,
                                 ),
                             )
-                            .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            continue;
                         }
+                    };
 
-                        tracing::info!(%did, "looking for package");
-                        let event = match self.identity_storage.get_package(did).await {
-                            Ok(package) => {
-                                tracing::info!(%did, package = %package, "package found");
-                                Response::SynchronizedResponse(SynchronizedResponse::Package(
-                                    package,
-                                ))
-                            }
-                            Err(_) => {
-                                tracing::warn!(%did, "package not found");
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::DoesntExist,
-                                    ),
-                                )
-                            }
-                        };
+                    let payload = payload_message_construct(keypair, None, event)
+                        .expect("Valid payload construction");
 
-                        let payload = payload_message_construct(keypair, None, event)
-                            .expect("Valid payload construction");
-
-                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                            let _ = resp.send((ch, payload));
-                        }
-
-                        continue;
+                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        let _ = resp.send((ch, payload));
                     }
-                    identity::protocol::Request::Lookup(kind) => {
-                        let peer_id = payload.sender();
-                        tracing::info!(peer_id = %peer_id, lookup = ?kind);
+                }
+                identity::protocol::Request::Lookup(kind) => {
+                    let peer_id = payload.sender();
+                    tracing::info!(peer_id = %peer_id, lookup = ?kind);
 
-                        let identity = self
-                            .identity_storage
-                            .lookup(kind.clone())
-                            .await
-                            .unwrap_or_default();
+                    let identity = self
+                        .identity_storage
+                        .lookup(kind.clone())
+                        .await
+                        .unwrap_or_default();
 
-                        let event = Response::LookupResponse(LookupResponse::Ok { identity });
+                    let event = Response::LookupResponse(LookupResponse::Ok { identity });
 
-                        let payload = payload_message_construct(keypair, None, event)
-                            .expect("Valid payload construction");
+                    let payload = payload_message_construct(keypair, None, event)
+                        .expect("Valid payload construction");
 
-                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                            let _ = resp.send((ch, payload));
-                        }
+                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        let _ = resp.send((ch, payload));
+                    }
+                }
+            },
+            Message::Response(_) => {}
+        }
+    }
+
+    async fn process_message_events(
+        &self,
+        id: InboundRequestId,
+        mut ch: Option<ResponseChannel<MessagePayload>>,
+        payload: MessagePayload,
+        mut resp: Option<OntshotSender<(ResponseChannel<MessagePayload>, MessagePayload)>>,
+    ) {
+        let keypair = self.ipfs.keypair();
+        tracing::info!(request_id = ?id, "Processing Incoming Request");
+
+        let peer_id = payload.sender();
+        let Ok(did) = peer_id.to_did() else {
+            tracing::warn!(%peer_id, "Could not convert to did key");
+            let payload = message::protocol::payload_message_construct(
+                keypair,
+                None,
+                MessageResponse::Error("public key is invalid".into()),
+            )
+            .expect("Valid payload construction");
+
+            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                let _ = resp.send((ch, payload));
+            }
+
+            return;
+        };
+
+        tracing::info!(request_id = ?id, %peer_id, %did, "Processing Incoming Request");
+        match payload.message() {
+            message::protocol::Message::Request(request) => match request {
+                message::protocol::Request::RegisterConversation(RegisterConversation {
+                    ..
+                }) => todo!(),
+                message::protocol::Request::MessageUpdate(update) => match update {
+                    message::protocol::MessageUpdate::Insert {
+                        conversation_id,
+                        message_id,
+                        recipients,
+                        message_cid,
+                    } => {
+                        tokio::spawn({
+                            let conversation_id = *conversation_id;
+                            let message_id = *message_id;
+                            let recipients = recipients.to_owned();
+                            let message_cid = *message_cid;
+                            let message_storage = self.message_storage.clone();
+                            async move {
+                                tracing::info!(%conversation_id, %message_id, %did, "inserting message into mailbox");
+                                if let Err(e) = message_storage
+                                    .insert_or_update(
+                                        &did,
+                                        recipients,
+                                        conversation_id,
+                                        message_id,
+                                        message_cid,
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to insert message into mailbox");
+                                    return;
+                                };
+                                tracing::info!(%conversation_id, %message_id, %did, "message inserted into mailbox");
+                            }
+                        });
+                    }
+                    message::protocol::MessageUpdate::Delivered {
+                        conversation_id,
+                        message_id,
+                    } => {
+                        tokio::spawn({
+                            let conversation_id = *conversation_id;
+                            let message_id = *message_id;
+                            let message_storage = self.message_storage.clone();
+                            async move {
+                                tracing::info!(%conversation_id, %message_id, %did, "marking message as delivered");
+                                if let Err(e) = message_storage
+                                    .message_delivered(&did, conversation_id, message_id)
+                                    .await
+                                {
+                                    tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to mark message as delivered");
+                                    return;
+                                };
+                                tracing::info!(%conversation_id, %message_id, %did, "message delivered");
+                            }
+                        });
+                    }
+                    message::protocol::MessageUpdate::Remove {
+                        conversation_id,
+                        message_id,
+                    } => {
+                        tokio::spawn({
+                            let conversation_id = *conversation_id;
+                            let message_id = *message_id;
+                            let message_storage = self.message_storage.clone();
+                            async move {
+                                tracing::info!(%conversation_id, %message_id, %did, "removing message from mailbox");
+                                if let Err(e) = message_storage
+                                    .remove_message(&did, conversation_id, message_id)
+                                    .await
+                                {
+                                    tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to remove message from mailbox");
+                                    return;
+                                };
+                                tracing::info!(%conversation_id, %message_id, %did, "message removed");
+                            }
+                        });
                     }
                 },
-                Message::Response(_) => {}
-            }
+                message::protocol::Request::FetchMailBox { conversation_id } => {
+                    let message = match self
+                        .message_storage
+                        .get_unsent_messages(did, *conversation_id)
+                        .await
+                    {
+                        Ok(content) => message::protocol::Response::Mailbox {
+                            conversation_id: *conversation_id,
+                            content,
+                        },
+                        Err(e) => message::protocol::Response::Error(e.to_string()),
+                    };
+
+                    let payload =
+                        message::protocol::payload_message_construct(keypair, None, message)
+                            .expect("Valid payload construction");
+
+                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        let _ = resp.send((ch, payload));
+                    }
+                }
+            },
+            message::protocol::Message::Response(_) => {}
         }
     }
 }

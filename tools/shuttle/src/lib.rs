@@ -12,6 +12,7 @@ use warp::crypto::{DIDKey, Ed25519KeyPair, KeyMaterial, DID};
 pub mod document;
 pub mod gateway;
 pub mod identity;
+pub mod message;
 pub mod server;
 pub mod store;
 pub mod subscription_stream;

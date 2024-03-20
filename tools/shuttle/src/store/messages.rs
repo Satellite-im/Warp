@@ -14,13 +14,14 @@ use crate::DidExt;
 
 use super::{identity::IdentityStorage, root::RootStorage};
 
-struct MessageStorage {
+#[derive(Clone)]
+pub struct MessageStorage {
     inner: Arc<RwLock<MessageStorageInner>>,
 }
 
 struct MessageStorageInner {
     ipfs: Ipfs,
-    path: Option<PathBuf>,
+    _path: Option<PathBuf>,
     list: Option<Cid>,
     identity: IdentityStorage,
     root: RootStorage,
@@ -31,7 +32,7 @@ impl MessageStorage {
         ipfs: &Ipfs,
         root: &RootStorage,
         identity: &IdentityStorage,
-        path: Option<PathBuf>,
+        _path: Option<PathBuf>,
     ) -> Self {
         let root_dag = root.get_root().await;
 
@@ -42,15 +43,15 @@ impl MessageStorage {
             root: root.clone(),
             identity: identity.clone(),
             list,
-            path,
+            _path,
         }));
 
         Self { inner }
     }
 
     pub async fn insert_or_update(
-        &mut self,
-        member: DID,
+        &self,
+        member: &DID,
         recipients: Vec<DID>,
         conversation_id: Uuid,
         message_id: Uuid,
@@ -62,7 +63,7 @@ impl MessageStorage {
             .await
     }
 
-    async fn get_unsent_messages(
+    pub async fn get_unsent_messages(
         &self,
         member: DID,
         conversation_id: Uuid,
@@ -71,9 +72,21 @@ impl MessageStorage {
         inner.get_unsent_messages(member, conversation_id).await
     }
 
-    async fn message_delivered(
+    pub async fn remove_message(
         &self,
-        member: DID,
+        member: &DID,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .remove_message(member, conversation_id, message_id)
+            .await
+    }
+
+    pub async fn message_delivered(
+        &self,
+        member: &DID,
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<(), Error> {
@@ -89,7 +102,7 @@ impl MessageStorageInner {
     //       each map.
     async fn insert_or_update(
         &mut self,
-        member: DID,
+        member: &DID,
         recipients: Vec<DID>,
         conversation_id: Uuid,
         message_id: Uuid,
@@ -97,7 +110,7 @@ impl MessageStorageInner {
     ) -> Result<(), Error> {
         let member_peer_id = member.to_peer_id()?;
 
-        if !self.identity.contains(&member).await {
+        if !self.identity.contains(member).await {
             return Err(Error::IdentityDoesntExist);
         }
 
@@ -194,8 +207,10 @@ impl MessageStorageInner {
         Ok(())
     }
 
-    async fn remove_mailbox(&mut self, creator: DID, conversation_id: Uuid) -> Result<(), Error> {
-        if !self.identity.contains(&creator).await {
+    //TODO: Use to remove conversation specific mailbox depending on conversation type
+    #[allow(dead_code)]
+    async fn remove_mailbox(&mut self, creator: &DID, conversation_id: Uuid) -> Result<(), Error> {
+        if !self.identity.contains(creator).await {
             return Err(Error::IdentityDoesntExist);
         }
 
@@ -211,6 +226,87 @@ impl MessageStorageInner {
         };
 
         list.remove(&conversation_id.to_string());
+
+        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+
+        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        }
+
+        let mut old_cid = self.list.replace(root_cid);
+
+        if let Some(cid) = old_cid.take() {
+            if cid != root_cid {
+                self.ipfs.remove_pin(&cid).recursive().await?;
+            }
+        }
+
+        self.root.set_conversation_mailbox(root_cid).await?;
+
+        Ok(())
+    }
+
+    async fn remove_message(
+        &mut self,
+        member: &DID,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<(), Error> {
+        if !self.identity.contains(member).await {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let mut list: BTreeMap<String, Cid> = match self.list {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .map_err(|_| Error::InvalidConversation)?,
+            None => return Err(Error::InvalidConversation),
+        };
+
+        let mut conversation_mailbox: BTreeMap<String, Cid> =
+            match list.get(&conversation_id.to_string()) {
+                Some(cid) => self
+                    .ipfs
+                    .get_dag(*cid)
+                    .local()
+                    .deserialized()
+                    .await
+                    .map_err(|_| Error::InvalidConversation)?,
+                None => return Err(Error::InvalidConversation),
+            };
+
+        for (_, cid) in conversation_mailbox.iter_mut() {
+            let Ok(mut current_map) = self
+                .ipfs
+                .get_dag(*cid)
+                .local()
+                .deserialized::<BTreeMap<String, Cid>>()
+                .await
+            else {
+                continue;
+            };
+
+            current_map.remove(&message_id.to_string());
+
+            let Ok(new_cid) = self.ipfs.dag().put().serialize(current_map).await else {
+                continue;
+            };
+
+            *cid = new_cid;
+        }
+
+        let cid = self
+            .ipfs
+            .dag()
+            .put()
+            .serialize(conversation_mailbox)
+            .await?;
+
+        list.insert(conversation_id.to_string(), cid);
 
         let root_cid = self.ipfs.dag().put().serialize(list).await?;
 
@@ -261,11 +357,11 @@ impl MessageStorageInner {
 
     async fn message_delivered(
         &mut self,
-        member: DID,
+        member: &DID,
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<(), Error> {
-        if !self.identity.contains(&member).await {
+        if !self.identity.contains(member).await {
             return Err(Error::IdentityDoesntExist);
         }
 

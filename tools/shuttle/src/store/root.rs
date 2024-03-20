@@ -97,6 +97,7 @@ impl RootStorage {
 impl RootInner {
     pub async fn set_identity_list(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
         self.root.identities.replace(cid);
+        tracing::debug!(%cid, "identity list set");
         self.save(ipfs).await?;
         //TODO: Broadcast root document to nodes
         Ok(())
@@ -104,12 +105,14 @@ impl RootInner {
 
     pub async fn set_package(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
         self.root.packages.replace(cid);
+        tracing::debug!(%cid, "package set");
         self.save(ipfs).await?;
         Ok(())
     }
 
     async fn set_mailbox(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
         self.root.mailbox.replace(cid);
+        tracing::debug!(%cid, "mailbox set");
         self.save(ipfs).await?;
         //TODO: Broadcast root document to nodes
         Ok(())
@@ -117,6 +120,7 @@ impl RootInner {
 
     async fn set_conversation_mailbox(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
         self.root.conversation_mailbox.replace(cid);
+        tracing::debug!(%cid, "conversation mailbox set");
         self.save(ipfs).await?;
         //TODO: Broadcast root document to nodes
         Ok(())

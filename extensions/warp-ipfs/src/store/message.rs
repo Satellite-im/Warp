@@ -18,13 +18,16 @@ use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
     stream::{BoxStream, FuturesUnordered, SelectAll},
-    SinkExt, Stream, StreamExt, TryFutureExt,
+    FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::{libp2p::gossipsub::Message, Ipfs, PeerId};
+use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
-use tokio::{select, task::JoinHandle};
+use tokio::{
+    select,
+    task::{JoinHandle, JoinSet},
+};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -42,22 +45,25 @@ use warp::{
     },
 };
 
-use crate::store::{
-    conversation::{ConversationDocument, MessageDocument},
-    discovery::Discovery,
-    ecdh_decrypt, ecdh_encrypt, ecdh_shared_key,
-    event_subscription::EventSubscription,
-    files::FileStore,
-    generate_shared_topic,
-    identity::IdentityStore,
-    keystore::Keystore,
-    payload::Payload,
-    sign_serde, verify_serde_sig, ConversationEvents, ConversationRequestKind,
-    ConversationRequestResponse, ConversationResponseKind, ConversationUpdateKind, DidExt,
-    MessagingEvents, PeerTopic,
+use crate::{
+    config,
+    store::{
+        conversation::{ConversationDocument, MessageDocument},
+        discovery::Discovery,
+        ecdh_decrypt, ecdh_encrypt, ecdh_shared_key,
+        event_subscription::EventSubscription,
+        files::FileStore,
+        generate_shared_topic,
+        identity::IdentityStore,
+        keystore::Keystore,
+        payload::Payload,
+        sign_serde, verify_serde_sig, ConversationEvents, ConversationRequestKind,
+        ConversationRequestResponse, ConversationResponseKind, ConversationUpdateKind, DidExt,
+        MessagingEvents, PeerTopic,
+    },
 };
 
-use super::document::root::RootDocumentMap;
+use super::{document::root::RootDocumentMap, SHUTTLE_TIMEOUT};
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
@@ -247,6 +253,7 @@ impl MessageStore {
         file: FileStore,
         event: EventSubscription<RayGunEventKind>,
         identity: IdentityStore,
+        message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
     ) -> Self {
         info!("Initializing MessageStore");
 
@@ -265,6 +272,7 @@ impl MessageStore {
 
         let root = identity.root_document().clone();
         let (atx, arx) = mpsc::channel(1);
+        let conversation_mailbox_task = JoinSet::new();
         let mut task = ConversationTask {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
@@ -280,7 +288,9 @@ impl MessageStore {
             event,
             attachment_rx: arx,
             attachment_tx: atx,
+            conversation_mailbox_task,
             pending_key_exchange: Default::default(),
+            message_command,
             queue: Default::default(),
         };
 
@@ -893,9 +903,10 @@ struct ConversationTask {
     attachment_rx: mpsc::Receiver<AttachmentChan>,
     attachment_tx: mpsc::Sender<AttachmentChan>,
     command_rx: mpsc::Receiver<MessagingCommand>,
-
+    conversation_mailbox_task: JoinSet<Result<(Uuid, Vec<MessageDocument>), Error>>,
     pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
 
+    message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
 }
@@ -1100,6 +1111,11 @@ impl ConversationTask {
                         },
                     }
                 }
+                Some(Ok(Ok((id, messages)))) = self.conversation_mailbox_task.join_next() => {
+                    if let Err(e) = self.insert_messages_from_mailbox(id, messages).await {
+                        tracing::error!(conversation_id = %id, error = %e, "unable to get messages from conversation mailbox");
+                    }
+                }
                 _ = queue_timer.tick() => {
                     _ = process_queue(self).await;
                 }
@@ -1153,6 +1169,89 @@ impl ConversationTask {
             if let Err(e) = self.create_conversation_task(id).await {
                 tracing::error!(id = %id, error = %e, "Failed to load conversation");
             }
+
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                let addresses = addresses.clone();
+                let ipfs = self.ipfs.clone();
+                let message_command = self.message_command.clone();
+                let conversation_id = id;
+                self.conversation_mailbox_task.spawn(async move {
+                    let mut conversation_mailbox = BTreeMap::new();
+                    let mut providers = vec![];
+                    for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                        let (tx, rx) = futures::channel::oneshot::channel();
+                        let _ = message_command
+                            .clone()
+                            .send(shuttle::message::client::MessageCommand::FetchMailbox {
+                                peer_id,
+                                conversation_id,
+                                response: tx,
+                            })
+                            .await;
+
+                        match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                            Ok(Ok(Ok(list))) => {
+                                providers.push(peer_id);
+                                conversation_mailbox.extend(list);
+                                break;
+                            }
+                            Ok(Ok(Err(e))) => {
+                                error!("unable to get mailbox to conversation {conversation_id} from {peer_id}: {e}");
+                                break;
+                            }
+                            Ok(Err(_)) => {
+                                error!("Channel been unexpectedly closed for {peer_id}");
+                                continue;
+                            }
+                            Err(_) => {
+                                error!("Request timed out for {peer_id}");
+                                continue;
+                            }
+                        }
+                    }
+
+                    let conversation_mailbox = conversation_mailbox.into_iter().filter_map(|(id, cid)| {
+                        let id = Uuid::from_str(&id).ok()?;
+                        Some((id, cid))
+                    }).collect::<BTreeMap<Uuid, Cid>>();
+
+                    let documents = FuturesUnordered::from_iter(conversation_mailbox.into_iter().map(|(id, cid)| {
+                        let ipfs = ipfs.clone();
+                        async move {
+                            ipfs.fetch(&cid).recursive().await?;
+                            Ok((id, cid))
+                        }.boxed()
+                    }))
+                    .filter_map(|res: Result<_, anyhow::Error>| {
+                        async move {
+                            res.ok()
+                        }
+                    })
+                    .filter_map( |(id, cid)| {
+                        let ipfs = ipfs.clone();
+                        let providers = providers.clone();
+                        let addresses = addresses.clone();
+                        let message_command = message_command.clone();
+                        async move {
+                            let message_document = ipfs.get_dag(cid).providers(&providers).deserialized::<MessageDocument>().await.ok()?;
+                            if message_document.conversation_id != id {
+                                return None;
+                            }
+                            for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
+                                let _ = message_command
+                                    .clone()
+                                    .send(shuttle::message::client::MessageCommand::MessageDelivered { peer_id, conversation_id, message_id: message_document.id })
+                                    .await;
+                            }
+                            Some(message_document)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .await;
+
+                    Ok::<_, Error>((conversation_id, documents))
+                });
+            }
         }
 
         if let Some(path) = self.path.as_ref() {
@@ -1167,6 +1266,26 @@ impl ConversationTask {
             }
         }
 
+        Ok(())
+    }
+
+    async fn insert_messages_from_mailbox(
+        &mut self,
+        conversation_id: Uuid,
+        messages: Vec<MessageDocument>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+
+        for message in messages {
+            if !message.verify() {
+                continue;
+            }
+            conversation
+                .insert_message_document(&self.ipfs, message)
+                .await?;
+        }
+
+        self.set_document(conversation).await?;
         Ok(())
     }
 
@@ -1821,9 +1940,11 @@ impl ConversationTask {
         let message =
             MessageDocument::new(&self.ipfs, &self.keypair, message, keystore.as_ref()).await?;
 
-        conversation
+        let message_cid = conversation
             .insert_message_document(&self.ipfs, message)
             .await?;
+
+        let recipients = conversation.recipients();
 
         self.set_document(conversation).await?;
 
@@ -1837,6 +1958,24 @@ impl ConversationTask {
         }
 
         let event = MessagingEvents::New { message };
+
+        if recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id: message.id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(conversation_id, Some(message_id), event, true)
             .await
@@ -1908,9 +2047,11 @@ impl ConversationTask {
         let nonce = message_document.nonce_from_message(&self.ipfs).await?;
         let signature = message_document.signature.expect("message to be signed");
 
-        conversation
+        let message_cid = conversation
             .update_message_document(&self.ipfs, message_document)
             .await?;
+
+        let recipients = conversation.recipients();
 
         self.set_document(conversation).await?;
 
@@ -1927,6 +2068,24 @@ impl ConversationTask {
             nonce: nonce.to_vec(),
             signature: signature.into(),
         };
+
+        if recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(conversation_id, None, event, true).await
     }
@@ -1976,9 +2135,11 @@ impl ConversationTask {
 
         let message_id = message.id;
 
-        conversation
+        let message_cid = conversation
             .insert_message_document(&self.ipfs, message)
             .await?;
+
+        let recipients = conversation.recipients();
 
         self.set_document(conversation).await?;
 
@@ -1992,6 +2153,24 @@ impl ConversationTask {
         }
 
         let event = MessagingEvents::New { message };
+
+        if recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(conversation_id, Some(message_id), event, true)
             .await
@@ -2015,6 +2194,20 @@ impl ConversationTask {
         conversation.delete_message(&self.ipfs, message_id).await?;
 
         self.set_document(conversation).await?;
+
+        if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let _ = self
+                    .message_command
+                    .clone()
+                    .send(shuttle::message::client::MessageCommand::RemoveMessage {
+                        peer_id,
+                        conversation_id,
+                        message_id,
+                    })
+                    .await;
+            }
+        }
 
         _ = tx.send(MessageEventKind::MessageDeleted {
             conversation_id,
@@ -2081,13 +2274,33 @@ impl ConversationTask {
             )
             .await?;
 
-        conversation
+        let message_cid = conversation
             .update_message_document(&self.ipfs, message_document)
             .await?;
+
+        let recipients = conversation.recipients();
 
         self.set_document(conversation).await?;
 
         _ = tx.send(event);
+
+        if recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         let event = MessagingEvents::Pin {
             conversation_id,
@@ -2119,7 +2332,11 @@ impl ConversationTask {
             .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
             .await?;
 
+        let recipients = conversation.recipients();
+
         let reactions = message.reactions_mut();
+
+        let message_cid;
 
         match state {
             ReactionState::Add => {
@@ -2142,7 +2359,7 @@ impl ConversationTask {
                     )
                     .await?;
 
-                conversation
+                message_cid = conversation
                     .update_message_document(&self.ipfs, message_document)
                     .await?;
                 self.set_document(conversation).await?;
@@ -2182,7 +2399,7 @@ impl ConversationTask {
                     )
                     .await?;
 
-                conversation
+                message_cid = conversation
                     .update_message_document(&self.ipfs, message_document)
                     .await?;
 
@@ -2204,6 +2421,24 @@ impl ConversationTask {
             state,
             emoji,
         };
+
+        if recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(conversation_id, None, event, true).await
     }
@@ -2458,9 +2693,11 @@ impl ConversationTask {
 
         let message_id = message.id;
 
-        conversation
+        let message_cid = conversation
             .insert_message_document(&self.ipfs, message)
             .await?;
+
+        let recipients = conversation.recipients();
 
         self.set_document(conversation).await?;
 
@@ -2474,6 +2711,24 @@ impl ConversationTask {
         }
 
         let event = MessagingEvents::New { message };
+
+        if recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(conversation_id, Some(message_id), event, true)
             .await
