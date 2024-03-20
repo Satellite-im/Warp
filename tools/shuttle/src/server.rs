@@ -219,6 +219,7 @@ impl ShuttleTask {
     async fn start(&mut self) {
         let keypair = self.ipfs.keypair();
 
+        //TODO: push each request into its own task or queue and poll to completion (in which it would respond accordingly)
         while let Some((id, mut ch, payload, mut resp)) = self.identity_rx.next().await {
             tracing::info!(request_id = ?id, "Processing Incoming Request");
 
