@@ -22,12 +22,32 @@ struct MessageStorageInner {
     ipfs: Ipfs,
     path: Option<PathBuf>,
     list: Option<Cid>,
-    mailbox: Option<Cid>,
     identity: IdentityStorage,
     root: RootStorage,
 }
 
 impl MessageStorage {
+    pub async fn new(
+        ipfs: &Ipfs,
+        root: &RootStorage,
+        identity: &IdentityStorage,
+        path: Option<PathBuf>,
+    ) -> Self {
+        let root_dag = root.get_root().await;
+
+        let list = root_dag.conversation_mailbox;
+
+        let inner = Arc::new(RwLock::new(MessageStorageInner {
+            ipfs: ipfs.clone(),
+            root: root.clone(),
+            identity: identity.clone(),
+            list,
+            path,
+        }));
+
+        Self { inner }
+    }
+
     pub async fn insert_or_update(
         &mut self,
         member: DID,
@@ -169,6 +189,45 @@ impl MessageStorageInner {
             }
         }
 
+        self.root.set_conversation_mailbox(root_cid).await?;
+
+        Ok(())
+    }
+
+    async fn remove_mailbox(&mut self, creator: DID, conversation_id: Uuid) -> Result<(), Error> {
+        if !self.identity.contains(&creator).await {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let mut list: BTreeMap<String, Cid> = match self.list {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .map_err(|_| Error::InvalidConversation)?,
+            None => return Err(Error::InvalidConversation),
+        };
+
+        list.remove(&conversation_id.to_string());
+
+        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+
+        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        }
+
+        let mut old_cid = self.list.replace(root_cid);
+
+        if let Some(cid) = old_cid.take() {
+            if cid != root_cid {
+                self.ipfs.remove_pin(&cid).recursive().await?;
+            }
+        }
+
+        self.root.set_conversation_mailbox(root_cid).await?;
+
         Ok(())
     }
 
@@ -209,8 +268,6 @@ impl MessageStorageInner {
         if !self.identity.contains(&member).await {
             return Err(Error::IdentityDoesntExist);
         }
-
-        let identity = self.identity.clone();
 
         let mut list: BTreeMap<String, Cid> = match self.list {
             Some(cid) => self
@@ -277,6 +334,8 @@ impl MessageStorageInner {
                 self.ipfs.remove_pin(&cid).recursive().await?;
             }
         }
+
+        self.root.set_conversation_mailbox(root_cid).await?;
 
         Ok(())
     }
