@@ -316,12 +316,8 @@ impl IdentityCacheTask {
 
                 let remove_pin_and_block = async {
                     if let Some(old_cid) = old_cid {
-                        if old_cid != cid {
-                            if self.ipfs.is_pinned(&old_cid).await? {
-                                self.ipfs.remove_pin(&old_cid).recursive().await?;
-                            }
-                            // Do we want to remove the old block?
-                            self.ipfs.remove_block(old_cid, false).await?;
+                        if old_cid != cid && self.ipfs.is_pinned(&old_cid).await? {
+                            self.ipfs.remove_pin(&old_cid).recursive().await?;
                         }
                     }
                     Ok::<_, Error>(())
@@ -352,12 +348,8 @@ impl IdentityCacheTask {
                 }
 
                 if let Some(old_cid) = old_cid {
-                    if old_cid != cid {
-                        if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid).recursive().await?;
-                        }
-                        // Do we want to remove the old block?
-                        self.ipfs.remove_block(old_cid, false).await?;
+                    if old_cid != cid && self.ipfs.is_pinned(&old_cid).await? {
+                        self.ipfs.remove_pin(&old_cid).recursive().await?;
                     }
                 }
 
@@ -423,12 +415,8 @@ impl IdentityCacheTask {
         }
 
         if let Some(old_cid) = old_cid {
-            if cid != old_cid {
-                if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.remove_pin(&old_cid).recursive().await?;
-                }
-                // Do we want to remove the old block?
-                self.ipfs.remove_block(old_cid, false).await?;
+            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await? {
+                self.ipfs.remove_pin(&old_cid).recursive().await?;
             }
         }
 

@@ -7,6 +7,7 @@ use futures::{StreamExt, TryFutureExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use warp::constellation::item::Item;
 use warp::error::Error;
 
@@ -16,6 +17,8 @@ use warp::constellation::{
 };
 
 use crate::store::document::image_dag::ImageDag;
+
+use super::FileAttachmentDocument;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DirectoryDocument {
@@ -235,6 +238,19 @@ impl FileDocument {
         }
 
         Ok(document)
+    }
+
+    pub fn to_attachment(&self) -> Result<FileAttachmentDocument, Error> {
+        let data = self.reference.clone().ok_or(Error::FileNotFound)?;
+        Ok(FileAttachmentDocument {
+            id: Uuid::new_v4(),
+            name: self.name.clone(),
+            size: self.size,
+            creation: Utc::now(),
+            thumbnail: self.thumbnail,
+            file_type: self.file_type.clone(),
+            data,
+        })
     }
 
     pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<File, Error> {

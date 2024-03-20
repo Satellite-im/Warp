@@ -1,6 +1,5 @@
 mod behaviour;
 pub mod config;
-mod spam_filter;
 pub mod store;
 mod thumbnail;
 mod utils;
