@@ -1175,7 +1175,7 @@ impl ConversationTask {
                 let ipfs = self.ipfs.clone();
                 let message_command = self.message_command.clone();
                 let conversation_id = id;
-                self.conversation_mailbox_task.spawn(async move {
+                let fut = async move {
                     let mut conversation_mailbox = BTreeMap::new();
                     let mut providers = vec![];
                     for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
@@ -1210,10 +1210,13 @@ impl ConversationTask {
                         }
                     }
 
-                    let conversation_mailbox = conversation_mailbox.into_iter().filter_map(|(id, cid)| {
-                        let id = Uuid::from_str(&id).ok()?;
-                        Some((id, cid))
-                    }).collect::<BTreeMap<Uuid, Cid>>();
+                    let conversation_mailbox = conversation_mailbox
+                        .into_iter()
+                        .filter_map(|(id, cid)| {
+                            let id = Uuid::from_str(&id).ok()?;
+                            Some((id, cid))
+                        })
+                        .collect::<BTreeMap<Uuid, Cid>>();
 
                     let documents = FuturesUnordered::from_iter(conversation_mailbox.into_iter().map(|(id, cid)| {
                         let ipfs = ipfs.clone();
@@ -1247,7 +1250,22 @@ impl ConversationTask {
                     .await;
 
                     Ok::<_, Error>((conversation_id, documents))
-                });
+                };
+
+                let (conversation_id, messages) = match fut.await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(%conversation_id, error = %e, "unable to get messages from conversation mailbox");
+                        continue;
+                    }
+                };
+
+                if let Err(e) = self
+                    .insert_messages_from_mailbox(conversation_id, messages)
+                    .await
+                {
+                    tracing::error!(%conversation_id, error = %e, "unable to insert messages into conversation");
+                }
             }
         }
 
@@ -1273,7 +1291,6 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         messages.sort_by(|a, b| b.cmp(a));
-        let tx = self.subscribe(conversation_id).await?;
 
         for message in messages {
             if !message.verify() {
@@ -1294,15 +1311,6 @@ impl ConversationTask {
                         .insert_message_document(&self.ipfs, message)
                         .await?;
                 }
-            }
-
-            let event = MessageEventKind::MessageSent {
-                conversation_id,
-                message_id: message.id,
-            };
-
-            if let Err(e) = tx.send(event) {
-                error!(%conversation_id, message_id = %message.id, error = %e, "Error broadcasting event");
             }
         }
 
