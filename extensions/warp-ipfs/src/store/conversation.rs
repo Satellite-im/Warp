@@ -821,33 +821,6 @@ impl MessageDocument {
         document.sign(keypair)
     }
 
-    fn sign(mut self, keypair: &DID) -> Result<MessageDocument, Error> {
-        let sender = self.sender.to_did();
-        if !sender.eq(keypair) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        let hash = sha256_iter(
-            [
-                Some(self.conversation_id.as_bytes().to_vec()),
-                Some(self.id.as_bytes().to_vec()),
-                Some(sender.public_key_bytes()),
-                Some(self.date.to_string().into_bytes()),
-                self.modified.map(|time| time.to_string().into_bytes()),
-                self.replied.map(|id| id.as_bytes().to_vec()),
-                self.attachments.map(|cid| cid.to_bytes()),
-                self.message.map(|cid| cid.to_bytes()),
-            ]
-            .into_iter(),
-            None,
-        );
-
-        let signature = keypair.sign(&hash);
-
-        self.signature = Some(MessageSignature::try_from(signature)?);
-        Ok(self)
-    }
-
     pub fn verify(&self) -> bool {
         let Some(signature) = self.signature else {
             return false;
@@ -1101,6 +1074,33 @@ impl MessageDocument {
         message.set_lines(lines);
 
         Ok(message)
+    }
+
+    fn sign(mut self, keypair: &DID) -> Result<MessageDocument, Error> {
+        let sender = self.sender.to_did();
+        if !sender.eq(keypair) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        let hash = sha256_iter(
+            [
+                Some(self.conversation_id.as_bytes().to_vec()),
+                Some(self.id.as_bytes().to_vec()),
+                Some(sender.public_key_bytes()),
+                Some(self.date.to_string().into_bytes()),
+                self.modified.map(|time| time.to_string().into_bytes()),
+                self.replied.map(|id| id.as_bytes().to_vec()),
+                self.attachments.map(|cid| cid.to_bytes()),
+                self.message.map(|cid| cid.to_bytes()),
+            ]
+            .into_iter(),
+            None,
+        );
+
+        let signature = keypair.sign(&hash);
+
+        self.signature = Some(MessageSignature::try_from(signature)?);
+        Ok(self)
     }
 }
 
