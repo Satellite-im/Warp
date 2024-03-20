@@ -1227,16 +1227,13 @@ impl ConversationTask {
                             res.ok()
                         }
                     })
-                    .filter_map( |(id, cid)| {
+                    .filter_map( |(_, cid)| {
                         let ipfs = ipfs.clone();
                         let providers = providers.clone();
                         let addresses = addresses.clone();
                         let message_command = message_command.clone();
                         async move {
                             let message_document = ipfs.get_dag(cid).providers(&providers).deserialized::<MessageDocument>().await.ok()?;
-                            if message_document.conversation_id != id {
-                                return None;
-                            }
                             for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
                                 let _ = message_command
                                     .clone()
@@ -1272,17 +1269,41 @@ impl ConversationTask {
     async fn insert_messages_from_mailbox(
         &mut self,
         conversation_id: Uuid,
-        messages: Vec<MessageDocument>,
+        mut messages: Vec<MessageDocument>,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
+        messages.sort_by(|a, b| b.cmp(a));
+        let tx = self.subscribe(conversation_id).await?;
 
         for message in messages {
             if !message.verify() {
                 continue;
             }
-            conversation
-                .insert_message_document(&self.ipfs, message)
-                .await?;
+            match conversation
+                .contains(&self.ipfs, message.id)
+                .await
+                .unwrap_or_default()
+            {
+                true => {
+                    conversation
+                        .update_message_document(&self.ipfs, message)
+                        .await?;
+                }
+                false => {
+                    conversation
+                        .insert_message_document(&self.ipfs, message)
+                        .await?;
+                }
+            }
+
+            let event = MessageEventKind::MessageSent {
+                conversation_id,
+                message_id: message.id,
+            };
+
+            if let Err(e) = tx.send(event) {
+                error!(%conversation_id, message_id = %message.id, error = %e, "Error broadcasting event");
+            }
         }
 
         self.set_document(conversation).await?;
@@ -1959,7 +1980,7 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
-        if recipients.is_empty() {
+        if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
                 for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                     let _ = self
@@ -2069,7 +2090,7 @@ impl ConversationTask {
             signature: signature.into(),
         };
 
-        if recipients.is_empty() {
+        if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
                 for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                     let _ = self
@@ -2154,7 +2175,7 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
-        if recipients.is_empty() {
+        if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
                 for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                     let _ = self
@@ -2284,7 +2305,7 @@ impl ConversationTask {
 
         _ = tx.send(event);
 
-        if recipients.is_empty() {
+        if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
                 for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                     let _ = self
@@ -2422,7 +2443,7 @@ impl ConversationTask {
             emoji,
         };
 
-        if recipients.is_empty() {
+        if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
                 for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                     let _ = self
@@ -2712,7 +2733,7 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
-        if recipients.is_empty() {
+        if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
                 for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                     let _ = self

@@ -930,7 +930,7 @@ impl ShuttleTask {
             return;
         };
 
-        tracing::info!(request_id = ?id, %peer_id, %did, "Processing Incoming Request");
+        tracing::info!(request_id = ?id, %peer_id, %did, "Processing Incoming Message Request");
         match payload.message() {
             message::protocol::Message::Request(request) => match request {
                 message::protocol::Request::RegisterConversation(RegisterConversation {

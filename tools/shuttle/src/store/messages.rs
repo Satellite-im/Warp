@@ -124,10 +124,16 @@ impl MessageStorageInner {
             .await
             .map_err(anyhow::Error::from)?;
 
+        if recipients.is_empty() {
+            tracing::warn!(%conversation_id, %message_id, sender = %member, "recipients list is empty. skipping storing in mailbox");
+            return Err(Error::Other);
+        }
+
         let identity = self.identity.clone();
 
         // we should only store for those who are registered
         let recipients = stream::iter(recipients)
+            .filter(|recipient| futures::future::ready(member != recipient))
             .filter(move |did| {
                 let identity = identity.clone();
                 let did = did.clone();
@@ -135,6 +141,11 @@ impl MessageStorageInner {
             })
             .collect::<Vec<_>>()
             .await;
+
+        if recipients.is_empty() {
+            tracing::warn!(%conversation_id, %message_id, sender = %member, "no recipients are registered. skipping storing in mailbox");
+            return Err(Error::Other);
+        }
 
         let mut list: BTreeMap<String, Cid> = match self.list {
             Some(cid) => self
@@ -160,6 +171,7 @@ impl MessageStorageInner {
             };
 
         for recipient in recipients {
+            tracing::info!(%conversation_id, %recipient, "opening recipient mailbox");
             let mut message_mailbox: BTreeMap<String, Cid> =
                 match conversation_mailbox.get(&recipient.to_string()) {
                     Some(cid) => self
@@ -172,11 +184,14 @@ impl MessageStorageInner {
                     None => BTreeMap::new(),
                 };
 
+            tracing::info!(%conversation_id, %recipient, %message_id, "inserting message into mailbox");
             message_mailbox.insert(message_id.to_string(), message_cid);
 
+            tracing::info!(%conversation_id, %recipient, "saving mailbox");
             let cid = self.ipfs.dag().put().serialize(message_mailbox).await?;
 
-            conversation_mailbox.insert(conversation_id.to_string(), cid);
+            tracing::info!(%conversation_id, %recipient, "storing mailbox into conversation index");
+            conversation_mailbox.insert(recipient.to_string(), cid);
         }
 
         let cid = self
@@ -203,7 +218,7 @@ impl MessageStorageInner {
         }
 
         self.root.set_conversation_mailbox(root_cid).await?;
-
+        tracing::info!(%conversation_id, %message_id, "message is stored in conversation mailbox");
         Ok(())
     }
 
