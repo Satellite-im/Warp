@@ -623,7 +623,7 @@ async fn main() -> anyhow::Result<()> {
                                             return Err::<_, anyhow::Error>(anyhow::Error::from(e));
                                         },
                                     };
-                                    while let Some(event) = stream.next().await {
+                                    while let Some((_location, event)) = stream.next().await {
                                         match event {
                                             AttachmentKind::AttachedProgress(Progression::CurrentProgress { .. }) => {},
                                             AttachmentKind::AttachedProgress(Progression::ProgressComplete { name, .. }) => {

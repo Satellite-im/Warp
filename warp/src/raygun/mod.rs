@@ -111,7 +111,7 @@ pub enum AttachmentKind {
     Pending(Result<(), Error>),
 }
 
-pub type AttachmentEventStream = BoxStream<'static, AttachmentKind>;
+pub type AttachmentEventStream = BoxStream<'static, (Option<Location>, AttachmentKind)>;
 
 pub type MessageEventStream = BoxStream<'static, MessageEventKind>;
 
