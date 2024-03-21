@@ -419,17 +419,14 @@ impl IdentityStore {
                     if let Err(e) = store.register().await {
                         tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                     }
-                    if let Err(e) = store.export_root_document().await {
-                        tracing::warn!(%id.did, error = %e, "Unable to export root document after registration");
-                    }
                 }
             }
         }
 
-        let did = store.get_keypair_did()?;
+        let did = store.get_keypair_did().expect("valid ed25519 keypair");
 
-        let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
-        let identity_announce_stream = store.ipfs.pubsub_subscribe("/identity/announce/v0").await?;
+        let event_stream = store.ipfs.pubsub_subscribe(did.events()).await.expect("not subscribed");
+        let identity_announce_stream = store.ipfs.pubsub_subscribe("/identity/announce/v0").await.expect("not subscribed");
 
         store.discovery.start().await?;
 
@@ -460,7 +457,7 @@ impl IdentityStore {
             }
         }
 
-        let friend_stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await?;
+        let friend_stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await.expect("not subscribed")
 
         tokio::spawn({
             let mut store = store.clone();
