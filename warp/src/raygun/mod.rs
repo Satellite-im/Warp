@@ -107,11 +107,11 @@ pub enum MessageEvent {
 }
 
 pub enum AttachmentKind {
-    AttachedProgress(Progression),
+    AttachedProgress(Location, Progression),
     Pending(Result<(), Error>),
 }
 
-pub type AttachmentEventStream = BoxStream<'static, (Option<Location>, AttachmentKind)>;
+pub type AttachmentEventStream = BoxStream<'static, AttachmentKind>;
 
 pub type MessageEventStream = BoxStream<'static, MessageEventKind>;
 

@@ -2408,7 +2408,7 @@ impl ConversationTask {
             }
 
             for await (location, (progress, file)) in streams {
-                yield (Some(location), AttachmentKind::AttachedProgress(progress));
+                yield AttachmentKind::AttachedProgress(location, progress);
                 if let Some(file) = file {
                     attachments.push(file);
                 }
@@ -2441,7 +2441,7 @@ impl ConversationTask {
                 }
             };
 
-            yield (None, AttachmentKind::Pending(final_results.await))
+            yield AttachmentKind::Pending(final_results.await)
         };
 
         Ok((message_id, stream.boxed()))

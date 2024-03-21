@@ -623,13 +623,13 @@ async fn main() -> anyhow::Result<()> {
                                             return Err::<_, anyhow::Error>(anyhow::Error::from(e));
                                         },
                                     };
-                                    while let Some((_location, event)) = stream.next().await {
+                                    while let Some(event) = stream.next().await {
                                         match event {
-                                            AttachmentKind::AttachedProgress(Progression::CurrentProgress { .. }) => {},
-                                            AttachmentKind::AttachedProgress(Progression::ProgressComplete { name, .. }) => {
+                                            AttachmentKind::AttachedProgress(_location, Progression::CurrentProgress { .. }) => {},
+                                            AttachmentKind::AttachedProgress(_location, Progression::ProgressComplete { name, .. }) => {
                                                 writeln!(stdout, "> {name} is uploaded")?;
                                             },
-                                            AttachmentKind::AttachedProgress(Progression::ProgressFailed { name, error, .. }) => {
+                                            AttachmentKind::AttachedProgress(_location, Progression::ProgressFailed { name, error, .. }) => {
                                                 writeln!(stdout, "> {name} failed to upload: {}", error)?;
                                             },
                                             AttachmentKind::Pending(Ok(_)) => {
