@@ -2294,7 +2294,7 @@ impl ConversationTask {
             let mut streams: SelectAll<_> = SelectAll::new();
 
             for file in files {
-                match file.clone() {
+                match &file {
                     Location::Constellation { path } => {
                         match constellation
                             .root_directory()
@@ -2309,7 +2309,7 @@ impl ConversationTask {
                             },
                             Err(e) => {
                                 let constellation_path = PathBuf::from(&path);
-                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
+                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path.to_string());
                                 let stream = async_stream::stream! {
                                     yield (file, (Progression::ProgressFailed { name, last_size: None, error: e }, None));
                                 };
@@ -2317,7 +2317,7 @@ impl ConversationTask {
                             },
                         }
                     }
-                    Location::Disk {path} => {
+                    Location::Disk { path } => {
                         let mut filename = match path.file_name() {
                             Some(file) => file.to_string_lossy().to_string(),
                             None => continue,
