@@ -173,7 +173,7 @@ pub enum LookupResponse {
 #[serde(rename_all = "snake_case")]
 pub enum Register {
     IsRegistered,
-    RegisterIdentity { document: IdentityDocument },
+    RegisterIdentity { root_cid: Cid },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -197,9 +197,8 @@ pub enum RegisterError {
 #[serde(rename_all = "snake_case")]
 pub enum Synchronized {
     PeerRecord { record: Vec<u8> },
-    Update { document: IdentityDocument },
     Store { package: Cid },
-    Fetch { did: DID },
+    Fetch,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

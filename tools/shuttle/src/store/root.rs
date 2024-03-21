@@ -10,9 +10,7 @@ use warp::error::Error;
 #[derive(Default, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct Root {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub identities: Option<Cid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub packages: Option<Cid>,
+    pub users: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mailbox: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -68,14 +66,9 @@ impl RootStorage {
         }
     }
 
-    pub async fn set_identity_list(&self, cid: Cid) -> Result<(), Error> {
+    pub async fn set_user_documents(&self, cid: Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.set_identity_list(&self.ipfs, cid).await
-    }
-
-    pub async fn set_package(&self, cid: Cid) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.set_package(&self.ipfs, cid).await
+        inner.set_user_documents(&self.ipfs, cid).await
     }
 
     pub async fn set_mailbox(&self, cid: Cid) -> Result<(), Error> {
@@ -95,16 +88,8 @@ impl RootStorage {
 }
 
 impl RootInner {
-    pub async fn set_identity_list(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
-        self.root.identities.replace(cid);
-        tracing::debug!(%cid, "identity list set");
-        self.save(ipfs).await?;
-        //TODO: Broadcast root document to nodes
-        Ok(())
-    }
-
-    pub async fn set_package(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
-        self.root.packages.replace(cid);
+    async fn set_user_documents(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
+        self.root.users.replace(cid);
         tracing::debug!(%cid, "package set");
         self.save(ipfs).await?;
         Ok(())

@@ -104,7 +104,6 @@ impl Behaviour {
         match matches!(
             request.message(),
             Message::Request(Request::Synchronized(Synchronized::Store { .. }))
-                | Message::Request(Request::Synchronized(Synchronized::Update { .. }))
         ) {
             true => {
                 let payload = payload_message_construct(&self.keypair, None, Response::Ack)

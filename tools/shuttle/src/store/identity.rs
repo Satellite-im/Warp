@@ -25,29 +25,22 @@ impl IdentityStorage {
     pub async fn new(ipfs: &Ipfs, root: &RootStorage) -> Self {
         let root_dag = root.get_root().await;
 
-        let list = root_dag.identities;
+        let users = root_dag.users;
         let mailbox = root_dag.mailbox;
-        let packages = root_dag.packages;
 
         let inner = Arc::new(RwLock::new(IdentityStorageInner {
             ipfs: ipfs.clone(),
             root: root.clone(),
             mailbox,
-            packages,
-            list,
+            users,
         }));
 
         Self { inner }
     }
 
-    pub async fn register(&self, document: IdentityDocument) -> Result<(), Error> {
+    pub async fn register(&self, document: &IdentityDocument, root_cid: Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.register(document).await
-    }
-
-    pub async fn update(&self, document: &IdentityDocument) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.update(document).await
+        inner.register(document, root_cid).await
     }
 
     pub async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
@@ -70,14 +63,14 @@ impl IdentityStorage {
         inner.deliver_request(to, request).await
     }
 
-    pub async fn store_package(&self, did: &DID, data: Cid) -> Result<(), Error> {
+    pub async fn update_user_document(&self, did: &DID, data: Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.store_package(did, data).await
+        inner.update_user_document(did, data).await
     }
 
-    pub async fn get_package(&self, did: &DID) -> Result<Cid, Error> {
+    pub async fn get_user_document(&self, did: &DID) -> Result<Cid, Error> {
         let inner = &*self.inner.read().await;
-        inner.get_package(did).await
+        inner.get_user_document(did).await
     }
 
     pub async fn list(&self) -> BoxStream<'static, IdentityDocument> {
@@ -105,15 +98,14 @@ impl IdentityStorage {
 #[derive(Debug)]
 struct IdentityStorageInner {
     ipfs: Ipfs,
-    list: Option<Cid>,
-    packages: Option<Cid>,
+    users: Option<Cid>,
     mailbox: Option<Cid>,
     root: RootStorage,
 }
 
 impl IdentityStorageInner {
     async fn contains(&self, did: &DID) -> bool {
-        let cid = match self.list {
+        let cid = match self.users {
             Some(cid) => cid,
             None => return false,
         };
@@ -122,18 +114,13 @@ impl IdentityStorageInner {
             .sub_path(&did.to_string())
             .expect("Valid path");
 
-        self.ipfs
-            .get_dag(path)
-            .local()
-            .deserialized::<IdentityDocument>()
-            .await
-            .is_ok()
+        self.ipfs.get_dag(path).local().await.is_ok()
     }
 
-    async fn register(&mut self, document: IdentityDocument) -> Result<(), Error> {
+    async fn register(&mut self, document: &IdentityDocument, root_cid: Cid) -> Result<(), Error> {
         document.verify()?;
 
-        let mut list: BTreeMap<String, Cid> = match self.list {
+        let mut list: BTreeMap<String, Cid> = match self.users {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -150,13 +137,11 @@ impl IdentityStorageInner {
             return Err(Error::IdentityExist);
         }
 
-        let cid = self.ipfs.dag().put().serialize(document).await?;
-
-        list.insert(did_str, cid);
+        list.insert(did_str, root_cid);
 
         let cid = self.ipfs.dag().put().serialize(list).await?;
 
-        let old_cid = self.list.replace(cid);
+        let old_cid = self.users.replace(cid);
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
@@ -164,19 +149,19 @@ impl IdentityStorageInner {
             }
         }
 
-        self.root.set_identity_list(cid).await?;
+        self.root.set_user_documents(cid).await?;
 
         Ok(())
     }
 
-    async fn store_package(&mut self, did: &DID, package: Cid) -> Result<(), Error> {
+    async fn update_user_document(&mut self, did: &DID, document: Cid) -> Result<(), Error> {
         if !self.contains(did).await {
             return Err(Error::IdentityDoesntExist);
         }
 
         let identity_peer_id = did.to_peer_id()?;
 
-        let mut list: BTreeMap<String, Cid> = match self.packages {
+        let mut list: BTreeMap<String, Cid> = match self.users {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -188,7 +173,7 @@ impl IdentityStorageInner {
         };
 
         if let Some(cid) = list.get(&did.to_string()) {
-            tracing::info!(%did, %package, "loading previous document");
+            tracing::info!(%did, %document, "loading previous document");
             let old_document = self
                 .ipfs
                 .get_dag(*cid)
@@ -199,55 +184,54 @@ impl IdentityStorageInner {
 
             let new_document = self
                 .ipfs
-                .get_dag(package)
+                .get_dag(document)
                 .provider(identity_peer_id)
                 .deserialized::<RootDocument>()
                 .await
                 .map_err(anyhow::Error::from)?;
 
-            tracing::info!(%did, %package, new = new_document.modified >= old_document.modified);
+            tracing::info!(%did, %document, new = new_document.modified >= old_document.modified);
 
             if old_document.modified >= new_document.modified {
-                tracing::warn!(%did, %package, "document provided is older or same as the current document");
+                tracing::warn!(%did, %document, "document provided is older or same as the current document");
                 return Err(Error::Other);
             }
 
-            tracing::info!(%did, %package, new = new_document.modified >= old_document.modified, "storing new root document");
+            tracing::info!(%did, %document, new = new_document.modified >= old_document.modified, "storing new root document");
         }
 
-        list.insert(did.to_string(), package);
+        list.insert(did.to_string(), document);
 
         let cid = self.ipfs.dag().put().serialize(list).await?;
 
         self.ipfs.insert_pin(&cid).recursive().await?;
 
-        let old_cid = self.packages.replace(cid);
+        let old_cid = self.users.replace(cid);
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning identity package block");
                 _ = self.ipfs.remove_pin(&old_cid).recursive().await;
             }
         }
-        self.root.set_package(cid).await?;
+        self.root.set_user_documents(cid).await?;
 
         Ok(())
     }
 
-    async fn get_package(&self, did: &DID) -> Result<Cid, Error> {
+    async fn get_user_document(&self, did: &DID) -> Result<Cid, Error> {
         if !self.contains(did).await {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let list: BTreeMap<String, Cid> = match self.packages {
-            Some(cid) => self
-                .ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default(),
-            None => return Err(Error::IdentityDoesntExist),
-        };
+        let cid = self.users.ok_or(Error::IdentityDoesntExist)?;
+
+        let list: BTreeMap<String, Cid> = self
+            .ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized()
+            .await
+            .map_err(|_| Error::IdentityDoesntExist)?;
 
         let did_str = did.to_string();
 
@@ -256,68 +240,8 @@ impl IdentityStorageInner {
             .copied()
     }
 
-    async fn update(&mut self, document: &IdentityDocument) -> Result<(), Error> {
-        document.verify()?;
-
-        let mut list: BTreeMap<String, Cid> = match self.list {
-            Some(cid) => self
-                .ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default(),
-            None => BTreeMap::new(),
-        };
-
-        let did_str = document.did.to_string();
-
-        if !list.contains_key(&did_str) {
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        let internal_cid = list.get(&did_str).expect("document to exist");
-
-        let internal_document = self
-            .ipfs
-            .get_dag(*internal_cid)
-            .local()
-            .deserialized::<IdentityDocument>()
-            .await
-            .map_err(|_| Error::IdentityDoesntExist)?;
-
-        if !internal_document.different(document) {
-            return Err(Error::CannotUpdateIdentity);
-        }
-
-        let cid = self.ipfs.dag().put().serialize(document).pin(false).await?;
-
-        let old_cid = list.insert(did_str, cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                tracing::debug!(cid = %old_cid, "unpinning identity block");
-                _ = self.ipfs.remove_pin(&old_cid).await;
-            }
-        }
-
-        let cid = self.ipfs.dag().put().serialize(list).pin(false).await?;
-
-        let old_cid = self.list.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                tracing::debug!(cid = %old_cid, "unpinning identity block");
-                _ = self.ipfs.remove_pin(&old_cid).await;
-            }
-        }
-        self.root.set_identity_list(cid).await?;
-
-        Ok(())
-    }
-
     async fn list(&self) -> BoxStream<'static, IdentityDocument> {
-        let list: BTreeMap<String, Cid> = match self.list {
+        let list: BTreeMap<String, Cid> = match self.users {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -333,7 +257,8 @@ impl IdentityStorageInner {
         FuturesUnordered::from_iter(list.values().copied().map(|cid| {
             let ipfs = ipfs.clone();
             async move {
-                ipfs.get_dag(cid)
+                let path = IpfsPath::from(cid).sub_path("identity")?;
+                ipfs.get_dag(path)
                     .local()
                     .deserialized::<IdentityDocument>()
                     .await
