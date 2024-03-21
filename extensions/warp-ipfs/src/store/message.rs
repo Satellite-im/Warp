@@ -1252,8 +1252,7 @@ impl ConversationTask {
                     Ok::<_, Error>((conversation_id, documents))
                 };
 
-                self.conversation_mailbox_task
-                    .spawn(async move { fut.await });
+                self.conversation_mailbox_task.spawn(fut);
             }
         }
 
@@ -1303,11 +1302,11 @@ impl ConversationTask {
                         .update_message_document(&self.ipfs, message)
                         .await?;
 
-                    let is_edited = match (message.modified, current_message.modified) {
-                        (Some(modified), Some(current_modified)) if modified > current_modified => true,
-                        (Some(_), None) => true,
-                        _ => false
-                    };
+                    let is_edited = matches!((message.modified, current_message.modified), (Some(modified), Some(current_modified)) if modified > current_modified )
+                        | matches!(
+                            (message.modified, current_message.modified),
+                            (Some(_), None)
+                        );
 
                     match is_edited {
                         true => events.push(MessageEventKind::MessageEdited {
