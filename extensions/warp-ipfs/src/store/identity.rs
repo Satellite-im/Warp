@@ -56,6 +56,7 @@ use super::{
     SHUTTLE_TIMEOUT,
 };
 
+// TODO: Split into its own task
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 #[derive(Clone)]
@@ -390,7 +391,7 @@ impl IdentityStore {
 
         let signal = Default::default();
 
-        let mut store = Self {
+        let store = Self {
             ipfs,
             root_document,
             identity_cache,
@@ -406,27 +407,30 @@ impl IdentityStore {
             span,
         };
 
-        if let Ok(ident) = store.own_identity().await {
-            tracing::info!(did = %ident.did_key(), "Identity loaded");
-            match store.is_registered().await.is_ok() {
-                true => {
-                    if let Err(e) = store.fetch_mailbox().await {
-                        tracing::warn!(error = %e, "Unable to fetch or process mailbox");
-                    }
-                }
-                false => {
-                    let id = store.own_identity_document().await.expect("Valid identity");
-                    if let Err(e) = store.register().await {
-                        tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
+        // Move shuttle logic logic into its own task
+        // TODO: Maybe push into a joinset or futureunordered and poll?
+        tokio::spawn({
+            let mut store = store.clone();
+            async move {
+                if let Ok(ident) = store.own_identity().await {
+                    tracing::info!(did = %ident.did_key(), "Identity loaded");
+                    match store.is_registered().await.is_ok() {
+                        true => {
+                            if let Err(e) = store.fetch_mailbox().await {
+                                tracing::warn!(error = %e, "Unable to fetch or process mailbox");
+                            }
+                        }
+                        false => {
+                            if let Err(e) = store.register().await {
+                                tracing::warn!(did = %store.did_key, error = %e, "Unable to register identity");
+                            }
+                        }
                     }
                 }
             }
-        }
+        });
 
         let did = store.get_keypair_did().expect("valid ed25519 keypair");
-
-        let event_stream = store.ipfs.pubsub_subscribe(did.events()).await.expect("not subscribed");
-        let identity_announce_stream = store.ipfs.pubsub_subscribe("/identity/announce/v0").await.expect("not subscribed");
 
         store.discovery.start().await?;
 
@@ -452,16 +456,30 @@ impl IdentityStore {
             let list = store.list_all_raw_request().await.unwrap_or_default();
 
             // cleanup outgoing
-            for req in list.iter().filter(|req| req.did().eq(&friend)) {
-                let _ = store.root_document.remove_request(req).await;
+            for req in list.into_iter().filter(|req| req.did().eq(&friend)) {
+                let _ = store.root_document.remove_request(&req).await;
             }
         }
-
-        let friend_stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await.expect("not subscribed")
 
         tokio::spawn({
             let mut store = store.clone();
             async move {
+                let event_stream = store
+                    .ipfs
+                    .pubsub_subscribe(did.events())
+                    .await
+                    .expect("not subscribed");
+                let identity_announce_stream = store
+                    .ipfs
+                    .pubsub_subscribe("/identity/announce/v0")
+                    .await
+                    .expect("not subscribed");
+                let friend_stream = store
+                    .ipfs
+                    .pubsub_subscribe(store.did_key.inbox())
+                    .await
+                    .expect("not subscribed");
+
                 futures::pin_mut!(identity_announce_stream);
                 futures::pin_mut!(event_stream);
                 futures::pin_mut!(friend_stream);
