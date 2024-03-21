@@ -325,7 +325,6 @@ impl ShuttleTask {
                         }
                         tracing::debug!(%sender, %root_cid, "root document preloaded");
 
-
                         let keypair = ipfs.keypair();
                         let path = IpfsPath::from(root_cid)
                             .sub_path("identity")
