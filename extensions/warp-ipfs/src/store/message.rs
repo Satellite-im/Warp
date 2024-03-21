@@ -1252,20 +1252,8 @@ impl ConversationTask {
                     Ok::<_, Error>((conversation_id, documents))
                 };
 
-                let (conversation_id, messages) = match fut.await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::error!(%conversation_id, error = %e, "unable to get messages from conversation mailbox");
-                        continue;
-                    }
-                };
-
-                if let Err(e) = self
-                    .insert_messages_from_mailbox(conversation_id, messages)
-                    .await
-                {
-                    tracing::error!(%conversation_id, error = %e, "unable to insert messages into conversation");
-                }
+                self.conversation_mailbox_task
+                    .spawn(async move { fut.await });
             }
         }
 
@@ -1290,31 +1278,66 @@ impl ConversationTask {
         mut messages: Vec<MessageDocument>,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
         messages.sort_by(|a, b| b.cmp(a));
+
+        let mut events = vec![];
 
         for message in messages {
             if !message.verify() {
                 continue;
             }
+            let message_id = message.id;
+
             match conversation
-                .contains(&self.ipfs, message.id)
+                .contains(&self.ipfs, message_id)
                 .await
                 .unwrap_or_default()
             {
                 true => {
+                    let current_message = conversation
+                        .get_message_document(&self.ipfs, message_id)
+                        .await?;
+
                     conversation
                         .update_message_document(&self.ipfs, message)
                         .await?;
+
+                    let is_edited = match (message.modified, current_message.modified) {
+                        (Some(modified), Some(current_modified)) if modified > current_modified => true,
+                        (Some(_), None) => true,
+                        _ => false
+                    };
+
+                    match is_edited {
+                        true => events.push(MessageEventKind::MessageEdited {
+                            conversation_id,
+                            message_id,
+                        }),
+                        false => {
+                            //TODO: Emit event showing message was updated in some way
+                        }
+                    }
                 }
                 false => {
                     conversation
                         .insert_message_document(&self.ipfs, message)
                         .await?;
+
+                    events.push(MessageEventKind::MessageReceived {
+                        conversation_id,
+                        message_id,
+                    });
                 }
             }
         }
 
         self.set_document(conversation).await?;
+
+        while let Some(event) = events.pop() {
+            _ = tx.send(event);
+        }
+
         Ok(())
     }
 
