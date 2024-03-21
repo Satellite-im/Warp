@@ -2298,7 +2298,7 @@ impl ConversationTask {
                     Location::Constellation { path } => {
                         match constellation
                             .root_directory()
-                            .get_item_by_path(&path)
+                            .get_item_by_path(path)
                             .and_then(|item| item.get_file())
                         {
                             Ok(f) => {
