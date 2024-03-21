@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 
-use futures::{channel::mpsc, StreamExt};
+use futures::{channel::mpsc, future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use rust_ipfs::{
     libp2p::{
         core::{
@@ -22,7 +22,7 @@ use rust_ipfs::{
     libp2p::{self, core::PeerRecord},
     p2p::PubsubConfig,
 };
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::JoinHandle;
 
 use crate::{
     identity::{
@@ -87,7 +87,7 @@ struct ShuttleTask {
     identity_rx: mpsc::Receiver<IdentityReceiver>,
     message_rx: mpsc::Receiver<MessageReceiver>,
     precord_tx: mpsc::Sender<PeerRecord>,
-    requests: JoinSet<()>,
+    requests: FuturesUnordered<BoxFuture<'static, ()>>,
 }
 
 impl ShuttleServer {
@@ -219,10 +219,13 @@ impl ShuttleServer {
             identity_rx: id_event_rx,
             message_rx: msg_event_rx,
             precord_tx,
-            requests: JoinSet::new(),
+            requests: Default::default(),
         };
 
         let task = tokio::spawn(async move {
+            server_event
+                .requests
+                .push(futures::future::pending().boxed());
             server_event.start().await;
         });
 
@@ -237,14 +240,8 @@ impl ShuttleServer {
 
 impl ShuttleTask {
     async fn start(&mut self) {
-        // Only reason we moved to using JoinSet over FuturesUnordered is due to a error as a result of using BoxFuture<'_, ()>, however there is some benefits since we can easily perform tracking with
-        // either vs spawning task with tokio::spawn and performing our own bookkeeping. This can eventually allow us to control the number of request being processed in their requested task
-        // while any excess, if we define a upper limit in the future, can be queued.
-        // The use of JoinSet may add some cost, but is the workaround to the error we get
-        // however the cost may not be that big of an impact and gives us some flexability on aborting the task/request in the future, unless we just add a guard from the behaviour
-        // and track that to determine if the request dropped (eg if the future returned) or if it been successful, in which case JoinSet may be redundant.
         // TODO: Investigate in JoinSet vs FuturesUnordered. See https://github.com/tokio-rs/tokio/issues/5564
-        // TODO: Track long running task and abort/terminate them if they exceed a specific (TBD) duration
+        // TODO: Track long running task (or futures) and abort/terminate them if they exceed a specific (TBD) duration
         //       (i.e if we are pinning a file from a user, the duration can be ignored while if the user is updating their profile, it shouldnt exceed maybe 5min (though other factors may have to be taken into account))
 
         loop {
@@ -255,7 +252,7 @@ impl ShuttleTask {
                 Some((id, ch, payload, resp)) = self.message_rx.next() => {
                     self.process_message_events(id, ch, payload, resp).await
                 }
-                _ = self.requests.join_next() => {}
+                _ = self.requests.next() => {}
             }
         }
     }
@@ -263,9 +260,9 @@ impl ShuttleTask {
     async fn process_identity_events(
         &mut self,
         id: InboundRequestId,
-        mut ch: Option<ResponseChannel<IdentityPayload>>,
+        ch: Option<ResponseChannel<IdentityPayload>>,
         payload: IdentityPayload,
-        mut resp: Option<OntshotSender<(ResponseChannel<IdentityPayload>, IdentityPayload)>>,
+        resp: Option<OntshotSender<(ResponseChannel<IdentityPayload>, IdentityPayload)>>,
     ) {
         let ipfs = self.ipfs.clone();
         let identity_storage = self.identity_storage.clone();
@@ -290,7 +287,7 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                 let _ = resp.send((ch, payload));
                             }
 
@@ -308,7 +305,7 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                 let _ = resp.send((ch, payload));
                             }
 
@@ -322,7 +319,7 @@ impl ShuttleTask {
                         )
                         .expect("Valid payload construction");
 
-                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        if let (Some(ch), Some(resp)) = (ch, resp) {
                             let _ = resp.send((ch, payload));
                         }
                     }
@@ -368,7 +365,7 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                 let _ = resp.send((ch, payload));
                             }
 
@@ -386,7 +383,7 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                 let _ = resp.send((ch, payload));
                             }
 
@@ -409,7 +406,7 @@ impl ShuttleTask {
                             let payload = payload_message_construct(keypair, None, res_error)
                                 .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                 let _ = resp.send((ch, payload));
                             }
 
@@ -440,7 +437,7 @@ impl ShuttleTask {
                             Response::RegisterResponse(RegisterResponse::Ok),
                         )
                         .expect("Valid payload construction");
-                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        if let (Some(ch), Some(resp)) = (ch, resp) {
                             let _ = resp.send((ch, payload));
                         }
                     }
@@ -457,7 +454,7 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                 let _ = resp.send((ch, payload));
                             }
 
@@ -477,7 +474,7 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                 let _ = resp.send((ch, payload));
                             }
 
@@ -505,7 +502,7 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                if let (Some(ch), Some(resp)) = (ch, resp) {
                                     let _ = resp.send((ch, payload));
                                 }
                             }
@@ -523,7 +520,7 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                if let (Some(ch), Some(resp)) = (ch, resp) {
                                     let _ = resp.send((ch, payload));
                                 }
                             }
@@ -541,7 +538,7 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    if let (Some(ch), Some(resp)) = (ch, resp) {
                                         let _ = resp.send((ch, payload));
                                     }
 
@@ -561,7 +558,7 @@ impl ShuttleTask {
                                     )
                                     .expect("Valid payload construction");
 
-                                    if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                    if let (Some(ch), Some(resp)) = (ch, resp) {
                                         let _ = resp.send((ch, payload));
                                     }
 
@@ -584,8 +581,7 @@ impl ShuttleTask {
                                     )
                                     .expect("Valid payload construction");
 
-                                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take())
-                                            {
+                                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                                 let _ = resp.send((ch, payload));
                                             }
                                         }
@@ -604,8 +600,7 @@ impl ShuttleTask {
                                             )
                                             .expect("Valid payload construction");
 
-                                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take())
-                                            {
+                                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                                 let _ = resp.send((ch, payload));
                                             }
                                         }
@@ -624,7 +619,7 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                if let (Some(ch), Some(resp)) = (ch, resp) {
                                     let _ = resp.send((ch, payload));
                                 }
                             }
@@ -818,7 +813,7 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                                if let (Some(ch), Some(resp)) = (ch, resp) {
                                     let _ = resp.send((ch, payload));
                                 }
 
@@ -840,7 +835,7 @@ impl ShuttleTask {
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
                                 let _ = resp.send((ch, payload));
                             }
 
@@ -868,7 +863,7 @@ impl ShuttleTask {
                         let payload = payload_message_construct(keypair, None, event)
                             .expect("Valid payload construction");
 
-                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        if let (Some(ch), Some(resp)) = (ch, resp) {
                             let _ = resp.send((ch, payload));
                         }
                     }
@@ -886,7 +881,7 @@ impl ShuttleTask {
                         let payload = payload_message_construct(keypair, None, event)
                             .expect("Valid payload construction");
 
-                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        if let (Some(ch), Some(resp)) = (ch, resp) {
                             let _ = resp.send((ch, payload));
                         }
                     }
@@ -895,15 +890,15 @@ impl ShuttleTask {
             }
         };
 
-        self.requests.spawn(fut);
+        self.requests.push(fut.boxed());
     }
 
     async fn process_message_events(
         &mut self,
         id: InboundRequestId,
-        mut ch: Option<ResponseChannel<MessagePayload>>,
+        ch: Option<ResponseChannel<MessagePayload>>,
         payload: MessagePayload,
-        mut resp: Option<OntshotSender<(ResponseChannel<MessagePayload>, MessagePayload)>>,
+        resp: Option<OntshotSender<(ResponseChannel<MessagePayload>, MessagePayload)>>,
     ) {
         let ipfs = self.ipfs.clone();
         let message_storage = self.message_storage.clone();
@@ -922,7 +917,7 @@ impl ShuttleTask {
                 )
                 .expect("Valid payload construction");
 
-                if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                if let (Some(ch), Some(resp)) = (ch, resp) {
                     let _ = resp.send((ch, payload));
                 }
 
@@ -1014,7 +1009,7 @@ impl ShuttleTask {
                             message::protocol::payload_message_construct(keypair, None, message)
                                 .expect("Valid payload construction");
 
-                        if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                        if let (Some(ch), Some(resp)) = (ch, resp) {
                             let _ = resp.send((ch, payload));
                         }
                     }
@@ -1023,7 +1018,7 @@ impl ShuttleTask {
             }
         };
 
-        self.requests.spawn(fut);
+        self.requests.push(fut.boxed());
     }
 }
 

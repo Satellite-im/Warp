@@ -285,7 +285,10 @@ impl NetworkBehaviour for Behaviour {
                     };
                     false
                 }
-                Poll::Ready(Err(Canceled)) => false,
+                Poll::Ready(Err(Canceled)) => {
+                    tracing::warn!(id = ?id, "request likely canceled or the oneshot has been unspectially dropped");
+                    false
+                },
                 Poll::Pending => true,
             });
 
