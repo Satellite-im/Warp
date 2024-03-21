@@ -2214,7 +2214,7 @@ impl ConversationTask {
         reply_id: Option<Uuid>,
         locations: Vec<Location>,
         messages: Vec<String>,
-    ) -> Result<(Uuid, BoxStream<'static, AttachmentKind>), Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         if locations.len() > 32 {
             return Err(Error::InvalidLength {
                 context: "files".into(),
@@ -2294,30 +2294,30 @@ impl ConversationTask {
             let mut streams: SelectAll<_> = SelectAll::new();
 
             for file in files {
-                match file {
+                match &file {
                     Location::Constellation { path } => {
                         match constellation
                             .root_directory()
-                            .get_item_by_path(&path)
+                            .get_item_by_path(path)
                             .and_then(|item| item.get_file())
                         {
                             Ok(f) => {
                                 let stream = async_stream::stream! {
-                                    yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
+                                    yield (file, (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f)));
                                 };
                                 streams.push(stream.boxed());
                             },
                             Err(e) => {
                                 let constellation_path = PathBuf::from(&path);
-                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
+                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path.to_string());
                                 let stream = async_stream::stream! {
-                                    yield (Progression::ProgressFailed { name, last_size: None, error: e }, None);
+                                    yield (file, (Progression::ProgressFailed { name, last_size: None, error: e }, None));
                                 };
                                 streams.push(stream.boxed());
                             },
                         }
                     }
-                    Location::Disk {path} => {
+                    Location::Disk { path } => {
                         let mut filename = match path.file_name() {
                             Some(file) => file.to_string_lossy().to_string(),
                             None => continue,
@@ -2355,24 +2355,24 @@ impl ConversationTask {
 
                         if skip {
                             let stream = async_stream::stream! {
-                                yield (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None);
+                                yield (file, (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None));
                             };
                             streams.push(stream.boxed());
                             continue;
                         }
 
-                        let file = path.display().to_string();
+                        let file_path = path.display().to_string();
 
                         in_stack.push(filename.clone());
 
                         let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
 
-                        let mut progress = match constellation.put(&filename, &file).await {
+                        let mut progress = match constellation.put(&filename, &file_path).await {
                             Ok(stream) => stream,
                             Err(e) => {
                                 error!(%conversation_id, "Error uploading {filename}: {e}");
                                 let stream = async_stream::stream! {
-                                    yield (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None);
+                                    yield (file, (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None));
                                 };
                                 streams.push(stream.boxed());
                                 continue;
@@ -2387,15 +2387,15 @@ impl ConversationTask {
                             while let Some(item) = progress.next().await {
                                 match item {
                                     item @ Progression::CurrentProgress { .. } => {
-                                        yield (item, None);
+                                        yield (file.clone(), (item, None));
                                     },
                                     item @ Progression::ProgressComplete { .. } => {
-                                        let file = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
-                                        yield (item, file);
+                                        let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
+                                        yield (file, (item, file_name));
                                         break;
                                     },
                                     item @ Progression::ProgressFailed { .. } => {
-                                        yield (item, None);
+                                        yield (file, (item, None));
                                         break;
                                     }
                                 }
@@ -2407,8 +2407,8 @@ impl ConversationTask {
                 };
             }
 
-            for await (progress, file) in streams {
-                yield AttachmentKind::AttachedProgress(progress);
+            for await (location, (progress, file)) in streams {
+                yield AttachmentKind::AttachedProgress(location, progress);
                 if let Some(file) = file {
                     attachments.push(file);
                 }

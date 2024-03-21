@@ -107,7 +107,7 @@ pub enum MessageEvent {
 }
 
 pub enum AttachmentKind {
-    AttachedProgress(Progression),
+    AttachedProgress(Location, Progression),
     Pending(Result<(), Error>),
 }
 
