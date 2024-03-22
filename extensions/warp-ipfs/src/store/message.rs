@@ -930,7 +930,10 @@ impl ConversationTask {
 
         let mut pending_exchange_timer = tokio::time::interval(Duration::from_secs(1));
 
-        let mut check_mailbox = tokio::time::interval_at(tokio::time::Instant::now() + Duration::from_secs(5), Duration::from_secs(60));
+        let mut check_mailbox = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(5),
+            Duration::from_secs(60),
+        );
 
         loop {
             tokio::select! {
@@ -1204,7 +1207,8 @@ impl ConversationTask {
     }
 
     async fn load_from_mailbox(&mut self) -> Result<(), Error> {
-        let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config().clone() else {
+        let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config().clone()
+        else {
             return Ok(());
         };
 
@@ -1233,7 +1237,7 @@ impl ConversationTask {
                                 response: tx,
                             })
                             .await;
-        
+
                         match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                             Ok(Ok(Ok(list))) => {
                                 providers.push(peer_id);
@@ -1254,7 +1258,7 @@ impl ConversationTask {
                             }
                         }
                     }
-        
+
                     let conversation_mailbox = conversation_mailbox
                         .into_iter()
                         .filter_map(|(id, cid)| {
@@ -1262,7 +1266,7 @@ impl ConversationTask {
                             Some((id, cid))
                         })
                         .collect::<BTreeMap<Uuid, Cid>>();
-                
+
                     let documents =
                         FuturesUnordered::from_iter(conversation_mailbox.into_iter().map(|(id, cid)| {
                             let ipfs = ipfs.clone();
@@ -1300,18 +1304,17 @@ impl ConversationTask {
                         })
                         .collect::<Vec<_>>()
                         .await;
-        
+
                     Ok::<_, Error>((conversation_id, documents))
                 };
-        
-                
+
+
                 tokio::spawn(async move {
                     let result = fut.await;
                     let _ = tx.send(result).await;
                 });
             }
         }).await;
-        
 
         Ok(())
     }
