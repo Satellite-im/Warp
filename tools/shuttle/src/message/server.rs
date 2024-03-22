@@ -97,9 +97,12 @@ impl Behaviour {
             return;
         }
 
+        // Note: These dont need to await for a response back from the node, as long as it been acknowledge here.
         match matches!(
             request.message(),
             Message::Request(Request::MessageUpdate(MessageUpdate::Insert { .. }))
+                | Message::Request(Request::MessageUpdate(MessageUpdate::Delivered { .. }))
+                | Message::Request(Request::MessageUpdate(MessageUpdate::Remove { .. }))
         ) {
             true => {
                 let payload = payload_message_construct(&self.keypair, None, Response::Ack)
