@@ -4,10 +4,10 @@ use std::{
     time::Duration,
 };
 
-use futures::{channel::oneshot::Canceled, FutureExt, StreamExt};
+use futures::{channel::oneshot::Canceled, FutureExt};
 use rust_ipfs::{
     libp2p::{
-        core::{Endpoint, PeerRecord},
+        core::Endpoint,
         request_response::{InboundRequestId, ResponseChannel},
         swarm::{
             ConnectionDenied, ConnectionId, FromSwarm, THandler, THandlerInEvent, THandlerOutEvent,
@@ -19,14 +19,26 @@ use rust_ipfs::{
 
 use rust_ipfs::libp2p::request_response;
 
-use crate::{
-    identity::protocol::{payload_message_construct, Request, Synchronized},
-    PayloadRequest,
-};
+use crate::{message::protocol::MessageUpdate, PayloadRequest};
+
+use super::protocol::{payload_message_construct, Request};
 
 use super::protocol::{self, Message, Response};
 
 type Payload = PayloadRequest<Message>;
+type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
+
+type MessageReceiver = (
+    InboundRequestId,
+    Option<ResponseChannel<PayloadRequest<Message>>>,
+    PayloadRequest<Message>,
+    Option<
+        OntshotSender<(
+            ResponseChannel<PayloadRequest<Message>>,
+            PayloadRequest<Message>,
+        )>,
+    >,
+);
 
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
@@ -40,30 +52,16 @@ pub struct Behaviour {
         futures::channel::oneshot::Receiver<(ResponseChannel<Payload>, Payload)>,
     >,
 
-    process_event: futures::channel::mpsc::Sender<(
-        InboundRequestId,
-        Option<ResponseChannel<Payload>>,
-        Payload,
-        Option<futures::channel::oneshot::Sender<(ResponseChannel<Payload>, Payload)>>,
-    )>,
+    process_event: futures::channel::mpsc::Sender<MessageReceiver>,
 
     queue_event: HashMap<InboundRequestId, (Option<ResponseChannel<Payload>>, Payload)>,
-
-    precord_rx: futures::channel::mpsc::Receiver<PeerRecord>,
-    peer_records: HashMap<PeerId, PeerRecord>,
 }
 
 impl Behaviour {
     #[allow(clippy::type_complexity)]
     pub fn new(
         keypair: &Keypair,
-        process_event: futures::channel::mpsc::Sender<(
-            InboundRequestId,
-            Option<ResponseChannel<Payload>>,
-            Payload,
-            Option<futures::channel::oneshot::Sender<(ResponseChannel<Payload>, Payload)>>,
-        )>,
-        precord_rx: futures::channel::mpsc::Receiver<PeerRecord>,
+        process_event: futures::channel::mpsc::Sender<MessageReceiver>,
     ) -> Self {
         Self {
             inner: request_response::json::Behaviour::new(
@@ -76,8 +74,6 @@ impl Behaviour {
             process_event,
             waiting_on_request: Default::default(),
             queue_event: Default::default(),
-            peer_records: Default::default(),
-            precord_rx,
         }
     }
 
@@ -101,14 +97,16 @@ impl Behaviour {
             return;
         }
 
+        // Note: These dont need to await for a response back from the node, as long as it been acknowledge here.
         match matches!(
             request.message(),
-            Message::Request(Request::Synchronized(Synchronized::Store { .. }))
+            Message::Request(Request::MessageUpdate(MessageUpdate::Insert { .. }))
+                | Message::Request(Request::MessageUpdate(MessageUpdate::Delivered { .. }))
+                | Message::Request(Request::MessageUpdate(MessageUpdate::Remove { .. }))
         ) {
             true => {
                 let payload = payload_message_construct(&self.keypair, None, Response::Ack)
                     .expect("Valid construction of payload");
-                tracing::info!(id = ?request_id, ?payload, "constructed payload");
                 _ = self.inner.send_response(channel, payload);
                 self.queue_event.insert(request_id, (None, request))
             }
@@ -242,11 +240,6 @@ impl NetworkBehaviour for Behaviour {
             };
         }
 
-        while let Poll::Ready(Some(record)) = self.precord_rx.poll_next_unpin(cx) {
-            let peer_id = record.peer_id();
-            self.peer_records.insert(peer_id, record);
-        }
-
         self.queue_event.retain(
             |id, (channel, req_res)| match self.process_event.poll_ready(cx) {
                 Poll::Ready(Ok(_)) => {
@@ -285,10 +278,7 @@ impl NetworkBehaviour for Behaviour {
                     };
                     false
                 }
-                Poll::Ready(Err(Canceled)) => {
-                    tracing::warn!(id = ?id, "request likely canceled or the oneshot has been unspectially dropped");
-                    false
-                },
+                Poll::Ready(Err(Canceled)) => false,
                 Poll::Pending => true,
             });
 

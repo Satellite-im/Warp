@@ -10,11 +10,11 @@ use warp::error::Error;
 #[derive(Default, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct Root {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub identities: Option<Cid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub packages: Option<Cid>,
+    pub users: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mailbox: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_mailbox: Option<Cid>,
 }
 
 #[derive(Debug)]
@@ -66,19 +66,19 @@ impl RootStorage {
         }
     }
 
-    pub async fn set_identity_list(&self, cid: Cid) -> Result<(), Error> {
+    pub async fn set_user_documents(&self, cid: Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.set_identity_list(&self.ipfs, cid).await
-    }
-
-    pub async fn set_package(&self, cid: Cid) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.set_package(&self.ipfs, cid).await
+        inner.set_user_documents(&self.ipfs, cid).await
     }
 
     pub async fn set_mailbox(&self, cid: Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.set_mailbox(&self.ipfs, cid).await
+    }
+
+    pub async fn set_conversation_mailbox(&self, cid: Cid) -> Result<(), Error> {
+        let inner: &mut RootInner = &mut *self.inner.write().await;
+        inner.set_conversation_mailbox(&self.ipfs, cid).await
     }
 
     pub async fn get_root(&self) -> Root {
@@ -88,47 +88,45 @@ impl RootStorage {
 }
 
 impl RootInner {
-    pub async fn set_identity_list(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
-        self.root.identities.replace(cid);
-        let cid = ipfs.dag().put().serialize(self.root).pin(false).await?;
-
-        tracing::info!(cid = %cid, "storing root");
-        self.save(ipfs, cid).await?;
-        tracing::info!(cid = %cid, "root is stored");
-
-        //TODO: Broadcast root document to nodes
-        Ok(())
-    }
-
-    pub async fn set_package(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
-        self.root.packages.replace(cid);
-        tracing::debug!(cid = %cid, "New cid for root. Store and pinning");
-        let cid = ipfs.dag().put().serialize(self.root).pin(false).await?;
-        tracing::info!(cid = %cid, "root stored");
-
-        tracing::info!(cid = %cid, "storing root");
-        self.save(ipfs, cid).await?;
-        tracing::info!(cid = %cid, "root is stored");
+    async fn set_user_documents(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
+        self.root.users.replace(cid);
+        tracing::debug!(%cid, "package set");
+        self.save(ipfs).await?;
         Ok(())
     }
 
     async fn set_mailbox(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
         self.root.mailbox.replace(cid);
-        let cid = ipfs.dag().put().serialize(self.root).pin(false).await?;
-
-        tracing::info!(cid = %cid, "storing root");
-        self.save(ipfs, cid).await?;
-        tracing::info!(cid = %cid, "root is stored");
+        tracing::debug!(%cid, "mailbox set");
+        self.save(ipfs).await?;
         //TODO: Broadcast root document to nodes
         Ok(())
     }
 
-    async fn save(&mut self, ipfs: &Ipfs, cid: Cid) -> std::io::Result<()> {
+    async fn set_conversation_mailbox(&mut self, ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
+        self.root.conversation_mailbox.replace(cid);
+        tracing::debug!(%cid, "conversation mailbox set");
+        self.save(ipfs).await?;
+        //TODO: Broadcast root document to nodes
+        Ok(())
+    }
+
+    async fn save(&mut self, ipfs: &Ipfs) -> std::io::Result<()> {
         //TODO: Reenable ipns
         // self.ipfs
         // .ipns()
         // .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
         // .await?;
+
+        let cid = ipfs
+            .dag()
+            .put()
+            .serialize(self.root)
+            .pin(false)
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        tracing::info!(cid = %cid, "storing root");
 
         let old_cid = self.cid.replace(cid);
 
@@ -145,6 +143,7 @@ impl RootInner {
                 tracing::error!("Error writing cid to file: {e}");
             }
         }
+        tracing::info!(cid = %cid, "root is stored");
         Ok(())
     }
 }
