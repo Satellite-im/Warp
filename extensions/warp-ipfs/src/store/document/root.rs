@@ -717,6 +717,14 @@ impl RootDocumentTask {
     }
 
     async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
+        self._set_root_document(document, true).await
+    }
+
+    async fn _set_root_document(
+        &mut self,
+        document: RootDocument,
+        local: bool,
+    ) -> Result<(), Error> {
         let document = document.sign(&self.keypair)?;
 
         //Precautionary check
@@ -724,7 +732,11 @@ impl RootDocumentTask {
 
         let root_cid = self.ipfs.dag().put().serialize(document).await?;
 
-        self.ipfs.insert_pin(&root_cid).recursive().await?;
+        self.ipfs
+            .insert_pin(&root_cid)
+            .set_local(local)
+            .recursive()
+            .await?;
 
         let old_cid = self.cid.replace(root_cid);
 
@@ -1317,7 +1329,7 @@ impl RootDocumentTask {
             .await?;
         // Step down through each field to resolve them
         root_document.resolve2(&self.ipfs).await?;
-        self.set_root_document(root_document).await?;
+        self._set_root_document(root_document, false).await?;
         Ok(())
     }
 }
