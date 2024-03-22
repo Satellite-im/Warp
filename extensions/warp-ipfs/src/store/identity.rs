@@ -53,6 +53,7 @@ use super::{
     phonebook::PhoneBook,
     queue::Queue,
     request::PayloadRequest,
+    topics::IDENTITY_ANNOUNCEMENT,
     SHUTTLE_TIMEOUT,
 };
 
@@ -471,7 +472,7 @@ impl IdentityStore {
                     .expect("not subscribed");
                 let identity_announce_stream = store
                     .ipfs
-                    .pubsub_subscribe("/identity/announce/v0")
+                    .pubsub_subscribe(IDENTITY_ANNOUNCEMENT)
                     .await
                     .expect("not subscribed");
                 let friend_stream = store
@@ -908,10 +909,7 @@ impl IdentityStore {
             let document = self.own_identity_document().await?;
             let payload = PayloadRequest::new(kp, None, document)?;
             let bytes = serde_json::to_vec(&payload)?;
-            _ = self
-                .ipfs
-                .pubsub_publish("/identity/announce/v0", bytes)
-                .await;
+            _ = self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await;
         }
 
         Ok(())

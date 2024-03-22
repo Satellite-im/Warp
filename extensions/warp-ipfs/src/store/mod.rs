@@ -34,7 +34,12 @@ use warp::{
     tesseract::Tesseract,
 };
 
-pub(crate) const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
+pub(super) mod topics {
+    /// Topic to announce identity updates to network
+    pub const IDENTITY_ANNOUNCEMENT: &str = "/identity/announce/v0";
+}
+
+const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 use self::conversation::{ConversationDocument, MessageDocument};
 
