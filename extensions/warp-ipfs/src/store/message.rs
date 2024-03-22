@@ -300,10 +300,6 @@ impl MessageStore {
             tracing::warn!("Unable to load conversations: {e}");
         }
 
-        if let Err(e) = task.load_from_mailbox().await {
-            tracing::warn!("Unable to load conversations mailbox: {e}");
-        }
-
         tokio::spawn({
             async move {
                 select! {
@@ -934,7 +930,7 @@ impl ConversationTask {
 
         let mut pending_exchange_timer = tokio::time::interval(Duration::from_secs(1));
 
-        let mut check_mailbox = tokio::time::interval(Duration::from_secs(60));
+        let mut check_mailbox = tokio::time::interval_at(tokio::time::Instant::now() + Duration::from_secs(5), Duration::from_secs(60));
 
         loop {
             tokio::select! {
