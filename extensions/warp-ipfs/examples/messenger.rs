@@ -893,6 +893,14 @@ async fn message_event_handle(
                 writeln!(stdout, "> Message {message_id} has been deleted")?;
             }
         }
+        MessageEventKind::MessageUpdated {
+            conversation_id,
+            message_id,
+        } => {
+            if main_conversation_id == conversation_id {
+                writeln!(stdout, "> Message {message_id} has been updated")?;
+            }
+        }
         MessageEventKind::MessageReactionAdded {
             conversation_id,
             message_id,

@@ -69,6 +69,10 @@ pub enum MessageEventKind {
         did_key: DID,
         reaction: String,
     },
+    MessageUpdated {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
     ConversationNameUpdated {
         conversation_id: Uuid,
         name: String,

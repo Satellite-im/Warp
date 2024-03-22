@@ -1355,15 +1355,18 @@ impl ConversationTask {
                             (Some(_), None)
                         );
 
-                    match is_edited {
-                        true => events.push(MessageEventKind::MessageEdited {
+                    let event = match is_edited {
+                        true => MessageEventKind::MessageEdited {
                             conversation_id,
                             message_id,
-                        }),
-                        false => {
-                            //TODO: Emit event showing message was updated in some way
-                        }
-                    }
+                        },
+                        false => MessageEventKind::MessageUpdated {
+                            conversation_id,
+                            message_id,
+                        },
+                    };
+
+                    events.push(event);
                 }
                 false => {
                     conversation
