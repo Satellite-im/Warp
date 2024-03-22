@@ -421,7 +421,7 @@ impl MessageStorageInner {
 
         let cid = self.ipfs.dag().put().serialize(message_mailbox).await?;
 
-        conversation_mailbox.insert(conversation_id.to_string(), cid);
+        conversation_mailbox.insert(member.to_string(), cid);
 
         let cid = self
             .ipfs
