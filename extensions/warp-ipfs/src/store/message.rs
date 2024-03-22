@@ -24,10 +24,7 @@ use libipld::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
-use tokio::{
-    select,
-    task::{JoinHandle, JoinSet},
-};
+use tokio::{select, task::JoinHandle};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -272,7 +269,7 @@ impl MessageStore {
 
         let root = identity.root_document().clone();
         let (atx, arx) = mpsc::channel(1);
-        let conversation_mailbox_task = JoinSet::new();
+        let (conversation_mailbox_task_tx, conversation_mailbox_task_rx) = mpsc::channel(2048);
         let mut task = ConversationTask {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
@@ -288,7 +285,8 @@ impl MessageStore {
             event,
             attachment_rx: arx,
             attachment_tx: atx,
-            conversation_mailbox_task,
+            conversation_mailbox_task_tx,
+            conversation_mailbox_task_rx,
             pending_key_exchange: Default::default(),
             message_command,
             queue: Default::default(),
@@ -300,6 +298,10 @@ impl MessageStore {
 
         if let Err(e) = task.load_conversations().await {
             tracing::warn!("Unable to load conversations: {e}");
+        }
+
+        if let Err(e) = task.load_from_mailbox().await {
+            tracing::warn!("Unable to load conversations mailbox: {e}");
         }
 
         tokio::spawn({
@@ -903,7 +905,8 @@ struct ConversationTask {
     attachment_rx: mpsc::Receiver<AttachmentChan>,
     attachment_tx: mpsc::Sender<AttachmentChan>,
     command_rx: mpsc::Receiver<MessagingCommand>,
-    conversation_mailbox_task: JoinSet<Result<(Uuid, Vec<MessageDocument>), Error>>,
+    conversation_mailbox_task_tx: mpsc::Sender<Result<(Uuid, Vec<MessageDocument>), Error>>,
+    conversation_mailbox_task_rx: mpsc::Receiver<Result<(Uuid, Vec<MessageDocument>), Error>>,
     pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
 
     message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
@@ -930,6 +933,8 @@ impl ConversationTask {
         let mut queue_timer = tokio::time::interval(Duration::from_secs(1));
 
         let mut pending_exchange_timer = tokio::time::interval(Duration::from_secs(1));
+
+        let mut check_mailbox = tokio::time::interval(Duration::from_secs(60));
 
         loop {
             tokio::select! {
@@ -1111,7 +1116,19 @@ impl ConversationTask {
                         },
                     }
                 }
-                Some(Ok(Ok((id, messages)))) = self.conversation_mailbox_task.join_next() => {
+                Some(result) = self.conversation_mailbox_task_rx.next() => {
+                    let (id, messages) = match result {
+                        Ok(ok) => ok,
+                        Err(e) => {
+                            tracing::error!(error = %e, "unable to obtain messages from mailbox");
+                            continue;
+                        }
+                    };
+                    if messages.is_empty() {
+                        tracing::info!(conversation_id = %id, "mailbox is empty");
+                        continue;
+                    }
+                    tracing::info!(conversation_id = %id, num_of_msg = messages.len(), "receive messages from mailbox");
                     if let Err(e) = self.insert_messages_from_mailbox(id, messages).await {
                         tracing::error!(conversation_id = %id, error = %e, "unable to get messages from conversation mailbox");
                     }
@@ -1121,6 +1138,10 @@ impl ConversationTask {
                 }
                 _ = pending_exchange_timer.tick() => {
                     _ = process_pending_payload(self).await;
+                }
+
+                _ = check_mailbox.tick() => {
+                    _ = self.load_from_mailbox().await;
                 }
             }
         }
@@ -1169,12 +1190,40 @@ impl ConversationTask {
             if let Err(e) = self.create_conversation_task(id).await {
                 tracing::error!(id = %id, error = %e, "Failed to load conversation");
             }
+        }
 
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                let addresses = addresses.clone();
-                let ipfs = self.ipfs.clone();
-                let message_command = self.message_command.clone();
-                let conversation_id = id;
+        if let Some(path) = self.path.as_ref() {
+            if let Ok(data) = tokio::fs::read(path.join(".messaging_queue"))
+                .and_then(|data| async move {
+                    serde_json::from_slice(&data)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })
+                .await
+            {
+                self.queue = data;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn load_from_mailbox(&mut self) -> Result<(), Error> {
+        let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config().clone() else {
+            return Ok(());
+        };
+
+        let tx = self.conversation_mailbox_task_tx.clone();
+        let ipfs = self.ipfs.clone();
+        let message_command = self.message_command.clone();
+
+        self.list_stream().await?.for_each_concurrent(None, |conversation| {
+            let mut tx = tx.clone();
+            let ipfs = ipfs.clone();
+            let message_command = message_command.clone();
+            let addresses = addresses.clone();
+            async move {
+                let ipfs = ipfs.clone();
+                let conversation_id = conversation.id;
                 let fut = async move {
                     let mut conversation_mailbox = BTreeMap::new();
                     let mut providers = vec![];
@@ -1188,7 +1237,7 @@ impl ConversationTask {
                                 response: tx,
                             })
                             .await;
-
+        
                         match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
                             Ok(Ok(Ok(list))) => {
                                 providers.push(peer_id);
@@ -1209,7 +1258,7 @@ impl ConversationTask {
                             }
                         }
                     }
-
+        
                     let conversation_mailbox = conversation_mailbox
                         .into_iter()
                         .filter_map(|(id, cid)| {
@@ -1217,56 +1266,56 @@ impl ConversationTask {
                             Some((id, cid))
                         })
                         .collect::<BTreeMap<Uuid, Cid>>();
-
-                    let documents = FuturesUnordered::from_iter(conversation_mailbox.into_iter().map(|(id, cid)| {
-                        let ipfs = ipfs.clone();
-                        async move {
-                            ipfs.fetch(&cid).recursive().await?;
-                            Ok((id, cid))
-                        }.boxed()
-                    }))
-                    .filter_map(|res: Result<_, anyhow::Error>| {
-                        async move {
-                            res.ok()
-                        }
-                    })
-                    .filter_map( |(_, cid)| {
-                        let ipfs = ipfs.clone();
-                        let providers = providers.clone();
-                        let addresses = addresses.clone();
-                        let message_command = message_command.clone();
-                        async move {
-                            let message_document = ipfs.get_dag(cid).providers(&providers).deserialized::<MessageDocument>().await.ok()?;
-                            for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
-                                let _ = message_command
-                                    .clone()
-                                    .send(shuttle::message::client::MessageCommand::MessageDelivered { peer_id, conversation_id, message_id: message_document.id })
-                                    .await;
+                
+                    let documents =
+                        FuturesUnordered::from_iter(conversation_mailbox.into_iter().map(|(id, cid)| {
+                            let ipfs = ipfs.clone();
+                            async move {
+                                ipfs.fetch(&cid).recursive().await?;
+                                Ok((id, cid))
                             }
-                            Some(message_document)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .await;
-
+                            .boxed()
+                        }))
+                        .filter_map(|res: Result<_, anyhow::Error>| async move { res.ok() })
+                        .filter_map(|(_, cid)| {
+                            let ipfs = ipfs.clone();
+                            let providers = providers.clone();
+                            let addresses = addresses.clone();
+                            let message_command = message_command.clone();
+                            async move {
+                                let message_document = ipfs
+                                    .get_dag(cid)
+                                    .providers(&providers)
+                                    .deserialized::<MessageDocument>()
+                                    .await
+                                    .ok()?;
+                                for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
+                                    let _ = message_command
+                                        .clone()
+                                        .send(shuttle::message::client::MessageCommand::MessageDelivered {
+                                            peer_id,
+                                            conversation_id,
+                                            message_id: message_document.id,
+                                        })
+                                        .await;
+                                }
+                                Some(message_document)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .await;
+        
                     Ok::<_, Error>((conversation_id, documents))
                 };
-
-                self.conversation_mailbox_task.spawn(fut);
+        
+                
+                tokio::spawn(async move {
+                    let result = fut.await;
+                    let _ = tx.send(result).await;
+                });
             }
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            if let Ok(data) = tokio::fs::read(path.join(".messaging_queue"))
-                .and_then(|data| async move {
-                    serde_json::from_slice(&data)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                })
-                .await
-            {
-                self.queue = data;
-            }
-        }
+        }).await;
+        
 
         Ok(())
     }
@@ -1287,7 +1336,6 @@ impl ConversationTask {
                 continue;
             }
             let message_id = message.id;
-
             match conversation
                 .contains(&self.ipfs, message_id)
                 .await
