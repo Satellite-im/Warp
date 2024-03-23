@@ -43,7 +43,7 @@ impl IdentityStorage {
         inner.register(document, root_cid).await
     }
 
-    pub async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
+    pub async fn lookup(&self, kind: &Lookup) -> Result<Vec<IdentityDocument>, Error> {
         let inner = &*self.inner.read().await;
         inner.lookup(kind).await
     }
@@ -141,6 +141,8 @@ impl IdentityStorageInner {
 
         let cid = self.ipfs.dag().put().serialize(list).await?;
 
+        self.ipfs.insert_pin(&cid).recursive().local().await?;
+
         let old_cid = self.users.replace(cid);
 
         if let Some(old_cid) = old_cid {
@@ -204,7 +206,7 @@ impl IdentityStorageInner {
 
         let cid = self.ipfs.dag().put().serialize(list).await?;
 
-        self.ipfs.insert_pin(&cid).recursive().await?;
+        self.ipfs.insert_pin(&cid).recursive().local().await?;
 
         let old_cid = self.users.replace(cid);
         if let Some(old_cid) = old_cid {
@@ -272,17 +274,17 @@ impl IdentityStorageInner {
     //TODO: Use a map instead with the key linked to the content pointer
     //      and resolve within a stream while matching conditions
     //TODO: Filter stream instead
-    async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
+    async fn lookup(&self, kind: &Lookup) -> Result<Vec<IdentityDocument>, Error> {
         let list_stream = self.list().await;
 
         let list = match kind {
             Lookup::PublicKey { did } => {
                 let internal_document = list_stream
-                    .filter(|document| futures::future::ready(document.did == did))
+                    .filter(|document| futures::future::ready(&document.did == did))
                     .collect::<Vec<_>>()
                     .await;
 
-                tracing::info!(did = %did, found = internal_document.iter().any(|document| document.did == did));
+                tracing::info!(did = %did, found = internal_document.iter().any(|document| &document.did == did));
 
                 internal_document
             }

@@ -12,7 +12,7 @@ use rust_ipfs::{
         swarm::behaviour::toggle::Toggle,
         Transport,
     },
-    p2p::{IdentifyConfiguration, RelayConfig, TransportConfig},
+    p2p::{IdentifyConfiguration, RelayConfig, SwarmConfig, TransportConfig},
     FDLimit, Ipfs, IpfsPath, Keypair, Multiaddr, NetworkBehaviour, PeerId, UninitializedIpfs,
 };
 
@@ -129,6 +129,11 @@ impl ShuttleServer {
             .set_idle_connection_timeout(60 * 30)
             .default_record_key_validator()
             .set_transport_configuration(TransportConfig {
+                enable_quic: false,
+                ..Default::default()
+            })
+            .set_swarm_configuration(SwarmConfig {
+                max_inbound_stream: 50_000,
                 ..Default::default()
             })
             // .with_gc(GCConfig {
@@ -329,8 +334,27 @@ impl ShuttleTask {
                         let root_cid = *root_cid;
 
                         tracing::debug!(%sender, %root_cid, "preloading root document");
-                        if let Err(e) = ipfs.fetch(&root_cid).recursive().await {
+                        if let Err(e) = ipfs
+                            .fetch(&root_cid)
+                            .provider(sender)
+                            .timeout(Duration::from_secs(10))
+                            .recursive()
+                            .await
+                        {
                             tracing::warn!(%sender, %root_cid, error = %e, "unable to preload root document");
+                            tracing::warn!(%sender, "Unable to register identity");
+                            let payload = payload_message_construct(
+                                keypair,
+                                None,
+                                Response::RegisterResponse(RegisterResponse::Error(
+                                    identity::protocol::RegisterError::InternalError,
+                                )),
+                            )
+                            .expect("Valid payload construction");
+
+                            if let (Some(ch), Some(resp)) = (ch, resp) {
+                                let _ = resp.send((ch, payload));
+                            }
                             return;
                         }
                         tracing::debug!(%sender, %root_cid, "root document preloaded");
@@ -342,13 +366,27 @@ impl ShuttleTask {
 
                         let document: IdentityDocument = match ipfs
                             .get_dag(path)
+                            .provider(sender)
                             .timeout(Duration::from_secs(10))
                             .deserialized()
                             .await
                         {
                             Ok(id) => id,
                             Err(e) => {
-                                tracing::info!(sender = %payload.sender(), error = %e, "unable to resolve identity path from root document");
+                                tracing::error!(%sender, error = %e, "unable to resolve identity path from root document");
+                                tracing::warn!(%sender, "Unable to register identity");
+                                let payload = payload_message_construct(
+                                    keypair,
+                                    None,
+                                    Response::RegisterResponse(RegisterResponse::Error(
+                                        identity::protocol::RegisterError::InternalError,
+                                    )),
+                                )
+                                .expect("Valid payload construction");
+
+                                if let (Some(ch), Some(resp)) = (ch, resp) {
+                                    let _ = resp.send((ch, payload));
+                                }
                                 return;
                             }
                         };
@@ -371,7 +409,7 @@ impl ShuttleTask {
 
                             return;
                         }
-
+                        tracing::debug!(%document.did, "verifying document");
                         if document.verify().is_err() {
                             tracing::warn!(%document.did, "Identity cannot be verified");
                             let payload = payload_message_construct(
@@ -389,7 +427,9 @@ impl ShuttleTask {
 
                             return;
                         }
-
+                        tracing::debug!(%document.did, "document verified");
+                        tracing::info!(%document.did, "registering identity");
+                        let start = std::time::Instant::now();
                         if let Err(e) = identity_storage.register(&document, root_cid).await {
                             tracing::warn!(%document.did, error = %e, "Unable to register identity");
                             let res_error = match e {
@@ -412,6 +452,9 @@ impl ShuttleTask {
 
                             return;
                         }
+                        tracing::info!(%document.did, "identity registered");
+                        let end = start.elapsed();
+                        tracing::debug!(%document.did, "took {}ms to register identity", end.as_millis());
 
                         if let Err(e) = subscriptions.subscribe(document.did.inbox()).await {
                             tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
@@ -427,10 +470,11 @@ impl ShuttleTask {
                             .expect("Valid payload construction");
 
                         let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
+                        tracing::info!(%document.did, "publishing identity to mesh");
 
                         _ = ipfs.pubsub_publish("/identity/announce/v0", bytes).await;
 
-                        tracing::info!(%document.did, "identity registered");
+                        tracing::info!(%document.did, "responding to request");
                         let payload = payload_message_construct(
                             keypair,
                             None,
@@ -639,19 +683,19 @@ impl ShuttleTask {
 
                         let keypair = ipfs.keypair();
                         tracing::debug!(%did, %package, "preloading root document");
-                        if let Err(e) = ipfs.fetch(package).recursive().await {
+                        if let Err(e) = ipfs.fetch(package).provider(sender).recursive().await {
                             tracing::warn!(%did, %package, error = %e, "unable to preload root document");
                             return;
                         }
 
                         let current_document = match identity_storage
-                            .lookup(Lookup::PublicKey { did: did.clone() })
+                            .lookup(&Lookup::PublicKey { did: did.clone() })
                             .await
                             .map(|list| list.first().cloned())
                         {
                             Ok(Some(id)) => id,
                             _ => {
-                                //
+                                tracing::warn!(%did, %package, "identity not registered");
                                 return;
                             }
                         };
@@ -662,6 +706,7 @@ impl ShuttleTask {
 
                         let document: IdentityDocument = match ipfs
                             .get_dag(path)
+                            .provider(sender)
                             .timeout(Duration::from_secs(10))
                             .deserialized()
                             .await
@@ -868,13 +913,9 @@ impl ShuttleTask {
                         }
                     }
                     identity::protocol::Request::Lookup(kind) => {
-                        let peer_id = payload.sender();
-                        tracing::info!(peer_id = %peer_id, lookup = ?kind);
+                        tracing::info!(peer_id = %sender, lookup = ?kind);
 
-                        let identity = identity_storage
-                            .lookup(kind.clone())
-                            .await
-                            .unwrap_or_default();
+                        let identity = identity_storage.lookup(kind).await.unwrap_or_default();
 
                         let event = Response::LookupResponse(LookupResponse::Ok { identity });
 
@@ -941,6 +982,17 @@ impl ShuttleTask {
                             let message_id = *message_id;
                             let recipients = recipients.to_owned();
                             let message_cid = *message_cid;
+
+                            if let Err(e) = ipfs
+                                .fetch(&message_cid)
+                                .provider(peer_id)
+                                .timeout(Duration::from_secs(10))
+                                .recursive()
+                                .await
+                            {
+                                tracing::warn!(%peer_id, %message_id, %message_cid, error = %e, "unable to preload message document");
+                                return;
+                            }
 
                             tracing::info!(%conversation_id, %message_id, %did, "inserting message into mailbox");
                             if let Err(e) = message_storage
