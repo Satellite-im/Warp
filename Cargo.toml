@@ -15,7 +15,7 @@ resolver = "2"
 [workspace.dependencies]
 
 # Async and futures crates
-futures = { version = "0.3", default-features = false }
+futures = { version = "0.3", default-features = false, features = ["std"] }
 async-trait = { version = "0.1" }
 async-stream = "0.3"
 async-broadcast = "0.5"
