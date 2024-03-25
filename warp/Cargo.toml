@@ -41,7 +41,7 @@ parking_lot = { workspace = true, features = ["send_guard", "serde"] }
 once_cell.workspace = true
 
 # Time crate
-chrono = { workspace = true, features = ["serde", "wasmbind"] }
+chrono = { workspace = true }
 
 # Encoding and Serializing Crates
 serde.workspace = true
