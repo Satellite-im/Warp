@@ -1,5 +1,6 @@
 use chrono::Utc;
 use either::Either;
+use tokio_stream::StreamMap;
 use tracing::info;
 
 use std::{
@@ -17,7 +18,7 @@ use std::{
 use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
-    stream::{BoxStream, FuturesUnordered, SelectAll},
+    stream::{self, BoxStream, FuturesUnordered, SelectAll},
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
@@ -2624,7 +2625,7 @@ impl ConversationTask {
 
             let mut attachments = vec![];
 
-            let mut streams: SelectAll<_> = SelectAll::new();
+            let mut streams = StreamMap::new();
 
             for file in files {
                 match &file {
@@ -2635,18 +2636,12 @@ impl ConversationTask {
                             .and_then(|item| item.get_file())
                         {
                             Ok(f) => {
-                                let stream = async_stream::stream! {
-                                    yield (file, (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f)));
-                                };
-                                streams.push(stream.boxed());
+                                streams.insert(file, stream::once(async { (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f)) }).boxed());
                             },
                             Err(e) => {
                                 let constellation_path = PathBuf::from(&path);
                                 let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path.to_string());
-                                let stream = async_stream::stream! {
-                                    yield (file, (Progression::ProgressFailed { name, last_size: None, error: e }, None));
-                                };
-                                streams.push(stream.boxed());
+                                streams.insert(file, stream::once(async { (Progression::ProgressFailed { name, last_size: None, error: e }, None) }).boxed());
                             },
                         }
                     }
@@ -2687,10 +2682,7 @@ impl ConversationTask {
                         }
 
                         if skip {
-                            let stream = async_stream::stream! {
-                                yield (file, (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None));
-                            };
-                            streams.push(stream.boxed());
+                            streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
                             continue;
                         }
 
@@ -2704,10 +2696,7 @@ impl ConversationTask {
                             Ok(stream) => stream,
                             Err(e) => {
                                 error!(%conversation_id, "Error uploading {filename}: {e}");
-                                let stream = async_stream::stream! {
-                                    yield (file, (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None));
-                                };
-                                streams.push(stream.boxed());
+                                streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
                                 continue;
                             }
                         };
@@ -2720,22 +2709,22 @@ impl ConversationTask {
                             while let Some(item) = progress.next().await {
                                 match item {
                                     item @ Progression::CurrentProgress { .. } => {
-                                        yield (file.clone(), (item, None));
+                                        yield (item, None);
                                     },
                                     item @ Progression::ProgressComplete { .. } => {
                                         let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
-                                        yield (file, (item, file_name));
+                                        yield (item, file_name);
                                         break;
                                     },
                                     item @ Progression::ProgressFailed { .. } => {
-                                        yield (file, (item, None));
+                                        yield (item, None);
                                         break;
                                     }
                                 }
                             }
                         };
 
-                        streams.push(stream.boxed());
+                        streams.insert(file, stream.boxed());
                     }
                 };
             }
