@@ -284,8 +284,6 @@ pub enum Error {
     #[error("Cannot serialize: {0}")]
     TomlSerializeError(#[from] toml::ser::Error),
     #[error(transparent)]
-    SataError(#[from] sata::error::Error),
-    #[error(transparent)]
     Any(#[from] anyhow::Error),
     #[error(transparent)]
     Bs58Error(#[from] bs58::decode::Error),
