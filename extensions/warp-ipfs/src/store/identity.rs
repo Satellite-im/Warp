@@ -1,6 +1,6 @@
 use crate::{
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, topics::PeerTopic},
+    store::{did_to_libp2p_pub, discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 use chrono::{DateTime, Utc};
 
