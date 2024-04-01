@@ -117,7 +117,7 @@ impl DidExt for DID {
 }
 
 pub trait VecExt<T: Eq> {
-    fn insert_item(&mut self, item: &T) -> bool;
+    fn insert_item(&mut self, item: T) -> bool;
     fn remove_item(&mut self, item: &T) -> bool;
 }
 
@@ -125,12 +125,12 @@ impl<T> VecExt<T> for Vec<T>
 where
     T: Eq + Clone,
 {
-    fn insert_item(&mut self, item: &T) -> bool {
-        if self.contains(item) {
+    fn insert_item(&mut self, item: T) -> bool {
+        if self.contains(&item) {
             return false;
         }
 
-        self.push(item.clone());
+        self.push(item);
         true
     }
 

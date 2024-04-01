@@ -385,7 +385,7 @@ impl RootDocumentInner {
             None => vec![],
         };
 
-        if !list.insert_item(&request) {
+        if !list.insert_item(request) {
             return Err(Error::FriendRequestExist);
         }
 
@@ -473,7 +473,7 @@ impl RootDocumentInner {
             None => vec![],
         };
 
-        if !list.insert_item(&did) {
+        if !list.insert_item(did) {
             return Err::<_, Error>(Error::FriendExist);
         }
 
@@ -605,7 +605,7 @@ impl RootDocumentInner {
             None => vec![],
         };
 
-        if !list.insert_item(&did) {
+        if !list.insert_item(did) {
             return Err::<_, Error>(Error::PublicKeyIsBlocked);
         }
 
@@ -695,7 +695,7 @@ impl RootDocumentInner {
             None => vec![],
         };
 
-        if !list.insert_item(&did) {
+        if !list.insert_item(did) {
             return Err::<_, Error>(Error::PublicKeyIsntBlocked);
         }
 
