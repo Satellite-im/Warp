@@ -22,10 +22,10 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 either = { workspace = true, features = ["serde"] }
-bs58 = "0.4"
+bs58.workspace = true
 parking_lot.workspace = true
 
-tracing = "0.1"
+tracing.workspace = true
 
 async-recursion = "1"
 
