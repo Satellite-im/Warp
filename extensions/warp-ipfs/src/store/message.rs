@@ -55,9 +55,10 @@ use crate::{
         identity::IdentityStore,
         keystore::Keystore,
         payload::Payload,
-        sign_serde, verify_serde_sig, ConversationEvents, ConversationRequestKind,
-        ConversationRequestResponse, ConversationResponseKind, ConversationUpdateKind, DidExt,
-        MessagingEvents, PeerTopic,
+        sign_serde,
+        topics::PeerTopic,
+        verify_serde_sig, ConversationEvents, ConversationRequestKind, ConversationRequestResponse,
+        ConversationResponseKind, ConversationUpdateKind, DidExt, MessagingEvents,
     },
 };
 

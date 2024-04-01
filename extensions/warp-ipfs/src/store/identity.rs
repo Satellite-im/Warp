@@ -1,6 +1,6 @@
 use crate::{
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
+    store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, topics::PeerTopic},
 };
 use chrono::{DateTime, Utc};
 
@@ -1143,7 +1143,6 @@ impl IdentityStore {
     }
 
     #[tracing::instrument(skip(self))]
-    #[allow(clippy::if_same_then_else)]
     async fn process_message(
         &mut self,
         in_did: &DID,
