@@ -97,9 +97,6 @@ enum MessagingCommand {
     List {
         response: oneshot::Sender<Result<Vec<ConversationDocument>, Error>>,
     },
-    LoadConversations {
-        response: oneshot::Sender<Result<(), Error>>,
-    },
     Subscribe {
         id: Uuid,
         response: oneshot::Sender<Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error>>,
@@ -297,9 +294,7 @@ impl MessageStore {
             tracing::warn!(error = %e, "unable to migrate conversations to root document");
         }
 
-        if let Err(e) = task.load_conversations().await {
-            tracing::warn!("Unable to load conversations: {e}");
-        }
+        task.load_conversations().await;
 
         tokio::spawn({
             async move {
@@ -418,16 +413,6 @@ impl MessageStore {
             .command_tx
             .clone()
             .send(MessagingCommand::List { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn load_conversations(&self) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::LoadConversations { response: tx })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -950,9 +935,6 @@ impl ConversationTask {
                         MessagingCommand::List { response } => {
                             let _ = response.send(Ok(self.list().await));
                         }
-                        MessagingCommand::LoadConversations { response } => {
-                            let _ = response.send(self.load_conversations().await);
-                        }
                         MessagingCommand::Delete { id, response } => {
                             let _ = response.send(self.delete(id).await);
                         }
@@ -1182,8 +1164,8 @@ impl ConversationTask {
         Ok(())
     }
 
-    async fn load_conversations(&mut self) -> Result<(), Error> {
-        let mut stream = self.list_stream().await?;
+    async fn load_conversations(&mut self) {
+        let mut stream = self.list_stream().await;
         while let Some(conversation) = stream.next().await {
             let id = conversation.id();
 
@@ -1203,8 +1185,6 @@ impl ConversationTask {
                 self.queue = data;
             }
         }
-
-        Ok(())
     }
 
     async fn load_from_mailbox(&mut self) -> Result<(), Error> {
@@ -1217,7 +1197,7 @@ impl ConversationTask {
         let ipfs = self.ipfs.clone();
         let message_command = self.message_command.clone();
 
-        self.list_stream().await?.for_each_concurrent(None, |conversation| {
+        self.list_stream().await.for_each_concurrent(None, |conversation| {
             let mut tx = tx.clone();
             let ipfs = ipfs.clone();
             let message_command = message_command.clone();
@@ -1663,27 +1643,18 @@ impl ConversationTask {
     }
 
     pub async fn list(&self) -> Vec<ConversationDocument> {
-        self.list_stream()
-            .and_then(|stream| async move { Ok(stream.collect::<Vec<_>>().await) })
-            .await
-            .unwrap_or_default()
+        self.list_stream().await.collect::<Vec<_>>().await
     }
 
-    pub async fn list_stream(
-        &self,
-    ) -> Result<impl Stream<Item = ConversationDocument> + Unpin, Error> {
+    pub async fn list_stream(&self) -> impl Stream<Item = ConversationDocument> + Unpin {
         self.root.list_conversation_document().await
     }
 
     pub async fn contains(&self, id: Uuid) -> bool {
         self.list_stream()
-            .and_then(|stream| async move {
-                Ok(stream
-                    .any(|conversation| async move { conversation.id() == id })
-                    .await)
-            })
             .await
-            .unwrap_or_default()
+            .any(|conversation| async move { conversation.id() == id })
+            .await
     }
 
     pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {

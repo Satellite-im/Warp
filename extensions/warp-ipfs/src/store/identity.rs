@@ -1900,7 +1900,7 @@ impl IdentityStore {
             .map(|identity| identity.did_key())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
-        let cache = self.identity_cache.list().await?;
+        let cache = self.identity_cache.list().await;
 
         let mut idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.

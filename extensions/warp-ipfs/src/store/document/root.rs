@@ -168,11 +168,9 @@ impl RootDocumentMap {
         inner.get_conversation_keystore_map().await
     }
 
-    pub async fn list_conversation_document(
-        &self,
-    ) -> Result<BoxStream<'static, ConversationDocument>, Error> {
+    pub async fn list_conversation_document(&self) -> BoxStream<'static, ConversationDocument> {
         let inner = &*self.inner.read().await;
-        Ok(inner.list_conversation_stream().await)
+        inner.list_conversation_stream().await
     }
 
     pub async fn get_conversation_document(&self, id: Uuid) -> Result<ConversationDocument, Error> {

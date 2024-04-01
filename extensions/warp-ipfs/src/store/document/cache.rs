@@ -56,9 +56,9 @@ impl IdentityCache {
         inner.remove(did.clone()).await
     }
 
-    pub async fn list(&self) -> Result<BoxStream<'static, IdentityDocument>, Error> {
+    pub async fn list(&self) -> BoxStream<'static, IdentityDocument> {
         let inner = &*self.inner.read().await;
-        Ok(inner.list().await)
+        inner.list().await
     }
 }
 
@@ -373,7 +373,7 @@ mod test {
         let mut rng = rand::thread_rng();
         let cache = pregenerated_cache::<10>().await;
 
-        let list = cache.list().await?.collect::<Vec<_>>().await;
+        let list = cache.list().await.collect::<Vec<_>>().await;
 
         let random_doc = list.choose(&mut rng).expect("exist");
 
