@@ -55,7 +55,7 @@ dyn-clone.workspace = true
 uuid.workspace = true
 derive_more.workspace = true
 paste.workspace = true
-tracing = { features = ["log"], workspace = true }
+tracing = { workspace = true }
 mediatype.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
