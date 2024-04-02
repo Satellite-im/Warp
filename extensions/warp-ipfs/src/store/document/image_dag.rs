@@ -19,7 +19,8 @@ pub async fn store_photo(
     file_type: FileType,
     limit: Option<usize>,
 ) -> Result<Cid, Error> {
-    let mut stream = ipfs.add_unixfs(stream);
+    // We dont pin here because we are pinning later
+    let mut stream = ipfs.add_unixfs(stream).pin(false);
 
     let mut size = 0;
 
