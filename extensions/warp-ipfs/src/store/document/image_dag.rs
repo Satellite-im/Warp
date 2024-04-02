@@ -157,8 +157,7 @@ impl IntoFuture for GetImage {
 
             let image = self
                 .ipfs
-                .unixfs()
-                .cat(dag.link)
+                .cat_unixfs(dag.link)
                 .providers(&self.peers)
                 .set_local(self.local)
                 .await
