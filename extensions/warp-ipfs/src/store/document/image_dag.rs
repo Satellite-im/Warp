@@ -1,8 +1,8 @@
-use futures::{stream::BoxStream, StreamExt};
+use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
-use std::task::Poll;
+use std::{future::IntoFuture, task::Poll};
 use warp::{constellation::file::FileType, error::Error, multipass::identity::IdentityImage};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -87,40 +87,89 @@ pub async fn store_photo(
 }
 
 #[tracing::instrument(skip(ipfs))]
-pub async fn get_image(
-    ipfs: &Ipfs,
-    cid: Cid,
-    peers: &[PeerId],
-    local: bool,
-    limit: Option<usize>,
-) -> Result<IdentityImage, Error> {
-    let dag: ImageDag = ipfs.get_dag(cid).set_local(local).deserialized().await?;
+pub fn get_image(ipfs: &Ipfs, cid: Cid) -> GetImage {
+    GetImage::new(ipfs, cid)
+}
 
-    match limit {
-        Some(size) if dag.size > size as _ => {
-            return Err(Error::InvalidLength {
-                context: "image".into(),
-                current: dag.size as _,
-                minimum: None,
-                maximum: limit,
-            });
+pub(crate) struct GetImage {
+    ipfs: Ipfs,
+    cid: Cid,
+    local: bool,
+    peers: Vec<PeerId>,
+    limit: Option<usize>,
+}
+
+impl GetImage {
+    fn new(ipfs: &Ipfs, cid: Cid) -> Self {
+        Self {
+            ipfs: ipfs.clone(),
+            cid,
+            local: false,
+            peers: vec![],
+            limit: None,
         }
-        Some(_) => {}
-        None => {}
     }
 
-    let image = ipfs
-        .unixfs()
-        .cat(dag.link)
-        .providers(peers)
-        .set_local(local)
-        .await
-        .map_err(anyhow::Error::from)?;
+    pub fn set_local(mut self, local: bool) -> Self {
+        self.local = local;
+        self
+    }
 
-    let mut id_img = IdentityImage::default();
+    pub fn add_peer(mut self, peer: PeerId) -> Self {
+        if !self.peers.contains(&peer) {
+            self.peers.push(peer)
+        }
+        self
+    }
 
-    id_img.set_data(image.into());
-    id_img.set_image_type(dag.mime);
+    pub fn set_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+}
 
-    Ok(id_img)
+impl IntoFuture for GetImage {
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+    type Output = Result<IdentityImage, Error>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move {
+            let dag: ImageDag = self
+                .ipfs
+                .get_dag(self.cid)
+                .set_local(self.local)
+                .deserialized()
+                .await?;
+
+            match self.limit {
+                Some(size) if dag.size > size as _ => {
+                    return Err(Error::InvalidLength {
+                        context: "image".into(),
+                        current: dag.size as _,
+                        minimum: None,
+                        maximum: self.limit,
+                    });
+                }
+                Some(_) => {}
+                None => {}
+            }
+
+            let image = self
+                .ipfs
+                .unixfs()
+                .cat(dag.link)
+                .providers(&self.peers)
+                .set_local(self.local)
+                .await
+                .map_err(anyhow::Error::from)?;
+
+            let mut id_img = IdentityImage::default();
+
+            id_img.set_data(image.into());
+            id_img.set_image_type(dag.mime);
+
+            Ok(id_img)
+        }
+        .boxed()
+    }
 }

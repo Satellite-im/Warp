@@ -1042,14 +1042,9 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let image = super::document::image_dag::get_image(
-            &self.ipfs,
-            cid,
-            &[],
-            true,
-            Some(2 * 1024 * 1024),
-        )
-        .await?;
+        let image = super::document::image_dag::get_image(&self.ipfs, cid)
+            .set_limit(Some(2 * 1024 * 1024))
+            .await?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Image {
@@ -1101,14 +1096,9 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let image = super::document::image_dag::get_image(
-            &self.ipfs,
-            cid,
-            &[],
-            true,
-            Some(2 * 1024 * 1024),
-        )
-        .await?;
+        let image = super::document::image_dag::get_image(&self.ipfs, cid)
+            .set_limit(Some(2 * 1024 * 1024))
+            .await?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Image {
@@ -1247,14 +1237,13 @@ impl IdentityStore {
                                             let store = self.clone();
                                             let did = in_did.clone();
                                             async move {
-                                                let peer_id = vec![did.to_peer_id()?];
+                                                let peer_id = did.to_peer_id()?;
                                                 let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     identity_profile_picture,
-                                                    &peer_id,
-                                                    false,
-                                                    Some(2 * 1024 * 1024),
                                                 )
+                                                .add_peer(peer_id)
+                                                .set_limit(Some(2 * 1024 * 1024))
                                                 .await
                                                 .map_err(|e| {
                                                     tracing::error!(
@@ -1314,15 +1303,14 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                let peer_id = vec![did.to_peer_id()?];
+                                                let peer_id = did.to_peer_id()?;
 
                                                 let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     identity_profile_banner,
-                                                    &peer_id,
-                                                    false,
-                                                    Some(2 * 1024 * 1024),
                                                 )
+                                                .add_peer(peer_id)
+                                                .set_limit(Some(2 * 1024 * 1024))
                                                 .await
                                                 .map_err(|e| {
                                                     tracing::error!(
@@ -1398,14 +1386,13 @@ impl IdentityStore {
                                                 let did = in_did.clone();
                                                 let store = self.clone();
                                                 async move {
-                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let peer_id = did.to_peer_id()?;
+
                                                     let _ = super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        picture,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(2 * 1024 * 1024),
+                                                        &ipfs, picture,
                                                     )
+                                                    .add_peer(peer_id)
+                                                    .set_limit(Some(2 * 1024 * 1024))
                                                     .await
                                                     .map_err(|e| {
                                                         tracing::error!(
@@ -1435,14 +1422,13 @@ impl IdentityStore {
 
                                                 let did = in_did.clone();
                                                 async move {
-                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let peer_id = did.to_peer_id()?;
+
                                                     let _ = super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        banner,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(2 * 1024 * 1024),
+                                                        &ipfs, banner,
                                                     )
+                                                    .add_peer(peer_id)
+                                                    .set_limit(Some(2 * 1024 * 1024))
                                                     .await
                                                     .map_err(|e| {
                                                         tracing::error!(
@@ -2228,7 +2214,9 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.metadata.profile_picture {
-            return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
+            return get_image(&self.ipfs, cid)
+                .set_local(true)
+                .set_limit(Some(2 * 1024 * 1024))
                 .await
                 .map_err(|_| Error::InvalidIdentityPicture);
         }
@@ -2258,9 +2246,11 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.metadata.profile_banner {
-            return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
+            return get_image(&self.ipfs, cid)
+                .set_local(true)
+                .set_limit(Some(2 * 1024 * 1024))
                 .await
-                .map_err(|_| Error::InvalidIdentityPicture);
+                .map_err(|_| Error::InvalidIdentityBanner);
         }
 
         Err(Error::InvalidIdentityBanner)
