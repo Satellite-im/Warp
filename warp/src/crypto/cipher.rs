@@ -579,101 +579,95 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    fn cipher_aes256gcm_async_stream_encrypt_decrypt() -> anyhow::Result<()> {
-        futures::executor::block_on(async move {
-            let cipher = Cipher::from(b"this is my key");
-            let message = b"this is my message";
-            let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
+    #[tokio::test]
+    async fn cipher_aes256gcm_async_stream_encrypt_decrypt() -> anyhow::Result<()> {
+        let cipher = Cipher::from(b"this is my key");
+        let message = b"this is my message";
+        let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
 
-            let cipher_stream = cipher
-                .encrypt_async_stream(base)
-                .await?
-                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
-                .boxed();
+        let cipher_stream = cipher
+            .encrypt_async_stream(base)
+            .await?
+            .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
+            .boxed();
 
-            let plaintext_stream = cipher.decrypt_async_stream(cipher_stream).await?;
+        let plaintext_stream = cipher.decrypt_async_stream(cipher_stream).await?;
 
-            let plaintext_message = plaintext_stream
-                .try_collect::<Vec<_>>()
-                .await?
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
+        let plaintext_message = plaintext_stream
+            .try_collect::<Vec<_>>()
+            .await?
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
 
-            assert_eq!(
-                String::from_utf8_lossy(&plaintext_message),
-                String::from_utf8_lossy(message)
-            );
-            Ok(())
-        })
+        assert_eq!(
+            String::from_utf8_lossy(&plaintext_message),
+            String::from_utf8_lossy(message)
+        );
+        Ok(())
     }
 
-    #[test]
-    fn cipher_aes256gcm_async_read_to_stream_encrypt_decrypt() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn cipher_aes256gcm_async_read_to_stream_encrypt_decrypt() -> anyhow::Result<()> {
         use futures::io::Cursor;
 
-        futures::executor::block_on(async move {
-            let cipher = Cipher::from(b"this is my key");
-            let mut message = Cursor::new("this is my message");
+        let cipher = Cipher::from(b"this is my key");
+        let mut message = Cursor::new("this is my message");
 
-            let cipher_stream = cipher
-                .encrypt_async_read_to_stream(&mut message)
-                .await?
-                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)));
+        let cipher_stream = cipher
+            .encrypt_async_read_to_stream(&mut message)
+            .await?
+            .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)));
 
-            let mut cipher_reader = cipher_stream.into_async_read();
+        let mut cipher_reader = cipher_stream.into_async_read();
 
-            let plaintext_stream = cipher
-                .decrypt_async_read_to_stream(&mut cipher_reader)
-                .await?;
+        let plaintext_stream = cipher
+            .decrypt_async_read_to_stream(&mut cipher_reader)
+            .await?;
 
-            let plaintext_message = plaintext_stream
-                .try_collect::<Vec<_>>()
-                .await?
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
+        let plaintext_message = plaintext_stream
+            .try_collect::<Vec<_>>()
+            .await?
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
 
-            drop(cipher_reader);
+        drop(cipher_reader);
 
-            assert_eq!(
-                String::from_utf8_lossy(&plaintext_message),
-                message.into_inner()
-            );
-            Ok(())
-        })
+        assert_eq!(
+            String::from_utf8_lossy(&plaintext_message),
+            message.into_inner()
+        );
+        Ok(())
     }
 
-    #[test]
-    fn cipher_aes256gcm_async_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
-        futures::executor::block_on(async move {
-            let message = b"this is my message";
-            let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
+    #[tokio::test]
+    async fn cipher_aes256gcm_async_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
+        let message = b"this is my message";
+        let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
 
-            let cipher_stream = Cipher::self_encrypt_async_stream(base)
-                .await?
-                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
-                .boxed();
+        let cipher_stream = Cipher::self_encrypt_async_stream(base)
+            .await?
+            .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
+            .boxed();
 
-            let plaintext_stream = Cipher::self_decrypt_async_stream(cipher_stream).await?;
+        let plaintext_stream = Cipher::self_decrypt_async_stream(cipher_stream).await?;
 
-            let plaintext_message = plaintext_stream
-                .try_collect::<Vec<_>>()
-                .await?
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
+        let plaintext_message = plaintext_stream
+            .try_collect::<Vec<_>>()
+            .await?
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
 
-            assert_eq!(
-                String::from_utf8_lossy(&plaintext_message),
-                String::from_utf8_lossy(message)
-            );
+        assert_eq!(
+            String::from_utf8_lossy(&plaintext_message),
+            String::from_utf8_lossy(message)
+        );
 
-            Ok(())
-        })
+        Ok(())
     }
 }

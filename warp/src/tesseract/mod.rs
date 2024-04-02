@@ -904,18 +904,18 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    pub fn tesseract_event() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn tesseract_event() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
         let mut stream = tesseract.subscribe();
         let key = generate::<32>();
 
         tesseract.unlock(&key)?;
-        let event = futures::executor::block_on(stream.next());
+        let event = stream.next().await;
         assert_eq!(event, Some(TesseractEvent::Unlocked));
 
         tesseract.lock();
-        let event = futures::executor::block_on(stream.next());
+        let event = stream.next().await;
         assert_eq!(event, Some(TesseractEvent::Locked));
 
         Ok(())
