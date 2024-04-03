@@ -70,172 +70,14 @@ pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
 
 #[allow(clippy::large_enum_variant)]
 enum MessagingCommand {
-    GetDocument {
-        id: Uuid,
-        response: oneshot::Sender<Result<ConversationDocument, Error>>,
-    },
-    GetKeystore {
-        id: Uuid,
-        response: oneshot::Sender<Result<Keystore, Error>>,
-    },
-    SetDocument {
-        document: ConversationDocument,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    SetKeystore {
-        id: Uuid,
-        document: Keystore,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    Delete {
-        id: Uuid,
-        response: oneshot::Sender<Result<ConversationDocument, Error>>,
-    },
-    Contains {
-        id: Uuid,
-        response: oneshot::Sender<Result<bool, Error>>,
-    },
-    List {
-        response: oneshot::Sender<Result<Vec<ConversationDocument>, Error>>,
-    },
-    Subscribe {
-        id: Uuid,
-        response: oneshot::Sender<Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error>>,
-    },
-
-    CreateConversation {
-        did: DID,
-        response: oneshot::Sender<Result<Conversation, Error>>,
-    },
-    CreateGroupConversation {
-        name: Option<String>,
-        recipients: HashSet<DID>,
-        settings: GroupSettings,
-        response: oneshot::Sender<Result<Conversation, Error>>,
-    },
-    GetMessage {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        response: oneshot::Sender<Result<warp::raygun::Message, Error>>,
-    },
-    GetMessages {
-        conversation_id: Uuid,
-        opt: MessageOptions,
-        response: oneshot::Sender<Result<Messages, Error>>,
-    },
-    GetMessagesCount {
-        conversation_id: Uuid,
-        response: oneshot::Sender<Result<usize, Error>>,
-    },
-    GetMessageReference {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        response: oneshot::Sender<Result<MessageReference, Error>>,
-    },
-    GetMessageReferences {
-        conversation_id: Uuid,
-        opt: MessageOptions,
-        response: oneshot::Sender<Result<BoxStream<'static, MessageReference>, Error>>,
-    },
-    DeleteConversation {
-        conversation_id: Uuid,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    UpdateConversationName {
-        conversation_id: Uuid,
-        name: String,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    UpdateConversationSettings {
-        conversation_id: Uuid,
-        settings: ConversationSettings,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    AddRecipient {
-        conversation_id: Uuid,
-        did: DID,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    RemoveRecipient {
-        conversation_id: Uuid,
-        did: DID,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    MessageStatus {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        response: oneshot::Sender<Result<MessageStatus, Error>>,
-    },
-    SendMessage {
-        conversation_id: Uuid,
-        lines: Vec<String>,
-        response: oneshot::Sender<Result<Uuid, Error>>,
-    },
-    EditMessage {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        lines: Vec<String>,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    Reply {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        lines: Vec<String>,
-        response: oneshot::Sender<Result<Uuid, Error>>,
-    },
-    DeleteMessage {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    PinMessage {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    React {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: ReactionState,
-        emoji: String,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    Attach {
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-        locations: Vec<Location>,
-        messages: Vec<String>,
-        response: oneshot::Sender<Result<(Uuid, AttachmentEventStream), Error>>,
-    },
-    Download {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        file: String,
-        path: PathBuf,
-        response: oneshot::Sender<Result<ConstellationProgressStream, Error>>,
-    },
-    DownloadStream {
-        conversation_id: Uuid,
-        message_id: Uuid,
-        file: String,
-        response: oneshot::Sender<Result<DownloadStream, Error>>,
-    },
-    SendEvent {
-        conversation_id: Uuid,
-        event: MessageEvent,
-        response: oneshot::Sender<Result<(), Error>>,
-    },
-    CancelEvent {
-        conversation_id: Uuid,
-        event: MessageEvent,
-        response: oneshot::Sender<Result<(), Error>>,
+    Receiver {
+        ch: mpsc::Receiver<ConversationStreamData>,
     },
 }
 
 #[derive(Clone)]
 pub struct MessageStore {
-    command_tx: mpsc::Sender<MessagingCommand>,
+    inner: Arc<tokio::sync::RwLock<ConversationInner>>,
     _task_cancellation: Arc<DropGuard>,
 }
 
@@ -261,7 +103,7 @@ impl MessageStore {
             }
         }
 
-        let (tx, rx) = futures::channel::mpsc::channel(0);
+        let (tx, rx) = futures::channel::mpsc::channel(1024);
 
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
@@ -269,33 +111,44 @@ impl MessageStore {
         let root = identity.root_document().clone();
         let (atx, arx) = mpsc::channel(1);
         let (conversation_mailbox_task_tx, conversation_mailbox_task_rx) = mpsc::channel(2048);
-        let mut task = ConversationTask {
+
+        let mut inner = ConversationInner {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
-            keypair,
+            keypair: keypair.clone(),
             path,
-            topic_stream: Default::default(),
             conversation_task: HashMap::new(),
-            identity,
-            command_rx: rx,
+            command_tx: tx,
+            identity: identity.clone(),
             root,
             discovery,
             file,
             event,
-            attachment_rx: arx,
             attachment_tx: atx,
             conversation_mailbox_task_tx,
-            conversation_mailbox_task_rx,
             pending_key_exchange: Default::default(),
             message_command,
             queue: Default::default(),
         };
 
-        if let Err(e) = task.migrate().await {
+        if let Err(e) = inner.migrate().await {
             tracing::warn!(error = %e, "unable to migrate conversations to root document");
         }
 
-        task.load_conversations().await;
+        inner.load_conversations().await;
+
+        let inner = Arc::new(tokio::sync::RwLock::new(inner));
+
+        let mut task = ConversationTask {
+            inner: inner.clone(),
+            ipfs: ipfs.clone(),
+            keypair: keypair.clone(),
+            topic_stream: Default::default(),
+            identity,
+            command_rx: rx,
+            attachment_rx: arx,
+            conversation_mailbox_task_rx,
+        };
 
         tokio::spawn({
             async move {
@@ -307,7 +160,7 @@ impl MessageStore {
         });
 
         Self {
-            command_tx: tx,
+            inner,
             _task_cancellation: Arc::new(drop_guard),
         }
     }
@@ -342,106 +195,51 @@ impl MessageStore {
     }
 
     pub async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::GetDocument { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get(id).await
     }
 
     pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::GetKeystore { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_keystore(id).await
     }
 
     pub async fn contains(&self, id: Uuid) -> Result<bool, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::Contains { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        Ok(inner.contains(id).await)
     }
 
     pub async fn set(&self, document: ConversationDocument) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::SetDocument {
-                document,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_document(document).await
     }
 
     pub async fn set_keystore(&self, id: Uuid, document: Keystore) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::SetKeystore {
-                id,
-                document,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.set_keystore(id, document).await
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::Delete { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.delete(id).await
     }
 
     pub async fn list(&self) -> Result<Vec<ConversationDocument>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::List { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        Ok(inner.list().await)
     }
 
     pub async fn subscribe(
         &self,
         id: Uuid,
     ) -> Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::Subscribe { id, response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.subscribe(id).await
     }
 
     pub async fn create_conversation(&self, did: &DID) -> Result<Conversation, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::CreateConversation {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.create_conversation(did).await
     }
 
     pub async fn create_group_conversation(
@@ -450,18 +248,10 @@ impl MessageStore {
         members: HashSet<DID>,
         settings: GroupSettings,
     ) -> Result<Conversation, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::CreateGroupConversation {
-                name,
-                recipients: members,
-                settings,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner
+            .create_group_conversation(name, members, settings)
+            .await
     }
 
     pub async fn get_message(
@@ -469,17 +259,8 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<warp::raygun::Message, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::GetMessage {
-                conversation_id,
-                message_id,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.get_message(conversation_id, message_id).await
     }
 
     pub async fn get_messages(
@@ -487,30 +268,13 @@ impl MessageStore {
         conversation_id: Uuid,
         opt: MessageOptions,
     ) -> Result<Messages, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::GetMessages {
-                conversation_id,
-                opt,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_messages(conversation_id, opt).await
     }
 
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::GetMessagesCount {
-                conversation_id,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.messages_count(conversation_id).await
     }
 
     pub async fn get_message_reference(
@@ -518,17 +282,10 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<MessageReference, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::GetMessageReference {
-                conversation_id,
-                message_id,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner
+            .get_message_reference(conversation_id, message_id)
+            .await
     }
 
     pub async fn get_message_references(
@@ -536,17 +293,8 @@ impl MessageStore {
         conversation_id: Uuid,
         opt: MessageOptions,
     ) -> Result<BoxStream<'static, MessageReference>, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::GetMessageReferences {
-                conversation_id,
-                opt,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get_message_references(conversation_id, opt).await
     }
 
     pub async fn update_conversation_name<S: Into<String>>(
@@ -555,17 +303,8 @@ impl MessageStore {
         name: S,
     ) -> Result<(), Error> {
         let name = name.into();
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::UpdateConversationName {
-                conversation_id,
-                name,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.update_conversation_name(conversation_id, &name).await
     }
 
     pub async fn update_conversation_settings(
@@ -573,58 +312,25 @@ impl MessageStore {
         conversation_id: Uuid,
         settings: ConversationSettings,
     ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::UpdateConversationSettings {
-                conversation_id,
-                settings,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner
+            .update_conversation_settings(conversation_id, settings)
+            .await
     }
 
     pub async fn delete_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::DeleteConversation {
-                conversation_id,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.delete_conversation(conversation_id, true).await
     }
 
     pub async fn add_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::AddRecipient {
-                conversation_id,
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.add_recipient(conversation_id, did).await
     }
 
     pub async fn remove_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::RemoveRecipient {
-                conversation_id,
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.remove_recipient(conversation_id, did, true).await
     }
 
     pub async fn message_status(
@@ -632,17 +338,8 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<MessageStatus, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::MessageStatus {
-                conversation_id,
-                message_id,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.message_status(conversation_id, message_id).await
     }
 
     pub async fn send_message(
@@ -650,17 +347,8 @@ impl MessageStore {
         conversation_id: Uuid,
         lines: Vec<String>,
     ) -> Result<Uuid, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::SendMessage {
-                conversation_id,
-                lines,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.send_message(conversation_id, lines).await
     }
 
     pub async fn edit_message(
@@ -669,18 +357,8 @@ impl MessageStore {
         message_id: Uuid,
         lines: Vec<String>,
     ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::EditMessage {
-                conversation_id,
-                message_id,
-                lines,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.edit_message(conversation_id, message_id, lines).await
     }
 
     pub async fn reply(
@@ -689,18 +367,10 @@ impl MessageStore {
         message_id: Uuid,
         lines: Vec<String>,
     ) -> Result<Uuid, Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::Reply {
-                conversation_id,
-                message_id,
-                lines,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner
+            .reply_message(conversation_id, message_id, lines)
+            .await
     }
 
     pub async fn delete_message(
@@ -708,17 +378,10 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::DeleteMessage {
-                conversation_id,
-                message_id,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner
+            .delete_message(conversation_id, message_id, true)
+            .await
     }
 
     pub async fn pin_message(
@@ -727,18 +390,8 @@ impl MessageStore {
         message_id: Uuid,
         state: PinState,
     ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::PinMessage {
-                conversation_id,
-                message_id,
-                state,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.pin_message(conversation_id, message_id, state).await
     }
 
     pub async fn react<S: Into<String>>(
@@ -749,19 +402,8 @@ impl MessageStore {
         emoji: S,
     ) -> Result<(), Error> {
         let emoji = emoji.into();
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::React {
-                conversation_id,
-                message_id,
-                state,
-                emoji,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.react(conversation_id, message_id, state, emoji).await
     }
 
     pub async fn attach(
@@ -771,19 +413,10 @@ impl MessageStore {
         locations: Vec<Location>,
         messages: Vec<String>,
     ) -> Result<(Uuid, AttachmentEventStream), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::Attach {
-                conversation_id,
-                message_id,
-                locations,
-                messages,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner
+            .attach(conversation_id, message_id, locations, messages)
+            .await
     }
 
     pub async fn download<S: Into<String>, P: AsRef<Path>>(
@@ -795,20 +428,10 @@ impl MessageStore {
     ) -> Result<ConstellationProgressStream, Error> {
         let file = file.into();
         let path = path.as_ref().to_path_buf();
-
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::Download {
-                conversation_id,
-                message_id,
-                file,
-                path,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner
+            .download(conversation_id, message_id, &file, path)
+            .await
     }
 
     pub async fn download_stream<S: Into<String>>(
@@ -818,19 +441,10 @@ impl MessageStore {
         file: S,
     ) -> Result<DownloadStream, Error> {
         let file = file.into();
-
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::DownloadStream {
-                conversation_id,
-                message_id,
-                file,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner
+            .download_stream(conversation_id, message_id, &file)
+            .await
     }
 
     pub async fn send_event(
@@ -838,17 +452,8 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::SendEvent {
-                conversation_id,
-                event,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.send_event(conversation_id, event).await
     }
 
     pub async fn cancel_event(
@@ -856,45 +461,23 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .command_tx
-            .clone()
-            .send(MessagingCommand::CancelEvent {
-                conversation_id,
-                event,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.cancel_event(conversation_id, event).await
     }
 }
 
 type AttachmentChan = (Uuid, MessageDocument, oneshot::Sender<Result<(), Error>>);
 
 struct ConversationTask {
+    inner: Arc<tokio::sync::RwLock<ConversationInner>>,
     ipfs: Ipfs,
-    path: Option<PathBuf>,
     keypair: Arc<DID>,
-    event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
     topic_stream: SelectAll<mpsc::Receiver<ConversationStreamData>>,
-    conversation_task: HashMap<Uuid, JoinHandle<()>>,
-    root: RootDocumentMap,
-    file: FileStore,
-    event: EventSubscription<RayGunEventKind>,
     identity: IdentityStore,
-    discovery: Discovery,
     // used for attachments to store message on document and publish it to the network
     attachment_rx: mpsc::Receiver<AttachmentChan>,
-    attachment_tx: mpsc::Sender<AttachmentChan>,
     command_rx: mpsc::Receiver<MessagingCommand>,
-    conversation_mailbox_task_tx: mpsc::Sender<Result<(Uuid, Vec<MessageDocument>), Error>>,
     conversation_mailbox_task_rx: mpsc::Receiver<Result<(Uuid, Vec<MessageDocument>), Error>>,
-    pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
-
-    message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
-    // Note: Temporary
-    queue: HashMap<DID, Vec<Queue>>,
 }
 
 impl ConversationTask {
@@ -925,115 +508,15 @@ impl ConversationTask {
         loop {
             tokio::select! {
                 biased;
-                Some(command) = self.command_rx.next() => {
-                    match command {
-                        MessagingCommand::GetDocument { id, response } => {
-                            let _ = response.send(self.get(id).await);
-                        }
-                        MessagingCommand::SetDocument { document, response } => {
-                            let _ = response.send(self.set_document(document).await);
-                        }
-                        MessagingCommand::List { response } => {
-                            let _ = response.send(Ok(self.list().await));
-                        }
-                        MessagingCommand::Delete { id, response } => {
-                            let _ = response.send(self.delete(id).await);
-                        }
-                        MessagingCommand::Subscribe { id, response } => {
-                            let _ = response.send(self.subscribe(id).await);
-                        }
-                        MessagingCommand::Contains { id, response } => {
-                            let _ = response.send(Ok(self.contains(id).await));
-                        }
-                        MessagingCommand::GetKeystore { id, response } => {
-                            let _ = response.send(self.get_keystore(id).await);
-                        }
-                        MessagingCommand::SetKeystore {
-                            id,
-                            document,
-                            response,
-                        } => {
-                            let _ = response.send(self.set_keystore(id, document).await);
-                        }
-                        MessagingCommand::CreateConversation { did, response } => {
-                            _ = response.send(self.create_conversation(&did).await);
-                        },
-                        MessagingCommand::CreateGroupConversation { name, recipients, settings, response } => {
-                            _ = response.send(self.create_group_conversation(name, recipients, settings).await);
-                        },
-                        MessagingCommand::GetMessageReference { conversation_id, message_id, response } => {
-                            _ = response.send(self.get_message_reference(conversation_id, message_id).await);
-                        },
-                        MessagingCommand::GetMessageReferences { conversation_id, opt, response } => {
-                            _ = response.send(self.get_message_references(conversation_id, opt).await)
-                        },
-                        MessagingCommand::GetMessage { conversation_id, message_id, response } => {
-                            _ = response.send(self.get_message(conversation_id, message_id).await);
-                        },
-                        MessagingCommand::GetMessages { conversation_id, opt, response } => {
-                            _ = response.send(self.get_messages(conversation_id, opt).await)
-                        },
-                        MessagingCommand::GetMessagesCount { conversation_id, response } => {
-                            _ = response.send(self.messages_count(conversation_id).await)
-                        }
-                        MessagingCommand::DeleteConversation { conversation_id, response } => {
-                            _ = response.send(self.delete_conversation(conversation_id, true).await)
-                        },
-                        MessagingCommand::UpdateConversationName { conversation_id, name, response } => {
-                            _ = response.send(self.update_conversation_name(conversation_id, &name).await)
-                        },
-                        MessagingCommand::UpdateConversationSettings { conversation_id, settings, response } => {
-                            _ = response.send(self.update_conversation_settings(conversation_id, settings).await)
-                        },
-                        MessagingCommand::AddRecipient { conversation_id, did, response } => {
-                            _ = response.send(self.add_recipient(conversation_id, &did).await)
-                        },
-                        MessagingCommand::RemoveRecipient { conversation_id, did, response } => {
-                            _ = response.send(self.remove_recipient(conversation_id, &did, true).await)
-                        },
-                        MessagingCommand::MessageStatus { conversation_id, message_id, response } => {
-                            _ = response.send(self.message_status(conversation_id, message_id).await)
-                        },
-                        MessagingCommand::SendMessage { conversation_id, lines, response } => {
-                            _ = response.send(self.send_message(conversation_id, lines).await)
-                        },
-                        MessagingCommand::EditMessage { conversation_id, message_id, lines, response } => {
-                            _ = response.send(self.edit_message(conversation_id, message_id, lines).await)
-                        },
-                        MessagingCommand::Reply { conversation_id, message_id, lines, response } => {
-                            _ = response.send(self.reply_message(conversation_id, message_id, lines).await)
-                        },
-                        MessagingCommand::DeleteMessage { conversation_id, message_id, response } => {
-                            _ = response.send(self.delete_message(conversation_id, message_id, true).await)
-                        },
-                        MessagingCommand::PinMessage { conversation_id, message_id, state, response } => {
-                            _ = response.send(self.pin_message(conversation_id, message_id, state).await)
-                        },
-                        MessagingCommand::React { conversation_id, message_id, state, emoji, response } => {
-                            _ = response.send(self.react(conversation_id, message_id, state, emoji).await)
-                        },
-                        MessagingCommand::Attach { conversation_id, message_id, locations, messages, response } => {
-                            _ = response.send(self.attach(conversation_id, message_id, locations, messages).await)
-                        },
-                        MessagingCommand::Download { conversation_id, message_id, file, path, response } => {
-                            _ = response.send(self.download(conversation_id, message_id, &file, path).await)
-                        },
-                        MessagingCommand::DownloadStream { conversation_id, message_id, file, response } => {
-                            _ = response.send(self.download_stream(conversation_id, message_id, &file).await)
-                        },
-                        MessagingCommand::SendEvent { conversation_id, event, response } => {
-                            _ = response.send(self.send_event(conversation_id, event).await)
-                        }
-                        MessagingCommand::CancelEvent { conversation_id, event, response } => {
-                            _ = response.send(self.cancel_event(conversation_id, event).await)
-                        }
-                    }
+                Some(MessagingCommand::Receiver { ch }) = self.command_rx.next() => {
+                    self.topic_stream.push(ch);
                 }
                 Some((conversation_id, message, response)) = self.attachment_rx.next() => {
-                    _ = response.send(self.store_direct_for_attachment(conversation_id, message).await);
+                    let inner = &mut *self.inner.write().await;
+                    _ = response.send(inner.store_direct_for_attachment(conversation_id, message).await);
                 }
                 Some(ev) = identity_stream.next() => {
-                    if let Err(e) = process_identity_events(self, ev).await {
+                    if let Err(e) = process_identity_events(&mut *self.inner.write().await, ev).await {
                         tracing::error!("Error processing identity events: {e}");
                     }
                 }
@@ -1064,15 +547,16 @@ impl ConversationTask {
                         }
                     };
 
-                    if let Err(e) = process_conversation(self, payload, events).await {
+                    if let Err(e) = process_conversation(&mut *self.inner.write().await, payload, events).await {
                         tracing::error!(%sender, error = %e, "error processing conversation");
                     }
                 }
                 Some(item) = self.topic_stream.next() => {
+                    let inner = &mut *self.inner.write().await;
                     match item {
                         ConversationStreamData::RequestResponse(conversation_id, _) |
                             ConversationStreamData::Event(conversation_id, _) |
-                            ConversationStreamData::Message(conversation_id, _) if !self.contains(conversation_id).await => {
+                            ConversationStreamData::Message(conversation_id, _) if !inner.contains(conversation_id).await => {
                                 // Note: If the conversation is deleted prior to processing the events from stream
                                 //       related to the specific we should then ignore those events.
                                 //       Additionally, we could switch back to `StreamMap` and remove the stream
@@ -1081,25 +565,26 @@ impl ConversationTask {
                         },
                         ConversationStreamData::RequestResponse(conversation_id, req) => {
                             let source = req.source;
-                            if let Err(e) = process_request_response_event(self, conversation_id, req).await {
+                            if let Err(e) = process_request_response_event(inner, conversation_id, req).await {
                                 tracing::error!(%conversation_id, sender = ?source, error = %e, name = "request", "Failed to process payload");
                             }
                         },
                         ConversationStreamData::Event(conversation_id, ev) => {
                             let source = ev.source;
-                            if let Err(e) = process_conversation_event(self, conversation_id, ev).await {
+                            if let Err(e) = process_conversation_event(inner, conversation_id, ev).await {
                                 tracing::error!(%conversation_id, sender = ?source, error = %e, name = "ev", "Failed to process payload");
                             }
                         },
                         ConversationStreamData::Message(conversation_id, msg) => {
                             let source = msg.source;
-                            if let Err(e) = self.process_msg_event(conversation_id, msg).await {
+                            if let Err(e) = inner.process_msg_event(conversation_id, msg).await {
                                 tracing::error!(%conversation_id, sender = ?source, error = %e, name = "msg", "Failed to process payload");
                             }
                         },
                     }
                 }
                 Some(result) = self.conversation_mailbox_task_rx.next() => {
+                    let inner = &mut *self.inner.write().await;
                     let (id, messages) = match result {
                         Ok(ok) => ok,
                         Err(e) => {
@@ -1112,24 +597,52 @@ impl ConversationTask {
                         continue;
                     }
                     tracing::info!(conversation_id = %id, num_of_msg = messages.len(), "receive messages from mailbox");
-                    if let Err(e) = self.insert_messages_from_mailbox(id, messages).await {
+
+                    if let Err(e) = inner.insert_messages_from_mailbox(id, messages).await {
                         tracing::error!(conversation_id = %id, error = %e, "unable to get messages from conversation mailbox");
                     }
                 }
                 _ = queue_timer.tick() => {
-                    _ = process_queue(self).await;
+                    let inner = &mut *self.inner.write().await;
+                    _ = process_queue(inner).await;
                 }
                 _ = pending_exchange_timer.tick() => {
-                    _ = process_pending_payload(self).await;
+                    let inner = &mut *self.inner.write().await;
+                    _ = process_pending_payload(inner).await;
                 }
 
                 _ = check_mailbox.tick() => {
-                    _ = self.load_from_mailbox().await;
+                    let inner = &mut *self.inner.write().await;
+                    _ = inner.load_from_mailbox().await;
                 }
             }
         }
     }
+}
 
+struct ConversationInner {
+    ipfs: Ipfs,
+    path: Option<PathBuf>,
+    keypair: Arc<DID>,
+    event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
+    conversation_task: HashMap<Uuid, JoinHandle<()>>,
+    root: RootDocumentMap,
+    file: FileStore,
+    event: EventSubscription<RayGunEventKind>,
+    identity: IdentityStore,
+    discovery: Discovery,
+    command_tx: mpsc::Sender<MessagingCommand>,
+    // used for attachments to store message on document and publish it to the network
+    attachment_tx: mpsc::Sender<AttachmentChan>,
+    conversation_mailbox_task_tx: mpsc::Sender<Result<(Uuid, Vec<MessageDocument>), Error>>,
+    pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
+
+    message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
+    // Note: Temporary
+    queue: HashMap<DID, Vec<Queue>>,
+}
+
+impl ConversationInner {
     async fn migrate(&mut self) -> Result<(), Error> {
         if let Some(path) = self.path.as_ref() {
             let mid_file = path.join(".message_id");
@@ -3560,7 +3073,10 @@ impl ConversationTask {
             }
         });
 
-        self.topic_stream.push(rx);
+        _ = self
+            .command_tx
+            .send(MessagingCommand::Receiver { ch: rx })
+            .await;
         self.conversation_task.insert(conversation_id, handle);
 
         tracing::info!(%conversation_id, "started conversation");
@@ -3608,7 +3124,7 @@ enum ConversationStreamData {
 }
 
 async fn process_conversation(
-    this: &mut ConversationTask,
+    this: &mut ConversationInner,
     data: Payload<'_>,
     event: ConversationEvents,
 ) -> Result<(), Error> {
@@ -3806,7 +3322,7 @@ async fn process_conversation(
 
 // TODO: de-duplicate logic where possible
 async fn message_event(
-    this: &mut ConversationTask,
+    this: &mut ConversationInner,
     conversation_id: Uuid,
     events: MessagingEvents,
 ) -> Result<(), Error> {
@@ -4246,7 +3762,7 @@ async fn message_event(
 }
 
 async fn process_identity_events(
-    this: &mut ConversationTask,
+    this: &mut ConversationInner,
     event: MultiPassEventKind,
 ) -> Result<(), Error> {
     //TODO: Tie this into a configuration
@@ -4350,7 +3866,7 @@ async fn process_identity_events(
 }
 
 async fn process_request_response_event(
-    this: &mut ConversationTask,
+    this: &mut ConversationInner,
     conversation_id: Uuid,
     req: Message,
 ) -> Result<(), Error> {
@@ -4485,7 +4001,7 @@ async fn process_request_response_event(
     Ok(())
 }
 
-async fn process_pending_payload(this: &mut ConversationTask) {
+async fn process_pending_payload(this: &mut ConversationInner) {
     if this.pending_key_exchange.is_empty() {
         return;
     }
@@ -4529,7 +4045,7 @@ async fn process_pending_payload(this: &mut ConversationTask) {
 }
 
 async fn process_conversation_event(
-    this: &mut ConversationTask,
+    this: &mut ConversationInner,
     conversation_id: Uuid,
     message: Message,
 ) -> Result<(), Error> {
@@ -4607,7 +4123,7 @@ impl Queue {
 }
 
 //TODO: Replace
-async fn process_queue(this: &mut ConversationTask) {
+async fn process_queue(this: &mut ConversationInner) {
     let mut changed = false;
 
     for (did, items) in this.queue.iter_mut() {
@@ -4674,7 +4190,7 @@ async fn process_queue(this: &mut ConversationTask) {
 }
 
 async fn pubkey_or_keystore(
-    conversation: &ConversationTask,
+    conversation: &ConversationInner,
     conversation_id: Uuid,
     keypair: &DID,
 ) -> Result<Either<DID, Keystore>, Error> {
