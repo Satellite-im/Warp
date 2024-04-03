@@ -23,7 +23,6 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use store::document::ResolvedRootDocument;
@@ -72,19 +71,27 @@ use crate::store::{ecdh_decrypt, get_keypair_did, PeerIdExt};
 #[derive(Clone)]
 pub struct WarpIpfs {
     config: Config,
-    identity_guard: Arc<tokio::sync::Mutex<()>>,
-    ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
-    span: Arc<RwLock<Span>>,
-    identity_store: Arc<RwLock<Option<IdentityStore>>>,
-    message_store: Arc<RwLock<Option<MessageStore>>>,
-    file_store: Arc<RwLock<Option<FileStore>>>,
-
-    initialized: Arc<AtomicBool>,
-
+    inner: Arc<Inner>,
     multipass_tx: EventSubscription<MultiPassEventKind>,
     raygun_tx: EventSubscription<RayGunEventKind>,
     constellation_tx: EventSubscription<ConstellationEventKind>,
+}
+
+struct Inner {
+    identity_guard: tokio::sync::Mutex<()>,
+    init_guard: tokio::sync::Mutex<()>,
+    span: RwLock<Span>,
+    components: RwLock<Option<Components>>,
+}
+
+// Holds the initialized components
+#[derive(Clone)]
+struct Components {
+    ipfs: Ipfs,
+    identity_store: IdentityStore,
+    message_store: MessageStore,
+    file_store: FileStore,
 }
 
 #[derive(Default)]
@@ -140,17 +147,19 @@ impl WarpIpfs {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
-        let span = Arc::new(RwLock::new(Span::current()));
+        let span = RwLock::new(Span::current());
+
+        let inner = Arc::new(Inner {
+            components: Default::default(),
+            identity_guard: Default::default(),
+            init_guard: Default::default(),
+            span,
+        });
+
         let identity = WarpIpfs {
             config,
             tesseract,
-            span,
-            ipfs: Default::default(),
-            identity_store: Default::default(),
-            message_store: Default::default(),
-            file_store: Default::default(),
-            initialized: Default::default(),
-            identity_guard: Arc::default(),
+            inner,
             multipass_tx,
             raygun_tx,
             constellation_tx,
@@ -176,7 +185,7 @@ impl WarpIpfs {
     async fn initialize_store(&self, init: bool) -> anyhow::Result<()> {
         let tesseract = self.tesseract.clone();
 
-        if init && self.identity_store.read().is_some() || self.initialized.load(Ordering::SeqCst) {
+        if init && self.inner.components.read().is_some() {
             warn!("Identity is already loaded");
             anyhow::bail!(Error::IdentityExist)
         }
@@ -210,6 +219,21 @@ impl WarpIpfs {
     }
 
     pub(crate) async fn init_ipfs(&self, keypair: Keypair) -> Result<(), Error> {
+        // Since some trait functions are not async (this may change in the future), we cannot hold a lock that is not async-aware
+        // through this function without suffering dead locks in the process through await points with the lock held. 
+        // As a result, we holds a tokio mutex lock here to allow a single call to this function on initializing
+        // preventing any other calls until this lock drops, in which case may return an error if the components
+        // been successfully initialized
+        let _g = self.inner.init_guard.lock().await;
+
+        // We check again in case
+        // - the initialization was previously successful (after tesseract was unlocked)
+        // - creating the account was previously successful
+        // - importing the account was successful (assuming the formers were not successful)
+        if self.inner.components.read().is_some() {
+            return Err(Error::IdentityExist);
+        }
+
         let tesseract = self.tesseract.clone();
         let peer_id = keypair.public().to_peer_id();
 
@@ -219,7 +243,7 @@ impl WarpIpfs {
 
         let span = tracing::trace_span!(parent: &Span::current(), "warp-ipfs", identity = %did);
 
-        *self.span.write() = span.clone();
+        *self.inner.span.write() = span.clone();
 
         let _g = span.enter();
 
@@ -557,10 +581,6 @@ impl WarpIpfs {
 
         info!("Identity initialized");
 
-        *self.identity_store.write() = Some(identity_store.clone());
-
-        *self.ipfs.write() = Some(ipfs.clone());
-
         let root = identity_store.root_document();
 
         let filestore = FileStore::new(
@@ -572,27 +592,28 @@ impl WarpIpfs {
         )
         .await?;
 
-        *self.file_store.write() = Some(filestore.clone());
-
         let message_store = MessageStore::new(
             &ipfs,
             config.path.map(|path| path.join("messages")),
             discovery,
             keypair,
-            filestore,
+            filestore.clone(),
             self.raygun_tx.clone(),
-            identity_store,
+            identity_store.clone(),
             msg_sh_tx,
         )
         .await;
 
-        *self.message_store.write() = Some(message_store);
-
         info!("Messaging store initialized");
 
-        self.initialized.store(true, Ordering::SeqCst);
-        info!("multipass initialized");
+        *self.inner.components.write() = Some(Components {
+            ipfs,
+            identity_store,
+            message_store,
+            file_store: filestore,
+        });
 
+        // Announce identity out to mesh if identity has been created at that time
         if let Ok(store) = self.identity_store(true).await {
             _ = store
                 .announce_identity_to_mesh()
@@ -603,7 +624,21 @@ impl WarpIpfs {
     }
 
     pub(crate) async fn identity_store(&self, created: bool) -> Result<IdentityStore, Error> {
-        let store = self.identity_store_sync()?;
+        if !self.tesseract.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        if !self.tesseract.exist("keypair") {
+            return Err(Error::IdentityNotCreated);
+        }
+
+        let store = self
+            .inner
+            .components
+            .read()
+            .as_ref()
+            .map(|com| com.identity_store.clone())
+            .ok_or(Error::MultiPassExtensionUnavailable)?;
+
         if created && !store.local_id_created().await {
             return Err(Error::IdentityNotCreated);
         }
@@ -611,47 +646,30 @@ impl WarpIpfs {
     }
 
     pub(crate) fn messaging_store(&self) -> std::result::Result<MessageStore, Error> {
-        self.message_store
+        self.inner
+            .components
             .read()
-            .clone()
+            .as_ref()
+            .map(|com| com.message_store.clone())
             .ok_or(Error::RayGunExtensionUnavailable)
     }
 
     pub(crate) fn file_store(&self) -> std::result::Result<FileStore, Error> {
-        self.file_store
+        self.inner
+            .components
             .read()
-            .clone()
+            .as_ref()
+            .map(|com| com.file_store.clone())
             .ok_or(Error::ConstellationExtensionUnavailable)
     }
 
-    pub(crate) fn identity_store_sync(&self) -> Result<IdentityStore, Error> {
-        if !self.tesseract.is_unlock() {
-            return Err(Error::TesseractLocked);
-        }
-        if !self.tesseract.exist("keypair") {
-            return Err(Error::IdentityNotCreated);
-        }
-        self.identity_store
-            .read()
-            .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
-    }
-
     pub(crate) fn ipfs(&self) -> Result<Ipfs, Error> {
-        self.ipfs
+        self.inner
+            .components
             .read()
-            .clone()
+            .as_ref()
+            .map(|com| com.ipfs.clone())
             .ok_or(Error::MultiPassExtensionUnavailable)
-    }
-
-    async fn is_store_initialized(&self) -> bool {
-        if !self.initialized.load(Ordering::SeqCst) {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            if !self.initialized.load(Ordering::SeqCst) {
-                return false;
-            }
-        }
-        true
     }
 
     pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
@@ -675,7 +693,14 @@ impl Extension for WarpIpfs {
 
 impl SingleHandle for WarpIpfs {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
-        self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
+        let ipfs = self
+            .inner
+            .components
+            .read()
+            .as_ref()
+            .map(|com| com.ipfs.clone())
+            .ok_or(Error::MultiPassExtensionUnavailable)?;
+        Ok(Box::new(ipfs) as Box<dyn Any>)
     }
 }
 
@@ -686,14 +711,14 @@ impl MultiPass for WarpIpfs {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<IdentityProfile, Error> {
-        let _g = self.identity_guard.lock().await;
+        let _g = self.inner.identity_guard.lock().await;
 
         info!(
             "create_identity with username: {username:?} and containing passphrase: {}",
             passphrase.is_some()
         );
 
-        if self.is_store_initialized().await {
+        if self.inner.components.read().is_some() {
             info!("Store is initialized with existing identity");
             return Err(Error::IdentityExist);
         }
@@ -763,6 +788,7 @@ impl MultiPass for WarpIpfs {
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         let mut identity = store.own_identity_document().await?;
+        let ipfs = self.ipfs()?;
 
         let mut old_cid = None;
         match option {
@@ -812,7 +838,7 @@ impl MultiPass for WarpIpfs {
                 .map_err(anyhow::Error::from)??;
 
                 let cid = store::document::image_dag::store_photo(
-                    &self.ipfs()?,
+                    &ipfs,
                     futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
                     format.into(),
                     Some(2 * 1024 * 1024),
@@ -887,7 +913,7 @@ impl MultiPass for WarpIpfs {
                 };
 
                 let cid = store::document::image_dag::store_photo(
-                    &self.ipfs()?,
+                    &ipfs,
                     stream.boxed(),
                     extension.into(),
                     Some(2 * 1024 * 1024),
@@ -951,7 +977,7 @@ impl MultiPass for WarpIpfs {
                 .map_err(anyhow::Error::from)??;
 
                 let cid = store::document::image_dag::store_photo(
-                    &self.ipfs()?,
+                    &ipfs,
                     futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
                     format.into(),
                     Some(2 * 1024 * 1024),
@@ -1026,7 +1052,7 @@ impl MultiPass for WarpIpfs {
                 };
 
                 let cid = store::document::image_dag::store_photo(
-                    &self.ipfs()?,
+                    &ipfs,
                     stream.boxed(),
                     extension.into(),
                     Some(2 * 1024 * 1024),
@@ -1097,10 +1123,10 @@ impl MultiPassImportExport for WarpIpfs {
         &mut self,
         option: IdentityImportOption<'a>,
     ) -> Result<Identity, Error> {
-        if self.initialized.load(Ordering::SeqCst) {
+        if self.inner.components.read().is_some() {
             return Err(Error::IdentityExist);
         }
-        let _g = self.identity_guard.lock().await;
+        let _g = self.inner.identity_guard.lock().await;
         if !self.tesseract.is_unlock() {
             return Err(Error::TesseractLocked);
         }
