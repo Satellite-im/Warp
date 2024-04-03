@@ -182,35 +182,37 @@ impl WarpIpfs {
         Ok(identity)
     }
 
-    async fn initialize_store(&self, init: bool) -> anyhow::Result<()> {
+    async fn initialize_store(&self, init: bool) -> Result<(), Error> {
         let tesseract = self.tesseract.clone();
 
         if init && self.inner.components.read().is_some() {
             warn!("Identity is already loaded");
-            anyhow::bail!(Error::IdentityExist)
+            return Err(Error::IdentityExist);
         }
 
         let keypair = match (init, tesseract.exist("keypair")) {
             (true, false) => {
                 info!("Keypair doesnt exist. Generating keypair....");
-                if let Ok(kp) = Keypair::generate_ed25519().try_into_ed25519() {
-                    let encoded_kp = bs58::encode(&kp.to_bytes()).into_string();
-                    tesseract.set("keypair", &encoded_kp)?;
-                    let bytes = Zeroizing::new(kp.secret().as_ref().to_vec());
-                    Keypair::ed25519_from_bytes(bytes)?
-                } else {
-                    error!("Unreachable. Report this as a bug");
-                    anyhow::bail!("Unreachable")
-                }
+                let kp = Keypair::generate_ed25519()
+                    .try_into_ed25519()
+                    .map_err(|e| {
+                        error!(error = %e, "Unreachable. Report this as a bug");
+                        Error::Other
+                    })?;
+                let encoded_kp = bs58::encode(&kp.to_bytes()).into_string();
+                tesseract.set("keypair", &encoded_kp)?;
+                let bytes = Zeroizing::new(kp.secret().as_ref().to_vec());
+                Keypair::ed25519_from_bytes(bytes).map_err(|_| Error::PrivateKeyInvalid)?
             }
             (false, true) | (true, true) => {
                 info!("Fetching keypair from tesseract");
                 let keypair = tesseract.retrieve("keypair")?;
                 let kp = Zeroizing::new(bs58::decode(keypair).into_vec()?);
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                Keypair::ed25519_from_bytes(id_kp.secret.to_bytes())?
+                Keypair::ed25519_from_bytes(id_kp.secret.to_bytes())
+                    .map_err(|_| Error::PrivateKeyInvalid)?
             }
-            _ => anyhow::bail!("Unable to initialize store"),
+            _ => return Err(Error::OtherWithContext("Unable to initialize store".into())),
         };
 
         self.init_ipfs(keypair).await?;
