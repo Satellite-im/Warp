@@ -220,7 +220,7 @@ impl WarpIpfs {
 
     pub(crate) async fn init_ipfs(&self, keypair: Keypair) -> Result<(), Error> {
         // Since some trait functions are not async (this may change in the future), we cannot hold a lock that is not async-aware
-        // through this function without suffering dead locks in the process through await points with the lock held. 
+        // through this function without suffering dead locks in the process through await points with the lock held.
         // As a result, we holds a tokio mutex lock here to allow a single call to this function on initializing
         // preventing any other calls until this lock drops, in which case may return an error if the components
         // been successfully initialized
