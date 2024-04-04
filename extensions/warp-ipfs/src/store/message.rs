@@ -68,7 +68,6 @@ const CHAT_DIRECTORY: &str = "chat_media";
 
 pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
 
-#[allow(clippy::large_enum_variant)]
 enum MessagingCommand {
     Receiver {
         ch: mpsc::Receiver<ConversationStreamData>,
@@ -297,14 +296,13 @@ impl MessageStore {
         inner.get_message_references(conversation_id, opt).await
     }
 
-    pub async fn update_conversation_name<S: Into<String>>(
+    pub async fn update_conversation_name(
         &self,
         conversation_id: Uuid,
-        name: S,
+        name: &str,
     ) -> Result<(), Error> {
-        let name = name.into();
         let inner = &mut *self.inner.write().await;
-        inner.update_conversation_name(conversation_id, &name).await
+        inner.update_conversation_name(conversation_id, name).await
     }
 
     pub async fn update_conversation_settings(
@@ -394,14 +392,13 @@ impl MessageStore {
         inner.pin_message(conversation_id, message_id, state).await
     }
 
-    pub async fn react<S: Into<String>>(
+    pub async fn react(
         &self,
         conversation_id: Uuid,
         message_id: Uuid,
         state: ReactionState,
-        emoji: S,
+        emoji: String,
     ) -> Result<(), Error> {
-        let emoji = emoji.into();
         let inner = &mut *self.inner.write().await;
         inner.react(conversation_id, message_id, state, emoji).await
     }
@@ -419,31 +416,29 @@ impl MessageStore {
             .await
     }
 
-    pub async fn download<S: Into<String>, P: AsRef<Path>>(
+    pub async fn download<P: AsRef<Path>>(
         &self,
         conversation_id: Uuid,
         message_id: Uuid,
-        file: S,
+        file: &str,
         path: P,
     ) -> Result<ConstellationProgressStream, Error> {
-        let file = file.into();
         let path = path.as_ref().to_path_buf();
         let inner = &*self.inner.read().await;
         inner
-            .download(conversation_id, message_id, &file, path)
+            .download(conversation_id, message_id, file, path)
             .await
     }
 
-    pub async fn download_stream<S: Into<String>>(
+    pub async fn download_stream(
         &self,
         conversation_id: Uuid,
         message_id: Uuid,
-        file: S,
+        file: &str,
     ) -> Result<DownloadStream, Error> {
-        let file = file.into();
         let inner = &*self.inner.read().await;
         inner
-            .download_stream(conversation_id, message_id, &file)
+            .download_stream(conversation_id, message_id, file)
             .await
     }
 
@@ -707,18 +702,13 @@ impl ConversationInner {
             return Ok(());
         };
 
-        let tx = self.conversation_mailbox_task_tx.clone();
-        let ipfs = self.ipfs.clone();
-        let message_command = self.message_command.clone();
-
         self.list_stream().await.for_each_concurrent(None, |conversation| {
-            let mut tx = tx.clone();
-            let ipfs = ipfs.clone();
-            let message_command = message_command.clone();
+            let mut tx = self.conversation_mailbox_task_tx.clone();
+            let ipfs = self.ipfs.clone();
+            let message_command =  self.message_command.clone();
             let addresses = addresses.clone();
+            let conversation_id = conversation.id;
             async move {
-                let ipfs = ipfs.clone();
-                let conversation_id = conversation.id;
                 let fut = async move {
                     let mut conversation_mailbox = BTreeMap::new();
                     let mut providers = vec![];
