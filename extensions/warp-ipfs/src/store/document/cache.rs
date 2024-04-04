@@ -43,7 +43,7 @@ impl IdentityCache {
         document: &IdentityDocument,
     ) -> Result<Option<IdentityDocument>, Error> {
         let inner = &mut *self.inner.write().await;
-        inner.insert(document.clone()).await
+        inner.insert(document).await
     }
 
     pub async fn get(&self, did: &DID) -> Result<IdentityDocument, Error> {
@@ -53,7 +53,7 @@ impl IdentityCache {
 
     pub async fn remove(&self, did: &DID) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.remove(did.clone()).await
+        inner.remove(did).await
     }
 
     pub async fn list(&self) -> BoxStream<'static, IdentityDocument> {
@@ -72,7 +72,7 @@ struct IdentityCacheInner {
 impl IdentityCacheInner {
     async fn insert(
         &mut self,
-        document: IdentityDocument,
+        document: &IdentityDocument,
     ) -> Result<Option<IdentityDocument>, Error> {
         document.verify()?;
 
@@ -109,7 +109,7 @@ impl IdentityCacheInner {
 
         match old_document {
             Some(old_document) => {
-                if !old_document.different(&document) {
+                if !old_document.different(document) {
                     return Ok(None);
                 }
 
@@ -199,7 +199,7 @@ impl IdentityCacheInner {
         Ok(id)
     }
 
-    async fn remove(&mut self, did: DID) -> Result<(), Error> {
+    async fn remove(&mut self, did: &DID) -> Result<(), Error> {
         let mut list: HashMap<String, Cid> = match self.list {
             Some(cid) => self
                 .ipfs
