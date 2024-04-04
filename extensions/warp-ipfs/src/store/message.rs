@@ -2339,7 +2339,7 @@ impl ConversationInner {
 
         let stream = attachment.download(&self.ipfs, path, &members, None);
 
-        Ok(stream.boxed())
+        Ok(stream)
     }
 
     pub async fn download_stream(
@@ -2374,7 +2374,7 @@ impl ConversationInner {
 
         let stream = attachment.download_stream(&self.ipfs, &members, None);
 
-        Ok(stream.boxed())
+        Ok(stream)
     }
 
     pub async fn add_restricted(
