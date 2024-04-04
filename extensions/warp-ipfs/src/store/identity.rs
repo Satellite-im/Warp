@@ -431,8 +431,6 @@ impl IdentityStore {
             }
         });
 
-        let did = store.get_keypair_did().expect("valid ed25519 keypair");
-
         store.discovery.start().await?;
 
         let mut discovery_rx = store.discovery.events();
@@ -467,7 +465,7 @@ impl IdentityStore {
             async move {
                 let event_stream = store
                     .ipfs
-                    .pubsub_subscribe(did.events())
+                    .pubsub_subscribe(store.did_key.events())
                     .await
                     .expect("not subscribed");
                 let identity_announce_stream = store
