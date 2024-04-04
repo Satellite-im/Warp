@@ -86,13 +86,14 @@ impl MessageStore {
         ipfs: &Ipfs,
         path: Option<PathBuf>,
         discovery: Discovery,
-        keypair: Arc<DID>,
         file: FileStore,
         event: EventSubscription<RayGunEventKind>,
         identity: IdentityStore,
         message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
     ) -> Self {
         info!("Initializing MessageStore");
+
+        let keypair = identity.did_key();
 
         if let Some(path) = path.as_ref() {
             if !path.exists() {
@@ -141,7 +142,6 @@ impl MessageStore {
         let mut task = ConversationTask {
             inner: inner.clone(),
             ipfs: ipfs.clone(),
-            keypair: keypair.clone(),
             topic_stream: Default::default(),
             identity,
             command_rx: rx,
@@ -466,7 +466,6 @@ type AttachmentChan = (Uuid, MessageDocument, oneshot::Sender<Result<(), Error>>
 struct ConversationTask {
     inner: Arc<tokio::sync::RwLock<ConversationInner>>,
     ipfs: Ipfs,
-    keypair: Arc<DID>,
     topic_stream: SelectAll<mpsc::Receiver<ConversationStreamData>>,
     identity: IdentityStore,
     // used for attachments to store message on document and publish it to the network
@@ -485,7 +484,7 @@ impl ConversationTask {
 
         let stream = self
             .ipfs
-            .pubsub_subscribe(self.keypair.messaging())
+            .pubsub_subscribe(self.identity.did_key().messaging())
             .await
             .expect("valid subscription");
 
@@ -526,7 +525,7 @@ impl ConversationTask {
 
                     let sender = payload.sender();
 
-                    let data = match ecdh_decrypt(&self.keypair, Some(&sender), payload.data()) {
+                    let data = match ecdh_decrypt(&self.identity.did_key(), Some(&sender), payload.data()) {
                         Ok(d) => d,
                         Err(e) => {
                             tracing::warn!(%sender, error = %e, "failed to decrypt message");

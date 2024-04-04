@@ -647,6 +647,11 @@ impl IdentityStore {
         &self.phonebook
     }
 
+    /// did key with private key embedded
+    pub(crate) fn did_key(&self) -> Arc<DID> {
+        self.did_key.clone()
+    }
+
     //TODO: Implement Errors
     #[tracing::instrument(skip(self, data, signal))]
     async fn check_request_message(
