@@ -80,7 +80,6 @@ pub struct MessageStore {
     _task_cancellation: Arc<DropGuard>,
 }
 
-#[allow(clippy::too_many_arguments)]
 impl MessageStore {
     pub async fn new(
         ipfs: &Ipfs,

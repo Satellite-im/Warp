@@ -353,7 +353,6 @@ impl std::fmt::Debug for ResponseOption {
 }
 
 impl IdentityStore {
-    #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ipfs: Ipfs,
@@ -994,7 +993,7 @@ impl IdentityStore {
             identity.metadata = metadata;
         }
 
-        let kp_did = self.get_keypair_did()?;
+        let kp_did = self.did_key();
 
         let payload = identity.sign(&kp_did)?;
 
@@ -1614,7 +1613,7 @@ impl IdentityStore {
             signature: None,
         };
 
-        let did_kp = self.get_keypair_did()?;
+        let did_kp = self.did_key();
         let identity = identity.sign(&did_kp)?;
 
         let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
@@ -1635,9 +1634,9 @@ impl IdentityStore {
             tracing::warn!(%identity.did, "Unable to export root document: {e}");
         }
 
-        let identity = identity.resolve()?;
         _ = self.announce_identity_to_mesh().await;
-        Ok(identity)
+
+        identity.resolve()
     }
 
     #[tracing::instrument(skip(self))]
@@ -1676,9 +1675,7 @@ impl IdentityStore {
             }
         }
 
-        let identity = self.own_identity().await?;
-
-        Ok(identity)
+        self.own_identity().await
     }
 
     pub async fn import_identity_remote(&mut self) -> Result<Cid, Error> {
@@ -2080,7 +2077,7 @@ impl IdentityStore {
     }
 
     pub async fn identity_update(&mut self, identity: IdentityDocument) -> Result<(), Error> {
-        let kp = self.get_keypair_did()?;
+        let kp = self.did_key();
 
         let identity = identity.sign(&kp)?;
 
