@@ -565,11 +565,10 @@ impl WarpIpfs {
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
-            config.path.clone(),
+            &config,
             tesseract.clone(),
             self.multipass_tx.clone(),
             phonebook,
-            &config,
             discovery.clone(),
             id_sh_tx,
             span.clone(),

@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -356,31 +355,31 @@ impl IdentityStore {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ipfs: Ipfs,
-        path: Option<PathBuf>,
+        config: &config::Config,
         tesseract: Tesseract,
         tx: EventSubscription<MultiPassEventKind>,
         phonebook: PhoneBook,
-        config: &config::Config,
         discovery: Discovery,
         identity_command: futures::channel::mpsc::Sender<
             shuttle::identity::client::IdentityCommand,
         >,
         span: Span,
     ) -> Result<Self, Error> {
-        if let Some(path) = path.as_ref() {
+        if let Some(path) = config.path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
             }
         }
         let config = config.clone();
 
-        let identity_cache = IdentityCache::new(&ipfs, path.clone()).await;
+        let identity_cache = IdentityCache::new(&ipfs, config.path.as_ref()).await;
 
         let event = tx.clone();
 
         let did_key = Arc::new(did_keypair(&tesseract)?);
 
-        let root_document = RootDocumentMap::new(&ipfs, did_key.clone(), path.clone()).await;
+        let root_document =
+            RootDocumentMap::new(&ipfs, did_key.clone(), config.path.as_ref()).await;
 
         let queue = Queue::new(
             ipfs.clone(),

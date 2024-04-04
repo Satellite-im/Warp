@@ -17,7 +17,7 @@ pub struct IdentityCache {
 }
 
 impl IdentityCache {
-    pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
+    pub async fn new(ipfs: &Ipfs, path: Option<&PathBuf>) -> Self {
         let list = match path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".cache_id_v0"))
                 .await
@@ -29,7 +29,7 @@ impl IdentityCache {
 
         let inner = IdentityCacheInner {
             ipfs: ipfs.clone(),
-            path,
+            path: path.cloned(),
             list,
         };
 

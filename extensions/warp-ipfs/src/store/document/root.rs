@@ -29,7 +29,7 @@ pub struct RootDocumentMap {
 }
 
 impl RootDocumentMap {
-    pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>, path: Option<PathBuf>) -> Self {
+    pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>, path: Option<&PathBuf>) -> Self {
         let cid = match path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".id"))
                 .await
@@ -42,7 +42,7 @@ impl RootDocumentMap {
         let mut inner = RootDocumentInner {
             ipfs: ipfs.clone(),
             keypair,
-            path,
+            path: path.cloned(),
             cid,
         };
 
