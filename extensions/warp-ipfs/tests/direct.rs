@@ -272,7 +272,7 @@ mod test {
 
         fs_a.put_buffer("image.png", PROFILE_IMAGE).await?;
 
-        let mut stream = chat_a
+        let (_, mut stream) = chat_a
             .attach(
                 id_a,
                 None,
@@ -285,15 +285,23 @@ mod test {
 
         while let Some(event) = stream.next().await {
             match event {
-                AttachmentKind::AttachedProgress(Progression::CurrentProgress { .. }) => {}
-                AttachmentKind::AttachedProgress(Progression::ProgressComplete { name, total }) => {
+                AttachmentKind::AttachedProgress(
+                    _location,
+                    Progression::CurrentProgress { .. },
+                ) => {}
+                AttachmentKind::AttachedProgress(
+                    _location,
+                    Progression::ProgressComplete { name, total },
+                ) => {
                     assert_eq!(name, "image.png");
                     assert_eq!(total, Some(PROFILE_IMAGE.len()));
                 }
-                AttachmentKind::AttachedProgress(Progression::ProgressFailed { .. }) => {
+                AttachmentKind::AttachedProgress(_location, Progression::ProgressFailed { .. }) => {
                     unreachable!("should not fail")
                 }
-                AttachmentKind::Pending(result) => result?,
+                AttachmentKind::Pending(result) => {
+                    result?;
+                }
             }
         }
 

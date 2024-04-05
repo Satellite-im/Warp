@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -6,6 +7,7 @@ use futures::{StreamExt, TryFutureExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use warp::constellation::item::Item;
 use warp::error::Error;
 
@@ -15,6 +17,8 @@ use warp::constellation::{
 };
 
 use crate::store::document::image_dag::ImageDag;
+
+use super::FileAttachmentDocument;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DirectoryDocument {
@@ -188,7 +192,7 @@ pub struct FileDocument {
     pub creation: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub file_type: FileType,
-    pub reference: Option<Cid>,
+    pub reference: Option<String>,
     pub hash: Hash,
 }
 
@@ -217,7 +221,7 @@ impl FileDocument {
                 .contains(&cid)
                 .await
                 .unwrap_or_default()
-                .then_some(cid)
+                .then(|| cid.to_string())
         }
 
         if let Some(cid) = file
@@ -234,6 +238,19 @@ impl FileDocument {
         }
 
         Ok(document)
+    }
+
+    pub fn to_attachment(&self) -> Result<FileAttachmentDocument, Error> {
+        let data = self.reference.clone().ok_or(Error::FileNotFound)?;
+        Ok(FileAttachmentDocument {
+            id: Uuid::new_v4(),
+            name: self.name.clone(),
+            size: self.size,
+            creation: Utc::now(),
+            thumbnail: self.thumbnail,
+            file_type: self.file_type.clone(),
+            data,
+        })
     }
 
     pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<File, Error> {
@@ -268,7 +285,12 @@ impl FileDocument {
             }
         }
 
-        if let Some(cid) = self.reference {
+        if let Some(cid) = self
+            .reference
+            .as_ref()
+            .and_then(|cid| Cid::from_str(cid).ok())
+        {
+            // Since the cid is valid, we will convert it to a ipfs path to store as a reference in `File::reference`
             let path = IpfsPath::from(cid);
             file.set_reference(&path.to_string());
         }

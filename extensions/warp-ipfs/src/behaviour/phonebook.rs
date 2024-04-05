@@ -2,11 +2,11 @@ mod handler;
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
 
-use futures_timer::Delay;
 use rust_ipfs::libp2p::{
     core::Endpoint,
     swarm::{
@@ -16,6 +16,7 @@ use rust_ipfs::libp2p::{
     Multiaddr, PeerId,
 };
 use rust_ipfs::NetworkBehaviour;
+use tokio::time::{sleep, Sleep};
 use void::Void;
 use warp::multipass::MultiPassEventKind;
 
@@ -51,7 +52,7 @@ pub struct Behaviour {
     event: EventSubscription<MultiPassEventKind>,
     command: futures::channel::mpsc::Receiver<PhoneBookCommand>,
     entry_state: HashMap<PeerId, PhoneBookState>,
-    backoff: HashMap<PeerId, Delay>,
+    backoff: HashMap<PeerId, Pin<Box<Sleep>>>,
 }
 
 impl Behaviour {
@@ -229,7 +230,7 @@ impl NetworkBehaviour for Behaviour {
                 if remaining_established == 0 && self.entry.contains(&peer_id) {
                     // Delay emitting event in case of reconnection
                     self.backoff
-                        .insert(peer_id, Delay::new(Duration::from_secs(2)));
+                        .insert(peer_id, Box::pin(sleep(Duration::from_secs(2))));
                 }
             }
             _ => {}

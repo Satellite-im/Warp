@@ -1,3 +1,6 @@
+use chrono::Utc;
+use either::Either;
+use tokio_stream::StreamMap;
 use tracing::info;
 
 use std::{
@@ -12,22 +15,23 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
-    stream::{BoxStream, FuturesUnordered, SelectAll},
-    SinkExt, Stream, StreamExt, TryFutureExt,
+    stream::{self, BoxStream, FuturesUnordered, SelectAll},
+    FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::{libp2p::gossipsub::Message, Ipfs, IpfsPath, PeerId};
+use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, PeerId};
+
 use serde::{Deserialize, Serialize};
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
+
 use warp::{
-    constellation::{ConstellationProgressStream, Progression},
+    constellation::{directory::Directory, ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
     error::Error,
     multipass::MultiPassEventKind,
@@ -39,22 +43,27 @@ use warp::{
     },
 };
 
-use crate::store::{
-    conversation::{ConversationDocument, MessageDocument},
-    discovery::Discovery,
-    ecdh_decrypt, ecdh_encrypt, ecdh_shared_key,
-    event_subscription::EventSubscription,
-    files::FileStore,
-    generate_shared_topic,
-    identity::IdentityStore,
-    keystore::Keystore,
-    payload::Payload,
-    sign_serde, verify_serde_sig, ConversationEvents, ConversationRequestKind,
-    ConversationRequestResponse, ConversationResponseKind, ConversationUpdateKind, DidExt,
-    MessagingEvents, PeerTopic,
+use crate::{
+    config,
+    store::{
+        conversation::{ConversationDocument, MessageDocument},
+        discovery::Discovery,
+        ecdh_decrypt, ecdh_encrypt, ecdh_shared_key,
+        event_subscription::EventSubscription,
+        files::FileStore,
+        generate_shared_topic,
+        identity::IdentityStore,
+        keystore::Keystore,
+        payload::Payload,
+        sign_serde, verify_serde_sig, ConversationEvents, ConversationRequestKind,
+        ConversationRequestResponse, ConversationResponseKind, ConversationUpdateKind, DidExt,
+        MessagingEvents, PeerTopic,
+    },
 };
 
-use super::document::root::RootDocumentMap;
+use super::{document::root::RootDocumentMap, SHUTTLE_TIMEOUT};
+
+const CHAT_DIRECTORY: &str = "chat_media";
 
 pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
 
@@ -162,7 +171,7 @@ enum MessagingCommand {
     SendMessage {
         conversation_id: Uuid,
         lines: Vec<String>,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     EditMessage {
         conversation_id: Uuid,
@@ -174,7 +183,7 @@ enum MessagingCommand {
         conversation_id: Uuid,
         message_id: Uuid,
         lines: Vec<String>,
-        response: oneshot::Sender<Result<(), Error>>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     DeleteMessage {
         conversation_id: Uuid,
@@ -199,7 +208,7 @@ enum MessagingCommand {
         message_id: Option<Uuid>,
         locations: Vec<Location>,
         messages: Vec<String>,
-        response: oneshot::Sender<Result<AttachmentEventStream, Error>>,
+        response: oneshot::Sender<Result<(Uuid, AttachmentEventStream), Error>>,
     },
     Download {
         conversation_id: Uuid,
@@ -242,6 +251,7 @@ impl MessageStore {
         file: FileStore,
         event: EventSubscription<RayGunEventKind>,
         identity: IdentityStore,
+        message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
     ) -> Self {
         info!("Initializing MessageStore");
 
@@ -253,45 +263,46 @@ impl MessageStore {
             }
         }
 
-        let cid = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".message_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .ok()
-                .and_then(|cid_str| cid_str.parse().ok()),
-            None => None,
-        };
-
         let (tx, rx) = futures::channel::mpsc::channel(0);
 
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
 
+        let root = identity.root_document().clone();
+        let (atx, arx) = mpsc::channel(1);
+        let (conversation_mailbox_task_tx, conversation_mailbox_task_rx) = mpsc::channel(2048);
+        let mut task = ConversationTask {
+            ipfs: ipfs.clone(),
+            event_handler: Default::default(),
+            keypair,
+            path,
+            topic_stream: Default::default(),
+            conversation_task: HashMap::new(),
+            identity,
+            command_rx: rx,
+            root,
+            discovery,
+            file,
+            event,
+            attachment_rx: arx,
+            attachment_tx: atx,
+            conversation_mailbox_task_tx,
+            conversation_mailbox_task_rx,
+            pending_key_exchange: Default::default(),
+            message_command,
+            queue: Default::default(),
+        };
+
+        if let Err(e) = task.migrate().await {
+            tracing::warn!(error = %e, "unable to migrate conversations to root document");
+        }
+
+        if let Err(e) = task.load_conversations().await {
+            tracing::warn!("Unable to load conversations: {e}");
+        }
+
         tokio::spawn({
-            let ipfs = ipfs.clone();
-            let keypair = keypair.clone();
             async move {
-                let root = identity.root_document().clone();
-                let (atx, arx) = mpsc::channel(1);
-                let mut task = ConversationTask {
-                    ipfs,
-                    event_handler: Default::default(),
-                    keypair,
-                    path,
-                    cid,
-                    topic_stream: Default::default(),
-                    conversation_task: HashMap::new(),
-                    identity,
-                    command_rx: rx,
-                    root,
-                    discovery,
-                    file,
-                    event,
-                    attachment_rx: arx,
-                    attachment_tx: atx,
-                    pending_key_exchange: Default::default(),
-                    queue: Default::default(),
-                };
                 select! {
                     _ = token.cancelled() => {}
                     _ = task.run() => {}
@@ -299,16 +310,10 @@ impl MessageStore {
             }
         });
 
-        let conversation = Self {
+        Self {
             command_tx: tx,
             _task_cancellation: Arc::new(drop_guard),
-        };
-
-        if let Err(e) = conversation.load_conversations().await {
-            tracing::warn!("Unable to load conversations: {e}");
         }
-
-        conversation
     }
 }
 
@@ -658,7 +663,7 @@ impl MessageStore {
         &self,
         conversation_id: Uuid,
         lines: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -697,7 +702,7 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
         lines: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -779,7 +784,7 @@ impl MessageStore {
         message_id: Option<Uuid>,
         locations: Vec<Location>,
         messages: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
@@ -879,15 +884,10 @@ impl MessageStore {
     }
 }
 
-type AttachmentChan = (
-    Uuid,
-    warp::raygun::Message,
-    oneshot::Sender<Result<(), Error>>,
-);
+type AttachmentChan = (Uuid, MessageDocument, oneshot::Sender<Result<(), Error>>);
 
 struct ConversationTask {
     ipfs: Ipfs,
-    cid: Option<Cid>,
     path: Option<PathBuf>,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
@@ -902,9 +902,11 @@ struct ConversationTask {
     attachment_rx: mpsc::Receiver<AttachmentChan>,
     attachment_tx: mpsc::Sender<AttachmentChan>,
     command_rx: mpsc::Receiver<MessagingCommand>,
-
+    conversation_mailbox_task_tx: mpsc::Sender<Result<(Uuid, Vec<MessageDocument>), Error>>,
+    conversation_mailbox_task_rx: mpsc::Receiver<Result<(Uuid, Vec<MessageDocument>), Error>>,
     pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
 
+    message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
 }
@@ -928,6 +930,11 @@ impl ConversationTask {
         let mut queue_timer = tokio::time::interval(Duration::from_secs(1));
 
         let mut pending_exchange_timer = tokio::time::interval(Duration::from_secs(1));
+
+        let mut check_mailbox = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(5),
+            Duration::from_secs(60),
+        );
 
         loop {
             tokio::select! {
@@ -1080,6 +1087,15 @@ impl ConversationTask {
                 }
                 Some(item) = self.topic_stream.next() => {
                     match item {
+                        ConversationStreamData::RequestResponse(conversation_id, _) |
+                            ConversationStreamData::Event(conversation_id, _) |
+                            ConversationStreamData::Message(conversation_id, _) if !self.contains(conversation_id).await => {
+                                // Note: If the conversation is deleted prior to processing the events from stream
+                                //       related to the specific we should then ignore those events.
+                                //       Additionally, we could switch back to `StreamMap` and remove the stream
+                                //       based on the conversation id to remove this check
+                                continue
+                        },
                         ConversationStreamData::RequestResponse(conversation_id, req) => {
                             let source = req.source;
                             if let Err(e) = process_request_response_event(self, conversation_id, req).await {
@@ -1100,18 +1116,74 @@ impl ConversationTask {
                         },
                     }
                 }
+                Some(result) = self.conversation_mailbox_task_rx.next() => {
+                    let (id, messages) = match result {
+                        Ok(ok) => ok,
+                        Err(e) => {
+                            tracing::error!(error = %e, "unable to obtain messages from mailbox");
+                            continue;
+                        }
+                    };
+                    if messages.is_empty() {
+                        tracing::info!(conversation_id = %id, "mailbox is empty");
+                        continue;
+                    }
+                    tracing::info!(conversation_id = %id, num_of_msg = messages.len(), "receive messages from mailbox");
+                    if let Err(e) = self.insert_messages_from_mailbox(id, messages).await {
+                        tracing::error!(conversation_id = %id, error = %e, "unable to get messages from conversation mailbox");
+                    }
+                }
                 _ = queue_timer.tick() => {
                     _ = process_queue(self).await;
                 }
                 _ = pending_exchange_timer.tick() => {
                     _ = process_pending_payload(self).await;
                 }
+
+                _ = check_mailbox.tick() => {
+                    _ = self.load_from_mailbox().await;
+                }
             }
         }
     }
 
+    async fn migrate(&mut self) -> Result<(), Error> {
+        if let Some(path) = self.path.as_ref() {
+            let mid_file = path.join(".message_id");
+            if !mid_file.is_file() {
+                return Ok(());
+            }
+            let cid = tokio::fs::read(&mid_file)
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                .and_then(|cid_str| {
+                    Cid::from_str(&cid_str)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })?;
+
+            let list: BTreeMap<String, Cid> = self.ipfs.get_dag(cid).local().deserialized().await?;
+
+            let mut stream = FuturesUnordered::from_iter(list.values().copied().map(|cid| {
+                self.ipfs
+                    .get_dag(cid)
+                    .local()
+                    .deserialized::<ConversationDocument>()
+                    .into_future()
+            }))
+            .filter_map(|result| async move { result.ok() })
+            .boxed();
+
+            while let Some(document) = stream.next().await {
+                let _ = self.root.set_conversation_document(document).await;
+            }
+
+            _ = tokio::fs::remove_file(mid_file).await;
+        }
+        Ok(())
+    }
+
     async fn load_conversations(&mut self) -> Result<(), Error> {
-        let mut stream = self.list_stream();
+        let mut stream = self.list_stream().await?;
         while let Some(conversation) = stream.next().await {
             let id = conversation.id();
 
@@ -1130,6 +1202,187 @@ impl ConversationTask {
             {
                 self.queue = data;
             }
+        }
+
+        Ok(())
+    }
+
+    async fn load_from_mailbox(&mut self) -> Result<(), Error> {
+        let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config().clone()
+        else {
+            return Ok(());
+        };
+
+        let tx = self.conversation_mailbox_task_tx.clone();
+        let ipfs = self.ipfs.clone();
+        let message_command = self.message_command.clone();
+
+        self.list_stream().await?.for_each_concurrent(None, |conversation| {
+            let mut tx = tx.clone();
+            let ipfs = ipfs.clone();
+            let message_command = message_command.clone();
+            let addresses = addresses.clone();
+            async move {
+                let ipfs = ipfs.clone();
+                let conversation_id = conversation.id;
+                let fut = async move {
+                    let mut conversation_mailbox = BTreeMap::new();
+                    let mut providers = vec![];
+                    for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                        let (tx, rx) = futures::channel::oneshot::channel();
+                        let _ = message_command
+                            .clone()
+                            .send(shuttle::message::client::MessageCommand::FetchMailbox {
+                                peer_id,
+                                conversation_id,
+                                response: tx,
+                            })
+                            .await;
+
+                        match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                            Ok(Ok(Ok(list))) => {
+                                providers.push(peer_id);
+                                conversation_mailbox.extend(list);
+                                break;
+                            }
+                            Ok(Ok(Err(e))) => {
+                                error!("unable to get mailbox to conversation {conversation_id} from {peer_id}: {e}");
+                                break;
+                            }
+                            Ok(Err(_)) => {
+                                error!("Channel been unexpectedly closed for {peer_id}");
+                                continue;
+                            }
+                            Err(_) => {
+                                error!("Request timed out for {peer_id}");
+                                continue;
+                            }
+                        }
+                    }
+
+                    let conversation_mailbox = conversation_mailbox
+                        .into_iter()
+                        .filter_map(|(id, cid)| {
+                            let id = Uuid::from_str(&id).ok()?;
+                            Some((id, cid))
+                        })
+                        .collect::<BTreeMap<Uuid, Cid>>();
+
+                    let documents =
+                        FuturesUnordered::from_iter(conversation_mailbox.into_iter().map(|(id, cid)| {
+                            let ipfs = ipfs.clone();
+                            async move {
+                                ipfs.fetch(&cid).recursive().await?;
+                                Ok((id, cid))
+                            }
+                            .boxed()
+                        }))
+                        .filter_map(|res: Result<_, anyhow::Error>| async move { res.ok() })
+                        .filter_map(|(_, cid)| {
+                            let ipfs = ipfs.clone();
+                            let providers = providers.clone();
+                            let addresses = addresses.clone();
+                            let message_command = message_command.clone();
+                            async move {
+                                let message_document = ipfs
+                                    .get_dag(cid)
+                                    .providers(&providers)
+                                    .deserialized::<MessageDocument>()
+                                    .await
+                                    .ok()?;
+                                for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
+                                    let _ = message_command
+                                        .clone()
+                                        .send(shuttle::message::client::MessageCommand::MessageDelivered {
+                                            peer_id,
+                                            conversation_id,
+                                            message_id: message_document.id,
+                                        })
+                                        .await;
+                                }
+                                Some(message_document)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .await;
+
+                    Ok::<_, Error>((conversation_id, documents))
+                };
+
+
+                tokio::spawn(async move {
+                    let result = fut.await;
+                    let _ = tx.send(result).await;
+                });
+            }
+        }).await;
+
+        Ok(())
+    }
+
+    async fn insert_messages_from_mailbox(
+        &mut self,
+        conversation_id: Uuid,
+        mut messages: Vec<MessageDocument>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+        messages.sort_by(|a, b| b.cmp(a));
+
+        let mut events = vec![];
+
+        for message in messages {
+            if !message.verify() {
+                continue;
+            }
+            let message_id = message.id;
+            match conversation
+                .contains(&self.ipfs, message_id)
+                .await
+                .unwrap_or_default()
+            {
+                true => {
+                    let current_message = conversation
+                        .get_message_document(&self.ipfs, message_id)
+                        .await?;
+
+                    conversation
+                        .update_message_document(&self.ipfs, message)
+                        .await?;
+
+                    let is_edited = matches!((message.modified, current_message.modified), (Some(modified), Some(current_modified)) if modified > current_modified )
+                        | matches!(
+                            (message.modified, current_message.modified),
+                            (Some(_), None)
+                        );
+
+                    match is_edited {
+                        true => events.push(MessageEventKind::MessageEdited {
+                            conversation_id,
+                            message_id,
+                        }),
+                        false => {
+                            //TODO: Emit event showing message was updated in some way
+                        }
+                    }
+                }
+                false => {
+                    conversation
+                        .insert_message_document(&self.ipfs, message)
+                        .await?;
+
+                    events.push(MessageEventKind::MessageReceived {
+                        conversation_id,
+                        message_id,
+                    });
+                }
+            }
+        }
+
+        self.set_document(conversation).await?;
+
+        while let Some(event) = events.pop() {
+            _ = tx.send(event);
         }
 
         Ok(())
@@ -1154,7 +1407,7 @@ impl ConversationTask {
             .await
             .iter()
             .find(|conversation| {
-                conversation.conversation_type == ConversationType::Direct
+                conversation.conversation_type() == ConversationType::Direct
                     && conversation.recipients().contains(did)
                     && conversation.recipients().contains(&self.keypair)
             })
@@ -1283,26 +1536,21 @@ impl ConversationTask {
 
         let restricted = self.root.get_blocks().await.unwrap_or_default();
 
-        let conversation = ConversationDocument::new_group(
-            own_did,
-            name,
-            &Vec::from_iter(recipients),
-            &restricted,
-            settings,
-        )?;
+        let conversation =
+            ConversationDocument::new_group(own_did, name, recipients, &restricted, settings)?;
 
         let recipient = conversation.recipients();
 
-        let convo_id = conversation.id();
+        let conversation_id = conversation.id();
 
         self.set_document(conversation).await?;
 
-        let mut keystore = Keystore::new(convo_id);
+        let mut keystore = Keystore::new(conversation_id);
         keystore.insert(own_did, own_did, warp::crypto::generate::<64>())?;
 
-        self.set_keystore(convo_id, keystore).await?;
+        self.set_keystore(conversation_id, keystore).await?;
 
-        self.create_conversation_task(convo_id).await?;
+        self.create_conversation_task(conversation_id).await?;
 
         let peer_id_list = recipient
             .iter()
@@ -1311,7 +1559,7 @@ impl ConversationTask {
             .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
 
-        let conversation = self.get(convo_id).await?;
+        let conversation = self.get(conversation_id).await?;
 
         let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
             conversation: conversation.clone(),
@@ -1336,7 +1584,7 @@ impl ConversationTask {
                 self.queue_event(
                     did.clone(),
                     Queue::direct(
-                        convo_id,
+                        conversation_id,
                         None,
                         peer_id,
                         did.messaging(),
@@ -1348,12 +1596,10 @@ impl ConversationTask {
         }
 
         for recipient in recipient.iter().filter(|d| own_did.ne(d)) {
-            if let Err(e) = self.request_key(conversation.id(), recipient).await {
+            if let Err(e) = self.request_key(conversation_id, recipient).await {
                 tracing::warn!("Failed to send exchange request to {recipient}: {e}");
             }
         }
-
-        let conversation_id = conversation.id();
 
         self.event
             .emit(RayGunEventKind::ConversationCreated { conversation_id })
@@ -1363,26 +1609,7 @@ impl ConversationTask {
     }
 
     async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
-        let cid = match self.cid {
-            Some(cid) => cid,
-            None => return Err(Error::InvalidConversation),
-        };
-
-        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
-
-        let document: ConversationDocument =
-            match self.ipfs.get_dag(path).local().deserialized().await {
-                Ok(d) => d,
-                Err(_) => return Err(Error::InvalidConversation),
-            };
-
-        document.verify()?;
-
-        if document.deleted {
-            return Err(Error::InvalidConversation);
-        }
-
-        Ok(document)
+        self.root.get_conversation_document(id).await
     }
 
     pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
@@ -1419,7 +1646,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         }
 
-        let list = conversation.messages.take();
+        conversation.messages.take();
         conversation.deleted = true;
 
         self.set_document(conversation.clone()).await?;
@@ -1432,87 +1659,41 @@ impl ConversationTask {
             }
         }
 
-        if let Some(cid) = list {
-            let _ = self.ipfs.remove_block(cid, true).await;
-        }
-
         Ok(conversation)
     }
 
     pub async fn list(&self) -> Vec<ConversationDocument> {
-        self.list_stream().collect::<Vec<_>>().await
+        self.list_stream()
+            .and_then(|stream| async move { Ok(stream.collect::<Vec<_>>().await) })
+            .await
+            .unwrap_or_default()
     }
 
-    pub fn list_stream(&self) -> impl Stream<Item = ConversationDocument> + Unpin {
-        let cid = match self.cid {
-            Some(cid) => cid,
-            None => return futures::stream::empty().boxed(),
-        };
-
-        let ipfs = self.ipfs.clone();
-
-        let stream = async_stream::stream! {
-            let conversation_map: BTreeMap<String, Cid> = ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default();
-
-            let unordered = FuturesUnordered::from_iter(
-                conversation_map
-                    .values()
-                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
-            )
-            .filter_map(|result: Result<ConversationDocument, _>| async move { result.ok() })
-            .filter(|document| {
-                let deleted = document.deleted;
-                async move { !deleted }
-            });
-
-            for await conversation in unordered {
-                yield conversation;
-            }
-        };
-
-        stream.boxed()
+    pub async fn list_stream(
+        &self,
+    ) -> Result<impl Stream<Item = ConversationDocument> + Unpin, Error> {
+        self.root.list_conversation_document().await
     }
 
     pub async fn contains(&self, id: Uuid) -> bool {
         self.list_stream()
-            .any(|conversation| async move { conversation.id() == id })
+            .and_then(|stream| async move {
+                Ok(stream
+                    .any(|conversation| async move { conversation.id() == id })
+                    .await)
+            })
             .await
+            .unwrap_or_default()
     }
 
     pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         self.root.set_conversation_keystore_map(map).await
     }
 
-    pub async fn set_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let cid = self.ipfs.dag().put().serialize(map).pin(true).await?;
-
-        let old_map_cid = self.cid.replace(cid);
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".message_id"), cid).await {
-                tracing::error!("Error writing to '.message_id': {e}.")
-            }
-        }
-
-        if let Some(old_cid) = old_map_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                self.ipfs.remove_pin(&old_cid).recursive().await?;
-            }
-        }
-
-        Ok(())
-    }
-
     pub async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
         if let Some(creator) = document.creator.as_ref() {
             if creator.eq(&self.keypair)
-                && matches!(document.conversation_type, ConversationType::Group { .. })
+                && matches!(document.conversation_type(), ConversationType::Group)
             {
                 document.sign(&self.keypair)?;
             }
@@ -1520,17 +1701,9 @@ impl ConversationTask {
 
         document.verify()?;
 
-        let mut map = match self.cid {
-            Some(cid) => self.ipfs.get_dag(cid).local().deserialized().await?,
-            None => BTreeMap::new(),
-        };
-
-        let id = document.id().to_string();
-        let cid = self.ipfs.dag().put().serialize(document).await?;
-
-        map.insert(id, cid);
-
-        self.set_map(map).await
+        self.root.set_conversation_document(document).await?;
+        self.identity.export_root_document().await?;
+        Ok(())
     }
 
     pub async fn subscribe(
@@ -1580,7 +1753,7 @@ impl ConversationTask {
 
         let conversation = self.get(id).await?;
 
-        let bytes = match conversation.conversation_type {
+        let bytes = match conversation.conversation_type() {
             ConversationType::Direct => {
                 let list = conversation.recipients();
 
@@ -1596,7 +1769,7 @@ impl ConversationTask {
 
                 ecdh_decrypt(own_did, Some(member), data.data())?
             }
-            ConversationType::Group { .. } => {
+            ConversationType::Group => {
                 let store = self.get_keystore(id).await?;
 
                 let key = match store.get_latest(own_did, &data.sender()) {
@@ -1638,7 +1811,7 @@ impl ConversationTask {
             e
         })?;
 
-        message_event(self, id, &event).await?;
+        message_event(self, id, event).await?;
 
         Ok(())
     }
@@ -1707,10 +1880,9 @@ impl ConversationTask {
         message_id: Uuid,
     ) -> Result<warp::raygun::Message, Error> {
         let conversation = self.get(conversation_id).await?;
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => self.get_keystore(conversation.id()).await.ok(),
-        };
+
+        let keystore = pubkey_or_keystore(self, conversation_id, &self.keypair).await?;
+
         conversation
             .get_message(&self.ipfs, &self.keypair, message_id, keystore.as_ref())
             .await
@@ -1745,22 +1917,25 @@ impl ConversationTask {
         opt: MessageOptions,
     ) -> Result<Messages, Error> {
         let conversation = self.get(conversation_id).await?;
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        };
+
+        // let keystore = match conversation.conversation_type {
+        //     ConversationType::Direct => None,
+        //     ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
+        // };
+
+        let keystore = pubkey_or_keystore(self, conversation_id, &self.keypair).await?;
 
         let m_type = opt.messages_type();
         match m_type {
             MessagesType::Stream => {
                 let stream = conversation
-                    .get_messages_stream(&self.ipfs, self.keypair.clone(), opt, keystore.as_ref())
+                    .get_messages_stream(&self.ipfs, self.keypair.clone(), opt, keystore)
                     .await?;
                 Ok(Messages::Stream(stream))
             }
             MessagesType::List => {
                 let list = conversation
-                    .get_messages(&self.ipfs, self.keypair.clone(), opt, keystore.as_ref())
+                    .get_messages(&self.ipfs, self.keypair.clone(), opt, keystore)
                     .await?;
                 Ok(Messages::List(list))
             }
@@ -1785,10 +1960,7 @@ impl ConversationTask {
     ) -> Result<MessageStatus, Error> {
         let conversation = self.get(conversation_id).await?;
 
-        if matches!(
-            conversation.conversation_type,
-            ConversationType::Group { .. }
-        ) {
+        if matches!(conversation.conversation_type(), ConversationType::Group) {
             //TODO: Handle message status for group
             return Err(Error::Unimplemented);
         }
@@ -1824,14 +1996,12 @@ impl ConversationTask {
         //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent
         Ok(MessageStatus::Sent)
     }
-}
 
-impl ConversationTask {
     pub async fn send_message(
         &mut self,
         conversation_id: Uuid,
         messages: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
@@ -1863,40 +2033,18 @@ impl ConversationTask {
         message.set_sender(own_did.clone());
         message.set_lines(messages.clone());
 
-        let construct = [
-            message.id().into_bytes().to_vec(),
-            message.conversation_id().into_bytes().to_vec(),
-            own_did.to_string().as_bytes().to_vec(),
-            message
-                .lines()
-                .iter()
-                .map(|s| s.as_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        ]
-        .concat();
-
-        let signature = sign_serde(own_did, &construct)?;
-        message.set_signature(Some(signature));
-
         let message_id = message.id();
+        let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
 
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        };
+        let message =
+            MessageDocument::new(&self.ipfs, &self.keypair, message, keystore.as_ref()).await?;
 
-        let message_document = MessageDocument::new(
-            &self.ipfs,
-            self.keypair.clone(),
-            message.clone(),
-            keystore.as_ref(),
-        )
-        .await?;
+        let message_cid = conversation
+            .insert_message_document(&self.ipfs, message)
+            .await?;
 
-        let mut messages = conversation.get_message_list(&self.ipfs).await?;
-        messages.insert(message_document);
-        conversation.set_message_list(&self.ipfs, messages).await?;
+        let recipients = conversation.recipients();
+
         self.set_document(conversation).await?;
 
         let event = MessageEventKind::MessageSent {
@@ -1910,8 +2058,27 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id: message.id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
         self.publish(conversation_id, Some(message_id), event, true)
             .await
+            .map(|_| message_id)
     }
 
     pub async fn edit_message(
@@ -1922,6 +2089,7 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
+
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
         }
@@ -1943,7 +2111,15 @@ impl ConversationTask {
             });
         }
 
-        let mut message = self.get_message(conversation_id, message_id).await?;
+        let keystore = pubkey_or_keystore(&*self, conversation.id(), &self.keypair).await?;
+
+        let mut message_document = conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await?;
+
+        let mut message = message_document
+            .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
+            .await?;
 
         let sender = message.sender();
 
@@ -1953,79 +2129,62 @@ impl ConversationTask {
             return Err(Error::InvalidMessage);
         }
 
-        {
-            let signature = message.signature();
-            let construct = [
-                message.id().into_bytes().to_vec(),
-                message.conversation_id().into_bytes().to_vec(),
-                sender.to_string().as_bytes().to_vec(),
-                message
-                    .lines()
-                    .iter()
-                    .map(|s| s.as_bytes())
-                    .collect::<Vec<_>>()
-                    .concat(),
-            ]
-            .concat();
-            verify_serde_sig(sender.clone(), &construct, &signature)?;
-        }
-
-        let construct = [
-            message_id.into_bytes().to_vec(),
-            conversation.id().into_bytes().to_vec(),
-            own_did.to_string().as_bytes().to_vec(),
-            messages
-                .iter()
-                .map(|s| s.as_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        ]
-        .concat();
-
-        let signature = sign_serde(own_did, &construct)?;
-
-        let modified = Utc::now();
-
-        message.set_signature(Some(signature.clone()));
         *message.lines_mut() = messages.clone();
-        message.set_modified(modified);
-
-        let event = MessagingEvents::Edit {
-            conversation_id,
-            message_id,
-            modified,
-            lines: messages,
-            signature,
-        };
-
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        };
-
-        let mut list = conversation.get_message_list(&self.ipfs).await?;
-
-        //TODO: Maybe assert?
-        let mut message_document = list
-            .iter()
-            .find(|document| {
-                document.id == message_id && document.conversation_id == conversation_id
-            })
-            .copied()
-            .ok_or(Error::MessageNotFound)?;
+        message.set_modified(Utc::now());
 
         message_document
-            .update(&self.ipfs, &self.keypair, message, keystore.as_ref())
+            .update(
+                &self.ipfs,
+                &self.keypair,
+                message,
+                None,
+                keystore.as_ref(),
+                None,
+            )
             .await?;
 
-        list.replace(message_document);
-        conversation.set_message_list(&self.ipfs, list).await?;
+        let nonce = message_document.nonce_from_message(&self.ipfs).await?;
+        let signature = message_document.signature.expect("message to be signed");
+
+        let message_cid = conversation
+            .update_message_document(&self.ipfs, message_document)
+            .await?;
+
+        let recipients = conversation.recipients();
+
         self.set_document(conversation).await?;
 
         _ = tx.send(MessageEventKind::MessageEdited {
             conversation_id,
             message_id,
         });
+
+        let event = MessagingEvents::Edit {
+            conversation_id,
+            message_id,
+            modified: message_document.modified.expect("message to be modified"),
+            lines: messages,
+            nonce: nonce.to_vec(),
+            signature: signature.into(),
+        };
+
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(conversation_id, None, event, true).await
     }
@@ -2035,7 +2194,7 @@ impl ConversationTask {
         conversation_id: Uuid,
         message_id: Uuid,
         messages: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
@@ -2068,40 +2227,19 @@ impl ConversationTask {
         message.set_lines(messages);
         message.set_replied(Some(message_id));
 
-        let construct = [
-            message.id().into_bytes().to_vec(),
-            message.conversation_id().into_bytes().to_vec(),
-            own_did.to_string().as_bytes().to_vec(),
-            message
-                .lines()
-                .iter()
-                .map(|s| s.as_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        ]
-        .concat();
+        let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
 
-        let signature = sign_serde(own_did, &construct)?;
-        message.set_signature(Some(signature));
+        let message =
+            MessageDocument::new(&self.ipfs, &self.keypair, message, keystore.as_ref()).await?;
 
-        let message_id = message.id();
+        let message_id = message.id;
 
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        };
+        let message_cid = conversation
+            .insert_message_document(&self.ipfs, message)
+            .await?;
 
-        let message_document = MessageDocument::new(
-            &self.ipfs,
-            self.keypair.clone(),
-            message.clone(),
-            keystore.as_ref(),
-        )
-        .await?;
+        let recipients = conversation.recipients();
 
-        let mut messages = conversation.get_message_list(&self.ipfs).await?;
-        messages.insert(message_document);
-        conversation.set_message_list(&self.ipfs, messages).await?;
         self.set_document(conversation).await?;
 
         let event = MessageEventKind::MessageSent {
@@ -2115,8 +2253,27 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
         self.publish(conversation_id, Some(message_id), event, true)
             .await
+            .map(|_| message_id)
     }
 
     pub async fn delete_message(
@@ -2136,6 +2293,20 @@ impl ConversationTask {
         conversation.delete_message(&self.ipfs, message_id).await?;
 
         self.set_document(conversation).await?;
+
+        if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let _ = self
+                    .message_command
+                    .clone()
+                    .send(shuttle::message::client::MessageCommand::RemoveMessage {
+                        peer_id,
+                        conversation_id,
+                        message_id,
+                    })
+                    .await;
+            }
+        }
 
         _ = tx.send(MessageEventKind::MessageDeleted {
             conversation_id,
@@ -2158,19 +2329,14 @@ impl ConversationTask {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        };
-
-        let mut list = conversation.get_message_list(&self.ipfs).await?;
+        let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
 
         let mut message_document = conversation
             .get_message_document(&self.ipfs, message_id)
             .await?;
 
         let mut message = message_document
-            .resolve(&self.ipfs, &self.keypair, keystore.as_ref())
+            .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
             .await?;
 
         let event = match state {
@@ -2197,14 +2363,43 @@ impl ConversationTask {
         };
 
         message_document
-            .update(&self.ipfs, &self.keypair, message, keystore.as_ref())
+            .update(
+                &self.ipfs,
+                &self.keypair,
+                message,
+                None,
+                keystore.as_ref(),
+                None,
+            )
             .await?;
 
-        list.replace(message_document);
-        conversation.set_message_list(&self.ipfs, list).await?;
+        let message_cid = conversation
+            .update_message_document(&self.ipfs, message_document)
+            .await?;
+
+        let recipients = conversation.recipients();
+
         self.set_document(conversation).await?;
 
         _ = tx.send(event);
+
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         let event = MessagingEvents::Pin {
             conversation_id,
@@ -2226,22 +2421,21 @@ impl ConversationTask {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        };
-
-        let mut list = conversation.get_message_list(&self.ipfs).await?;
+        let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
 
         let mut message_document = conversation
             .get_message_document(&self.ipfs, message_id)
             .await?;
 
         let mut message = message_document
-            .resolve(&self.ipfs, &self.keypair, keystore.as_ref())
+            .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
             .await?;
 
+        let recipients = conversation.recipients();
+
         let reactions = message.reactions_mut();
+
+        let message_cid;
 
         match state {
             ReactionState::Add => {
@@ -2254,11 +2448,19 @@ impl ConversationTask {
                 entry.push((*self.keypair).clone());
 
                 message_document
-                    .update(&self.ipfs, &self.keypair, message, keystore.as_ref())
+                    .update(
+                        &self.ipfs,
+                        &self.keypair,
+                        message,
+                        None,
+                        keystore.as_ref(),
+                        None,
+                    )
                     .await?;
 
-                list.replace(message_document);
-                conversation.set_message_list(&self.ipfs, list).await?;
+                message_cid = conversation
+                    .update_message_document(&self.ipfs, message_document)
+                    .await?;
                 self.set_document(conversation).await?;
 
                 _ = tx.send(MessageEventKind::MessageReactionAdded {
@@ -2286,11 +2488,19 @@ impl ConversationTask {
                 };
 
                 message_document
-                    .update(&self.ipfs, &self.keypair, message, keystore.as_ref())
+                    .update(
+                        &self.ipfs,
+                        &self.keypair,
+                        message,
+                        None,
+                        keystore.as_ref(),
+                        None,
+                    )
                     .await?;
 
-                list.replace(message_document);
-                conversation.set_message_list(&self.ipfs, list).await?;
+                message_cid = conversation
+                    .update_message_document(&self.ipfs, message_document)
+                    .await?;
 
                 self.set_document(conversation).await?;
 
@@ -2311,22 +2521,40 @@ impl ConversationTask {
             emoji,
         };
 
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
         self.publish(conversation_id, None, event, true).await
     }
 
     pub async fn attach(
         &mut self,
         conversation_id: Uuid,
-        message_id: Option<Uuid>,
+        reply_id: Option<Uuid>,
         locations: Vec<Location>,
         messages: Vec<String>,
-    ) -> Result<BoxStream<'static, AttachmentKind>, Error> {
-        if locations.len() > 8 {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        if locations.len() > 32 {
             return Err(Error::InvalidLength {
                 context: "files".into(),
                 current: locations.len(),
                 minimum: Some(1),
-                maximum: Some(8),
+                maximum: Some(32),
             });
         }
 
@@ -2349,7 +2577,6 @@ impl ConversationTask {
             }
         }
         let conversation = self.get(conversation_id).await?;
-        let keypair = self.keypair.clone();
 
         let mut constellation = self.file.clone();
 
@@ -2366,41 +2593,59 @@ impl ConversationTask {
             return Err(Error::NoAttachments);
         }
 
+        let root_directory = constellation.root_directory();
+
+        if !root_directory.has_item(CHAT_DIRECTORY) {
+            let new_dir = Directory::new(CHAT_DIRECTORY);
+            root_directory.add_directory(new_dir)?;
+        }
+
+        let mut media_dir = root_directory
+            .get_last_directory_from_path(&format!("/{CHAT_DIRECTORY}/{conversation_id}"))?;
+
+        // if the directory that returned is the chat directory, this means we should create
+        // the directory specific to the conversation
+        if media_dir.name() == CHAT_DIRECTORY {
+            let new_dir = Directory::new(&conversation_id.to_string());
+            media_dir.add_directory(new_dir)?;
+            media_dir = media_dir.get_last_directory_from_path(&conversation_id.to_string())?;
+        }
+
+        assert_eq!(media_dir.name(), conversation_id.to_string());
+
         let mut atx = self.attachment_tx.clone();
+        let keystore = pubkey_or_keystore(self, conversation_id, &self.keypair).await?;
+        let ipfs = self.ipfs.clone();
+        let keypair = self.keypair.clone();
+
+        let message_id = Uuid::new_v4();
 
         let stream = async_stream::stream! {
             let mut in_stack = vec![];
 
             let mut attachments = vec![];
-            let mut total_thumbnail_size = 0;
 
-            let mut streams: SelectAll<_> = SelectAll::new();
+            let mut streams = StreamMap::new();
 
             for file in files {
-                match file {
+                match &file {
                     Location::Constellation { path } => {
                         match constellation
                             .root_directory()
-                            .get_item_by_path(&path)
+                            .get_item_by_path(path)
                             .and_then(|item| item.get_file())
                         {
                             Ok(f) => {
-                                let stream = async_stream::stream! {
-                                    yield (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f));
-                                };
-                                streams.push(stream.boxed());
+                                streams.insert(file, stream::once(async { (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f)) }).boxed());
                             },
                             Err(e) => {
                                 let constellation_path = PathBuf::from(&path);
-                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path);
-                                let stream = async_stream::stream! {
-                                    yield (Progression::ProgressFailed { name, last_size: None, error: Some(e.to_string()) }, None);
-                                };
-                                streams.push(stream.boxed());
+                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path.to_string());
+                                streams.insert(file, stream::once(async { (Progression::ProgressFailed { name, last_size: None, error: e }, None) }).boxed());
                             },
                         }
                     }
-                    Location::Disk {path} => {
+                    Location::Disk { path } => {
                         let mut filename = match path.file_name() {
                             Some(file) => file.to_string_lossy().to_string(),
                             None => continue,
@@ -2408,13 +2653,7 @@ impl ConversationTask {
 
                         let original = filename.clone();
 
-                        let current_directory = match constellation.current_directory() {
-                            Ok(directory) => directory,
-                            Err(e) => {
-                                yield AttachmentKind::Pending(Err(e));
-                                return;
-                            }
-                        };
+                        let current_directory = media_dir.clone();
 
                         let mut interval = 0;
                         let skip;
@@ -2443,30 +2682,27 @@ impl ConversationTask {
                         }
 
                         if skip {
-                            let stream = async_stream::stream! {
-                                yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some("Max files reached".into()) }, None);
-                            };
-                            streams.push(stream.boxed());
+                            streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
                             continue;
                         }
 
-                        let file = path.display().to_string();
+                        let file_path = path.display().to_string();
 
                         in_stack.push(filename.clone());
 
-                        let mut progress = match constellation.put(&filename, &file).await {
+                        let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
+
+                        let mut progress = match constellation.put(&filename, &file_path).await {
                             Ok(stream) => stream,
                             Err(e) => {
                                 error!(%conversation_id, "Error uploading {filename}: {e}");
-                                let stream = async_stream::stream! {
-                                    yield (Progression::ProgressFailed { name: filename, last_size: None, error: Some(e.to_string()) }, None);
-                                };
-                                streams.push(stream.boxed());
+                                streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
                                 continue;
                             }
                         };
 
-                        let current_directory = current_directory.clone();
+
+                        let directory = root_directory.clone();
                         let filename = filename.to_string();
 
                         let stream = async_stream::stream! {
@@ -2476,8 +2712,8 @@ impl ConversationTask {
                                         yield (item, None);
                                     },
                                     item @ Progression::ProgressComplete { .. } => {
-                                        let file = current_directory.get_item(&filename).and_then(|item| item.get_file()).ok();
-                                        yield (item, file);
+                                        let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
+                                        yield (item, file_name);
                                         break;
                                     },
                                     item @ Progression::ProgressFailed { .. } => {
@@ -2488,31 +2724,15 @@ impl ConversationTask {
                             }
                         };
 
-                        streams.push(stream.boxed());
+                        streams.insert(file, stream.boxed());
                     }
                 };
             }
 
-            for await (progress, file) in streams {
-                yield AttachmentKind::AttachedProgress(progress);
+            for await (location, (progress, file)) in streams {
+                yield AttachmentKind::AttachedProgress(location, progress);
                 if let Some(file) = file {
-                    // We reconstruct it to avoid out any metadata that was apart of the `File` structure that we dont want to share
-                    let new_file = warp::constellation::file::File::new(&file.name());
-
-                    let thumbnail = file.thumbnail();
-
-                    if total_thumbnail_size < 3 * 1024 * 1024
-                        && !thumbnail.is_empty()
-                        && thumbnail.len() <= 1024 * 1024
-                    {
-                        new_file.set_thumbnail(&thumbnail);
-                        new_file.set_thumbnail_format(file.thumbnail_format());
-                        total_thumbnail_size += thumbnail.len();
-                    }
-                    new_file.set_size(file.size());
-                    new_file.set_hash(file.hash());
-                    new_file.set_reference(&file.reference().unwrap_or_default());
-                    attachments.push(new_file);
+                    attachments.push(file);
                 }
             }
 
@@ -2525,28 +2745,16 @@ impl ConversationTask {
 
                     let own_did = &*keypair;
                     let mut message = warp::raygun::Message::default();
+                    message.set_id(message_id);
                     message.set_message_type(MessageType::Attachment);
                     message.set_conversation_id(conversation.id());
                     message.set_sender(own_did.clone());
                     message.set_attachment(attachments);
                     message.set_lines(messages.clone());
-                    message.set_replied(message_id);
-                    let construct = [
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        own_did.to_string().as_bytes().to_vec(),
-                        message
-                            .lines()
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
+                    message.set_replied(reply_id);
 
-                    let signature = sign_serde(own_did, &construct)?;
-                    message.set_signature(Some(signature));
-
+                    let message =
+                        MessageDocument::new(&ipfs, &keypair, message, keystore.as_ref()).await?;
 
                     let (tx, rx) = oneshot::channel();
                     _ = atx.send((conversation_id, message, tx)).await;
@@ -2558,36 +2766,26 @@ impl ConversationTask {
             yield AttachmentKind::Pending(final_results.await)
         };
 
-        Ok(stream.boxed())
+        Ok((message_id, stream.boxed()))
     }
 
     // use specifically for attachment messages
     async fn store_direct_for_attachment(
         &mut self,
         conversation_id: Uuid,
-        message: warp::raygun::Message,
+        message: MessageDocument,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
-        let message_id = message.id();
+        let message_id = message.id;
 
-        let keystore = match conversation.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        };
+        let message_cid = conversation
+            .insert_message_document(&self.ipfs, message)
+            .await?;
 
-        let message_document = MessageDocument::new(
-            &self.ipfs,
-            self.keypair.clone(),
-            message.clone(),
-            keystore.as_ref(),
-        )
-        .await?;
+        let recipients = conversation.recipients();
 
-        let mut messages = conversation.get_message_list(&self.ipfs).await?;
-        messages.insert(message_document);
-        conversation.set_message_list(&self.ipfs, messages).await?;
         self.set_document(conversation).await?;
 
         let event = MessageEventKind::MessageSent {
@@ -2601,132 +2799,95 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
         self.publish(conversation_id, Some(message_id), event, true)
             .await
     }
 
     pub async fn download(
         &self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
         path: PathBuf,
     ) -> Result<ConstellationProgressStream, Error> {
-        let constellation = self.file.clone();
+        let conversation = self.get(conversation_id).await?;
 
-        let members = self.get(conversation).await.map(|c| {
-            c.recipients()
-                .iter()
-                .filter_map(|did| did.to_peer_id().ok())
-                .collect::<Vec<_>>()
-        })?;
+        let members = conversation
+            .recipients()
+            .iter()
+            .filter_map(|did| did.to_peer_id().ok())
+            .collect::<Vec<_>>();
 
-        let message = self.get_message(conversation, message_id).await?;
+        let message = conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await?;
 
-        if message.message_type() != MessageType::Attachment {
+        if message.message_type != MessageType::Attachment {
             return Err(Error::InvalidMessage);
         }
 
         let attachment = message
-            .attachments()
+            .attachments(&self.ipfs)
+            .await
             .iter()
-            .find(|attachment| attachment.name() == file)
+            .find(|attachment| attachment.name == file)
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let _root = constellation.root_directory();
+        let stream = attachment.download(&self.ipfs, path, &members, None);
 
-        let reference = attachment
-            .reference()
-            .and_then(|reference| IpfsPath::from_str(&reference).ok())
-            .ok_or(Error::FileNotFound)?;
-
-        let ipfs = self.ipfs.clone();
-        let _constellation = constellation.clone();
-        let progress_stream = async_stream::stream! {
-            yield Progression::CurrentProgress {
-                name: attachment.name(),
-                current: 0,
-                total: Some(attachment.size()),
-            };
-
-            let stream = ipfs.unixfs().get(reference, &path).providers(&members);
-
-            for await event in stream {
-                match event {
-                    rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, total_size } => {
-                        yield Progression::CurrentProgress {
-                            name: attachment.name(),
-                            current: written,
-                            total: total_size
-                        };
-                    },
-                    rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { total_size, .. } => {
-                        yield Progression::ProgressComplete {
-                            name: attachment.name(),
-                            total: total_size,
-                        };
-                    },
-                    rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
-                        if let Err(e) = tokio::fs::remove_file(&path).await {
-                            error!("Error removing file: {e}");
-                        }
-                        yield Progression::ProgressFailed {
-                            name: attachment.name(),
-                            last_size: Some(written),
-                            error: error.map(|e| e.to_string()),
-                        };
-                    },
-                }
-            }
-        };
-
-        Ok(progress_stream.boxed())
+        Ok(stream.boxed())
     }
 
     pub async fn download_stream(
         &self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
-        let members = self.get(conversation).await.map(|c| {
-            c.recipients()
-                .iter()
-                .filter_map(|did| did.to_peer_id().ok())
-                .collect::<Vec<_>>()
-        })?;
+        let conversation = self.get(conversation_id).await?;
 
-        let message = self.get_message(conversation, message_id).await?;
+        let members = conversation
+            .recipients()
+            .iter()
+            .filter_map(|did| did.to_peer_id().ok())
+            .collect::<Vec<_>>();
 
-        if message.message_type() != MessageType::Attachment {
+        let message = conversation
+            .get_message_document(&self.ipfs, message_id)
+            .await?;
+
+        if message.message_type != MessageType::Attachment {
             return Err(Error::InvalidMessage);
         }
 
         let attachment = message
-            .attachments()
+            .attachments(&self.ipfs)
+            .await
             .iter()
-            .find(|attachment| attachment.name() == file)
+            .find(|attachment| attachment.name == file)
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let reference = attachment
-            .reference()
-            .and_then(|reference| IpfsPath::from_str(&reference).ok())
-            .ok_or(Error::FileNotFound)?;
-
-        let ipfs = self.ipfs.clone();
-
-        let stream = ipfs
-            .unixfs()
-            .cat(reference)
-            .providers(&members)
-            .map(|result| {
-                result
-                    .map(|b| b.into())
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
-            });
+        let stream = attachment.download_stream(&self.ipfs, &members, None);
 
         Ok(stream.boxed())
     }
@@ -2738,7 +2899,7 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
 
-        if matches!(conversation.conversation_type, ConversationType::Direct) {
+        if matches!(conversation.conversation_type(), ConversationType::Direct) {
             return Err(Error::InvalidConversation);
         }
 
@@ -2786,7 +2947,7 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
 
-        if matches!(conversation.conversation_type, ConversationType::Direct) {
+        if matches!(conversation.conversation_type(), ConversationType::Direct) {
             return Err(Error::InvalidConversation);
         }
 
@@ -2852,7 +3013,7 @@ impl ConversationTask {
             ConversationSettings::Group(settings) => settings,
             ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
         };
-        assert_eq!(conversation.conversation_type, ConversationType::Group);
+        assert_eq!(conversation.conversation_type(), ConversationType::Group);
 
         let Some(creator) = conversation.creator.clone() else {
             return Err(Error::InvalidConversation);
@@ -2896,7 +3057,7 @@ impl ConversationTask {
             ConversationSettings::Group(settings) => settings,
             ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
         };
-        assert_eq!(conversation.conversation_type, ConversationType::Group);
+        assert_eq!(conversation.conversation_type(), ConversationType::Group);
 
         let Some(creator) = conversation.creator.clone() else {
             return Err(Error::InvalidConversation);
@@ -2961,7 +3122,7 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
 
-        if matches!(conversation.conversation_type, ConversationType::Direct) {
+        if matches!(conversation.conversation_type(), ConversationType::Direct) {
             return Err(Error::InvalidConversation);
         }
 
@@ -3027,10 +3188,7 @@ impl ConversationTask {
 
             let mut can_broadcast = true;
 
-            if matches!(
-                document_type.conversation_type,
-                ConversationType::Group { .. }
-            ) {
+            if matches!(document_type.conversation_type(), ConversationType::Group) {
                 let own_did = &*self.keypair;
                 let creator = document_type
                     .creator
@@ -3450,7 +3608,7 @@ impl ConversationTask {
         member: Option<&DID>,
     ) -> Result<Vec<u8>, Error> {
         let conversation = self.get(conversation_id).await?;
-        match conversation.conversation_type {
+        match conversation.conversation_type() {
             ConversationType::Direct => {
                 let list = conversation.recipients();
 
@@ -3462,7 +3620,7 @@ impl ConversationTask {
                 let member = recipients.first().ok_or(Error::InvalidConversation)?;
                 ecdh_shared_key(&self.keypair, Some(member))
             }
-            ConversationType::Group { .. } => {
+            ConversationType::Group => {
                 let recipient = member.unwrap_or(&*self.keypair);
                 let keystore = self.get_keystore(conversation.id()).await?;
                 keystore.get_latest(&self.keypair, recipient)
@@ -3509,7 +3667,7 @@ async fn process_conversation(
             tracing::info!(%conversation_id, "Creating conversation");
 
             let convo = ConversationDocument::new_direct(did, list, settings)?;
-            let conversation_type = convo.conversation_type;
+            let conversation_type = convo.conversation_type();
 
             this.set_document(convo).await?;
 
@@ -3543,7 +3701,7 @@ async fn process_conversation(
 
             tracing::info!(%conversation_id, "Creating group conversation");
 
-            let conversation_type = conversation.conversation_type;
+            let conversation_type = conversation.conversation_type();
 
             let mut keystore = Keystore::new(conversation_id);
             keystore.insert(&this.keypair, &this.keypair, warp::crypto::generate::<64>())?;
@@ -3581,10 +3739,7 @@ async fn process_conversation(
         } => {
             let conversation = this.get(conversation_id).await?;
 
-            if !matches!(
-                conversation.conversation_type,
-                ConversationType::Group { .. }
-            ) {
+            if !matches!(conversation.conversation_type(), ConversationType::Group) {
                 return Err(anyhow::anyhow!("Can only leave from a group conversation").into());
             }
 
@@ -3657,8 +3812,8 @@ async fn process_conversation(
             match this.get(conversation_id).await {
                 Ok(conversation)
                     if conversation.recipients().contains(&sender)
-                        && matches!(conversation.conversation_type, ConversationType::Direct)
-                        || matches!(conversation.conversation_type, ConversationType::Group)
+                        && matches!(conversation.conversation_type(), ConversationType::Direct)
+                        || matches!(conversation.conversation_type(), ConversationType::Group)
                             && matches!(&conversation.creator, Some(creator) if creator.eq(&sender)) =>
                 {
                     conversation
@@ -3677,34 +3832,42 @@ async fn process_conversation(
     Ok(())
 }
 
+// TODO: de-duplicate logic where possible
 async fn message_event(
     this: &mut ConversationTask,
     conversation_id: Uuid,
-    events: &MessagingEvents,
+    events: MessagingEvents,
 ) -> Result<(), Error> {
     let mut document = this.get(conversation_id).await?;
     let tx = this.subscribe(conversation_id).await?;
 
-    let keystore = match document.conversation_type {
-        ConversationType::Direct => None,
-        ConversationType::Group { .. } => this.get_keystore(conversation_id).await.ok(),
-    };
+    let keystore = pubkey_or_keystore(this, conversation_id, &this.keypair).await?;
 
-    match events.clone() {
+    match events {
         MessagingEvents::New { message } => {
-            let mut messages = document.get_message_list(&this.ipfs).await?;
-            if messages
-                .iter()
-                .any(|message_document| message_document.id == message.id())
-            {
-                return Err(Error::MessageFound);
+            if !message.verify() {
+                return Err(Error::InvalidMessage);
             }
 
-            if !document.recipients().contains(&message.sender()) {
+            if document.id != message.conversation_id {
+                return Err(Error::InvalidConversation);
+            }
+
+            let message_id = message.id;
+
+            if !document.recipients().contains(&message.sender.to_did()) {
                 return Err(Error::IdentityDoesntExist);
             }
 
-            let lines_value_length: usize = message
+            if document.contains(&this.ipfs, message_id).await? {
+                return Err(Error::MessageFound);
+            }
+
+            let resolved_message = message
+                .resolve(&this.ipfs, &this.keypair, false, keystore.as_ref())
+                .await?;
+
+            let lines_value_length: usize = resolved_message
                 .lines()
                 .iter()
                 .map(|s| s.trim())
@@ -3725,35 +3888,12 @@ async fn message_event(
                 });
             }
 
-            {
-                let signature = message.signature();
-                let sender = message.sender();
-                let construct = [
-                    message.id().into_bytes().to_vec(),
-                    message.conversation_id().into_bytes().to_vec(),
-                    sender.to_string().as_bytes().to_vec(),
-                    message
-                        .lines()
-                        .iter()
-                        .map(|s| s.as_bytes())
-                        .collect::<Vec<_>>()
-                        .concat(),
-                ]
-                .concat();
-                verify_serde_sig(sender, &construct, &signature)?;
-            }
+            let conversation_id = message.conversation_id;
 
-            // spam_check(&mut message, self.spam_filter.clone())?;
-            let conversation_id = message.conversation_id();
+            document
+                .insert_message_document(&this.ipfs, message)
+                .await?;
 
-            let message_id = message.id();
-
-            let message_document =
-                MessageDocument::new(&this.ipfs, this.keypair.clone(), message, keystore.as_ref())
-                    .await?;
-
-            messages.insert(message_document);
-            document.set_message_list(&this.ipfs, messages).await?;
             this.set_document(document).await?;
 
             if let Err(e) = tx.send(MessageEventKind::MessageReceived {
@@ -3768,20 +3908,15 @@ async fn message_event(
             message_id,
             modified,
             lines,
+            nonce,
             signature,
         } => {
-            let mut list = document.get_message_list(&this.ipfs).await?;
-
-            let mut message_document = list
-                .iter()
-                .find(|document| {
-                    document.id == message_id && document.conversation_id == conversation_id
-                })
-                .copied()
-                .ok_or(Error::MessageNotFound)?;
+            let mut message_document = document
+                .get_message_document(&this.ipfs, message_id)
+                .await?;
 
             let mut message = message_document
-                .resolve(&this.ipfs, &this.keypair, keystore.as_ref())
+                .resolve(&this.ipfs, &this.keypair, true, keystore.as_ref())
                 .await?;
 
             let lines_value_length: usize = lines
@@ -3802,49 +3937,25 @@ async fn message_event(
             }
 
             let sender = message.sender();
-            //Validate the original message
-            {
-                let signature = message.signature();
-                let construct = [
-                    message.id().into_bytes().to_vec(),
-                    message.conversation_id().into_bytes().to_vec(),
-                    sender.to_string().as_bytes().to_vec(),
-                    message
-                        .lines()
-                        .iter()
-                        .map(|s| s.as_bytes())
-                        .collect::<Vec<_>>()
-                        .concat(),
-                ]
-                .concat();
-                verify_serde_sig(sender.clone(), &construct, &signature)?;
-            }
 
-            //Validate the edit message
-            {
-                let construct = [
-                    message.id().into_bytes().to_vec(),
-                    message.conversation_id().into_bytes().to_vec(),
-                    sender.to_string().as_bytes().to_vec(),
-                    lines
-                        .iter()
-                        .map(|s| s.as_bytes())
-                        .collect::<Vec<_>>()
-                        .concat(),
-                ]
-                .concat();
-                verify_serde_sig(sender, &construct, &signature)?;
-            }
-
-            message.set_signature(Some(signature));
             *message.lines_mut() = lines;
             message.set_modified(modified);
 
             message_document
-                .update(&this.ipfs, &this.keypair, message, keystore.as_ref())
+                .update(
+                    &this.ipfs,
+                    &this.keypair,
+                    message,
+                    (!signature.is_empty() && sender.ne(&this.keypair)).then_some(signature),
+                    keystore.as_ref(),
+                    Some(nonce.as_slice()),
+                )
                 .await?;
-            list.replace(message_document);
-            document.set_message_list(&this.ipfs, list).await?;
+
+            document
+                .update_message_document(&this.ipfs, message_document)
+                .await?;
+
             this.set_document(document).await?;
 
             if let Err(e) = tx.send(MessageEventKind::MessageEdited {
@@ -3864,24 +3975,12 @@ async fn message_event(
             //         .await?;
 
             //     let message = message_document
-            //         .resolve(&self.ipfs, &self.did, keystore.as_ref())
+            //         .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
             //         .await?;
 
-            //     let signature = message.signature();
-            //     let sender = message.sender();
-            //     let construct = [
-            //         message.id().into_bytes().to_vec(),
-            //         message.conversation_id().into_bytes().to_vec(),
-            //         sender.to_string().as_bytes().to_vec(),
-            //         message
-            //             .lines()
-            //             .iter()
-            //             .map(|s| s.as_bytes())
-            //             .collect::<Vec<_>>()
-            //             .concat(),
-            //     ]
-            //     .concat();
-            //     verify_serde_sig(sender, &construct, &signature)?;
+            //     if message.sender() == *self.keypair {
+            //         return Ok(());
+            //     }
             // }
 
             document.delete_message(&this.ipfs, message_id).await?;
@@ -3901,14 +4000,12 @@ async fn message_event(
             state,
             ..
         } => {
-            let mut list = document.get_message_list(&this.ipfs).await?;
-
             let mut message_document = document
                 .get_message_document(&this.ipfs, message_id)
                 .await?;
 
             let mut message = message_document
-                .resolve(&this.ipfs, &this.keypair, keystore.as_ref())
+                .resolve(&this.ipfs, &this.keypair, true, keystore.as_ref())
                 .await?;
 
             let event = match state {
@@ -3935,11 +4032,20 @@ async fn message_event(
             };
 
             message_document
-                .update(&this.ipfs, &this.keypair, message, keystore.as_ref())
+                .update(
+                    &this.ipfs,
+                    &this.keypair,
+                    message,
+                    None,
+                    keystore.as_ref(),
+                    None,
+                )
                 .await?;
 
-            list.replace(message_document);
-            document.set_message_list(&this.ipfs, list).await?;
+            document
+                .update_message_document(&this.ipfs, message_document)
+                .await?;
+
             this.set_document(document).await?;
 
             if let Err(e) = tx.send(event) {
@@ -3953,18 +4059,12 @@ async fn message_event(
             state,
             emoji,
         } => {
-            let mut list = document.get_message_list(&this.ipfs).await?;
-
-            let mut message_document = list
-                .iter()
-                .find(|document| {
-                    document.id == message_id && document.conversation_id == conversation_id
-                })
-                .cloned()
-                .ok_or(Error::MessageNotFound)?;
+            let mut message_document = document
+                .get_message_document(&this.ipfs, message_id)
+                .await?;
 
             let mut message = message_document
-                .resolve(&this.ipfs, &this.keypair, keystore.as_ref())
+                .resolve(&this.ipfs, &this.keypair, true, keystore.as_ref())
                 .await?;
 
             let reactions = message.reactions_mut();
@@ -3980,11 +4080,20 @@ async fn message_event(
                     entry.push(reactor.clone());
 
                     message_document
-                        .update(&this.ipfs, &this.keypair, message, keystore.as_ref())
+                        .update(
+                            &this.ipfs,
+                            &this.keypair,
+                            message,
+                            None,
+                            keystore.as_ref(),
+                            None,
+                        )
                         .await?;
 
-                    list.replace(message_document);
-                    document.set_message_list(&this.ipfs, list).await?;
+                    document
+                        .update_message_document(&this.ipfs, message_document)
+                        .await?;
+
                     this.set_document(document).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
@@ -4014,11 +4123,19 @@ async fn message_event(
                     };
 
                     message_document
-                        .update(&this.ipfs, &this.keypair, message, keystore.as_ref())
+                        .update(
+                            &this.ipfs,
+                            &this.keypair,
+                            message,
+                            None,
+                            keystore.as_ref(),
+                            None,
+                        )
                         .await?;
 
-                    list.replace(message_document);
-                    document.set_message_list(&this.ipfs, list).await?;
+                    document
+                        .update_message_document(&this.ipfs, message_document)
+                        .await?;
 
                     this.set_document(document).await?;
 
@@ -4180,14 +4297,14 @@ async fn process_identity_events(
 
             for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
                 let id = conversation.id();
-                match conversation.conversation_type {
+                match conversation.conversation_type() {
                     ConversationType::Direct => {
                         if let Err(e) = this.delete_conversation(id, true).await {
                             warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
                             continue;
                         }
                     }
-                    ConversationType::Group { .. } => {
+                    ConversationType::Group => {
                         if conversation.creator != Some((*this.keypair).clone()) {
                             continue;
                         }
@@ -4216,7 +4333,7 @@ async fn process_identity_events(
                         .map(|creator| own_did.eq(creator))
                         .unwrap_or_default()
                 })
-                .filter(|c| c.conversation_type == ConversationType::Group)
+                .filter(|c| c.conversation_type() == ConversationType::Group)
                 .filter(|c| c.restrict.contains(&did))
             {
                 let id = conversation.id();
@@ -4232,14 +4349,14 @@ async fn process_identity_events(
 
             for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
                 let id = conversation.id();
-                match conversation.conversation_type {
+                match conversation.conversation_type() {
                     ConversationType::Direct => {
                         if let Err(e) = this.delete_conversation(id, true).await {
                             tracing::warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
                             continue;
                         }
                     }
-                    ConversationType::Group { .. } => {
+                    ConversationType::Group => {
                         if conversation.creator != Some((*this.keypair).clone()) {
                             continue;
                         }
@@ -4282,10 +4399,7 @@ async fn process_request_response_event(
             kind,
         } => match kind {
             ConversationRequestKind::Key => {
-                if !matches!(
-                    conversation.conversation_type,
-                    ConversationType::Group { .. }
-                ) {
+                if !matches!(conversation.conversation_type(), ConversationType::Group) {
                     //Only group conversations support keys
                     return Err(Error::InvalidConversation);
                 }
@@ -4368,10 +4482,7 @@ async fn process_request_response_event(
             kind,
         } => match kind {
             ConversationResponseKind::Key { key } => {
-                if !matches!(
-                    conversation.conversation_type,
-                    ConversationType::Group { .. }
-                ) {
+                if !matches!(conversation.conversation_type(), ConversationType::Group) {
                     //Only group conversations support keys
                     tracing::error!(%conversation_id, "Invalid conversation type");
                     return Err(Error::InvalidConversation);
@@ -4435,7 +4546,7 @@ async fn process_pending_payload(this: &mut ConversationTask) {
                 let key = store.get_latest(&this.keypair, &sender)?;
                 let data = Cipher::direct_decrypt(&data, &key)?;
                 let event = serde_json::from_slice(&data)?;
-                message_event(this, conversation_id, &event).await
+                message_event(this, conversation_id, event).await
             };
 
             if let Err(e) = fut.await {
@@ -4588,4 +4699,32 @@ async fn process_queue(this: &mut ConversationTask) {
     if changed {
         this.save_queue().await;
     }
+}
+
+async fn pubkey_or_keystore(
+    conversation: &ConversationTask,
+    conversation_id: Uuid,
+    keypair: &DID,
+) -> Result<Either<DID, Keystore>, Error> {
+    let document = conversation.get(conversation_id).await?;
+    let keystore = match document.conversation_type() {
+        ConversationType::Direct => {
+            let list = document.recipients();
+
+            let recipients = list
+                .into_iter()
+                .filter(|did| keypair.ne(did))
+                .collect::<Vec<_>>();
+
+            let member = recipients
+                .first()
+                .cloned()
+                .ok_or(Error::InvalidConversation)?;
+
+            Either::Left(member)
+        }
+        ConversationType::Group => Either::Right(conversation.get_keystore(conversation_id).await?),
+    };
+
+    Ok(keystore)
 }

@@ -1,3 +1,4 @@
+use libipld::Cid;
 use rust_ipfs::{libp2p::StreamProtocol, Keypair};
 use serde::{Deserialize, Serialize};
 use warp::{crypto::DID, multipass::identity::ShortId};
@@ -77,6 +78,7 @@ pub enum Response {
     SynchronizedResponse(SynchronizedResponse),
     MailboxResponse(MailboxResponse),
     LookupResponse(LookupResponse),
+    Ack,
     Error(String),
 }
 
@@ -171,7 +173,7 @@ pub enum LookupResponse {
 #[serde(rename_all = "snake_case")]
 pub enum Register {
     IsRegistered,
-    RegisterIdentity { document: IdentityDocument },
+    RegisterIdentity { root_cid: Cid },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -195,9 +197,8 @@ pub enum RegisterError {
 #[serde(rename_all = "snake_case")]
 pub enum Synchronized {
     PeerRecord { record: Vec<u8> },
-    Update { document: IdentityDocument },
-    Store { package: Vec<u8> },
-    Fetch { did: DID },
+    Store { package: Cid },
+    Fetch,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -205,7 +206,7 @@ pub enum Synchronized {
 pub enum SynchronizedResponse {
     RecordStored,
     IdentityUpdated,
-    Package(Vec<u8>),
+    Package(Cid),
     Error(SynchronizedError),
 }
 

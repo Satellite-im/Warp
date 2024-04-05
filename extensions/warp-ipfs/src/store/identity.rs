@@ -46,17 +46,18 @@ use super::{
     connected_to_peer, did_keypair,
     document::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
-        root::RootDocumentMap, ExtractedRootDocument, RootDocument,
+        root::RootDocumentMap, ResolvedRootDocument, RootDocument,
     },
     ecdh_decrypt, ecdh_encrypt,
     event_subscription::EventSubscription,
     phonebook::PhoneBook,
     queue::Queue,
     request::PayloadRequest,
+    topics::IDENTITY_ANNOUNCEMENT,
+    SHUTTLE_TIMEOUT,
 };
 
-const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
-
+// TODO: Split into its own task
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 #[derive(Clone)]
@@ -391,7 +392,7 @@ impl IdentityStore {
 
         let signal = Default::default();
 
-        let mut store = Self {
+        let store = Self {
             ipfs,
             root_document,
             identity_cache,
@@ -407,30 +408,30 @@ impl IdentityStore {
             span,
         };
 
-        if let Ok(ident) = store.own_identity().await {
-            tracing::info!(did = %ident.did_key(), "Identity loaded");
-            match store.is_registered().await.is_ok() {
-                true => {
-                    if let Err(e) = store.fetch_mailbox().await {
-                        tracing::warn!(error = %e, "Unable to fetch or process mailbox");
-                    }
-                }
-                false => {
-                    let id = store.own_identity_document().await.expect("Valid identity");
-                    if let Err(e) = store.register(&id).await {
-                        tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
-                    }
-                    if let Err(e) = store.export_root_document().await {
-                        tracing::warn!(%id.did, error = %e, "Unable to export root document after registration");
+        // Move shuttle logic logic into its own task
+        // TODO: Maybe push into a joinset or futureunordered and poll?
+        tokio::spawn({
+            let mut store = store.clone();
+            async move {
+                if let Ok(ident) = store.own_identity().await {
+                    tracing::info!(did = %ident.did_key(), "Identity loaded");
+                    match store.is_registered().await.is_ok() {
+                        true => {
+                            if let Err(e) = store.fetch_mailbox().await {
+                                tracing::warn!(error = %e, "Unable to fetch or process mailbox");
+                            }
+                        }
+                        false => {
+                            if let Err(e) = store.register().await {
+                                tracing::warn!(did = %store.did_key, error = %e, "Unable to register identity");
+                            }
+                        }
                     }
                 }
             }
-        }
+        });
 
-        let did = store.get_keypair_did()?;
-
-        let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
-        let identity_announce_stream = store.ipfs.pubsub_subscribe("/identity/announce/v0").await?;
+        let did = store.get_keypair_did().expect("valid ed25519 keypair");
 
         store.discovery.start().await?;
 
@@ -456,16 +457,30 @@ impl IdentityStore {
             let list = store.list_all_raw_request().await.unwrap_or_default();
 
             // cleanup outgoing
-            for req in list.iter().filter(|req| req.did().eq(&friend)) {
-                let _ = store.root_document.remove_request(req).await;
+            for req in list.into_iter().filter(|req| req.did().eq(&friend)) {
+                let _ = store.root_document.remove_request(&req).await;
             }
         }
-
-        let friend_stream = store.ipfs.pubsub_subscribe(store.did_key.inbox()).await?;
 
         tokio::spawn({
             let mut store = store.clone();
             async move {
+                let event_stream = store
+                    .ipfs
+                    .pubsub_subscribe(did.events())
+                    .await
+                    .expect("not subscribed");
+                let identity_announce_stream = store
+                    .ipfs
+                    .pubsub_subscribe(IDENTITY_ANNOUNCEMENT)
+                    .await
+                    .expect("not subscribed");
+                let friend_stream = store
+                    .ipfs
+                    .pubsub_subscribe(store.did_key.inbox())
+                    .await
+                    .expect("not subscribed");
+
                 futures::pin_mut!(identity_announce_stream);
                 futures::pin_mut!(event_stream);
                 futures::pin_mut!(friend_stream);
@@ -894,10 +909,7 @@ impl IdentityStore {
             let document = self.own_identity_document().await?;
             let payload = PayloadRequest::new(kp, None, document)?;
             let bytes = serde_json::to_vec(&payload)?;
-            _ = self
-                .ipfs
-                .pubsub_publish("/identity/announce/v0", bytes)
-                .await;
+            _ = self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await;
         }
 
         Ok(())
@@ -1523,7 +1535,7 @@ impl IdentityStore {
     #[tracing::instrument(skip(self, extracted))]
     pub async fn import_identity(
         &mut self,
-        extracted: ExtractedRootDocument,
+        extracted: ResolvedRootDocument,
     ) -> Result<Identity, Error> {
         extracted.verify()?;
 
@@ -1553,7 +1565,7 @@ impl IdentityStore {
             }
             false => {
                 let id = self.own_identity_document().await.expect("Valid identity");
-                if let Err(e) = self.register(&id).await {
+                if let Err(e) = self.register().await {
                     tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
                 }
 
@@ -1613,7 +1625,7 @@ impl IdentityStore {
         self.root_document.set(root_document).await?;
         let identity = self.root_document.identity().await?;
 
-        if let Err(e) = self.register(&identity).await {
+        if let Err(e) = self.register().await {
             tracing::warn!(%identity.did, "Unable to register to external node: {e}. Identity will not be discoverable offline");
         }
 
@@ -1626,7 +1638,48 @@ impl IdentityStore {
         Ok(identity)
     }
 
-    pub async fn import_identity_remote(&mut self, did: DID) -> Result<Vec<u8>, Error> {
+    #[tracing::instrument(skip(self))]
+    pub async fn import_identity_remote_resolve(&mut self) -> Result<Identity, Error> {
+        let package = self.import_identity_remote().await?;
+
+        self.root_document.import_root_cid(package).await?;
+
+        tracing::info!("Loading friends list into phonebook");
+        if let Ok(friends) = self.friends_list().await {
+            if !friends.is_empty() {
+                let phonebook = self.phonebook();
+
+                if let Err(_e) = phonebook.add_friend_list(&friends).await {
+                    error!("Error adding friends in phonebook: {_e}");
+                }
+                _ = self.announce_identity_to_mesh().await;
+            }
+        }
+
+        match self.is_registered().await.is_ok() {
+            true => {
+                if let Err(e) = self.fetch_mailbox().await {
+                    tracing::warn!(error = %e, "Unable to fetch or process mailbox");
+                }
+            }
+            false => {
+                let id = self.own_identity_document().await.expect("Valid identity");
+                if let Err(e) = self.register().await {
+                    tracing::warn!(did = %id.did, error = %e, "Unable to register identity");
+                }
+
+                if let Err(e) = self.export_root_document().await {
+                    tracing::warn!(%id.did, error = %e, "Unable to export root document after registration");
+                }
+            }
+        }
+
+        let identity = self.own_identity().await?;
+
+        Ok(identity)
+    }
+
+    pub async fn import_identity_remote(&mut self) -> Result<Cid, Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
@@ -1635,7 +1688,6 @@ impl IdentityStore {
                     .clone()
                     .send(shuttle::identity::client::IdentityCommand::Fetch {
                         peer_id,
-                        did: did.clone(),
                         response: tx,
                     })
                     .await;
@@ -1662,77 +1714,21 @@ impl IdentityStore {
         Err(Error::IdentityDoesntExist)
     }
 
-    pub async fn export_identity_document(&self) -> Result<(), Error> {
-        let identity = self.own_identity_document().await?;
-
-        if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
-                let _ = self
-                    .identity_command
-                    .clone()
-                    .send(shuttle::identity::client::IdentityCommand::UpdateIdentity {
-                        peer_id,
-                        identity: identity.clone().into(),
-                        response: tx,
-                    })
-                    .await;
-
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
-                    Ok(Ok(Ok(_))) => {
-                        break;
-                    }
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!("Error exporting to {peer_id}: {e}");
-                        break;
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
-                        continue;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub async fn export_root_document(&self) -> Result<(), Error> {
-        let package = self.root_document.export_bytes().await?;
+        let package = self.root_document.export_root_cid().await?;
 
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
                     .clone()
-                    .send(shuttle::identity::client::IdentityCommand::UpdatePackage {
-                        peer_id,
-                        package: package.clone(),
-                        response: tx,
-                    })
+                    .send(
+                        shuttle::identity::client::IdentityCommand::UpdateRootDocument {
+                            peer_id,
+                            package,
+                        },
+                    )
                     .await;
-
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
-                    Ok(Ok(Ok(_))) => {
-                        break;
-                    }
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!("Error exporting to {peer_id}: {e}");
-                        break;
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
-                        continue;
-                    }
-                }
             }
         }
         Ok(())
@@ -1772,7 +1768,8 @@ impl IdentityStore {
         Err(Error::IdentityDoesntExist)
     }
 
-    async fn register(&self, identity: &IdentityDocument) -> Result<(), Error> {
+    async fn register(&self) -> Result<(), Error> {
+        let root_cid = self.root_document.export_root_cid().await?;
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let (tx, rx) = futures::channel::oneshot::channel();
@@ -1781,7 +1778,7 @@ impl IdentityStore {
                     .clone()
                     .send(shuttle::identity::client::IdentityCommand::Register {
                         peer_id,
-                        identity: identity.clone().into(),
+                        root_cid,
                         response: tx,
                     })
                     .await;
@@ -1873,7 +1870,6 @@ impl IdentityStore {
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
                 let _ = self
                     .identity_command
                     .clone()
@@ -1881,23 +1877,8 @@ impl IdentityStore {
                         peer_id,
                         to: did.clone(),
                         request: request.clone(),
-                        response: tx,
                     })
                     .await;
-
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
-                    Ok(Ok(result)) => {
-                        return result;
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
-                        continue;
-                    }
-                }
             }
         }
         Ok(())
@@ -2114,7 +2095,7 @@ impl IdentityStore {
                 tracing::error!("Updating root document failed: {e}");
                 e
             })?;
-        let _ = futures::join!(self.export_identity_document(), self.export_root_document());
+        let _ = self.export_root_document().await;
 
         Ok(())
     }
@@ -2167,7 +2148,7 @@ impl IdentityStore {
     pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
         self.root_document.set_status_indicator(status).await?;
 
-        let _ = futures::join!(self.export_identity_document(), self.export_root_document());
+        let _ = self.export_root_document().await;
 
         self.push_to_all().await;
         Ok(())
@@ -2291,8 +2272,6 @@ impl IdentityStore {
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid).recursive().await?;
         }
-        let blocks = ipfs.remove_block(cid, true).await?;
-        tracing::info!("{} blocks removed.", blocks.len());
         Ok(())
     }
 

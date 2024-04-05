@@ -18,11 +18,10 @@ warp.workspace = true
 rust-ipfs = { workspace = true }
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["net"] }
 futures.workspace = true
-futures-timer.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
 anyhow.workspace = true
@@ -34,7 +33,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 
-chrono = { workspace = true, features = ["serde"] }
+chrono = { workspace = true }
 
 void.workspace = true
 

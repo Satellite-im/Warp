@@ -107,7 +107,7 @@ pub enum MessageEvent {
 }
 
 pub enum AttachmentKind {
-    AttachedProgress(Progression),
+    AttachedProgress(Location, Progression),
     Pending(Result<(), Error>),
 }
 
@@ -352,7 +352,6 @@ pub struct Conversation {
     creator: Option<DID>,
     created: DateTime<Utc>,
     modified: DateTime<Utc>,
-    conversation_type: ConversationType,
     settings: ConversationSettings,
     recipients: Vec<DID>,
 }
@@ -374,7 +373,6 @@ impl Default for Conversation {
         let id = Uuid::new_v4();
         let name = None;
         let creator = None;
-        let conversation_type = ConversationType::Direct;
         let recipients = Vec::new();
         let timestamp = Utc::now();
         Self {
@@ -383,7 +381,6 @@ impl Default for Conversation {
             creator,
             created: timestamp,
             modified: timestamp,
-            conversation_type,
             settings: ConversationSettings::default(),
             recipients,
         }
@@ -412,7 +409,10 @@ impl Conversation {
     }
 
     pub fn conversation_type(&self) -> ConversationType {
-        self.conversation_type
+        match self.settings {
+            ConversationSettings::Direct(_) => ConversationType::Direct,
+            ConversationSettings::Group(_) => ConversationType::Group,
+        }
     }
 
     pub fn settings(&self) -> ConversationSettings {
@@ -443,10 +443,6 @@ impl Conversation {
 
     pub fn set_modified(&mut self, modified: DateTime<Utc>) {
         self.modified = modified;
-    }
-
-    pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
-        self.conversation_type = conversation_type;
     }
 
     pub fn set_settings(&mut self, settings: ConversationSettings) {
@@ -682,10 +678,6 @@ pub struct Message {
     /// List of Attachment
     attachment: Vec<File>,
 
-    /// Signature of the message
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<Vec<u8>>,
-
     /// Metadata related to the message. Can be used externally, but more internally focused
     #[serde(flatten)]
     metadata: HashMap<String, String>,
@@ -706,7 +698,6 @@ impl Default for Message {
             replied: None,
             lines: Vec::new(),
             attachment: Vec::new(),
-            signature: Default::default(),
             metadata: HashMap::new(),
         }
     }
@@ -776,10 +767,6 @@ impl Message {
         self.attachment.clone()
     }
 
-    pub fn signature(&self) -> Vec<u8> {
-        self.signature.clone().unwrap_or_default()
-    }
-
     pub fn metadata(&self) -> HashMap<String, String> {
         self.metadata.clone()
     }
@@ -832,10 +819,6 @@ impl Message {
 
     pub fn set_attachment(&mut self, attachments: Vec<File>) {
         self.attachment = attachments
-    }
-
-    pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
-        self.signature = signature
     }
 
     pub fn set_metadata(&mut self, metadata: HashMap<String, String>) {
@@ -904,7 +887,7 @@ pub enum EmbedState {
     Disable,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Hash, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
@@ -987,7 +970,7 @@ pub trait RayGun:
     ) -> Result<Messages, Error>;
 
     /// Sends a message to a conversation.
-    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error>;
+    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<Uuid, Error>;
 
     /// Edit an existing message in a conversation.
     async fn edit(
@@ -1027,7 +1010,7 @@ pub trait RayGun:
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
-    ) -> Result<(), Error>;
+    ) -> Result<Uuid, Error>;
 
     async fn embeds(
         &mut self,
@@ -1075,7 +1058,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Option<Uuid>,
         _: Vec<Location>,
         _: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         Err(Error::Unimplemented)
     }
 

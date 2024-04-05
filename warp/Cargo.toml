@@ -21,9 +21,7 @@ async-stream.workspace = true
 async-broadcast.workspace = true
 
 # Crypto crates
-x25519-dalek.workspace = true
 ed25519-dalek.workspace = true
-curve25519-dalek.workspace = true
 sha2.workspace = true
 hmac.workspace = true
 digest.workspace = true
@@ -40,11 +38,10 @@ thiserror.workspace = true
 
 # Sync crates
 parking_lot = { workspace = true, features = ["send_guard", "serde"] }
-cfg-if.workspace = true
 once_cell.workspace = true
 
 # Time crate
-chrono = { workspace = true, features = ["serde", "wasmbind"] }
+chrono = { workspace = true }
 
 # Encoding and Serializing Crates
 serde.workspace = true
@@ -62,24 +59,16 @@ dyn-clone.workspace = true
 uuid.workspace = true
 derive_more.workspace = true
 paste.workspace = true
-libc.workspace = true
 sata.workspace = true
-tracing = {  features = ["log"], workspace = true }
-tracing-futures = { features = [
-    "std-future",
-    "std",
-    "futures-03",
-], workspace = true }
+tracing = { features = ["log"], workspace = true }
 mediatype.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2" }
 gloo = "0.7"
-getrandom = { workspace = true, features = ["js"] }
 web-sys = { version = "0.3" }
 js-sys = { version = "0.3" }
 console_error_panic_hook = { version = "0.1.6" }

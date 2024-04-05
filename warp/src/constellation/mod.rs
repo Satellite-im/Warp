@@ -1,7 +1,6 @@
 #![allow(clippy::result_large_err)]
 pub mod directory;
 pub mod file;
-pub mod guard;
 pub mod item;
 
 use std::path::{Path, PathBuf};
@@ -15,8 +14,6 @@ use directory::Directory;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use futures::Stream;
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum ConstellationEventKind {
@@ -50,7 +47,7 @@ impl Stream for ConstellationEventStream {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug)]
 pub enum Progression {
     CurrentProgress {
         /// name of the file
@@ -77,7 +74,7 @@ pub enum Progression {
         last_size: Option<usize>,
 
         /// error of why it failed, if any
-        error: Option<String>,
+        error: Error,
     },
 }
 

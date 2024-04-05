@@ -1,230 +1,81 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use futures::{
-    channel::{
-        mpsc::{Receiver, Sender},
-        oneshot::Sender as OneshotSender,
-    },
     stream::{BoxStream, FuturesUnordered},
-    SinkExt, StreamExt,
+    StreamExt,
 };
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
-use tokio::select;
-use tokio_util::sync::{CancellationToken, DropGuard};
+use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
 
-use crate::identity::{document::IdentityDocument, protocol::Lookup, RequestPayload};
+use crate::{
+    identity::{document::IdentityDocument, protocol::Lookup, RequestPayload, RootDocument},
+    DidExt,
+};
 
 use super::root::RootStorage;
 
-#[allow(clippy::large_enum_variant)]
-enum IdentityStorageCommand {
-    Register {
-        document: IdentityDocument,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    Update {
-        document: IdentityDocument,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    Lookup {
-        kind: Lookup,
-        response: OneshotSender<Result<Vec<IdentityDocument>, Error>>,
-    },
-    Contains {
-        did: DID,
-        response: OneshotSender<bool>,
-    },
-    DeliverRequest {
-        to: DID,
-        request: RequestPayload,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    FetchAll {
-        did: DID,
-        response: OneshotSender<Result<(Vec<RequestPayload>, usize), Error>>,
-    },
-    StorePackage {
-        did: DID,
-        pkg: Vec<u8>,
-        response: OneshotSender<Result<(), Error>>,
-    },
-    GetPackage {
-        did: DID,
-        response: OneshotSender<Result<Vec<u8>, Error>>,
-    },
-    List {
-        response: OneshotSender<Result<Vec<IdentityDocument>, Error>>,
-    },
-}
-
 #[derive(Debug, Clone)]
 pub struct IdentityStorage {
-    tx: Sender<IdentityStorageCommand>,
-    _task_cancellation: Arc<DropGuard>,
+    inner: Arc<RwLock<IdentityStorageInner>>,
 }
 
 impl IdentityStorage {
     pub async fn new(ipfs: &Ipfs, root: &RootStorage) -> Self {
-        let root_dag = root.get_root().await.unwrap_or_default();
+        let root_dag = root.get_root().await;
 
-        let list = root_dag.identities;
+        let users = root_dag.users;
         let mailbox = root_dag.mailbox;
-        let packages = root_dag.packages;
 
-        let (tx, rx) = futures::channel::mpsc::channel(0);
-
-        let mut task = IdentityStorageTask {
+        let inner = Arc::new(RwLock::new(IdentityStorageInner {
             ipfs: ipfs.clone(),
             root: root.clone(),
             mailbox,
-            packages,
-            list,
-            rx,
-        };
+            users,
+        }));
 
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
-        tokio::spawn(async move {
-            select! {
-                _ = token.cancelled() => {}
-                _ = task.run() => {}
-            }
-        });
-
-        Self {
-            tx,
-            _task_cancellation: Arc::new(drop_guard),
-        }
+        Self { inner }
     }
 
-    pub async fn register(&self, document: IdentityDocument) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::Register {
-                document,
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    pub async fn update(&self, document: &IdentityDocument) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::Update {
-                document: document.clone(),
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+    pub async fn register(&self, document: &IdentityDocument, root_cid: Cid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.register(document, root_cid).await
     }
 
     pub async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::Lookup { kind, response: tx })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.lookup(kind).await
     }
 
-    pub async fn contains(&self, did: &DID) -> Result<bool, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::Contains {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from).map_err(Error::from)
+    pub async fn contains(&self, did: &DID) -> bool {
+        let inner = &*self.inner.read().await;
+        inner.contains(did).await
     }
 
     pub async fn fetch_mailbox(&self, did: DID) -> Result<(Vec<RequestPayload>, usize), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::FetchAll { did, response: tx })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.fetch_requests(did).await
     }
 
     pub async fn deliver_request(&self, to: &DID, request: &RequestPayload) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::DeliverRequest {
-                to: to.clone(),
-                request: request.clone(),
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.deliver_request(to, request).await
     }
 
-    pub async fn store_package(&self, did: &DID, data: Vec<u8>) -> Result<(), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::StorePackage {
-                did: did.clone(),
-                pkg: data,
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+    pub async fn update_user_document(&self, did: &DID, data: Cid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.update_user_document(did, data).await
     }
 
-    pub async fn get_package(&self, did: &DID) -> Result<Vec<u8>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::GetPackage {
-                did: did.clone(),
-                response: tx,
-            })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+    pub async fn get_user_document(&self, did: &DID) -> Result<Cid, Error> {
+        let inner = &*self.inner.read().await;
+        inner.get_user_document(did).await
     }
 
-    pub async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let _ = self
-            .tx
-            .clone()
-            .send(IdentityStorageCommand::List { response: tx })
-            .await;
-
-        rx.await.map_err(anyhow::Error::from)?
+    pub async fn list(&self) -> BoxStream<'static, IdentityDocument> {
+        let inner = &*self.inner.read().await;
+        inner.list().await
     }
 
     // pub async fn remove(&self, did: &DID) -> Result<(), Error> {
@@ -241,69 +92,20 @@ impl IdentityStorage {
 
     //     rx.await.map_err(anyhow::Error::from)?
     // }
-
-    // pub async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
-    //     let (tx, rx) = futures::channel::oneshot::channel();
-
-    //     let _ = self
-    //         .tx
-    //         .clone()
-    //         .send(IdentityStorageCommand::List { response: tx })
-    //         .await;
-
-    //     rx.await.map_err(anyhow::Error::from)?
-    // }
 }
 
 //Note: Maybe migrate to using a map where the public key points to the cid of the identity document instead
-struct IdentityStorageTask {
+#[derive(Debug)]
+struct IdentityStorageInner {
     ipfs: Ipfs,
-    list: Option<Cid>,
-    packages: Option<Cid>,
+    users: Option<Cid>,
     mailbox: Option<Cid>,
     root: RootStorage,
-    rx: Receiver<IdentityStorageCommand>,
 }
 
-impl IdentityStorageTask {
-    pub async fn run(&mut self) {
-        while let Some(command) = self.rx.next().await {
-            match command {
-                IdentityStorageCommand::Register { document, response } => {
-                    _ = response.send(self.register(document).await);
-                }
-                IdentityStorageCommand::Update { document, response } => {
-                    _ = response.send(self.update(document).await);
-                }
-                IdentityStorageCommand::Lookup { kind, response } => {
-                    _ = response.send(self.lookup(kind).await);
-                }
-                IdentityStorageCommand::Contains { did, response } => {
-                    _ = response.send(self.contains(did).await);
-                }
-                IdentityStorageCommand::DeliverRequest {
-                    to,
-                    request,
-                    response,
-                } => _ = response.send(self.deliver_request(to, request).await),
-                IdentityStorageCommand::FetchAll { did, response } => {
-                    _ = response.send(self.fetch_requests(did).await)
-                }
-                IdentityStorageCommand::StorePackage { did, pkg, response } => {
-                    _ = response.send(self.store_package(did, pkg).await)
-                }
-                IdentityStorageCommand::GetPackage { did, response } => {
-                    _ = response.send(self.get_package(did).await)
-                }
-                IdentityStorageCommand::List { response } => {
-                    _ = response.send(Ok(self.list().await.collect::<Vec<_>>().await))
-                }
-            }
-        }
-    }
-
-    async fn contains(&self, did: DID) -> bool {
-        let cid = match self.list {
+impl IdentityStorageInner {
+    async fn contains(&self, did: &DID) -> bool {
+        let cid = match self.users {
             Some(cid) => cid,
             None => return false,
         };
@@ -312,18 +114,13 @@ impl IdentityStorageTask {
             .sub_path(&did.to_string())
             .expect("Valid path");
 
-        self.ipfs
-            .get_dag(path)
-            .local()
-            .deserialized::<IdentityDocument>()
-            .await
-            .is_ok()
+        self.ipfs.get_dag(path).local().await.is_ok()
     }
 
-    async fn register(&mut self, document: IdentityDocument) -> Result<(), Error> {
+    async fn register(&mut self, document: &IdentityDocument, root_cid: Cid) -> Result<(), Error> {
         document.verify()?;
 
-        let mut list: HashMap<String, Cid> = match self.list {
+        let mut list: BTreeMap<String, Cid> = match self.users {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -331,7 +128,7 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         let did_str = document.did.to_string();
@@ -340,47 +137,31 @@ impl IdentityStorageTask {
             return Err(Error::IdentityExist);
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(document.clone())
-            .pin(false)
-            .await?;
+        list.insert(did_str, root_cid);
 
-        list.insert(did_str, cid);
+        let cid = self.ipfs.dag().put().serialize(list).await?;
 
-        let cid = self.ipfs.dag().put().serialize(list).pin(false).await?;
-
-        let old_cid = self.list.replace(cid);
+        let old_cid = self.users.replace(cid);
 
         if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                _ = self.ipfs.remove_pin(&old_cid).await;
             }
         }
 
-        self.root.set_identity_list(cid).await?;
+        self.root.set_user_documents(cid).await?;
 
         Ok(())
     }
 
-    async fn store_package(&mut self, did: DID, package: Vec<u8>) -> Result<(), Error> {
-        if !self.contains(did.clone()).await {
+    async fn update_user_document(&mut self, did: &DID, document: Cid) -> Result<(), Error> {
+        if !self.contains(did).await {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let mut list: HashMap<String, Cid> = match self.packages {
+        let identity_peer_id = did.to_peer_id()?;
+
+        let mut list: BTreeMap<String, Cid> = match self.users {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -388,149 +169,79 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
-        let pkg_path = self
-            .ipfs
-            .add_unixfs(
-                futures::stream::once(async move { Ok::<_, std::io::Error>(package) }).boxed(),
-            )
-            .await?;
+        if let Some(cid) = list.get(&did.to_string()) {
+            tracing::info!(%did, %document, "loading previous document");
+            let old_document = self
+                .ipfs
+                .get_dag(*cid)
+                .local()
+                .deserialized::<RootDocument>()
+                .await
+                .map_err(anyhow::Error::from)?;
 
-        let pkg_cid = pkg_path.root().cid().copied().expect("Cid available");
+            let new_document = self
+                .ipfs
+                .get_dag(document)
+                .provider(identity_peer_id)
+                .deserialized::<RootDocument>()
+                .await
+                .map_err(anyhow::Error::from)?;
 
-        list.insert(did.to_string(), pkg_cid);
+            tracing::info!(%did, %document, new = new_document.modified >= old_document.modified);
 
-        let cid = self.ipfs.dag().put().pin(true).serialize(list).await?;
+            if old_document.modified >= new_document.modified {
+                tracing::warn!(%did, %document, "document provided is older or same as the current document");
+                return Err(Error::Other);
+            }
 
-        let old_cid = self.packages.replace(cid);
+            tracing::info!(%did, %document, new = new_document.modified >= old_document.modified, "storing new root document");
+        }
+
+        list.insert(did.to_string(), document);
+
+        let cid = self.ipfs.dag().put().serialize(list).await?;
+
+        self.ipfs.insert_pin(&cid).recursive().await?;
+
+        let old_cid = self.users.replace(cid);
         if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity package block");
-                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, true)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                tracing::debug!(cid = %old_cid, "unpinning identity package block");
+                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
             }
         }
-        self.root.set_package(cid).await?;
+        self.root.set_user_documents(cid).await?;
 
         Ok(())
     }
 
-    async fn get_package(&mut self, did: DID) -> Result<Vec<u8>, Error> {
-        if !self.contains(did.clone()).await {
+    async fn get_user_document(&self, did: &DID) -> Result<Cid, Error> {
+        if !self.contains(did).await {
             return Err(Error::IdentityDoesntExist);
         }
 
-        if self.packages.is_none() {
-            return Err(Error::IdentityDoesntExist);
-        }
+        let cid = self.users.ok_or(Error::IdentityDoesntExist)?;
 
-        let did_str = did.to_string();
-
-        let path = IpfsPath::from(self.packages.expect("Valid")).sub_path(&did_str)?;
-
-        let pkg_path = self
+        let list: BTreeMap<String, Cid> = self
             .ipfs
-            .cat_unixfs(path)
+            .get_dag(cid)
             .local()
-            .await
-            .map_err(anyhow::Error::from)?;
-
-        Ok(pkg_path.into())
-    }
-
-    async fn update(&mut self, document: IdentityDocument) -> Result<(), Error> {
-        document.verify()?;
-
-        let mut list: HashMap<String, Cid> = match self.list {
-            Some(cid) => self
-                .ipfs
-                .get_dag(cid)
-                .local()
-                .deserialized()
-                .await
-                .unwrap_or_default(),
-            None => HashMap::new(),
-        };
-
-        let did_str = document.did.to_string();
-
-        if !list.contains_key(&did_str) {
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        let internal_cid = list.get(&did_str).expect("document to exist");
-
-        let internal_document = self
-            .ipfs
-            .get_dag(*internal_cid)
-            .local()
-            .deserialized::<IdentityDocument>()
+            .deserialized()
             .await
             .map_err(|_| Error::IdentityDoesntExist)?;
 
-        if !internal_document.different(&document) {
-            return Err(Error::CannotUpdateIdentity);
-        }
+        let did_str = did.to_string();
 
-        let cid = self.ipfs.dag().put().serialize(document).pin(false).await?;
-
-        let old_cid = list.insert(did_str, cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
-
-        let cid = self.ipfs.dag().put().serialize(list).pin(false).await?;
-
-        let old_cid = self.list.replace(cid);
-
-        if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, false)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
-            }
-        }
-        self.root.set_identity_list(cid).await?;
-
-        Ok(())
+        list.get(&did_str)
+            .ok_or(Error::IdentityDoesntExist)
+            .copied()
     }
 
     async fn list(&self) -> BoxStream<'static, IdentityDocument> {
-        let list: HashMap<String, Cid> = match self.list {
+        let list: BTreeMap<String, Cid> = match self.users {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -538,7 +249,7 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         let ipfs = self.ipfs.clone();
@@ -546,7 +257,8 @@ impl IdentityStorageTask {
         FuturesUnordered::from_iter(list.values().copied().map(|cid| {
             let ipfs = ipfs.clone();
             async move {
-                ipfs.get_dag(cid)
+                let path = IpfsPath::from(cid).sub_path("identity")?;
+                ipfs.get_dag(path)
                     .local()
                     .deserialized::<IdentityDocument>()
                     .await
@@ -559,6 +271,7 @@ impl IdentityStorageTask {
 
     //TODO: Use a map instead with the key linked to the content pointer
     //      and resolve within a stream while matching conditions
+    //TODO: Filter stream instead
     async fn lookup(&self, kind: Lookup) -> Result<Vec<IdentityDocument>, Error> {
         let list_stream = self.list().await;
 
@@ -660,7 +373,7 @@ impl IdentityStorageTask {
 
     async fn fetch_requests(&mut self, did: DID) -> Result<(Vec<RequestPayload>, usize), Error> {
         let key_str = did.to_string();
-        let mut list: HashMap<String, Cid> = match self.mailbox {
+        let mut list: BTreeMap<String, Cid> = match self.mailbox {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -688,17 +401,11 @@ impl IdentityStorageTask {
 
         mailbox.sort_by(|a, b| b.cmp(a));
 
-        let mut requests = vec![];
+        let mut mailbox = mailbox.into_iter();
 
-        let mut counter = 0;
+        let requests = mailbox.by_ref().take(50).collect::<Vec<_>>();
 
-        while let Some(req) = mailbox.pop() {
-            if counter > 50 {
-                break;
-            }
-            requests.push(req);
-            counter += 1;
-        }
+        let mailbox = mailbox.collect::<Vec<_>>();
 
         let remaining = mailbox.len();
 
@@ -711,19 +418,9 @@ impl IdentityStorageTask {
         let old_cid = self.mailbox.replace(cid);
 
         if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, true)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
             }
         }
 
@@ -732,14 +429,14 @@ impl IdentityStorageTask {
         Ok((requests, remaining))
     }
 
-    async fn deliver_request(&mut self, to: DID, request: RequestPayload) -> Result<(), Error> {
-        if !self.contains(to.clone()).await {
+    async fn deliver_request(&mut self, to: &DID, request: &RequestPayload) -> Result<(), Error> {
+        if !self.contains(to).await {
             return Err(Error::IdentityDoesntExist);
         }
 
         request.verify().map_err(|_| Error::InvalidSignature)?;
         let key_str = to.to_string();
-        let mut list: HashMap<String, Cid> = match self.mailbox {
+        let mut list: BTreeMap<String, Cid> = match self.mailbox {
             Some(cid) => self
                 .ipfs
                 .get_dag(cid)
@@ -747,7 +444,7 @@ impl IdentityStorageTask {
                 .deserialized()
                 .await
                 .unwrap_or_default(),
-            None => HashMap::new(),
+            None => BTreeMap::new(),
         };
 
         let mut mailbox = match list.get(&key_str) {
@@ -769,7 +466,7 @@ impl IdentityStorageTask {
             return Err(Error::FriendRequestExist);
         }
 
-        mailbox.push(request);
+        mailbox.push(request.clone());
 
         let cid = self.ipfs.dag().put().serialize(mailbox).await?;
 
@@ -780,19 +477,9 @@ impl IdentityStorageTask {
         let old_cid = self.mailbox.replace(cid);
 
         if let Some(old_cid) = old_cid {
-            if old_cid != cid {
-                if self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                    tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                    _ = self.ipfs.remove_pin(&old_cid).recursive().await;
-                }
-
-                tracing::info!(cid = %old_cid, "removing block(s)");
-                let remove_blocks = self
-                    .ipfs
-                    .remove_block(old_cid, true)
-                    .await
-                    .unwrap_or_default();
-                tracing::info!(cid = %old_cid, blocks_removed = remove_blocks.len(), "blocks removed");
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
+                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
             }
         }
 
@@ -801,6 +488,8 @@ impl IdentityStorageTask {
         Ok(())
     }
 
+    // TODO: We should have the option for users to deregister their identity from shuttle
+    //       which would be an act of preserving privacy to those who wish to opt out
     // async fn remove(&mut self, did: DID) -> Result<(), Error> {
     //     let mut list: HashSet<IdentityDocument> = match self.list {
     //         Some(cid) => self
@@ -838,20 +527,5 @@ impl IdentityStorageTask {
     //     }
 
     //     Ok(())
-    // }
-
-    // async fn list(&self) -> Result<Vec<IdentityDocument>, Error> {
-    //     let list: HashSet<IdentityDocument> = match self.list {
-    //         Some(cid) => self
-    //             .ipfs
-    //             .get_dag(IpfsPath::from(cid))
-    //             .local()
-    //             .deserialized()
-    //             .await
-    //             .unwrap_or_default(),
-    //         None => HashSet::new(),
-    //     };
-
-    //     Ok(Vec::from_iter(list))
     // }
 }

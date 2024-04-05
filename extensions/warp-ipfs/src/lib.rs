@@ -1,6 +1,5 @@
 mod behaviour;
 pub mod config;
-mod spam_filter;
 pub mod store;
 mod thumbnail;
 mod utils;
@@ -27,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use store::document::ExtractedRootDocument;
+use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
 use store::files::FileStore;
 use store::identity::{IdentityStore, LookupBy};
@@ -238,6 +237,7 @@ impl WarpIpfs {
 
         let (pb_tx, pb_rx) = channel(50);
         let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
+        let (msg_sh_tx, msg_sh_rx) = futures::channel::mpsc::channel(1);
 
         let (enable, nodes) = match &config.store_setting.discovery {
             config::Discovery::Shuttle { addresses } => (true, addresses.clone()),
@@ -246,7 +246,14 @@ impl WarpIpfs {
 
         let behaviour = behaviour::Behaviour {
             shuttle_identity: enable
-                .then(|| shuttle::identity::client::Behaviour::new(&keypair, None, id_sh_rx, nodes))
+                .then(|| {
+                    shuttle::identity::client::Behaviour::new(&keypair, None, id_sh_rx, &nodes)
+                })
+                .into(),
+            shuttle_message: enable
+                .then(|| {
+                    shuttle::message::client::Behaviour::new(&keypair, None, msg_sh_rx, &nodes)
+                })
                 .into(),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
@@ -575,6 +582,7 @@ impl WarpIpfs {
             filestore,
             self.raygun_tx.clone(),
             identity_store,
+            msg_sh_tx,
         )
         .await;
 
@@ -1106,7 +1114,7 @@ impl MultiPassImportExport for WarpIpfs {
                 let bytes = tokio::fs::read(path).await?;
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
                 let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                    serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
 
@@ -1140,7 +1148,7 @@ impl MultiPassImportExport for WarpIpfs {
 
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
                 let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
+                    serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
 
@@ -1186,13 +1194,7 @@ impl MultiPassImportExport for WarpIpfs {
 
                 let mut store = self.identity_store(false).await?;
 
-                let package = store.import_identity_remote(keypair.clone()).await?;
-                let decrypted_bundle = ecdh_decrypt(&keypair, None, package)?;
-                let exported_document =
-                    serde_json::from_slice::<ExtractedRootDocument>(&decrypted_bundle)?;
-
-                exported_document.verify()?;
-                return store.import_identity(exported_document).await;
+                return store.import_identity_remote_resolve().await;
             }
         }
     }
@@ -1432,7 +1434,7 @@ impl RayGun for WarpIpfs {
             .await
     }
 
-    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<(), Error> {
+    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<Uuid, Error> {
         self.messaging_store()?
             .send_message(conversation_id, value)
             .await
@@ -1489,7 +1491,7 @@ impl RayGun for WarpIpfs {
         conversation_id: Uuid,
         message_id: Uuid,
         value: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         self.messaging_store()?
             .reply(conversation_id, message_id, value)
             .await
@@ -1518,7 +1520,7 @@ impl RayGunAttachment for WarpIpfs {
         message_id: Option<Uuid>,
         locations: Vec<Location>,
         message: Vec<String>,
-    ) -> Result<AttachmentEventStream, Error> {
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
         self.messaging_store()?
             .attach(conversation_id, message_id, locations, message)
             .await
