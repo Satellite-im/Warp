@@ -143,7 +143,6 @@ impl WarpIpfsBuilder {
 }
 
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: Tesseract) -> anyhow::Result<WarpIpfs> {
     pub async fn new(config: Config, tesseract: Tesseract) -> Result<WarpIpfs, Error> {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
