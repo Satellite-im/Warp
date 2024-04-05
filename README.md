@@ -48,7 +48,10 @@ outside of localhost.
 
 #### Mac
 
-***TBD***
+| Dep  | Install Command                                                  |
+|------|------------------------------------------------------------------|
+| Rust | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| CMake | `brew install cmake` |
 
 ## Docs
 
