@@ -70,7 +70,6 @@ use crate::store::{ecdh_decrypt, PeerIdExt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
-    config: Config,
     tesseract: Tesseract,
     inner: Arc<Inner>,
     multipass_tx: EventSubscription<MultiPassEventKind>,
@@ -79,6 +78,7 @@ pub struct WarpIpfs {
 }
 
 struct Inner {
+    config: Config,
     identity_guard: tokio::sync::Mutex<()>,
     init_guard: tokio::sync::Mutex<()>,
     span: RwLock<Span>,
@@ -150,6 +150,7 @@ impl WarpIpfs {
         let span = RwLock::new(Span::current());
 
         let inner = Arc::new(Inner {
+            config,
             components: Default::default(),
             identity_guard: Default::default(),
             init_guard: Default::default(),
@@ -157,7 +158,6 @@ impl WarpIpfs {
         });
 
         let identity = WarpIpfs {
-            config,
             tesseract,
             inner,
             multipass_tx,
@@ -249,15 +249,13 @@ impl WarpIpfs {
 
         let _g = span.enter();
 
-        let config = self.config.clone();
-
-        let empty_bootstrap = match &config.bootstrap {
+        let empty_bootstrap = match &self.inner.config.bootstrap {
             Bootstrap::Ipfs => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
             Bootstrap::None => true,
         };
 
-        if empty_bootstrap && !config.ipfs_setting.dht_client {
+        if empty_bootstrap && !self.inner.config.ipfs_setting.dht_client {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
@@ -265,7 +263,7 @@ impl WarpIpfs {
         let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
         let (msg_sh_tx, msg_sh_rx) = futures::channel::mpsc::channel(1);
 
-        let (enable, nodes) = match &config.store_setting.discovery {
+        let (enable, nodes) = match &self.inner.config.store_setting.discovery {
             config::Discovery::Shuttle { addresses } => (true, addresses.clone()),
             _ => Default::default(),
         };
@@ -291,7 +289,7 @@ impl WarpIpfs {
                     protocol_version: "/satellite/warp/0.1".into(),
                     ..Default::default()
                 };
-                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
+                if let Some(agent) = self.inner.config.ipfs_setting.agent_version.as_ref() {
                     idconfig.agent_version = agent.clone();
                 }
                 idconfig
@@ -299,22 +297,22 @@ impl WarpIpfs {
             .with_bitswap()
             .with_ping(Default::default())
             .with_pubsub(PubsubConfig {
-                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
+                max_transmit_size: self.inner.config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
             })
             .with_relay(true)
-            .set_listening_addrs(config.listen_on.clone())
+            .set_listening_addrs(self.inner.config.listen_on.clone())
             .with_custom_behaviour(behaviour)
             .set_keypair(&keypair)
             .with_rendezvous_client()
             .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
-                enable_quic: !config.ipfs_setting.disable_quic,
+                enable_quic: !self.inner.config.ipfs_setting.disable_quic,
                 quic_max_idle_timeout: Duration::from_secs(5),
                 ..Default::default()
             });
 
-        if let Some(path) = self.config.path.as_ref() {
+        if let Some(path) = self.inner.config.path.as_ref() {
             info!("Instance will be persistent");
             info!("Path set: {}", path.display());
 
@@ -326,7 +324,7 @@ impl WarpIpfs {
         }
 
         if matches!(
-            config.store_setting.discovery,
+            self.inner.config.store_setting.discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
@@ -343,14 +341,14 @@ impl WarpIpfs {
                 Default::default(),
             );
 
-            if config.ipfs_setting.bootstrap {
-                for addr in config.bootstrap.address() {
+            if self.inner.config.ipfs_setting.bootstrap {
+                for addr in self.inner.config.bootstrap.address() {
                     uninitialized = uninitialized.add_bootstrap(addr);
                 }
             }
         }
 
-        if config.ipfs_setting.memory_transport {
+        if self.inner.config.ipfs_setting.memory_transport {
             uninitialized = uninitialized
                 .with_custom_transport(Box::new(
                     |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
@@ -378,25 +376,27 @@ impl WarpIpfs {
                 .listen_as_external_addr();
         }
 
-        if config.ipfs_setting.portmapping {
+        if self.inner.config.ipfs_setting.portmapping {
             uninitialized = uninitialized.with_upnp();
         }
 
-        if config.ipfs_setting.mdns.enable {
+        if self.inner.config.ipfs_setting.mdns.enable {
             uninitialized = uninitialized.with_mdns();
         }
 
         let ipfs = uninitialized.start().await?;
 
-        if config.enable_relay {
+        if self.inner.config.enable_relay {
             let mut relay_peers = HashSet::new();
 
-            for mut addr in config
+            for mut addr in self
+                .inner
+                .config
                 .ipfs_setting
                 .relay_client
                 .relay_address
                 .iter()
-                .chain(config.bootstrap.address().iter())
+                .chain(self.inner.config.bootstrap.address().iter())
                 .cloned()
             {
                 if addr.is_relayed() {
@@ -428,7 +428,7 @@ impl WarpIpfs {
             // Use the selected relays
             let relay_connection_task = {
                 let ipfs = ipfs.clone();
-                let quorum = config.ipfs_setting.relay_client.quorum;
+                let quorum = self.inner.config.ipfs_setting.relay_client.quorum;
                 async move {
                     let mut counter = 0;
                     for relay_peer in relay_peers {
@@ -469,16 +469,16 @@ impl WarpIpfs {
                 }
             };
 
-            if config.ipfs_setting.relay_client.background {
+            if self.inner.config.ipfs_setting.relay_client.background {
                 tokio::spawn(relay_connection_task);
             } else {
                 relay_connection_task.await;
             }
         }
 
-        if config.ipfs_setting.dht_client
+        if self.inner.config.ipfs_setting.dht_client
             && matches!(
-                config.store_setting.discovery,
+                self.inner.config.store_setting.discovery,
                 config::Discovery::Namespace {
                     discovery_type: DiscoveryType::DHT,
                     ..
@@ -489,12 +489,12 @@ impl WarpIpfs {
         }
 
         if matches!(
-            config.store_setting.discovery,
+            self.inner.config.store_setting.discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
             }
-        ) && config.ipfs_setting.bootstrap
+        ) && self.inner.config.ipfs_setting.bootstrap
             && !empty_bootstrap
         {
             tokio::spawn({
@@ -536,7 +536,7 @@ impl WarpIpfs {
         if let config::Discovery::Namespace {
             discovery_type: DiscoveryType::RzPoint { addresses },
             ..
-        } = &config.store_setting.discovery
+        } = &self.inner.config.store_setting.discovery
         {
             for mut addr in addresses.iter().cloned() {
                 let Some(peer_id) = addr.extract_peer_id() else {
@@ -556,7 +556,7 @@ impl WarpIpfs {
 
         let discovery = Discovery::new(
             ipfs.clone(),
-            config.store_setting.discovery.clone(),
+            self.inner.config.store_setting.discovery.clone(),
             relays.clone(),
         );
 
@@ -565,7 +565,7 @@ impl WarpIpfs {
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
-            &config,
+            &self.inner.config,
             tesseract.clone(),
             self.multipass_tx.clone(),
             phonebook,
@@ -582,7 +582,7 @@ impl WarpIpfs {
         let filestore = FileStore::new(
             ipfs.clone(),
             root.clone(),
-            &config,
+            &self.inner.config,
             self.constellation_tx.clone(),
             span.clone(),
         )
@@ -590,7 +590,11 @@ impl WarpIpfs {
 
         let message_store = MessageStore::new(
             &ipfs,
-            config.path.map(|path| path.join("messages")),
+            self.inner
+                .config
+                .path
+                .as_ref()
+                .map(|path| path.join("messages")),
             discovery,
             filestore.clone(),
             self.raygun_tx.clone(),
@@ -749,7 +753,7 @@ impl MultiPass for WarpIpfs {
                 &mut tesseract,
                 &phrase,
                 None,
-                self.config.save_phrase,
+                self.inner.config.save_phrase,
                 false,
             )?;
         }
@@ -1145,7 +1149,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.config.save_phrase,
+                    self.inner.config.save_phrase,
                     false,
                 )?;
 
@@ -1179,7 +1183,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.config.save_phrase,
+                    self.inner.config.save_phrase,
                     false,
                 )?;
 
@@ -1203,7 +1207,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.config.save_phrase,
+                    self.inner.config.save_phrase,
                     false,
                 )?;
 
