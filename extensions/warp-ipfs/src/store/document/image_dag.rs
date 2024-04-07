@@ -2,7 +2,6 @@ use futures::{stream::BoxStream, StreamExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
-use std::task::Poll;
 use warp::{constellation::file::FileType, error::Error, multipass::identity::IdentityImage};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -21,39 +20,29 @@ pub async fn store_photo(
 ) -> Result<Cid, Error> {
     let mut stream = ipfs.add_unixfs(stream);
 
-    let mut size = 0;
+    let (cid, size) = loop {
+        let status = stream.next().await.ok_or(Error::Other)?;
 
-    let cid = futures::future::poll_fn(|cx| loop {
-        match stream.poll_next_unpin(cx) {
-            Poll::Ready(Some(rust_ipfs::unixfs::UnixfsStatus::ProgressStatus {
-                written, ..
-            })) => {
+        match status {
+            rust_ipfs::unixfs::UnixfsStatus::ProgressStatus { written, .. } => {
                 if let Some(limit) = limit {
                     if written > limit {
-                        return Poll::Ready(Err(Error::InvalidLength {
+                        return Err(Error::InvalidLength {
                             context: "photo".into(),
                             current: written,
                             minimum: Some(1),
                             maximum: Some(limit),
-                        }));
+                        });
                     }
                 }
                 tracing::trace!("{written} bytes written");
             }
-            Poll::Ready(Some(rust_ipfs::unixfs::UnixfsStatus::CompletedStatus {
-                path,
-                written,
-                ..
-            })) => {
-                size = written;
+            rust_ipfs::unixfs::UnixfsStatus::CompletedStatus { path, written, .. } => {
                 tracing::debug!("Image is written with {written} bytes - stored at {path}");
-                return Poll::Ready(path.root().cid().copied().ok_or(Error::Other));
+                let cid = path.root().cid().copied().ok_or(Error::Other)?;
+                break (cid, written);
             }
-            Poll::Ready(Some(rust_ipfs::unixfs::UnixfsStatus::FailedStatus {
-                written,
-                error,
-                ..
-            })) => {
+            rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
                 let err = match error {
                     Some(e) => {
                         tracing::error!(
@@ -66,14 +55,10 @@ pub async fn store_photo(
                         Error::OtherWithContext("Error uploading photo".into())
                     }
                 };
-
-                return Poll::Ready(Err(err));
+                return Err(err);
             }
-            Poll::Ready(None) => return Poll::Ready(Err(Error::ReceiverChannelUnavailable)),
-            Poll::Pending => return Poll::Pending,
         }
-    })
-    .await?;
+    };
 
     let dag = ImageDag {
         link: cid,

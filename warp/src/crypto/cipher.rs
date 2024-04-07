@@ -59,8 +59,8 @@ impl Cipher {
     }
 
     /// Returns the stored key
-    pub fn private_key(&self) -> Vec<u8> {
-        self.private_key.to_owned()
+    pub fn private_key(&self) -> &[u8] {
+        &self.private_key
     }
 
     /// Used to generate and encrypt data with a random key
@@ -145,7 +145,7 @@ impl Cipher {
         stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
-        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key())));
+        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_owned())));
 
         let cipher_stream = cipher.encrypt_async_stream(stream).await?;
 
@@ -171,7 +171,7 @@ impl Cipher {
         reader: R,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
-        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key())));
+        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_owned())));
 
         let cipher_stream = cipher.encrypt_async_read_to_stream(reader).await?;
         let stream = key_stream.chain(cipher_stream);
@@ -396,7 +396,7 @@ impl Cipher {
     /// Encrypts and embeds private key into writer stream
     pub fn self_encrypt_stream(reader: &mut impl Read, writer: &mut impl Write) -> Result<()> {
         let cipher = Cipher::new();
-        writer.write_all(&cipher.private_key())?;
+        writer.write_all(cipher.private_key())?;
         cipher.encrypt_stream(reader, writer)?;
         Ok(())
     }
@@ -579,101 +579,95 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    fn cipher_aes256gcm_async_stream_encrypt_decrypt() -> anyhow::Result<()> {
-        futures::executor::block_on(async move {
-            let cipher = Cipher::from(b"this is my key");
-            let message = b"this is my message";
-            let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
+    #[tokio::test]
+    async fn cipher_aes256gcm_async_stream_encrypt_decrypt() -> anyhow::Result<()> {
+        let cipher = Cipher::from(b"this is my key");
+        let message = b"this is my message";
+        let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
 
-            let cipher_stream = cipher
-                .encrypt_async_stream(base)
-                .await?
-                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
-                .boxed();
+        let cipher_stream = cipher
+            .encrypt_async_stream(base)
+            .await?
+            .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
+            .boxed();
 
-            let plaintext_stream = cipher.decrypt_async_stream(cipher_stream).await?;
+        let plaintext_stream = cipher.decrypt_async_stream(cipher_stream).await?;
 
-            let plaintext_message = plaintext_stream
-                .try_collect::<Vec<_>>()
-                .await?
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
+        let plaintext_message = plaintext_stream
+            .try_collect::<Vec<_>>()
+            .await?
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
 
-            assert_eq!(
-                String::from_utf8_lossy(&plaintext_message),
-                String::from_utf8_lossy(message)
-            );
-            Ok(())
-        })
+        assert_eq!(
+            String::from_utf8_lossy(&plaintext_message),
+            String::from_utf8_lossy(message)
+        );
+        Ok(())
     }
 
-    #[test]
-    fn cipher_aes256gcm_async_read_to_stream_encrypt_decrypt() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn cipher_aes256gcm_async_read_to_stream_encrypt_decrypt() -> anyhow::Result<()> {
         use futures::io::Cursor;
 
-        futures::executor::block_on(async move {
-            let cipher = Cipher::from(b"this is my key");
-            let mut message = Cursor::new("this is my message");
+        let cipher = Cipher::from(b"this is my key");
+        let mut message = Cursor::new("this is my message");
 
-            let cipher_stream = cipher
-                .encrypt_async_read_to_stream(&mut message)
-                .await?
-                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)));
+        let cipher_stream = cipher
+            .encrypt_async_read_to_stream(&mut message)
+            .await?
+            .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)));
 
-            let mut cipher_reader = cipher_stream.into_async_read();
+        let mut cipher_reader = cipher_stream.into_async_read();
 
-            let plaintext_stream = cipher
-                .decrypt_async_read_to_stream(&mut cipher_reader)
-                .await?;
+        let plaintext_stream = cipher
+            .decrypt_async_read_to_stream(&mut cipher_reader)
+            .await?;
 
-            let plaintext_message = plaintext_stream
-                .try_collect::<Vec<_>>()
-                .await?
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
+        let plaintext_message = plaintext_stream
+            .try_collect::<Vec<_>>()
+            .await?
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
 
-            drop(cipher_reader);
+        drop(cipher_reader);
 
-            assert_eq!(
-                String::from_utf8_lossy(&plaintext_message),
-                message.into_inner()
-            );
-            Ok(())
-        })
+        assert_eq!(
+            String::from_utf8_lossy(&plaintext_message),
+            message.into_inner()
+        );
+        Ok(())
     }
 
-    #[test]
-    fn cipher_aes256gcm_async_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
-        futures::executor::block_on(async move {
-            let message = b"this is my message";
-            let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
+    #[tokio::test]
+    async fn cipher_aes256gcm_async_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
+        let message = b"this is my message";
+        let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
 
-            let cipher_stream = Cipher::self_encrypt_async_stream(base)
-                .await?
-                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
-                .boxed();
+        let cipher_stream = Cipher::self_encrypt_async_stream(base)
+            .await?
+            .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
+            .boxed();
 
-            let plaintext_stream = Cipher::self_decrypt_async_stream(cipher_stream).await?;
+        let plaintext_stream = Cipher::self_decrypt_async_stream(cipher_stream).await?;
 
-            let plaintext_message = plaintext_stream
-                .try_collect::<Vec<_>>()
-                .await?
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
+        let plaintext_message = plaintext_stream
+            .try_collect::<Vec<_>>()
+            .await?
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
 
-            assert_eq!(
-                String::from_utf8_lossy(&plaintext_message),
-                String::from_utf8_lossy(message)
-            );
+        assert_eq!(
+            String::from_utf8_lossy(&plaintext_message),
+            String::from_utf8_lossy(message)
+        );
 
-            Ok(())
-        })
+        Ok(())
     }
 }
