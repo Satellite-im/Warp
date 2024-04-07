@@ -145,16 +145,16 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
 }
 
 impl<M> PayloadRequest<M> {
-    pub fn sender(&self) -> PeerId {
-        self.on_behalf.unwrap_or(self.sender)
+    pub fn sender(&self) -> &PeerId {
+        self.on_behalf.as_ref().unwrap_or(&self.sender)
     }
 
-    pub fn original_sender(&self) -> PeerId {
-        self.sender
+    pub fn original_sender(&self) -> &PeerId {
+        &self.sender
     }
 
-    pub fn cosigner(&self) -> Option<PeerId> {
-        self.on_behalf
+    pub fn cosigner(&self) -> Option<&PeerId> {
+        self.on_behalf.as_ref()
     }
 
     pub fn message(&self) -> &M {
@@ -179,7 +179,7 @@ mod test {
         let keypair = Keypair::generate_ed25519();
 
         let payload = PayloadRequest::new(&keypair, None, data)?;
-        assert_eq!(payload.sender(), keypair.public().to_peer_id());
+        assert_eq!(payload.sender(), &keypair.public().to_peer_id());
         payload.verify()?;
         assert_eq!(payload.message(), "Request");
 
@@ -194,8 +194,8 @@ mod test {
 
         let payload = PayloadRequest::new(&keypair, Some(&cosigner_keypair), data)?;
 
-        assert_ne!(payload.sender(), keypair.public().to_peer_id());
-        assert_eq!(payload.sender(), cosigner_keypair.public().to_peer_id());
+        assert_ne!(payload.sender(), &keypair.public().to_peer_id());
+        assert_eq!(payload.sender(), &cosigner_keypair.public().to_peer_id());
         payload.verify()?;
         assert_eq!(payload.message(), "Request");
 
@@ -208,7 +208,7 @@ mod test {
         let keypair = Keypair::generate_ed25519();
 
         let payload = PayloadRequest::new(&keypair, None, data)?;
-        assert_eq!(payload.sender(), keypair.public().to_peer_id());
+        assert_eq!(payload.sender(), &keypair.public().to_peer_id());
         payload.verify()?;
 
         let bytes = payload.to_bytes()?;

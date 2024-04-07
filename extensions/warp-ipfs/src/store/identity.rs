@@ -1,6 +1,6 @@
 use crate::{
     config::{self, Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, DidExt, PeerIdExt, PeerTopic},
+    store::{did_to_libp2p_pub, discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 use chrono::{DateTime, Utc};
 
@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -353,35 +352,34 @@ impl std::fmt::Debug for ResponseOption {
 }
 
 impl IdentityStore {
-    #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ipfs: Ipfs,
-        path: Option<PathBuf>,
+        config: &config::Config,
         tesseract: Tesseract,
         tx: EventSubscription<MultiPassEventKind>,
         phonebook: PhoneBook,
-        config: &config::Config,
         discovery: Discovery,
         identity_command: futures::channel::mpsc::Sender<
             shuttle::identity::client::IdentityCommand,
         >,
         span: Span,
     ) -> Result<Self, Error> {
-        if let Some(path) = path.as_ref() {
+        if let Some(path) = config.path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
             }
         }
         let config = config.clone();
 
-        let identity_cache = IdentityCache::new(&ipfs, path.clone()).await;
+        let identity_cache = IdentityCache::new(&ipfs, config.path.as_ref()).await;
 
         let event = tx.clone();
 
         let did_key = Arc::new(did_keypair(&tesseract)?);
 
-        let root_document = RootDocumentMap::new(&ipfs, did_key.clone(), path.clone()).await;
+        let root_document =
+            RootDocumentMap::new(&ipfs, did_key.clone(), config.path.as_ref()).await;
 
         let queue = Queue::new(
             ipfs.clone(),
@@ -431,8 +429,6 @@ impl IdentityStore {
             }
         });
 
-        let did = store.get_keypair_did().expect("valid ed25519 keypair");
-
         store.discovery.start().await?;
 
         let mut discovery_rx = store.discovery.events();
@@ -467,7 +463,7 @@ impl IdentityStore {
             async move {
                 let event_stream = store
                     .ipfs
-                    .pubsub_subscribe(did.events())
+                    .pubsub_subscribe(store.did_key.events())
                     .await
                     .expect("not subscribed");
                 let identity_announce_stream = store
@@ -647,6 +643,11 @@ impl IdentityStore {
 
     pub(crate) fn phonebook(&self) -> &PhoneBook {
         &self.phonebook
+    }
+
+    /// did key with private key embedded
+    pub(crate) fn did_key(&self) -> Arc<DID> {
+        self.did_key.clone()
     }
 
     //TODO: Implement Errors
@@ -991,7 +992,7 @@ impl IdentityStore {
             identity.metadata = metadata;
         }
 
-        let kp_did = self.get_keypair_did()?;
+        let kp_did = self.did_key();
 
         let payload = identity.sign(&kp_did)?;
 
@@ -1143,7 +1144,6 @@ impl IdentityStore {
     }
 
     #[tracing::instrument(skip(self))]
-    #[allow(clippy::if_same_then_else)]
     async fn process_message(
         &mut self,
         in_did: &DID,
@@ -1612,7 +1612,7 @@ impl IdentityStore {
             signature: None,
         };
 
-        let did_kp = self.get_keypair_did()?;
+        let did_kp = self.did_key();
         let identity = identity.sign(&did_kp)?;
 
         let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
@@ -1633,9 +1633,9 @@ impl IdentityStore {
             tracing::warn!(%identity.did, "Unable to export root document: {e}");
         }
 
-        let identity = identity.resolve()?;
         _ = self.announce_identity_to_mesh().await;
-        Ok(identity)
+
+        identity.resolve()
     }
 
     #[tracing::instrument(skip(self))]
@@ -1674,9 +1674,7 @@ impl IdentityStore {
             }
         }
 
-        let identity = self.own_identity().await?;
-
-        Ok(identity)
+        self.own_identity().await
     }
 
     pub async fn import_identity_remote(&mut self) -> Result<Cid, Error> {
@@ -1900,7 +1898,7 @@ impl IdentityStore {
             .map(|identity| identity.did_key())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
-        let cache = self.identity_cache.list().await?;
+        let cache = self.identity_cache.list().await;
 
         let mut idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
@@ -2078,7 +2076,7 @@ impl IdentityStore {
     }
 
     pub async fn identity_update(&mut self, identity: IdentityDocument) -> Result<(), Error> {
-        let kp = self.get_keypair_did()?;
+        let kp = self.did_key();
 
         let identity = identity.sign(&kp)?;
 

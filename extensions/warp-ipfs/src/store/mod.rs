@@ -14,7 +14,7 @@ pub mod request;
 use chrono::{DateTime, Utc};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, time::Duration};
+use std::time::Duration;
 use uuid::Uuid;
 
 use ipfs::{Keypair, PeerId, PublicKey};
@@ -35,28 +35,32 @@ use warp::{
 };
 
 pub(super) mod topics {
-    /// Topic to announce identity updates to network
+    use std::fmt::Display;
+
+    use warp::crypto::DID;
+
+    /// Topic to announce identity updates to the network
     pub const IDENTITY_ANNOUNCEMENT: &str = "/identity/announce/v0";
+
+    pub trait PeerTopic: Display {
+        fn inbox(&self) -> String {
+            format!("/peer/{self}/inbox")
+        }
+
+        fn events(&self) -> String {
+            format!("/peer/{self}/events")
+        }
+        fn messaging(&self) -> String {
+            format!("{self}/messaging")
+        }
+    }
+
+    impl PeerTopic for DID {}
 }
 
 const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 use self::conversation::{ConversationDocument, MessageDocument};
-
-pub trait PeerTopic: Display {
-    fn inbox(&self) -> String {
-        format!("/peer/{self}/inbox")
-    }
-
-    fn events(&self) -> String {
-        format!("/peer/{self}/events")
-    }
-    fn messaging(&self) -> String {
-        format!("{self}/messaging")
-    }
-}
-
-impl PeerTopic for DID {}
 
 pub trait PeerIdExt {
     fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
@@ -113,7 +117,7 @@ impl DidExt for DID {
 }
 
 pub trait VecExt<T: Eq> {
-    fn insert_item(&mut self, item: &T) -> bool;
+    fn insert_item(&mut self, item: T) -> bool;
     fn remove_item(&mut self, item: &T) -> bool;
 }
 
@@ -121,12 +125,12 @@ impl<T> VecExt<T> for Vec<T>
 where
     T: Eq + Clone,
 {
-    fn insert_item(&mut self, item: &T) -> bool {
-        if self.contains(item) {
+    fn insert_item(&mut self, item: T) -> bool {
+        if self.contains(&item) {
             return false;
         }
 
-        self.push(item.clone());
+        self.push(item);
         true
     }
 
