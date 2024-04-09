@@ -351,6 +351,7 @@ pub struct Conversation {
     name: Option<String>,
     creator: Option<DID>,
     created: DateTime<Utc>,
+    favorite: bool,
     modified: DateTime<Utc>,
     settings: ConversationSettings,
     recipients: Vec<DID>,
@@ -380,6 +381,7 @@ impl Default for Conversation {
             name,
             creator,
             created: timestamp,
+            favorite: false,
             modified: timestamp,
             settings: ConversationSettings::default(),
             recipients,
@@ -406,6 +408,10 @@ impl Conversation {
 
     pub fn modified(&self) -> DateTime<Utc> {
         self.modified
+    }
+
+    pub fn favorite(&self) -> bool {
+        self.favorite
     }
 
     pub fn conversation_type(&self) -> ConversationType {
@@ -439,6 +445,10 @@ impl Conversation {
 
     pub fn set_created(&mut self, created: DateTime<Utc>) {
         self.created = created;
+    }
+
+    pub fn set_favorite(&mut self, favorite: bool) {
+        self.favorite = favorite;
     }
 
     pub fn set_modified(&mut self, modified: DateTime<Utc>) {
@@ -925,6 +935,11 @@ pub trait RayGun:
 
     /// Get an active conversation
     async fn get_conversation(&self, _: Uuid) -> Result<Conversation, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Set or unset conversation favorite  
+    async fn favorite_conversation(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 

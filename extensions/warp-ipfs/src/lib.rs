@@ -1403,6 +1403,12 @@ impl RayGun for WarpIpfs {
             .await
     }
 
+    async fn favorite_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .favorite_conversation(conversation_id)
+            .await
+    }
+
     async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
         self.messaging_store()?.list_conversations().await
     }

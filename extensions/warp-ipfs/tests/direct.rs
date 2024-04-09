@@ -64,6 +64,67 @@ mod test {
     }
 
     #[tokio::test]
+    async fn conversation_favorite() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![
+            (None, None, Some("test::conversation_favorite".into())),
+            (None, None, Some("test::conversation_favorite".into())),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+
+        chat_a.create_conversation(&did_b).await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        assert_eq!(id_a, id_b);
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.conversation_type(), ConversationType::Direct);
+        assert_eq!(conversation.recipients().len(), 2);
+        assert!(conversation.recipients().contains(&did_a));
+        assert!(conversation.recipients().contains(&did_b));
+        assert!(!conversation.favorite());
+
+        // favorite conversation
+        chat_a.favorite_conversation(id_a).await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert!(conversation.favorite());
+
+        // unmark conversation
+        chat_a.favorite_conversation(id_a).await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert!(!conversation.favorite());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn destroy_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::destroy_conversation".into())),

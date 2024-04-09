@@ -252,6 +252,11 @@ impl MessageStore {
             .await
     }
 
+    pub async fn favorite_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.favorite_conversation(conversation_id).await
+    }
+
     pub async fn get_message(
         &self,
         conversation_id: Uuid,
@@ -1092,6 +1097,12 @@ impl ConversationInner {
 
     async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
         self.root.get_conversation_document(id).await
+    }
+
+    async fn favorite_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        let mut document = self.get(conversation_id).await?;
+        document.favorite = !document.favorite;
+        self.set_document(document).await
     }
 
     pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
@@ -3186,6 +3197,7 @@ async fn process_conversation(
 
             //TODO: Resolve message list
             conversation.messages = None;
+            conversation.favorite = false;
 
             this.set_document(conversation).await?;
 
@@ -3643,6 +3655,7 @@ async fn message_event(
 
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = this.request_key(conversation_id, &did).await {
@@ -3669,6 +3682,7 @@ async fn message_event(
 
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
                     this.set_document(conversation).await?;
 
                     if can_emit {
@@ -3700,6 +3714,7 @@ async fn message_event(
 
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3713,6 +3728,7 @@ async fn message_event(
                 ConversationUpdateKind::ChangeName { name: None } => {
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3726,6 +3742,7 @@ async fn message_event(
                 | ConversationUpdateKind::RemoveRestricted { .. } => {
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
                     this.set_document(conversation).await?;
                     //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
@@ -3733,6 +3750,7 @@ async fn message_event(
                 ConversationUpdateKind::ChangeSettings { settings } => {
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
