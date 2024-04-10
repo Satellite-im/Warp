@@ -252,9 +252,15 @@ impl MessageStore {
             .await
     }
 
-    pub async fn set_favorite_conversation(&self, conversation_id: Uuid, favorite: bool) -> Result<(), Error> {
+    pub async fn set_favorite_conversation(
+        &self,
+        conversation_id: Uuid,
+        favorite: bool,
+    ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.set_favorite_conversation(conversation_id, favorite).await
+        inner
+            .set_favorite_conversation(conversation_id, favorite)
+            .await
     }
 
     pub async fn get_message(
@@ -1099,7 +1105,11 @@ impl ConversationInner {
         self.root.get_conversation_document(id).await
     }
 
-    async fn set_favorite_conversation(&mut self, conversation_id: Uuid, favorite: bool) -> Result<(), Error> {
+    async fn set_favorite_conversation(
+        &mut self,
+        conversation_id: Uuid,
+        favorite: bool,
+    ) -> Result<(), Error> {
         let mut document = self.get(conversation_id).await?;
         document.favorite = favorite;
         self.set_document(document).await
