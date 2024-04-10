@@ -111,13 +111,13 @@ mod test {
         assert!(!conversation.favorite());
 
         // favorite conversation
-        chat_a.favorite_conversation(id_a).await?;
+        chat_a.set_favorite_conversation(id_a, true).await?;
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert!(conversation.favorite());
 
         // unmark conversation
-        chat_a.favorite_conversation(id_a).await?;
+        chat_a.set_favorite_conversation(id_a, false).await?;
 
         let conversation = chat_a.get_conversation(id_a).await?;
         assert!(!conversation.favorite());

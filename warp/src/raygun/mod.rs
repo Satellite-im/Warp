@@ -939,7 +939,7 @@ pub trait RayGun:
     }
 
     /// Set or unset conversation favorite  
-    async fn favorite_conversation(&mut self, _: Uuid) -> Result<(), Error> {
+    async fn set_favorite_conversation(&mut self, _: Uuid, _: bool) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
