@@ -37,7 +37,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 
 # Sync crates
-parking_lot = { workspace = true, features = ["send_guard", "serde"] }
+parking_lot = { workspace = true, features = ["serde"] }
 
 # Time crate
 chrono = { workspace = true }
