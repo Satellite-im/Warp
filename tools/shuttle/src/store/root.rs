@@ -32,12 +32,31 @@ pub struct RootStorage {
 
 impl RootStorage {
     pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
+        
+        #[cfg(not(target_arch = "wasm32"))]
         let root_cid = match path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".root_v0"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
                 .ok()
                 .and_then(|cid_str| cid_str.parse().ok()),
+            None => None,
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let root_cid = match path.as_ref() {
+            Some(path) => path.to_str().and_then(|key| {
+                use gloo::storage::{LocalStorage, Storage};
+                let local_storage = LocalStorage::raw();
+                local_storage.get(key).ok().and_then(|key| {
+                    key.and_then(|key|{
+                        LocalStorage::get(key).ok().and_then(|bytes: Vec<u8> |{
+                            let cid_str = String::from_utf8_lossy(&bytes).to_string();
+                            cid_str.parse().ok()
+                        })
+                    })
+                })
+            }),
             None => None,
         };
 
@@ -139,10 +158,19 @@ impl RootInner {
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".root_v0"), cid).await {
-                tracing::error!("Error writing cid to file: {e}");
+            #[cfg(not(target_arch = "wasm32"))] {
+                if let Err(e) = tokio::fs::write(path.join(".root_v0"), cid).await {
+                    tracing::error!("Error writing cid to file: {e}");
+                }
+            }
+            #[cfg(target_arch = "wasm32")] {
+                use gloo::storage::{LocalStorage, Storage};
+                if let Err(e) = LocalStorage::set(path.join(".root_v0").to_str().unwrap(), cid) {
+                    tracing::error!("Error writing cid to file: {e}");
+                }
             }
         }
+
         tracing::info!(cid = %cid, "root is stored");
         Ok(())
     }

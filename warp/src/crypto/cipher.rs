@@ -1,6 +1,5 @@
 #![allow(clippy::result_large_err)]
 #[allow(unused)]
-#[cfg(not(target_arch = "wasm32"))]
 use std::io::{ErrorKind, Read, Write};
 
 use crate::crypto::hash::sha256_hash;
@@ -578,7 +577,8 @@ mod test {
         );
         Ok(())
     }
-
+    
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn cipher_aes256gcm_async_stream_encrypt_decrypt() -> anyhow::Result<()> {
         let cipher = Cipher::from(b"this is my key");
@@ -608,6 +608,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn cipher_aes256gcm_async_read_to_stream_encrypt_decrypt() -> anyhow::Result<()> {
         use futures::io::Cursor;
@@ -643,6 +644,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn cipher_aes256gcm_async_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
         let message = b"this is my message";
