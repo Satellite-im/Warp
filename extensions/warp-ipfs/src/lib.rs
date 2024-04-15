@@ -501,14 +501,9 @@ impl WarpIpfs {
                 let ipfs = ipfs.clone();
                 async move {
                     loop {
-                        match ipfs.bootstrap().await {
-                            Ok(task) => {
-                                if let Err(e) = task.await {
-                                    error!("Failed to bootstrap: {e}");
-                                }
-                            }
-                            Err(e) => error!("Failed to bootstrap: {e}"),
-                        };
+                        if let Err(e) = ipfs.bootstrap().await {
+                            error!("Failed to bootstrap: {e}")
+                        }
 
                         tokio::time::sleep(Duration::from_secs(60 * 5)).await;
                     }
