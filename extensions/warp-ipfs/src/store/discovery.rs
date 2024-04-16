@@ -44,7 +44,6 @@ impl Discovery {
 
     /// Start discovery task
     /// Note: This starting will only work across a provided namespace
-    #[allow(clippy::collapsible_if)]
     pub async fn start(&self) -> Result<(), Error> {
         match &self.config {
             DiscoveryConfig::Namespace {
@@ -77,20 +76,18 @@ impl Discovery {
                                         .await
                                         .unwrap_or_default()
                                         && cached.insert(peer_id)
+                                        && !discovery.contains(peer_id).await
                                     {
-                                        if !discovery.contains(peer_id).await {
-                                            let entry = DiscoveryEntry::new(
-                                                &discovery.ipfs,
-                                                peer_id,
-                                                discovery.config.clone(),
-                                                discovery.events.clone(),
-                                                discovery.relays.clone(),
-                                            )
-                                            .await;
-                                            if discovery.entries.write().await.insert(entry.clone())
-                                            {
-                                                entry.start().await;
-                                            }
+                                        let entry = DiscoveryEntry::new(
+                                            &discovery.ipfs,
+                                            peer_id,
+                                            discovery.config.clone(),
+                                            discovery.events.clone(),
+                                            discovery.relays.clone(),
+                                        )
+                                        .await;
+                                        if discovery.entries.write().await.insert(entry.clone()) {
+                                            entry.start().await;
                                         }
                                     }
                                 }
@@ -179,25 +176,24 @@ impl Discovery {
                                                 .await
                                                 .unwrap_or_default()
                                                 && discovery.ipfs.connect(peer_id).await.is_ok()
+                                                && !discovery.contains(peer_id).await
                                             {
-                                                if !discovery.contains(peer_id).await {
-                                                    let entry = DiscoveryEntry::new(
-                                                        &discovery.ipfs,
-                                                        peer_id,
-                                                        discovery.config.clone(),
-                                                        discovery.events.clone(),
-                                                        discovery.relays.clone(),
-                                                    )
-                                                    .await;
+                                                let entry = DiscoveryEntry::new(
+                                                    &discovery.ipfs,
+                                                    peer_id,
+                                                    discovery.config.clone(),
+                                                    discovery.events.clone(),
+                                                    discovery.relays.clone(),
+                                                )
+                                                .await;
 
-                                                    if discovery
-                                                        .entries
-                                                        .write()
-                                                        .await
-                                                        .insert(entry.clone())
-                                                    {
-                                                        entry.start().await;
-                                                    }
+                                                if discovery
+                                                    .entries
+                                                    .write()
+                                                    .await
+                                                    .insert(entry.clone())
+                                                {
+                                                    entry.start().await;
                                                 }
                                             }
                                         }

@@ -38,8 +38,8 @@ chrono = { workspace = true }
 void.workspace = true
 
 clap = { version = "4.4", features = ["derive"] }
-zeroize = "1"
+zeroize.workspace = true
 dotenv = "0.15"
 base64 = "0.21"
 
-bs58 = "0.4"
+bs58.workspace = true

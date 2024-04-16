@@ -19,7 +19,7 @@ use warp::{
     error::Error,
 };
 
-use crate::store::{ecdh_encrypt, PeerIdExt, PeerTopic};
+use crate::store::{ecdh_encrypt, topics::PeerTopic, PeerIdExt};
 
 use super::{connected_to_peer, discovery::Discovery, identity::RequestResponsePayload};
 

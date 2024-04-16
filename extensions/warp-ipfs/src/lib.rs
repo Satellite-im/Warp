@@ -23,7 +23,6 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use store::document::ResolvedRootDocument;
@@ -67,24 +66,32 @@ use warp::multipass::{
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
-use crate::store::{ecdh_decrypt, get_keypair_did, PeerIdExt};
+use crate::store::{ecdh_decrypt, PeerIdExt};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
-    config: Config,
-    identity_guard: Arc<tokio::sync::Mutex<()>>,
-    ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
-    span: Arc<RwLock<Span>>,
-    identity_store: Arc<RwLock<Option<IdentityStore>>>,
-    message_store: Arc<RwLock<Option<MessageStore>>>,
-    file_store: Arc<RwLock<Option<FileStore>>>,
-
-    initialized: Arc<AtomicBool>,
-
+    inner: Arc<Inner>,
     multipass_tx: EventSubscription<MultiPassEventKind>,
     raygun_tx: EventSubscription<RayGunEventKind>,
     constellation_tx: EventSubscription<ConstellationEventKind>,
+}
+
+struct Inner {
+    config: Config,
+    identity_guard: tokio::sync::Mutex<()>,
+    init_guard: tokio::sync::Mutex<()>,
+    span: RwLock<Span>,
+    components: RwLock<Option<Components>>,
+}
+
+// Holds the initialized components
+#[derive(Clone)]
+struct Components {
+    ipfs: Ipfs,
+    identity_store: IdentityStore,
+    message_store: MessageStore,
+    file_store: FileStore,
 }
 
 #[derive(Default)]
@@ -136,21 +143,23 @@ impl WarpIpfsBuilder {
 }
 
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: Tesseract) -> anyhow::Result<WarpIpfs> {
+    pub async fn new(config: Config, tesseract: Tesseract) -> Result<WarpIpfs, Error> {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
-        let span = Arc::new(RwLock::new(Span::current()));
-        let identity = WarpIpfs {
+        let span = RwLock::new(Span::current());
+
+        let inner = Arc::new(Inner {
             config,
-            tesseract,
+            components: Default::default(),
+            identity_guard: Default::default(),
+            init_guard: Default::default(),
             span,
-            ipfs: Default::default(),
-            identity_store: Default::default(),
-            message_store: Default::default(),
-            file_store: Default::default(),
-            initialized: Default::default(),
-            identity_guard: Arc::default(),
+        });
+
+        let identity = WarpIpfs {
+            tesseract,
+            inner,
             multipass_tx,
             raygun_tx,
             constellation_tx,
@@ -173,35 +182,37 @@ impl WarpIpfs {
         Ok(identity)
     }
 
-    async fn initialize_store(&self, init: bool) -> anyhow::Result<()> {
+    async fn initialize_store(&self, init: bool) -> Result<(), Error> {
         let tesseract = self.tesseract.clone();
 
-        if init && self.identity_store.read().is_some() || self.initialized.load(Ordering::SeqCst) {
+        if init && self.inner.components.read().is_some() {
             warn!("Identity is already loaded");
-            anyhow::bail!(Error::IdentityExist)
+            return Err(Error::IdentityExist);
         }
 
         let keypair = match (init, tesseract.exist("keypair")) {
             (true, false) => {
                 info!("Keypair doesnt exist. Generating keypair....");
-                if let Ok(kp) = Keypair::generate_ed25519().try_into_ed25519() {
-                    let encoded_kp = bs58::encode(&kp.to_bytes()).into_string();
-                    tesseract.set("keypair", &encoded_kp)?;
-                    let bytes = Zeroizing::new(kp.secret().as_ref().to_vec());
-                    Keypair::ed25519_from_bytes(bytes)?
-                } else {
-                    error!("Unreachable. Report this as a bug");
-                    anyhow::bail!("Unreachable")
-                }
+                let kp = Keypair::generate_ed25519()
+                    .try_into_ed25519()
+                    .map_err(|e| {
+                        error!(error = %e, "Unreachable. Report this as a bug");
+                        Error::Other
+                    })?;
+                let encoded_kp = bs58::encode(&kp.to_bytes()).into_string();
+                tesseract.set("keypair", &encoded_kp)?;
+                let bytes = Zeroizing::new(kp.secret().as_ref().to_vec());
+                Keypair::ed25519_from_bytes(bytes).map_err(|_| Error::PrivateKeyInvalid)?
             }
             (false, true) | (true, true) => {
                 info!("Fetching keypair from tesseract");
                 let keypair = tesseract.retrieve("keypair")?;
                 let kp = Zeroizing::new(bs58::decode(keypair).into_vec()?);
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                Keypair::ed25519_from_bytes(id_kp.secret.to_bytes())?
+                Keypair::ed25519_from_bytes(id_kp.secret.to_bytes())
+                    .map_err(|_| Error::PrivateKeyInvalid)?
             }
-            _ => anyhow::bail!("Unable to initialize store"),
+            _ => return Err(Error::OtherWithContext("Unable to initialize store".into())),
         };
 
         self.init_ipfs(keypair).await?;
@@ -210,6 +221,21 @@ impl WarpIpfs {
     }
 
     pub(crate) async fn init_ipfs(&self, keypair: Keypair) -> Result<(), Error> {
+        // Since some trait functions are not async (this may change in the future), we cannot hold a lock that is not async-aware
+        // through this function without suffering dead locks in the process through await points with the lock held.
+        // As a result, we holds a tokio mutex lock here to allow a single call to this function on initializing
+        // preventing any other calls until this lock drops, in which case may return an error if the components
+        // been successfully initialized
+        let _g = self.inner.init_guard.lock().await;
+
+        // We check again in case
+        // - the initialization was previously successful (after tesseract was unlocked)
+        // - creating the account was previously successful
+        // - importing the account was successful (assuming the formers were not successful)
+        if self.inner.components.read().is_some() {
+            return Err(Error::IdentityExist);
+        }
+
         let tesseract = self.tesseract.clone();
         let peer_id = keypair.public().to_peer_id();
 
@@ -219,19 +245,17 @@ impl WarpIpfs {
 
         let span = tracing::trace_span!(parent: &Span::current(), "warp-ipfs", identity = %did);
 
-        *self.span.write() = span.clone();
+        *self.inner.span.write() = span.clone();
 
         let _g = span.enter();
 
-        let config = self.config.clone();
-
-        let empty_bootstrap = match &config.bootstrap {
+        let empty_bootstrap = match &self.inner.config.bootstrap {
             Bootstrap::Ipfs => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
             Bootstrap::None => true,
         };
 
-        if empty_bootstrap && !config.ipfs_setting.dht_client {
+        if empty_bootstrap && !self.inner.config.ipfs_setting.dht_client {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
@@ -239,7 +263,7 @@ impl WarpIpfs {
         let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
         let (msg_sh_tx, msg_sh_rx) = futures::channel::mpsc::channel(1);
 
-        let (enable, nodes) = match &config.store_setting.discovery {
+        let (enable, nodes) = match &self.inner.config.store_setting.discovery {
             config::Discovery::Shuttle { addresses } => (true, addresses.clone()),
             _ => Default::default(),
         };
@@ -265,7 +289,7 @@ impl WarpIpfs {
                     protocol_version: "/satellite/warp/0.1".into(),
                     ..Default::default()
                 };
-                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
+                if let Some(agent) = self.inner.config.ipfs_setting.agent_version.as_ref() {
                     idconfig.agent_version = agent.clone();
                 }
                 idconfig
@@ -273,22 +297,22 @@ impl WarpIpfs {
             .with_bitswap()
             .with_ping(Default::default())
             .with_pubsub(PubsubConfig {
-                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
+                max_transmit_size: self.inner.config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
             })
             .with_relay(true)
-            .set_listening_addrs(config.listen_on.clone())
+            .set_listening_addrs(self.inner.config.listen_on.clone())
             .with_custom_behaviour(behaviour)
             .set_keypair(&keypair)
             .with_rendezvous_client()
             .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
-                enable_quic: !config.ipfs_setting.disable_quic,
+                enable_quic: !self.inner.config.ipfs_setting.disable_quic,
                 quic_max_idle_timeout: Duration::from_secs(5),
                 ..Default::default()
             });
 
-        if let Some(path) = self.config.path.as_ref() {
+        if let Some(path) = self.inner.config.path.as_ref() {
             info!("Instance will be persistent");
             info!("Path set: {}", path.display());
 
@@ -300,7 +324,7 @@ impl WarpIpfs {
         }
 
         if matches!(
-            config.store_setting.discovery,
+            self.inner.config.store_setting.discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
@@ -317,14 +341,14 @@ impl WarpIpfs {
                 Default::default(),
             );
 
-            if config.ipfs_setting.bootstrap {
-                for addr in config.bootstrap.address() {
+            if self.inner.config.ipfs_setting.bootstrap {
+                for addr in self.inner.config.bootstrap.address() {
                     uninitialized = uninitialized.add_bootstrap(addr);
                 }
             }
         }
 
-        if config.ipfs_setting.memory_transport {
+        if self.inner.config.ipfs_setting.memory_transport {
             uninitialized = uninitialized
                 .with_custom_transport(Box::new(
                     |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
@@ -352,25 +376,27 @@ impl WarpIpfs {
                 .listen_as_external_addr();
         }
 
-        if config.ipfs_setting.portmapping {
+        if self.inner.config.ipfs_setting.portmapping {
             uninitialized = uninitialized.with_upnp();
         }
 
-        if config.ipfs_setting.mdns.enable {
+        if self.inner.config.ipfs_setting.mdns.enable {
             uninitialized = uninitialized.with_mdns();
         }
 
         let ipfs = uninitialized.start().await?;
 
-        if config.enable_relay {
+        if self.inner.config.enable_relay {
             let mut relay_peers = HashSet::new();
 
-            for mut addr in config
+            for mut addr in self
+                .inner
+                .config
                 .ipfs_setting
                 .relay_client
                 .relay_address
                 .iter()
-                .chain(config.bootstrap.address().iter())
+                .chain(self.inner.config.bootstrap.address().iter())
                 .cloned()
             {
                 if addr.is_relayed() {
@@ -402,7 +428,7 @@ impl WarpIpfs {
             // Use the selected relays
             let relay_connection_task = {
                 let ipfs = ipfs.clone();
-                let quorum = config.ipfs_setting.relay_client.quorum;
+                let quorum = self.inner.config.ipfs_setting.relay_client.quorum;
                 async move {
                     let mut counter = 0;
                     for relay_peer in relay_peers {
@@ -443,16 +469,16 @@ impl WarpIpfs {
                 }
             };
 
-            if config.ipfs_setting.relay_client.background {
+            if self.inner.config.ipfs_setting.relay_client.background {
                 tokio::spawn(relay_connection_task);
             } else {
                 relay_connection_task.await;
             }
         }
 
-        if config.ipfs_setting.dht_client
+        if self.inner.config.ipfs_setting.dht_client
             && matches!(
-                config.store_setting.discovery,
+                self.inner.config.store_setting.discovery,
                 config::Discovery::Namespace {
                     discovery_type: DiscoveryType::DHT,
                     ..
@@ -463,26 +489,21 @@ impl WarpIpfs {
         }
 
         if matches!(
-            config.store_setting.discovery,
+            self.inner.config.store_setting.discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
             }
-        ) && config.ipfs_setting.bootstrap
+        ) && self.inner.config.ipfs_setting.bootstrap
             && !empty_bootstrap
         {
             tokio::spawn({
                 let ipfs = ipfs.clone();
                 async move {
                     loop {
-                        match ipfs.bootstrap().await {
-                            Ok(task) => {
-                                if let Err(e) = task.await {
-                                    error!("Failed to bootstrap: {e}");
-                                }
-                            }
-                            Err(e) => error!("Failed to bootstrap: {e}"),
-                        };
+                        if let Err(e) = ipfs.bootstrap().await {
+                            error!("Failed to bootstrap: {e}")
+                        }
 
                         tokio::time::sleep(Duration::from_secs(60 * 5)).await;
                     }
@@ -510,7 +531,7 @@ impl WarpIpfs {
         if let config::Discovery::Namespace {
             discovery_type: DiscoveryType::RzPoint { addresses },
             ..
-        } = &config.store_setting.discovery
+        } = &self.inner.config.store_setting.discovery
         {
             for mut addr in addresses.iter().cloned() {
                 let Some(peer_id) = addr.extract_peer_id() else {
@@ -530,25 +551,19 @@ impl WarpIpfs {
 
         let discovery = Discovery::new(
             ipfs.clone(),
-            config.store_setting.discovery.clone(),
+            self.inner.config.store_setting.discovery.clone(),
             relays.clone(),
         );
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
-        let keypair = {
-            let keypair = ipfs.keypair();
-            Arc::new(get_keypair_did(keypair).expect("valid keypair"))
-        };
-
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             ipfs.clone(),
-            config.path.clone(),
+            &self.inner.config,
             tesseract.clone(),
             self.multipass_tx.clone(),
             phonebook,
-            &config,
             discovery.clone(),
             id_sh_tx,
             span.clone(),
@@ -557,42 +572,42 @@ impl WarpIpfs {
 
         info!("Identity initialized");
 
-        *self.identity_store.write() = Some(identity_store.clone());
-
-        *self.ipfs.write() = Some(ipfs.clone());
-
         let root = identity_store.root_document();
 
         let filestore = FileStore::new(
             ipfs.clone(),
             root.clone(),
-            &config,
+            &self.inner.config,
             self.constellation_tx.clone(),
             span.clone(),
         )
         .await?;
 
-        *self.file_store.write() = Some(filestore.clone());
-
         let message_store = MessageStore::new(
             &ipfs,
-            config.path.map(|path| path.join("messages")),
+            self.inner
+                .config
+                .path
+                .as_ref()
+                .map(|path| path.join("messages")),
             discovery,
-            keypair,
-            filestore,
+            filestore.clone(),
             self.raygun_tx.clone(),
-            identity_store,
+            identity_store.clone(),
             msg_sh_tx,
         )
         .await;
 
-        *self.message_store.write() = Some(message_store);
-
         info!("Messaging store initialized");
 
-        self.initialized.store(true, Ordering::SeqCst);
-        info!("multipass initialized");
+        *self.inner.components.write() = Some(Components {
+            ipfs,
+            identity_store,
+            message_store,
+            file_store: filestore,
+        });
 
+        // Announce identity out to mesh if identity has been created at that time
         if let Ok(store) = self.identity_store(true).await {
             _ = store
                 .announce_identity_to_mesh()
@@ -603,7 +618,21 @@ impl WarpIpfs {
     }
 
     pub(crate) async fn identity_store(&self, created: bool) -> Result<IdentityStore, Error> {
-        let store = self.identity_store_sync()?;
+        if !self.tesseract.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        if !self.tesseract.exist("keypair") {
+            return Err(Error::IdentityNotCreated);
+        }
+
+        let store = self
+            .inner
+            .components
+            .read()
+            .as_ref()
+            .map(|com| com.identity_store.clone())
+            .ok_or(Error::MultiPassExtensionUnavailable)?;
+
         if created && !store.local_id_created().await {
             return Err(Error::IdentityNotCreated);
         }
@@ -611,47 +640,30 @@ impl WarpIpfs {
     }
 
     pub(crate) fn messaging_store(&self) -> std::result::Result<MessageStore, Error> {
-        self.message_store
+        self.inner
+            .components
             .read()
-            .clone()
+            .as_ref()
+            .map(|com| com.message_store.clone())
             .ok_or(Error::RayGunExtensionUnavailable)
     }
 
     pub(crate) fn file_store(&self) -> std::result::Result<FileStore, Error> {
-        self.file_store
+        self.inner
+            .components
             .read()
-            .clone()
+            .as_ref()
+            .map(|com| com.file_store.clone())
             .ok_or(Error::ConstellationExtensionUnavailable)
     }
 
-    pub(crate) fn identity_store_sync(&self) -> Result<IdentityStore, Error> {
-        if !self.tesseract.is_unlock() {
-            return Err(Error::TesseractLocked);
-        }
-        if !self.tesseract.exist("keypair") {
-            return Err(Error::IdentityNotCreated);
-        }
-        self.identity_store
-            .read()
-            .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
-    }
-
     pub(crate) fn ipfs(&self) -> Result<Ipfs, Error> {
-        self.ipfs
+        self.inner
+            .components
             .read()
-            .clone()
+            .as_ref()
+            .map(|com| com.ipfs.clone())
             .ok_or(Error::MultiPassExtensionUnavailable)
-    }
-
-    async fn is_store_initialized(&self) -> bool {
-        if !self.initialized.load(Ordering::SeqCst) {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            if !self.initialized.load(Ordering::SeqCst) {
-                return false;
-            }
-        }
-        true
     }
 
     pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
@@ -675,7 +687,14 @@ impl Extension for WarpIpfs {
 
 impl SingleHandle for WarpIpfs {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
-        self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
+        let ipfs = self
+            .inner
+            .components
+            .read()
+            .as_ref()
+            .map(|com| com.ipfs.clone())
+            .ok_or(Error::MultiPassExtensionUnavailable)?;
+        Ok(Box::new(ipfs) as Box<dyn Any>)
     }
 }
 
@@ -686,14 +705,14 @@ impl MultiPass for WarpIpfs {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<IdentityProfile, Error> {
-        let _g = self.identity_guard.lock().await;
+        let _g = self.inner.identity_guard.lock().await;
 
         info!(
             "create_identity with username: {username:?} and containing passphrase: {}",
             passphrase.is_some()
         );
 
-        if self.is_store_initialized().await {
+        if self.inner.components.read().is_some() {
             info!("Store is initialized with existing identity");
             return Err(Error::IdentityExist);
         }
@@ -729,7 +748,7 @@ impl MultiPass for WarpIpfs {
                 &mut tesseract,
                 &phrase,
                 None,
-                self.config.save_phrase,
+                self.inner.config.save_phrase,
                 false,
             )?;
         }
@@ -763,6 +782,7 @@ impl MultiPass for WarpIpfs {
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         let mut identity = store.own_identity_document().await?;
+        let ipfs = self.ipfs()?;
 
         let mut old_cid = None;
         match option {
@@ -812,7 +832,7 @@ impl MultiPass for WarpIpfs {
                 .map_err(anyhow::Error::from)??;
 
                 let cid = store::document::image_dag::store_photo(
-                    &self.ipfs()?,
+                    &ipfs,
                     futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
                     format.into(),
                     Some(2 * 1024 * 1024),
@@ -887,7 +907,7 @@ impl MultiPass for WarpIpfs {
                 };
 
                 let cid = store::document::image_dag::store_photo(
-                    &self.ipfs()?,
+                    &ipfs,
                     stream.boxed(),
                     extension.into(),
                     Some(2 * 1024 * 1024),
@@ -951,7 +971,7 @@ impl MultiPass for WarpIpfs {
                 .map_err(anyhow::Error::from)??;
 
                 let cid = store::document::image_dag::store_photo(
-                    &self.ipfs()?,
+                    &ipfs,
                     futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
                     format.into(),
                     Some(2 * 1024 * 1024),
@@ -1026,7 +1046,7 @@ impl MultiPass for WarpIpfs {
                 };
 
                 let cid = store::document::image_dag::store_photo(
-                    &self.ipfs()?,
+                    &ipfs,
                     stream.boxed(),
                     extension.into(),
                     Some(2 * 1024 * 1024),
@@ -1097,10 +1117,10 @@ impl MultiPassImportExport for WarpIpfs {
         &mut self,
         option: IdentityImportOption<'a>,
     ) -> Result<Identity, Error> {
-        if self.initialized.load(Ordering::SeqCst) {
+        if self.inner.components.read().is_some() {
             return Err(Error::IdentityExist);
         }
-        let _g = self.identity_guard.lock().await;
+        let _g = self.inner.identity_guard.lock().await;
         if !self.tesseract.is_unlock() {
             return Err(Error::TesseractLocked);
         }
@@ -1124,7 +1144,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.config.save_phrase,
+                    self.inner.config.save_phrase,
                     false,
                 )?;
 
@@ -1158,7 +1178,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.config.save_phrase,
+                    self.inner.config.save_phrase,
                     false,
                 )?;
 
@@ -1182,7 +1202,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.config.save_phrase,
+                    self.inner.config.save_phrase,
                     false,
                 )?;
 

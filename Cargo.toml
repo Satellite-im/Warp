@@ -71,13 +71,12 @@ dyn-clone = "1.0"
 uuid = { version = "1", features = ["serde", "v4"] }
 derive_more = "0.99"
 paste = "1.0"
-sata = { git = "https://github.com/Satellite-im/Sata", rev = "9b5a5d441c816968bc75ea8b99335f728be259ef" }
 tracing = { version = "0.1" }
 either = "1"
 void = "1"
 
 #ipfs dependency
-rust-ipfs = "0.11.4"
+rust-ipfs = "0.11.5"
 
 
 # Blink related crates

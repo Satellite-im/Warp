@@ -216,35 +216,6 @@ pub trait Constellation:
     async fn sync_ref(&mut self, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-
-    /// Used to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
-    fn export(&self, r#type: ConstellationDataType) -> Result<String, Error> {
-        match r#type {
-            ConstellationDataType::Json => {
-                serde_json::to_string(&self.root_directory()).map_err(Error::from)
-            }
-            ConstellationDataType::Yaml => {
-                serde_yaml::to_string(&self.root_directory()).map_err(Error::from)
-            }
-            ConstellationDataType::Toml => {
-                toml::to_string(&self.root_directory()).map_err(Error::from)
-            }
-        }
-    }
-
-    /// Used to import data into the filesystem. This would override current contents.
-    /// TODO: Have the data argument accept either bytes or an reader field
-    fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<(), Error> {
-        let directory: Directory = match r#type {
-            ConstellationDataType::Json => serde_json::from_str(data.as_str())?,
-            ConstellationDataType::Yaml => serde_yaml::from_str(data.as_str())?,
-            ConstellationDataType::Toml => toml::from_str(data.as_str())?,
-        };
-        //TODO: create a function to override directory items.
-        self.root_directory().set_items(directory.get_items());
-
-        Ok(())
-    }
 }
 
 dyn_clone::clone_trait_object!(Constellation);
