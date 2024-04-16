@@ -8,6 +8,7 @@ use self::document::IdentityDocument;
 pub mod client;
 pub mod document;
 pub mod protocol;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
