@@ -1,7 +1,10 @@
 #![allow(clippy::result_large_err)]
 #[allow(unused)]
 
-use std::io::{ErrorKind, Read, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{Read, Write};
+
+use std::io::ErrorKind;
 
 use crate::crypto::hash::sha256_hash;
 use futures::{stream, AsyncRead, AsyncReadExt, Stream, StreamExt, TryStreamExt};
