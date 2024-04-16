@@ -887,7 +887,7 @@ pub enum EmbedState {
     Disable,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Hash, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation

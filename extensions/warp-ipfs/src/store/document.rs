@@ -121,7 +121,6 @@ impl RootDocument {
     #[tracing::instrument(skip(self, ipfs))]
     pub async fn verify(&self, ipfs: &Ipfs) -> Result<(), Error> {
         let identity: IdentityDocument = ipfs
-            .dag()
             .get_dag(self.identity)
             .local()
             .deserialized()

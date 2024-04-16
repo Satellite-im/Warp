@@ -10,7 +10,7 @@ repository.workspace = true
 
 [dependencies]
 rust-ipfs = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["net"] }
 futures.workspace = true
@@ -21,9 +21,9 @@ serde.workspace = true
 serde_json.workspace = true
 void.workspace = true
 tracing.workspace = true
-toml = "0.8"
+toml.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.4", features = ["derive"] }
-zeroize = "1"
+zeroize.workspace = true
 dotenv = "0.15"
 base64 = "0.21"

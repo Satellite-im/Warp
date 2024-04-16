@@ -9,7 +9,6 @@ use futures::{
     FutureExt, SinkExt, StreamExt,
 };
 
-use libipld::Cid;
 use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath};
 
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -29,10 +28,7 @@ use crate::{
     to_file_type,
 };
 
-use super::{
-    document::root::RootDocumentMap, ecdh_decrypt, event_subscription::EventSubscription,
-    get_keypair_did,
-};
+use super::{document::root::RootDocumentMap, event_subscription::EventSubscription};
 
 #[derive(Clone)]
 pub struct FileStore {
@@ -81,16 +77,6 @@ impl FileStore {
             signal_rx,
             command_receiver,
         };
-
-        if let Some(p) = task.config.path.as_ref() {
-            let index_file = p.join(".index_id");
-            // Since this file exist, we will attempt to migrate into root document
-            if index_file.is_file() {
-                if let Err(e) = task.import_v0().await {
-                    tracing::error!("Error importing index: {e}");
-                }
-            }
-        }
 
         if let Err(e) = task.import_v1().await {
             tracing::warn!("Unable to import index: {e}");
@@ -483,53 +469,6 @@ impl FileTask {
                 },
             }
         }
-    }
-
-    pub async fn import_v0(&self) -> Result<(), Error> {
-        if self.config.path.is_none() {
-            return Ok(());
-        }
-
-        let path = match self.config.path.as_ref() {
-            Some(path) => path,
-            None => return Ok(()),
-        };
-
-        if let Ok(cid) = tokio::fs::read(path.join(".index_id"))
-            .await
-            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            .and_then(|cid_str| {
-                cid_str
-                    .parse::<Cid>()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            })
-        {
-            tracing::info!("Importing index");
-            let data = self
-                .ipfs
-                .cat_unixfs(cid)
-                .local()
-                .await
-                .map_err(anyhow::Error::from)?;
-
-            let key = get_keypair_did(self.ipfs.keypair())?;
-
-            let index_bytes = ecdh_decrypt(&key, None, data)?;
-
-            let directory_index: Directory = serde_json::from_slice(&index_bytes)?;
-
-            self.index.set_items(directory_index.get_items());
-
-            _ = self.export().await;
-
-            if self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_pin(&cid).recursive().await?;
-            }
-
-            _ = tokio::fs::remove_file(path.join(".index_id")).await;
-        }
-
-        Ok(())
     }
 
     async fn import_v1(&self) -> Result<(), Error> {

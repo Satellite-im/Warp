@@ -12,9 +12,9 @@ warp.workspace = true
 rust-ipfs.workspace = true
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
-tokio = { workspace = true, features = ["full"] }
-tokio-util = { workspace = true, features = ["full"] }
-tokio-stream = { workspace = true, features = ["net"] }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
 futures.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
@@ -22,14 +22,14 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 either = { workspace = true, features = ["serde"] }
-bs58 = "0.4"
+bs58.workspace = true
 parking_lot.workspace = true
 
-tracing = "0.1"
+tracing.workspace = true
 
 async-recursion = "1"
 
-chrono = { workspace = true, features = ["serde"] }
+chrono = { workspace = true }
 
 void.workspace = true
 
@@ -38,7 +38,6 @@ derive_more.workspace = true
 mediatype.workspace = true
 
 bincode.workspace = true
-bayespam = "1.1.0"
 bytes.workspace = true
 
 shuttle = { path = "../../tools/shuttle", default-features = false }
