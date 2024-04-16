@@ -32,6 +32,7 @@ pub struct RootStorage {
 
 impl RootStorage {
     pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
+        
         let root_cid = match path.as_ref() {
             Some(path) => tokio::fs::read(path.join(".root_v0"))
                 .await
@@ -143,6 +144,7 @@ impl RootInner {
                 tracing::error!("Error writing cid to file: {e}");
             }
         }
+
         tracing::info!(cid = %cid, "root is stored");
         Ok(())
     }
