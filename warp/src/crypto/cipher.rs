@@ -1,5 +1,6 @@
 #![allow(clippy::result_large_err)]
 #[allow(unused)]
+
 use std::io::{ErrorKind, Read, Write};
 
 use crate::crypto::hash::sha256_hash;
