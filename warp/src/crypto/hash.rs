@@ -1,7 +1,6 @@
 #![allow(clippy::result_large_err)]
 use digest::Digest;
 use sha2::Sha256;
-#[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
 
 use crate::error::Error;
@@ -9,7 +8,6 @@ use crate::error::Error;
 #[allow(dead_code)]
 type Result<T> = std::result::Result<T, Error>;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn sha256_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Result<Vec<u8>> {
     let mut hasher = Sha256::new();
     std::io::copy(reader, &mut hasher)?;

@@ -552,7 +552,9 @@ impl TesseractInner {
         }
         Ok(())
     }
+}
 
+impl TesseractInner {
     fn export(&self) -> Result<HashMap<String, String>> {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
@@ -571,9 +573,7 @@ impl TesseractInner {
         }
         Ok(map)
     }
-}
 
-impl TesseractInner {
     fn set_autosave(&self) {
         let autosave = self.autosave_enabled();
         self.autosave.store(!autosave, Ordering::Relaxed);
@@ -775,7 +775,7 @@ impl TesseractInner {
         let length = LocalStorage::length();
 
         for index in 0..length {
-            let key = local_storage.key(index).unwrap().unwrap_throw();
+            let key = local_storage.key(index).unwrap().unwrap();
             let value: Vec<u8> = LocalStorage::get(&key).unwrap();
             self.internal.write().insert(key, value);
         }
@@ -904,6 +904,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn tesseract_event() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();

@@ -5,7 +5,6 @@ use derive_more::Display;
 use mediatype;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-#[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek};
 use std::sync::Arc;
 use uuid::Uuid;

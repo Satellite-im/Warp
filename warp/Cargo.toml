@@ -37,7 +37,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 
 # Sync crates
-parking_lot = { workspace = true, features = ["send_guard", "serde"] }
+parking_lot = { workspace = true, features = ["serde"] }
 
 # Time crate
 chrono = { workspace = true }
@@ -62,6 +62,7 @@ mediatype.workspace = true
 tokio = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", default-features = false, features = ["sync"]}
 wasm-bindgen = { version = "0.2" }
 gloo = "0.7"
 web-sys = { version = "0.3" }
