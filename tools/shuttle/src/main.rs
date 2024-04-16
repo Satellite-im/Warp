@@ -56,6 +56,7 @@ struct Opt {
     enable_relay_server: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
@@ -123,3 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}
