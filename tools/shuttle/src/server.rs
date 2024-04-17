@@ -197,8 +197,10 @@ impl ShuttleServer {
 
         let ipfs = uninitialized.start().await?;
 
-        for addr in addrs {
-            ipfs.add_listening_address(addr).await?;
+        for addr in &addrs {
+            if let Err(e) = ipfs.add_listening_address(addr.clone()).await {
+                tracing::error!(address = %addr, error = %e, "unable to add listening address");
+            }
         }
 
         let root = crate::store::root::RootStorage::new(&ipfs, path).await;
@@ -528,7 +530,7 @@ impl ShuttleTask {
                         match event {
                             identity::protocol::Mailbox::FetchAll => {
                                 let (reqs, remaining) = identity_storage
-                                    .fetch_mailbox(did.clone())
+                                    .fetch_mailbox(&did)
                                     .await
                                     .unwrap_or_default();
 

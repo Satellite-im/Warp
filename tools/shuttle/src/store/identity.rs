@@ -53,7 +53,7 @@ impl IdentityStorage {
         inner.contains(did).await
     }
 
-    pub async fn fetch_mailbox(&self, did: DID) -> Result<(Vec<RequestPayload>, usize), Error> {
+    pub async fn fetch_mailbox(&self, did: &DID) -> Result<(Vec<RequestPayload>, usize), Error> {
         let inner = &mut *self.inner.write().await;
         inner.fetch_requests(did).await
     }
@@ -373,7 +373,7 @@ impl IdentityStorageInner {
         Ok(list)
     }
 
-    async fn fetch_requests(&mut self, did: DID) -> Result<(Vec<RequestPayload>, usize), Error> {
+    async fn fetch_requests(&mut self, did: &DID) -> Result<(Vec<RequestPayload>, usize), Error> {
         let key_str = did.to_string();
         let mut list: BTreeMap<String, Cid> = match self.mailbox {
             Some(cid) => self
@@ -452,7 +452,7 @@ impl IdentityStorageInner {
         let mut mailbox = match list.get(&key_str) {
             Some(cid) => self
                 .ipfs
-                .get_dag(*cid)
+                .get_dag(cid)
                 .local()
                 .deserialized::<Vec<RequestPayload>>()
                 .await
