@@ -1247,7 +1247,9 @@ impl IdentityStore {
                                             let store = self.clone();
                                             let did = in_did.clone();
                                             async move {
-                                                let peer_id = vec![did.to_peer_id()?];
+                                                let mut peer_id = vec![did.to_peer_id()?];
+                                                let providers = store.discovery_peers();
+                                                peer_id.extend(providers);
                                                 let _ = super::document::image_dag::get_image(
                                                     &ipfs,
                                                     identity_profile_picture,
@@ -1314,7 +1316,9 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                let peer_id = vec![did.to_peer_id()?];
+                                                let mut peer_id = vec![did.to_peer_id()?];
+                                                let providers = store.discovery_peers();
+                                                peer_id.extend(providers);
 
                                                 let _ = super::document::image_dag::get_image(
                                                     &ipfs,
@@ -1398,7 +1402,9 @@ impl IdentityStore {
                                                 let did = in_did.clone();
                                                 let store = self.clone();
                                                 async move {
-                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let mut peer_id = vec![did.to_peer_id()?];
+                                                    let providers = store.discovery_peers();
+                                                    peer_id.extend(providers);
                                                     let _ = super::document::image_dag::get_image(
                                                         &ipfs,
                                                         picture,
@@ -1435,7 +1441,9 @@ impl IdentityStore {
 
                                                 let did = in_did.clone();
                                                 async move {
-                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let mut peer_id = vec![did.to_peer_id()?];
+                                                    let providers = store.discovery_peers();
+                                                    peer_id.extend(providers);
                                                     let _ = super::document::image_dag::get_image(
                                                         &ipfs,
                                                         banner,
