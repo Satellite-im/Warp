@@ -255,9 +255,10 @@ impl RootDocument {
     }
 
     #[tracing::instrument(skip(self, ipfs))]
-    pub async fn resolve2(&self, ipfs: &Ipfs) -> Result<(), Error> {
+    pub async fn resolve2(&self, ipfs: &Ipfs, providers: &[PeerId]) -> Result<(), Error> {
         let document: IdentityDocument = ipfs
             .get_dag(self.identity)
+            .providers(providers)
             .deserialized()
             .await
             .map_err(|_| Error::IdentityInvalid)?;
@@ -267,6 +268,7 @@ impl RootDocument {
         _ = futures::future::ready(self.friends.ok_or(Error::Other))
             .and_then(|document| async move {
                 ipfs.get_dag(document)
+                    .providers(providers)
                     .await
                     .map_err(anyhow::Error::from)
                     .map_err(Error::from)
@@ -276,6 +278,7 @@ impl RootDocument {
         _ = futures::future::ready(self.blocks.ok_or(Error::Other))
             .and_then(|document| async move {
                 ipfs.get_dag(document)
+                    .providers(providers)
                     .await
                     .map_err(anyhow::Error::from)
                     .map_err(Error::from)
@@ -285,6 +288,7 @@ impl RootDocument {
         _ = futures::future::ready(self.block_by.ok_or(Error::Other))
             .and_then(|document| async move {
                 ipfs.get_dag(document)
+                    .providers(providers)
                     .await
                     .map_err(anyhow::Error::from)
                     .map_err(Error::from)
@@ -294,6 +298,7 @@ impl RootDocument {
         _ = futures::future::ready(self.request.ok_or(Error::Other))
             .and_then(|document| async move {
                 ipfs.get_dag(document)
+                    .providers(providers)
                     .await
                     .map_err(anyhow::Error::from)
                     .map_err(Error::from)
@@ -302,7 +307,11 @@ impl RootDocument {
 
         _ = futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
             .and_then(|document| async move {
-                let map: BTreeMap<String, Cid> = ipfs.get_dag(document).deserialized().await?;
+                let map: BTreeMap<String, Cid> = ipfs
+                    .get_dag(document)
+                    .providers(providers)
+                    .deserialized()
+                    .await?;
                 let mut resolved_map: BTreeMap<Uuid, _> = BTreeMap::new();
                 for (k, v) in map
                     .iter()

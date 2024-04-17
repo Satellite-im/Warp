@@ -10,7 +10,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 
-use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
+use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair, PeerId};
 
 use libipld::Cid;
 use rust_ipfs as ipfs;
@@ -1638,11 +1638,25 @@ impl IdentityStore {
         identity.resolve()
     }
 
+    pub fn discovery_peers(&self) -> Vec<PeerId> {
+        match self.discovery.discovery_config() {
+            DiscoveryConfig::Shuttle { addresses } => addresses
+                .iter()
+                .filter_map(|addr| addr.peer_id())
+                .collect::<Vec<_>>(),
+            _ => vec![],
+        }
+    }
+
     #[tracing::instrument(skip(self))]
     pub async fn import_identity_remote_resolve(&mut self) -> Result<Identity, Error> {
         let package = self.import_identity_remote().await?;
 
-        self.root_document.import_root_cid(package).await?;
+        let providers = self.discovery_peers();
+
+        self.root_document
+            .import_root_cid(package, providers)
+            .await?;
 
         tracing::info!("Loading friends list into phonebook");
         if let Ok(friends) = self.friends_list().await {

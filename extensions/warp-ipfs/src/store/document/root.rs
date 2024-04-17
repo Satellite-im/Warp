@@ -6,7 +6,7 @@ use futures::{
     StreamExt,
 };
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath};
+use rust_ipfs::{Ipfs, IpfsPath, PeerId};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use warp::{
@@ -148,9 +148,9 @@ impl RootDocumentMap {
         inner.cid.ok_or(Error::IdentityNotCreated)
     }
 
-    pub async fn import_root_cid(&self, cid: Cid) -> Result<(), Error> {
+    pub async fn import_root_cid(&self, cid: Cid, providers: Vec<PeerId>) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.set_root_cid(cid).await
+        inner.set_root_cid(cid, providers).await
     }
 
     pub async fn export(&self) -> Result<ResolvedRootDocument, Error> {
@@ -296,12 +296,13 @@ impl RootDocumentInner {
     }
 
     async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
-        self._set_root_document(document, true).await
+        self._set_root_document(document, vec![], true).await
     }
 
     async fn _set_root_document(
         &mut self,
         document: RootDocument,
+        providers: Vec<PeerId>,
         local: bool,
     ) -> Result<(), Error> {
         let document = document.sign(&self.keypair)?;
@@ -311,9 +312,22 @@ impl RootDocumentInner {
 
         let root_cid = self.ipfs.dag().put().serialize(document).await?;
 
+        if !local {
+            if let Err(e) = self
+                .ipfs
+                .fetch(&root_cid)
+                .providers(&providers)
+                .recursive()
+                .await
+            {
+                tracing::warn!(cid = %root_cid, error = %e, "unable to prefetch root document");
+            }
+        }
+
         self.ipfs
             .insert_pin(&root_cid)
             .set_local(local)
+            .providers(&providers)
             .recursive()
             .await?;
 
@@ -900,15 +914,17 @@ impl RootDocumentInner {
         ecdh_encrypt(&self.keypair, None, bytes)
     }
 
-    async fn set_root_cid(&mut self, cid: Cid) -> Result<(), Error> {
+    async fn set_root_cid(&mut self, cid: Cid, providers: Vec<PeerId>) -> Result<(), Error> {
         let root_document = self
             .ipfs
             .get_dag(cid)
+            .providers(&providers)
             .deserialized::<RootDocument>()
             .await?;
         // Step down through each field to resolve them
-        root_document.resolve2(&self.ipfs).await?;
-        self._set_root_document(root_document, false).await?;
+        root_document.resolve2(&self.ipfs, &providers).await?;
+        self._set_root_document(root_document, providers, false)
+            .await?;
         Ok(())
     }
 }
