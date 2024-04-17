@@ -19,7 +19,7 @@ pub struct IdentityCache {
 impl IdentityCache {
     pub async fn new(ipfs: &Ipfs, path: Option<&PathBuf>) -> Self {
         let list = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".cache_id_v0"))
+            Some(path) => fs::read(path.join(".cache_id_v0"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
                 .ok()
@@ -127,7 +127,7 @@ impl IdentityCacheInner {
 
                 if let Some(path) = self.path.as_ref() {
                     let cid = cid.to_string();
-                    if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
+                    if let Err(e) = fs::write(path.join(".cache_id_v0"), cid).await {
                         tracing::error!("Error writing cid to file: {e}");
                     }
                 }
@@ -160,7 +160,7 @@ impl IdentityCacheInner {
 
                 if let Some(path) = self.path.as_ref() {
                     let cid = cid.to_string();
-                    if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
+                    if let Err(e) = fs::write(path.join(".cache_id_v0"), cid).await {
                         tracing::error!("Error writing cid to file: {e}");
                     }
                 }
@@ -227,7 +227,7 @@ impl IdentityCacheInner {
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".cache_id_v0"), cid).await {
+            if let Err(e) = fs::write(path.join(".cache_id_v0"), cid).await {
                 tracing::error!("Error writing cid to file: {e}");
             }
         }

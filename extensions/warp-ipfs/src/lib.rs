@@ -30,6 +30,7 @@ use store::event_subscription::EventSubscription;
 use store::files::FileStore;
 use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{debug, error, info, trace, warn, Instrument, Span};
 use utils::ExtensionType;
@@ -312,13 +313,14 @@ impl WarpIpfs {
                 ..Default::default()
             });
 
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(path) = self.inner.config.path.as_ref() {
             info!("Instance will be persistent");
             info!("Path set: {}", path.display());
 
             if !path.is_dir() {
                 warn!("Path doesnt exist... creating");
-                tokio::fs::create_dir_all(path).await?;
+                fs::create_dir_all(path).await?;
             }
             uninitialized = uninitialized.set_path(path);
         }
@@ -376,10 +378,12 @@ impl WarpIpfs {
                 .listen_as_external_addr();
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         if self.inner.config.ipfs_setting.portmapping {
             uninitialized = uninitialized.with_upnp();
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         if self.inner.config.ipfs_setting.mdns.enable {
             uninitialized = uninitialized.with_mdns();
         }
@@ -1131,7 +1135,7 @@ impl MultiPassImportExport for WarpIpfs {
             } => {
                 let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
 
-                let bytes = tokio::fs::read(path).await?;
+                let bytes = fs::read(path).await?;
                 let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
                 let exported_document =
                     serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
@@ -1225,7 +1229,7 @@ impl MultiPassImportExport for WarpIpfs {
         match location {
             ImportLocation::Local { path } => {
                 let bundle = store.root_document().export_bytes().await?;
-                tokio::fs::write(path, bundle).await?;
+                fs::write(path, bundle).await?;
                 Ok(())
             }
             ImportLocation::Memory { buffer } => {

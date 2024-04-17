@@ -49,7 +49,7 @@ impl FileStore {
     ) -> Result<Self, Error> {
         if let Some(path) = config.path.as_ref() {
             if !path.exists() {
-                tokio::fs::create_dir_all(path).await?;
+                fs::create_dir_all(path).await?;
             }
         }
 
@@ -535,7 +535,7 @@ impl FileTask {
             return Err(Error::FileNotFound);
         }
 
-        let file_size = tokio::fs::metadata(&path).await?.len();
+        let file_size = fs::file_size(&path).await?;
 
         if self.current_size() + (file_size as usize) >= self.max_size() {
             return Err(Error::InvalidLength {

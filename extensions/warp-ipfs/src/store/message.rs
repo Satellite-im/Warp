@@ -96,7 +96,7 @@ impl MessageStore {
 
         if let Some(path) = path.as_ref() {
             if !path.exists() {
-                tokio::fs::create_dir_all(path)
+                fs::create_dir_all(path)
                     .await
                     .expect("able to create directory");
             }
@@ -642,7 +642,7 @@ impl ConversationInner {
             if !mid_file.is_file() {
                 return Ok(());
             }
-            let cid = tokio::fs::read(&mid_file)
+            let cid = fs::read(&mid_file)
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
                 .and_then(|cid_str| {
@@ -666,7 +666,7 @@ impl ConversationInner {
                 let _ = self.root.set_conversation_document(document).await;
             }
 
-            _ = tokio::fs::remove_file(mid_file).await;
+            _ = fs::remove_file(mid_file).await;
         }
         Ok(())
     }
@@ -682,7 +682,7 @@ impl ConversationInner {
         }
 
         if let Some(path) = self.path.as_ref() {
-            if let Ok(data) = tokio::fs::read(path.join(".messaging_queue"))
+            if let Ok(data) = fs::read(path.join(".messaging_queue"))
                 .and_then(|data| async move {
                     serde_json::from_slice(&data)
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
@@ -1213,7 +1213,7 @@ impl ConversationInner {
                 }
             };
 
-            if let Err(e) = tokio::fs::write(path.join(".messaging_queue"), bytes).await {
+            if let Err(e) = fs::write(path.join(".messaging_queue"), bytes).await {
                 error!("Error saving queue: {e}");
             }
         }

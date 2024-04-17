@@ -38,11 +38,13 @@ bincode.workspace = true
 bytes.workspace = true
 
 shuttle = { path = "../../tools/shuttle", default-features = false }
+fs = { path = "../../tools/fs", default-features = false }
+
+tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
-tokio-util = { workspace = true }
-tokio-stream = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", default-features = false, features = ["sync"]}

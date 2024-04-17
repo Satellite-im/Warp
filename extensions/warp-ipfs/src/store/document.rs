@@ -506,7 +506,7 @@ impl FileAttachmentDocument {
                         };
                     },
                     rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
-                        if let Err(e) = tokio::fs::remove_file(&path).await {
+                        if let Err(e) = fs::remove_file(&path).await {
                             tracing::error!("Error removing file: {e}");
                         }
                         let error = error.map(Error::Any).unwrap_or(Error::Other);
