@@ -31,7 +31,7 @@ pub struct RootDocumentMap {
 impl RootDocumentMap {
     pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>, path: Option<&PathBuf>) -> Self {
         let cid = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".id"))
+            Some(path) => fs::read(path.join(".id"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
                 .ok()
@@ -321,7 +321,7 @@ impl RootDocumentInner {
 
         if let Some(path) = self.path.as_ref() {
             let cid = root_cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".id"), cid).await {
+            if let Err(e) = fs::write(path.join(".id"), cid).await {
                 tracing::error!("Error writing to '.id': {e}.")
             }
         }

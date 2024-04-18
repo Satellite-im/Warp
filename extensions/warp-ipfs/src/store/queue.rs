@@ -130,7 +130,7 @@ impl Queue {
 impl Queue {
     pub async fn load(&self) -> Result<(), Error> {
         if let Some(path) = self.path.as_ref() {
-            let data = tokio::fs::read(path.join(".request_queue")).await?;
+            let data = fs::read(path.join(".request_queue")).await?;
 
             let prikey =
                 Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
@@ -182,7 +182,7 @@ impl Queue {
                 }
             };
 
-            if let Err(e) = tokio::fs::write(path.join(".request_queue"), data).await {
+            if let Err(e) = fs::write(path.join(".request_queue"), data).await {
                 error!("Error saving queue: {e}");
             }
         }

@@ -367,7 +367,7 @@ impl IdentityStore {
     ) -> Result<Self, Error> {
         if let Some(path) = config.path.as_ref() {
             if !path.exists() {
-                tokio::fs::create_dir_all(path).await?;
+                fs::create_dir_all(path).await?;
             }
         }
         let config = config.clone();
