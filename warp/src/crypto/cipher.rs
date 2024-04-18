@@ -1,6 +1,5 @@
 #![allow(clippy::result_large_err)]
 #[allow(unused)]
-
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Write};
 
@@ -581,7 +580,7 @@ mod test {
         );
         Ok(())
     }
-    
+
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn cipher_aes256gcm_async_stream_encrypt_decrypt() -> anyhow::Result<()> {
