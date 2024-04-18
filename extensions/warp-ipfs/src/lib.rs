@@ -868,11 +868,9 @@ impl MultiPass for WarpIpfs {
                     )));
                 }
 
-                let file = tokio::fs::File::open(&path).await?;
+                let file = fs::File::open(&path).await?;
 
-                let metadata = file.metadata().await?;
-
-                let len = metadata.len() as _;
+                let len = file.file_size().await?;
 
                 if len == 0 || len > 2 * 1024 * 1024 {
                     return Err(Error::InvalidLength {
@@ -1007,11 +1005,9 @@ impl MultiPass for WarpIpfs {
                     )));
                 }
 
-                let file = tokio::fs::File::open(&path).await?;
+                let file = fs::File::open(&path).await?;
 
-                let metadata = file.metadata().await?;
-
-                let len = metadata.len() as _;
+                let len = file.file_size().await?;
 
                 if len == 0 || len > 2 * 1024 * 1024 {
                     return Err(Error::InvalidLength {

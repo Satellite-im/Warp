@@ -16,6 +16,8 @@ resolver = "2"
 
 # Async and futures crates
 futures = { version = "0.3", default-features = false, features = ["std"] }
+futures-io = "0.3"
+futures-util = "0.3"
 async-trait = { version = "0.1" }
 async-stream = "0.3"
 async-broadcast = "0.5"
@@ -76,9 +78,11 @@ tracing = { version = "0.1" }
 either = "1"
 void = "1"
 
-#ipfs dependency
+# ipfs dependency
 rust-ipfs = "0.11.5"
 
+# wasm crates
+gloo = "0.7"
 
 # Blink related crates
 # av-data is needed to use libaom. need to ensure that Warp and libaom use the same version of av-data
