@@ -1,5 +1,6 @@
 mod behaviour;
 pub mod config;
+pub(crate) mod rt;
 pub mod store;
 mod thumbnail;
 mod utils;
@@ -168,7 +169,7 @@ impl WarpIpfs {
 
         if !identity.tesseract.is_unlock() {
             let inner = identity.clone();
-            tokio::spawn(async move {
+            crate::rt::spawn(async move {
                 let mut stream = inner.tesseract.subscribe();
                 while let Some(event) = stream.next().await {
                     if matches!(event, TesseractEvent::Unlocked) {
@@ -390,6 +391,7 @@ impl WarpIpfs {
 
         let ipfs = uninitialized.start().await?;
 
+        #[cfg(not(target_arch = "wasm32"))]
         if self.inner.config.enable_relay {
             let mut relay_peers = HashSet::new();
 
@@ -474,7 +476,7 @@ impl WarpIpfs {
             };
 
             if self.inner.config.ipfs_setting.relay_client.background {
-                tokio::spawn(relay_connection_task);
+                crate::rt::spawn(relay_connection_task);
             } else {
                 relay_connection_task.await;
             }
@@ -501,7 +503,7 @@ impl WarpIpfs {
         ) && self.inner.config.ipfs_setting.bootstrap
             && !empty_bootstrap
         {
-            tokio::spawn({
+            crate::rt::spawn({
                 let ipfs = ipfs.clone();
                 async move {
                     loop {
@@ -805,136 +807,150 @@ impl MultiPass for WarpIpfs {
                 store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::Picture(data) => {
-                let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile picture".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-
-                trace!("image size = {}", len);
-
-                let (data, format) = tokio::task::spawn_blocking(move || {
-                    let cursor = std::io::Cursor::new(data);
-
-                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
-
-                    let format = image
-                        .format()
-                        .and_then(|format| ExtensionType::try_from(format).ok())
-                        .unwrap_or(ExtensionType::Other);
-
-                    let inner = image.into_inner();
-
-                    let data = inner.into_inner();
-                    Ok::<_, Error>((data, format))
-                })
-                .await
-                .map_err(anyhow::Error::from)??;
-
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
-                    format.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                debug!("Image cid: {cid}");
-
-                if let Some(picture_cid) = identity.metadata.profile_picture {
-                    if picture_cid == cid {
-                        debug!("Picture is already on document. Not updating identity");
-                        return Ok(());
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let len = data.len();
+                    if len == 0 || len > 2 * 1024 * 1024 {
+                        return Err(Error::InvalidLength {
+                            context: "profile picture".into(),
+                            current: len,
+                            minimum: Some(1),
+                            maximum: Some(2 * 1024 * 1024),
+                        });
                     }
 
-                    if let Some(banner_cid) = identity.metadata.profile_banner {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(picture_cid);
+                    trace!("image size = {}", len);
+
+                    let (data, format) = tokio::task::spawn_blocking(move || {
+                        let cursor = std::io::Cursor::new(data);
+
+                        let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                        let format = image
+                            .format()
+                            .and_then(|format| ExtensionType::try_from(format).ok())
+                            .unwrap_or(ExtensionType::Other);
+
+                        let inner = image.into_inner();
+
+                        let data = inner.into_inner();
+                        Ok::<_, Error>((data, format))
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)??;
+
+                    let cid = store::document::image_dag::store_photo(
+                        &ipfs,
+                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                        format.into(),
+                        Some(2 * 1024 * 1024),
+                    )
+                    .await?;
+
+                    debug!("Image cid: {cid}");
+
+                    if let Some(picture_cid) = identity.metadata.profile_picture {
+                        if picture_cid == cid {
+                            debug!("Picture is already on document. Not updating identity");
+                            return Ok(());
                         }
-                    }
-                }
 
-                identity.metadata.profile_picture = Some(cid);
-                store.identity_update(identity).await?;
-            }
-            IdentityUpdate::PicturePath(path) => {
-                if !path.is_file() {
-                    return Err(Error::IoError(std::io::Error::from(
-                        std::io::ErrorKind::NotFound,
-                    )));
-                }
-
-                let file = tokio::fs::File::open(&path).await?;
-
-                let metadata = file.metadata().await?;
-
-                let len = metadata.len() as _;
-
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile picture".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-
-                let extension = path
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .map(ExtensionType::from)
-                    .unwrap_or(ExtensionType::Other);
-
-                trace!("image size = {}", len);
-
-                let stream = async_stream::stream! {
-                    let mut reader = file.compat();
-                    let mut buffer = vec![0u8; 512];
-                    loop {
-                        match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
-                            Ok(_n) => {
-                                yield Ok(buffer.clone());
-                                break;
-                            },
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                            Err(e) => {
-                                yield Err(e);
-                                break;
+                        if let Some(banner_cid) = identity.metadata.profile_banner {
+                            if picture_cid != banner_cid {
+                                old_cid = Some(picture_cid);
                             }
                         }
                     }
-                };
 
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    stream.boxed(),
-                    extension.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                debug!("Image cid: {cid}");
-
-                if let Some(picture_cid) = identity.metadata.profile_picture {
-                    if picture_cid == cid {
-                        debug!("Picture is already on document. Not updating identity");
-                        return Ok(());
+                    identity.metadata.profile_picture = Some(cid);
+                    store.identity_update(identity).await?;
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    _ = data;
+                }
+            }
+            IdentityUpdate::PicturePath(path) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if !path.is_file() {
+                        return Err(Error::IoError(std::io::Error::from(
+                            std::io::ErrorKind::NotFound,
+                        )));
                     }
 
-                    if let Some(banner_cid) = identity.metadata.profile_banner {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(picture_cid);
+                    let file = tokio::fs::File::open(&path).await?;
+
+                    let metadata = file.metadata().await?;
+
+                    let len = metadata.len() as _;
+
+                    if len == 0 || len > 2 * 1024 * 1024 {
+                        return Err(Error::InvalidLength {
+                            context: "profile picture".into(),
+                            current: len,
+                            minimum: Some(1),
+                            maximum: Some(2 * 1024 * 1024),
+                        });
+                    }
+
+                    let extension = path
+                        .extension()
+                        .and_then(OsStr::to_str)
+                        .map(ExtensionType::from)
+                        .unwrap_or(ExtensionType::Other);
+
+                    trace!("image size = {}", len);
+
+                    let stream = async_stream::stream! {
+                        let mut reader = file.compat();
+                        let mut buffer = vec![0u8; 512];
+                        loop {
+                            match reader.read(&mut buffer).await {
+                                Ok(512) => yield Ok(buffer.clone()),
+                                Ok(_n) => {
+                                    yield Ok(buffer.clone());
+                                    break;
+                                },
+                                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                                Err(e) => {
+                                    yield Err(e);
+                                    break;
+                                }
+                            }
+                        }
+                    };
+
+                    let cid = store::document::image_dag::store_photo(
+                        &ipfs,
+                        stream.boxed(),
+                        extension.into(),
+                        Some(2 * 1024 * 1024),
+                    )
+                    .await?;
+
+                    debug!("Image cid: {cid}");
+
+                    if let Some(picture_cid) = identity.metadata.profile_picture {
+                        if picture_cid == cid {
+                            debug!("Picture is already on document. Not updating identity");
+                            return Ok(());
+                        }
+
+                        if let Some(banner_cid) = identity.metadata.profile_banner {
+                            if picture_cid != banner_cid {
+                                old_cid = Some(picture_cid);
+                            }
                         }
                     }
-                }
 
-                identity.metadata.profile_picture = Some(cid);
-                store.identity_update(identity).await?;
+                    identity.metadata.profile_picture = Some(cid);
+                    store.identity_update(identity).await?;
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    _ = path;
+                }
             }
             IdentityUpdate::ClearPicture => {
                 let document = identity.metadata.profile_picture.take();
@@ -944,136 +960,150 @@ impl MultiPass for WarpIpfs {
                 store.identity_update(identity).await?;
             }
             IdentityUpdate::Banner(data) => {
-                let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile banner".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-
-                trace!("image size = {}", len);
-
-                let (data, format) = tokio::task::spawn_blocking(move || {
-                    let cursor = std::io::Cursor::new(data);
-
-                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
-
-                    let format = image
-                        .format()
-                        .and_then(|format| ExtensionType::try_from(format).ok())
-                        .unwrap_or(ExtensionType::Other);
-
-                    let inner = image.into_inner();
-
-                    let data = inner.into_inner();
-                    Ok::<_, Error>((data, format))
-                })
-                .await
-                .map_err(anyhow::Error::from)??;
-
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
-                    format.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                debug!("Image cid: {cid}");
-
-                if let Some(banner_cid) = identity.metadata.profile_banner {
-                    if banner_cid == cid {
-                        debug!("Banner is already on document. Not updating identity");
-                        return Ok(());
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let len = data.len();
+                    if len == 0 || len > 2 * 1024 * 1024 {
+                        return Err(Error::InvalidLength {
+                            context: "profile banner".into(),
+                            current: len,
+                            minimum: Some(1),
+                            maximum: Some(2 * 1024 * 1024),
+                        });
                     }
 
-                    if let Some(picture_cid) = identity.metadata.profile_picture {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(banner_cid);
+                    trace!("image size = {}", len);
+
+                    let (data, format) = tokio::task::spawn_blocking(move || {
+                        let cursor = std::io::Cursor::new(data);
+
+                        let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                        let format = image
+                            .format()
+                            .and_then(|format| ExtensionType::try_from(format).ok())
+                            .unwrap_or(ExtensionType::Other);
+
+                        let inner = image.into_inner();
+
+                        let data = inner.into_inner();
+                        Ok::<_, Error>((data, format))
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)??;
+
+                    let cid = store::document::image_dag::store_photo(
+                        &ipfs,
+                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                        format.into(),
+                        Some(2 * 1024 * 1024),
+                    )
+                    .await?;
+
+                    debug!("Image cid: {cid}");
+
+                    if let Some(banner_cid) = identity.metadata.profile_banner {
+                        if banner_cid == cid {
+                            debug!("Banner is already on document. Not updating identity");
+                            return Ok(());
                         }
-                    }
-                }
 
-                identity.metadata.profile_banner = Some(cid);
-                store.identity_update(identity).await?;
-            }
-            IdentityUpdate::BannerPath(path) => {
-                if !path.is_file() {
-                    return Err(Error::IoError(std::io::Error::from(
-                        std::io::ErrorKind::NotFound,
-                    )));
-                }
-
-                let file = tokio::fs::File::open(&path).await?;
-
-                let metadata = file.metadata().await?;
-
-                let len = metadata.len() as _;
-
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile banner".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-
-                let extension = path
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .map(ExtensionType::from)
-                    .unwrap_or(ExtensionType::Other);
-
-                trace!("image size = {}", len);
-
-                let stream = async_stream::stream! {
-                    let mut reader = file.compat();
-                    let mut buffer = vec![0u8; 512];
-                    loop {
-                        match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
-                            Ok(_n) => {
-                                yield Ok(buffer.clone());
-                                break;
-                            },
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                            Err(e) => {
-                                yield Err(e);
-                                break;
+                        if let Some(picture_cid) = identity.metadata.profile_picture {
+                            if picture_cid != banner_cid {
+                                old_cid = Some(banner_cid);
                             }
                         }
                     }
-                };
 
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    stream.boxed(),
-                    extension.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                debug!("Image cid: {cid}");
-
-                if let Some(banner_cid) = identity.metadata.profile_banner {
-                    if banner_cid == cid {
-                        debug!("Banner is already on document. Not updating identity");
-                        return Ok(());
+                    identity.metadata.profile_banner = Some(cid);
+                    store.identity_update(identity).await?;
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    _ = data;
+                }
+            }
+            IdentityUpdate::BannerPath(path) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if !path.is_file() {
+                        return Err(Error::IoError(std::io::Error::from(
+                            std::io::ErrorKind::NotFound,
+                        )));
                     }
 
-                    if let Some(picture_cid) = identity.metadata.profile_picture {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(banner_cid);
+                    let file = tokio::fs::File::open(&path).await?;
+
+                    let metadata = file.metadata().await?;
+
+                    let len = metadata.len() as _;
+
+                    if len == 0 || len > 2 * 1024 * 1024 {
+                        return Err(Error::InvalidLength {
+                            context: "profile banner".into(),
+                            current: len,
+                            minimum: Some(1),
+                            maximum: Some(2 * 1024 * 1024),
+                        });
+                    }
+
+                    let extension = path
+                        .extension()
+                        .and_then(OsStr::to_str)
+                        .map(ExtensionType::from)
+                        .unwrap_or(ExtensionType::Other);
+
+                    trace!("image size = {}", len);
+
+                    let stream = async_stream::stream! {
+                        let mut reader = file.compat();
+                        let mut buffer = vec![0u8; 512];
+                        loop {
+                            match reader.read(&mut buffer).await {
+                                Ok(512) => yield Ok(buffer.clone()),
+                                Ok(_n) => {
+                                    yield Ok(buffer.clone());
+                                    break;
+                                },
+                                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                                Err(e) => {
+                                    yield Err(e);
+                                    break;
+                                }
+                            }
+                        }
+                    };
+
+                    let cid = store::document::image_dag::store_photo(
+                        &ipfs,
+                        stream.boxed(),
+                        extension.into(),
+                        Some(2 * 1024 * 1024),
+                    )
+                    .await?;
+
+                    debug!("Image cid: {cid}");
+
+                    if let Some(banner_cid) = identity.metadata.profile_banner {
+                        if banner_cid == cid {
+                            debug!("Banner is already on document. Not updating identity");
+                            return Ok(());
+                        }
+
+                        if let Some(picture_cid) = identity.metadata.profile_picture {
+                            if picture_cid != banner_cid {
+                                old_cid = Some(banner_cid);
+                            }
                         }
                     }
-                }
 
-                identity.metadata.profile_banner = Some(cid);
-                store.identity_update(identity).await?;
+                    identity.metadata.profile_banner = Some(cid);
+                    store.identity_update(identity).await?;
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    _ = path;
+                }
             }
             IdentityUpdate::ClearBanner => {
                 let document = identity.metadata.profile_banner.take();

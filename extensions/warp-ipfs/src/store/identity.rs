@@ -16,9 +16,10 @@ use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use shuttle::identity::{RequestEvent, RequestPayload};
+use web_time::Instant;
 use std::{
     collections::{HashMap, HashSet},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use tokio::sync::RwLock;
@@ -408,7 +409,7 @@ impl IdentityStore {
 
         // Move shuttle logic logic into its own task
         // TODO: Maybe push into a joinset or futureunordered and poll?
-        tokio::spawn({
+        crate::rt::spawn({
             let mut store = store.clone();
             async move {
                 if let Ok(ident) = store.own_identity().await {
@@ -458,7 +459,7 @@ impl IdentityStore {
             }
         }
 
-        tokio::spawn({
+        crate::rt::spawn({
             let mut store = store.clone();
             async move {
                 let event_stream = store
@@ -1242,40 +1243,42 @@ impl IdentityStore {
                                             .metadata
                                             .profile_picture
                                             .expect("Cid is provided");
-                                        tokio::spawn({
+                                        crate::rt::spawn({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
                                             async move {
-                                                let peer_id = vec![did.to_peer_id()?];
-                                                let _ = super::document::image_dag::get_image(
-                                                    &ipfs,
-                                                    identity_profile_picture,
-                                                    &peer_id,
-                                                    false,
-                                                    Some(2 * 1024 * 1024),
-                                                )
-                                                .await
-                                                .map_err(|e| {
-                                                    tracing::error!(
-                                                        "Error fetching image from {did}: {e}"
-                                                    );
-                                                    e
-                                                })?;
+                                                _ = async {
+                                                    let peer_id = vec![did.to_peer_id()?];
+                                                    let _ = super::document::image_dag::get_image(
+                                                        &ipfs,
+                                                        identity_profile_picture,
+                                                        &peer_id,
+                                                        false,
+                                                        Some(2 * 1024 * 1024),
+                                                    )
+                                                    .await
+                                                    .map_err(|e| {
+                                                        tracing::error!(
+                                                            "Error fetching image from {did}: {e}"
+                                                        );
+                                                        e
+                                                    })?;
 
-                                                tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
+                                                    tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
 
-                                                if emit {
-                                                    store
+                                                    if emit {
+                                                        store
                                                         .emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
                                                                 did,
                                                             },
                                                         )
                                                         .await;
-                                                }
+                                                    }
 
-                                                Ok::<_, anyhow::Error>(())
+                                                    Ok::<_, anyhow::Error>(())
+                                                }.await;
                                             }
                                         });
                                     }
@@ -1309,41 +1312,43 @@ impl IdentityStore {
                                             .metadata
                                             .profile_banner
                                             .expect("Cid is provided");
-                                        tokio::spawn({
+                                        crate::rt::spawn({
                                             let ipfs = self.ipfs.clone();
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                let peer_id = vec![did.to_peer_id()?];
+                                                _ = async {
+                                                    let peer_id = vec![did.to_peer_id()?];
 
-                                                let _ = super::document::image_dag::get_image(
-                                                    &ipfs,
-                                                    identity_profile_banner,
-                                                    &peer_id,
-                                                    false,
-                                                    Some(2 * 1024 * 1024),
-                                                )
-                                                .await
-                                                .map_err(|e| {
-                                                    tracing::error!(
-                                                        "Error fetching image from {did}: {e}"
-                                                    );
-                                                    e
-                                                })?;
+                                                    let _ = super::document::image_dag::get_image(
+                                                        &ipfs,
+                                                        identity_profile_banner,
+                                                        &peer_id,
+                                                        false,
+                                                        Some(2 * 1024 * 1024),
+                                                    )
+                                                    .await
+                                                    .map_err(|e| {
+                                                        tracing::error!(
+                                                            "Error fetching image from {did}: {e}"
+                                                        );
+                                                        e
+                                                    })?;
 
-                                                tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
+                                                    tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
-                                                if emit {
-                                                    store
-                                                        .emit_event(
-                                                            MultiPassEventKind::IdentityUpdate {
-                                                                did,
-                                                            },
-                                                        )
-                                                        .await;
-                                                }
+                                                    if emit {
+                                                        store
+                                                            .emit_event(
+                                                                MultiPassEventKind::IdentityUpdate {
+                                                                    did,
+                                                                },
+                                                            )
+                                                            .await;
+                                                    }
 
-                                                Ok::<_, anyhow::Error>(())
+                                                    Ok::<_, anyhow::Error>(())
+                                                }.await;
                                             }
                                         });
                                     }
@@ -1393,30 +1398,32 @@ impl IdentityStore {
                                         .await?;
                                     } else {
                                         if let Some(picture) = picture {
-                                            tokio::spawn({
+                                            crate::rt::spawn({
                                                 let ipfs = self.ipfs.clone();
                                                 let did = in_did.clone();
                                                 let store = self.clone();
                                                 async move {
-                                                    let peer_id = vec![did.to_peer_id()?];
-                                                    let _ = super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        picture,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(2 * 1024 * 1024),
-                                                    )
-                                                    .await
-                                                    .map_err(|e| {
-                                                        tracing::error!(
+                                                    _ = async {
+                                                        let peer_id = vec![did.to_peer_id()?];
+                                                        let _ =
+                                                            super::document::image_dag::get_image(
+                                                                &ipfs,
+                                                                picture,
+                                                                &peer_id,
+                                                                false,
+                                                                Some(2 * 1024 * 1024),
+                                                            )
+                                                            .await
+                                                            .map_err(|e| {
+                                                                tracing::error!(
                                                             "Error fetching image from {did}: {e}"
                                                         );
-                                                        e
-                                                    })?;
+                                                                e
+                                                            })?;
 
-                                                    tracing::trace!("Image pointed to {picture} for {did} downloaded");
+                                                        tracing::trace!("Image pointed to {picture} for {did} downloaded");
 
-                                                    store
+                                                        store
                                                         .emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
                                                                 did,
@@ -1424,36 +1431,39 @@ impl IdentityStore {
                                                         )
                                                         .await;
 
-                                                    Ok::<_, anyhow::Error>(())
+                                                        Ok::<_, anyhow::Error>(())
+                                                    }.await;
                                                 }
                                             });
                                         }
                                         if let Some(banner) = banner {
-                                            tokio::spawn({
+                                            crate::rt::spawn({
                                                 let store = self.clone();
                                                 let ipfs = self.ipfs.clone();
 
                                                 let did = in_did.clone();
                                                 async move {
-                                                    let peer_id = vec![did.to_peer_id()?];
-                                                    let _ = super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        banner,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(2 * 1024 * 1024),
-                                                    )
-                                                    .await
-                                                    .map_err(|e| {
-                                                        tracing::error!(
+                                                    _ = async {
+                                                        let peer_id = vec![did.to_peer_id()?];
+                                                        let _ =
+                                                            super::document::image_dag::get_image(
+                                                                &ipfs,
+                                                                banner,
+                                                                &peer_id,
+                                                                false,
+                                                                Some(2 * 1024 * 1024),
+                                                            )
+                                                            .await
+                                                            .map_err(|e| {
+                                                                tracing::error!(
                                                             "Error fetching image from {did}: {e}"
                                                         );
-                                                        e
-                                                    })?;
+                                                                e
+                                                            })?;
 
-                                                    tracing::trace!("Image pointed to {banner} for {did} downloaded");
+                                                        tracing::trace!("Image pointed to {banner} for {did} downloaded");
 
-                                                    store
+                                                        store
                                                         .emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
                                                                 did,
@@ -1461,7 +1471,8 @@ impl IdentityStore {
                                                         )
                                                         .await;
 
-                                                    Ok::<_, anyhow::Error>(())
+                                                        Ok::<_, anyhow::Error>(())
+                                                    }.await;
                                                 }
                                             });
                                         }
@@ -1481,23 +1492,27 @@ impl IdentityStore {
                 if cache.metadata.profile_picture == Some(cid)
                     || cache.metadata.profile_banner == Some(cid)
                 {
-                    tokio::spawn({
+                    crate::rt::spawn({
                         let store = self.clone();
                         let did = in_did.clone();
                         async move {
-                            let added_cid = super::document::image_dag::store_photo(
-                                &store.ipfs,
-                                futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
-                                ty,
-                                Some(2 * 1024 * 1024),
-                            )
-                            .await?;
+                            _ = async {
+                                let added_cid = super::document::image_dag::store_photo(
+                                    &store.ipfs,
+                                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
+                                        .boxed(),
+                                    ty,
+                                    Some(2 * 1024 * 1024),
+                                )
+                                .await?;
 
-                            debug_assert_eq!(added_cid, cid);
-                            store
-                                .emit_event(MultiPassEventKind::IdentityUpdate { did })
-                                .await;
-                            Ok::<_, Error>(())
+                                debug_assert_eq!(added_cid, cid);
+                                store
+                                    .emit_event(MultiPassEventKind::IdentityUpdate { did })
+                                    .await;
+                                Ok::<_, Error>(())
+                            }
+                            .await;
                         }
                     });
                 }

@@ -92,7 +92,7 @@ impl FileStore {
         let token = CancellationToken::new();
         let _guard = Arc::new(token.clone().drop_guard());
 
-        tokio::spawn(async move {
+        crate::rt::spawn(async move {
             tokio::select! {
                 _ = task.run().instrument(span) => {}
                 _ = token.cancelled() => {}

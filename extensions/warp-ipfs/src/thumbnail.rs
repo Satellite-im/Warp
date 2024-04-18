@@ -9,9 +9,8 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Instant,
 };
-
+use web_time::Instant;
 use image::io::Reader as ImageReader;
 use image::ImageFormat;
 use rust_ipfs::{Ipfs, IpfsPath};

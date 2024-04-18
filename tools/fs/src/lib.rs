@@ -40,7 +40,10 @@ pub async fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
 
     //Dirs don't need to be created in wasm since we are using the path as a key in LocalStorage
     #[cfg(target_arch = "wasm32")]
-    Ok(())
+    {
+        _ = path;
+        Ok(())
+    }
 }
 
 /// Delete the file at path
