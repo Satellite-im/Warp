@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use config::Config;
 use futures::channel::mpsc::channel;
 use futures::stream::BoxStream;
+#[allow(unused_imports)] //TODO: Remove
 use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::core::muxing::StreamMuxerBox;
 use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
@@ -33,7 +34,7 @@ use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{debug, error, info, trace, warn, Instrument, Span};
+use tracing::{error, info, warn, Instrument, Span};
 use utils::ExtensionType;
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
@@ -788,6 +789,7 @@ impl MultiPass for WarpIpfs {
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         let mut identity = store.own_identity_document().await?;
+        #[allow(unused_variables)] // due to stub; TODO: Remove
         let ipfs = self.ipfs()?;
 
         let mut old_cid = None;
@@ -819,7 +821,7 @@ impl MultiPass for WarpIpfs {
                         });
                     }
 
-                    trace!("image size = {}", len);
+                    tracing::trace!("image size = {}", len);
 
                     let (data, format) = tokio::task::spawn_blocking(move || {
                         let cursor = std::io::Cursor::new(data);
@@ -847,11 +849,13 @@ impl MultiPass for WarpIpfs {
                     )
                     .await?;
 
-                    debug!("Image cid: {cid}");
+                    tracing::debug!("Image cid: {cid}");
 
                     if let Some(picture_cid) = identity.metadata.profile_picture {
                         if picture_cid == cid {
-                            debug!("Picture is already on document. Not updating identity");
+                            tracing::debug!(
+                                "Picture is already on document. Not updating identity"
+                            );
                             return Ok(());
                         }
 
@@ -900,7 +904,7 @@ impl MultiPass for WarpIpfs {
                         .map(ExtensionType::from)
                         .unwrap_or(ExtensionType::Other);
 
-                    trace!("image size = {}", len);
+                    tracing::trace!("image size = {}", len);
 
                     let stream = async_stream::stream! {
                         let mut reader = file.compat();
@@ -929,11 +933,13 @@ impl MultiPass for WarpIpfs {
                     )
                     .await?;
 
-                    debug!("Image cid: {cid}");
+                    tracing::debug!("Image cid: {cid}");
 
                     if let Some(picture_cid) = identity.metadata.profile_picture {
                         if picture_cid == cid {
-                            debug!("Picture is already on document. Not updating identity");
+                            tracing::debug!(
+                                "Picture is already on document. Not updating identity"
+                            );
                             return Ok(());
                         }
 
@@ -972,7 +978,7 @@ impl MultiPass for WarpIpfs {
                         });
                     }
 
-                    trace!("image size = {}", len);
+                    tracing::trace!("image size = {}", len);
 
                     let (data, format) = tokio::task::spawn_blocking(move || {
                         let cursor = std::io::Cursor::new(data);
@@ -1000,11 +1006,11 @@ impl MultiPass for WarpIpfs {
                     )
                     .await?;
 
-                    debug!("Image cid: {cid}");
+                    tracing::debug!("Image cid: {cid}");
 
                     if let Some(banner_cid) = identity.metadata.profile_banner {
                         if banner_cid == cid {
-                            debug!("Banner is already on document. Not updating identity");
+                            tracing::debug!("Banner is already on document. Not updating identity");
                             return Ok(());
                         }
 
@@ -1053,7 +1059,7 @@ impl MultiPass for WarpIpfs {
                         .map(ExtensionType::from)
                         .unwrap_or(ExtensionType::Other);
 
-                    trace!("image size = {}", len);
+                    tracing::trace!("image size = {}", len);
 
                     let stream = async_stream::stream! {
                         let mut reader = file.compat();
@@ -1082,11 +1088,11 @@ impl MultiPass for WarpIpfs {
                     )
                     .await?;
 
-                    debug!("Image cid: {cid}");
+                    tracing::debug!("Image cid: {cid}");
 
                     if let Some(banner_cid) = identity.metadata.profile_banner {
                         if banner_cid == cid {
-                            debug!("Banner is already on document. Not updating identity");
+                            tracing::debug!("Banner is already on document. Not updating identity");
                             return Ok(());
                         }
 
