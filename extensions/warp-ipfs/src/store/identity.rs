@@ -16,11 +16,11 @@ use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use shuttle::identity::{RequestEvent, RequestPayload};
-use web_time::Instant;
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
 };
+use web_time::Instant;
 
 use tokio::sync::RwLock;
 use tracing::{error, warn, Span};
