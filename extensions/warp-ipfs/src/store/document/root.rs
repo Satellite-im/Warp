@@ -31,13 +31,16 @@ pub struct RootDocumentMap {
 impl RootDocumentMap {
     pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>) -> Self {
         let peer_id = ipfs.keypair().public().to_peer_id();
+        let key = format!("/identity/{peer_id}");
 
         let cid = ipfs
-            .ipns()
-            .resolve(&IpfsPath::from(peer_id))
+            .repo()
+            .data_store()
+            .get(key.as_bytes())
             .await
-            .ok()
-            .and_then(|path| path.root().cid().copied());
+            .unwrap_or_default()
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| cid_str.parse().ok());
 
         let mut inner = RootDocumentInner {
             ipfs: ipfs.clone(),
@@ -317,17 +320,19 @@ impl RootDocumentInner {
 
         let old_cid = self.cid.replace(root_cid);
 
+        let peer_id = self.ipfs.keypair().public().to_peer_id();
+        let key = format!("/identity/{peer_id}");
+
+        let cid_str = root_cid.to_string();
+
         if let Err(e) = self
             .ipfs
-            .ipns()
-            .publish(
-                None,
-                &IpfsPath::from(root_cid),
-                Some(rust_ipfs::ipns::IpnsOption::Local),
-            )
+            .repo()
+            .data_store()
+            .put(key.as_bytes(), cid_str.as_bytes())
             .await
         {
-            tracing::error!(error = %e, "error storing cid in ipns");
+            tracing::error!(error = %e, "unable to store root cid");
         }
 
         if let Some(old_cid) = old_cid {
