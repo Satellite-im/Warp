@@ -127,11 +127,13 @@ impl Queue {
 impl Queue {
     pub async fn load(&self) -> Result<(), Error> {
         let ipfs = &self.ipfs;
+        let peer_id = self.ipfs.keypair().public().to_peer_id();
+        let key = format!("/identity/{peer_id}/request_queue");
 
         let data = match futures::future::ready(
             ipfs.repo()
                 .data_store()
-                .get(b"/messaging/queue")
+                .get(key.as_bytes())
                 .await
                 .unwrap_or_default()
                 .ok_or(Error::Other),
@@ -180,11 +182,14 @@ impl Queue {
     }
 
     pub async fn save(&self) {
+        let peer_id = self.ipfs.keypair().public().to_peer_id();
+        let key = format!("/identity/{peer_id}/request_queue");
+
         let current_cid = self
             .ipfs
             .repo()
             .data_store()
-            .get(b"/friends/queue")
+            .get(key.as_bytes())
             .await
             .unwrap_or_default()
             .map(|bytes| String::from_utf8_lossy(&bytes).to_string())

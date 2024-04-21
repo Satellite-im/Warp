@@ -18,10 +18,12 @@ pub struct IdentityCache {
 
 impl IdentityCache {
     pub async fn new(ipfs: &Ipfs) -> Self {
+        let peer_id = ipfs.keypair().public().to_peer_id();
+        let key = format!("/identity/{peer_id}/cache");
         let list = ipfs
             .repo()
             .data_store()
-            .get(b"cache_id_v0")
+            .get(key.as_bytes())
             .await
             .unwrap_or_default()
             .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
@@ -144,11 +146,14 @@ impl IdentityCacheInner {
 
         let cid_str = cid.to_string();
 
+        let peer_id = self.ipfs.keypair().public().to_peer_id();
+        let key = format!("/identity/{peer_id}/root");
+
         if let Err(e) = self
             .ipfs
             .repo()
             .data_store()
-            .put(b"cache_id_v0", cid_str.as_bytes())
+            .put(key.as_bytes(), cid_str.as_bytes())
             .await
         {
             tracing::error!(error = %e, "unable to store cache cid");

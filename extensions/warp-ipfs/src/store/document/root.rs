@@ -31,7 +31,7 @@ pub struct RootDocumentMap {
 impl RootDocumentMap {
     pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>) -> Self {
         let peer_id = ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}");
+        let key = format!("/identity/{peer_id}/root");
 
         let cid = ipfs
             .repo()
@@ -321,7 +321,7 @@ impl RootDocumentInner {
         let old_cid = self.cid.replace(root_cid);
 
         let peer_id = self.ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}");
+        let key = format!("/identity/{peer_id}/root");
 
         let cid_str = root_cid.to_string();
 
