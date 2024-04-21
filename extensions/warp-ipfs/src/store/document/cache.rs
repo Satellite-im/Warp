@@ -9,6 +9,8 @@ use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
 
+use crate::store::ds_key::DataStoreKey;
+
 use super::identity::IdentityDocument;
 
 #[derive(Debug, Clone)]
@@ -18,8 +20,7 @@ pub struct IdentityCache {
 
 impl IdentityCache {
     pub async fn new(ipfs: &Ipfs) -> Self {
-        let peer_id = ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}/cache");
+        let key = ipfs.cache();
         let list = ipfs
             .repo()
             .data_store()
@@ -146,8 +147,7 @@ impl IdentityCacheInner {
 
         let cid_str = cid.to_string();
 
-        let peer_id = self.ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}/root");
+        let key = self.ipfs.cache();
 
         if let Err(e) = self
             .ipfs

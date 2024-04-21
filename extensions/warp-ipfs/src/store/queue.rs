@@ -19,7 +19,7 @@ use warp::{
     error::Error,
 };
 
-use crate::store::{ecdh_encrypt, topics::PeerTopic, PeerIdExt};
+use crate::store::{ds_key::DataStoreKey, ecdh_encrypt, topics::PeerTopic, PeerIdExt};
 
 use super::{connected_to_peer, discovery::Discovery, identity::RequestResponsePayload};
 
@@ -127,8 +127,7 @@ impl Queue {
 impl Queue {
     pub async fn load(&self) -> Result<(), Error> {
         let ipfs = &self.ipfs;
-        let peer_id = self.ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}/request_queue");
+        let key = ipfs.request_queue();
 
         let data = match futures::future::ready(
             ipfs.repo()
@@ -182,8 +181,7 @@ impl Queue {
     }
 
     pub async fn save(&self) {
-        let peer_id = self.ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}/request_queue");
+        let key = self.ipfs.request_queue();
 
         let current_cid = self
             .ipfs
@@ -237,7 +235,7 @@ impl Queue {
             .ipfs
             .repo()
             .data_store()
-            .put(b"/friends/queue", cid_str.as_bytes())
+            .put(key.as_bytes(), cid_str.as_bytes())
             .await
         {
             tracing::error!(error = %e, "unable to save queue");

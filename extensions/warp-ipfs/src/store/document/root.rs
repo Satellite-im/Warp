@@ -15,8 +15,8 @@ use warp::{
 };
 
 use crate::store::{
-    conversation::ConversationDocument, ecdh_decrypt, ecdh_encrypt, identity::Request,
-    keystore::Keystore, VecExt,
+    conversation::ConversationDocument, ds_key::DataStoreKey, ecdh_decrypt, ecdh_encrypt,
+    identity::Request, keystore::Keystore, VecExt,
 };
 
 use super::{
@@ -30,8 +30,7 @@ pub struct RootDocumentMap {
 
 impl RootDocumentMap {
     pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>) -> Self {
-        let peer_id = ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}/root");
+        let key = ipfs.root();
 
         let cid = ipfs
             .repo()
@@ -320,8 +319,7 @@ impl RootDocumentInner {
 
         let old_cid = self.cid.replace(root_cid);
 
-        let peer_id = self.ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}/root");
+        let key = self.ipfs.root();
 
         let cid_str = root_cid.to_string();
 

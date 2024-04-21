@@ -61,7 +61,7 @@ use crate::{
     },
 };
 
-use super::{document::root::RootDocumentMap, SHUTTLE_TIMEOUT};
+use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, SHUTTLE_TIMEOUT};
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
@@ -639,8 +639,7 @@ impl ConversationInner {
         }
 
         let ipfs = &self.ipfs;
-        let peer_id = self.ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}/messaging_queue");
+        let key = ipfs.messaging_queue();
 
         if let Ok(data) = futures::future::ready(
             ipfs.repo()
@@ -1181,8 +1180,7 @@ impl ConversationInner {
     }
 
     async fn save_queue(&self) {
-        let peer_id = self.ipfs.keypair().public().to_peer_id();
-        let key = format!("/identity/{peer_id}/messaging_queue");
+        let key = self.ipfs.messaging_queue();
         let current_cid = self
             .ipfs
             .repo()
@@ -1207,7 +1205,7 @@ impl ConversationInner {
             .ipfs
             .repo()
             .data_store()
-            .put(b"/messaging/queue", cid_str.as_bytes())
+            .put(key.as_bytes(), cid_str.as_bytes())
             .await
         {
             tracing::error!(error = %e, "unable to save queue");

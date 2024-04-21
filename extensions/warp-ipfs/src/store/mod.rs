@@ -58,6 +58,58 @@ pub(super) mod topics {
     impl PeerTopic for DID {}
 }
 
+pub(super) mod ds_key {
+
+    use rust_ipfs::{Ipfs, Keypair, PeerId, PublicKey};
+
+    pub trait DataStoreKey {
+        fn base(&self) -> String;
+
+        fn root(&self) -> String {
+            self.base() + "/root"
+        }
+
+        fn cache(&self) -> String {
+            self.base() + "/cache"
+        }
+
+        fn messaging_queue(&self) -> String {
+            self.base() + "/messaging_queue"
+        }
+
+        fn request_queue(&self) -> String {
+            self.base() + "/request_queue"
+        }
+    }
+
+    impl DataStoreKey for Ipfs {
+        fn base(&self) -> String {
+            let peer_id = self.keypair().public().to_peer_id();
+            format!("/identity/{peer_id}")
+        }
+    }
+
+    impl DataStoreKey for PeerId {
+        fn base(&self) -> String {
+            format!("/identity/{self}")
+        }
+    }
+
+    impl DataStoreKey for Keypair {
+        fn base(&self) -> String {
+            let peer_id = self.public().to_peer_id();
+            format!("/identity/{peer_id}")
+        }
+    }
+
+    impl DataStoreKey for PublicKey {
+        fn base(&self) -> String {
+            let peer_id = self.to_peer_id();
+            format!("/identity/{peer_id}")
+        }
+    }
+}
+
 const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 use self::conversation::{ConversationDocument, MessageDocument};
