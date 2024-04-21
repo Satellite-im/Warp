@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, future::IntoFuture, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, future::IntoFuture, sync::Arc};
 
 use chrono::Utc;
 use futures::{
@@ -29,20 +29,19 @@ pub struct RootDocumentMap {
 }
 
 impl RootDocumentMap {
-    pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>, path: Option<&PathBuf>) -> Self {
-        let cid = match path.as_ref() {
-            Some(path) => fs::read(path.join(".id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .ok()
-                .and_then(|cid_str| cid_str.parse().ok()),
-            None => None,
-        };
+    pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>) -> Self {
+        let peer_id = ipfs.keypair().public().to_peer_id();
+
+        let cid = ipfs
+            .ipns()
+            .resolve(&IpfsPath::from(peer_id))
+            .await
+            .ok()
+            .and_then(|path| path.root().cid().copied());
 
         let mut inner = RootDocumentInner {
             ipfs: ipfs.clone(),
             keypair,
-            path: path.cloned(),
             cid,
         };
 
@@ -213,7 +212,6 @@ impl RootDocumentMap {
 #[derive(Debug)]
 struct RootDocumentInner {
     keypair: Arc<DID>,
-    path: Option<PathBuf>,
     ipfs: Ipfs,
     cid: Option<Cid>,
 }
@@ -319,11 +317,17 @@ impl RootDocumentInner {
 
         let old_cid = self.cid.replace(root_cid);
 
-        if let Some(path) = self.path.as_ref() {
-            let cid = root_cid.to_string();
-            if let Err(e) = fs::write(path.join(".id"), cid).await {
-                tracing::error!("Error writing to '.id': {e}.")
-            }
+        if let Err(e) = self
+            .ipfs
+            .ipns()
+            .publish(
+                None,
+                &IpfsPath::from(root_cid),
+                Some(rust_ipfs::ipns::IpnsOption::Local),
+            )
+            .await
+        {
+            tracing::error!(error = %e, "error storing cid in ipns");
         }
 
         if let Some(old_cid) = old_cid {

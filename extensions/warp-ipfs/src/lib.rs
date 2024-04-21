@@ -589,11 +589,6 @@ impl WarpIpfs {
 
         let message_store = MessageStore::new(
             &ipfs,
-            self.inner
-                .config
-                .path
-                .as_ref()
-                .map(|path| path.join("messages")),
             discovery,
             filestore.clone(),
             self.raygun_tx.clone(),
