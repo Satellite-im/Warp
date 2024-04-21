@@ -642,7 +642,6 @@ impl ConversationInner {
         let peer_id = self.ipfs.keypair().public().to_peer_id();
         let key = format!("/identity/{peer_id}/messaging_queue");
 
-        
         if let Ok(data) = futures::future::ready(
             ipfs.repo()
                 .data_store()
