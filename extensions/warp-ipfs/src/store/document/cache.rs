@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use futures::{
     stream::{BoxStream, FuturesUnordered},
@@ -9,6 +9,8 @@ use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
 
+use crate::store::ds_key::DataStoreKey;
+
 use super::identity::IdentityDocument;
 
 #[derive(Debug, Clone)]
@@ -17,19 +19,19 @@ pub struct IdentityCache {
 }
 
 impl IdentityCache {
-    pub async fn new(ipfs: &Ipfs, path: Option<&PathBuf>) -> Self {
-        let list = match path.as_ref() {
-            Some(path) => fs::read(path.join(".cache_id_v0"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .ok()
-                .and_then(|cid_str| cid_str.parse().ok()),
-            None => None,
-        };
+    pub async fn new(ipfs: &Ipfs) -> Self {
+        let key = ipfs.cache();
+        let list = ipfs
+            .repo()
+            .data_store()
+            .get(key.as_bytes())
+            .await
+            .unwrap_or_default()
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| cid_str.parse().ok());
 
         let inner = IdentityCacheInner {
             ipfs: ipfs.clone(),
-            path: path.cloned(),
             list,
         };
 
@@ -65,7 +67,6 @@ impl IdentityCache {
 #[derive(Debug)]
 struct IdentityCacheInner {
     pub ipfs: Ipfs,
-    pub path: Option<PathBuf>,
     pub list: Option<Cid>,
 }
 
@@ -119,29 +120,7 @@ impl IdentityCacheInner {
 
                 let cid = self.ipfs.dag().put().serialize(list).await?;
 
-                if !self.ipfs.is_pinned(&cid).await? {
-                    self.ipfs.insert_pin(&cid).recursive().local().await?;
-                }
-
-                let old_cid = self.list.replace(cid);
-
-                if let Some(path) = self.path.as_ref() {
-                    let cid = cid.to_string();
-                    if let Err(e) = fs::write(path.join(".cache_id_v0"), cid).await {
-                        tracing::error!("Error writing cid to file: {e}");
-                    }
-                }
-
-                let remove_pin_and_block = async {
-                    if let Some(old_cid) = old_cid {
-                        if old_cid != cid && self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid).recursive().await?;
-                        }
-                    }
-                    Ok::<_, Error>(())
-                };
-
-                remove_pin_and_block.await?;
+                self.save(cid).await?;
 
                 Ok(Some(old_document))
             }
@@ -152,28 +131,41 @@ impl IdentityCacheInner {
 
                 let cid = self.ipfs.dag().put().serialize(list).await?;
 
-                if !self.ipfs.is_pinned(&cid).await? {
-                    self.ipfs.insert_pin(&cid).recursive().local().await?;
-                }
-
-                let old_cid = self.list.replace(cid);
-
-                if let Some(path) = self.path.as_ref() {
-                    let cid = cid.to_string();
-                    if let Err(e) = fs::write(path.join(".cache_id_v0"), cid).await {
-                        tracing::error!("Error writing cid to file: {e}");
-                    }
-                }
-
-                if let Some(old_cid) = old_cid {
-                    if old_cid != cid && self.ipfs.is_pinned(&old_cid).await? {
-                        self.ipfs.remove_pin(&old_cid).recursive().await?;
-                    }
-                }
+                self.save(cid).await?;
 
                 Ok(None)
             }
         }
+    }
+
+    async fn save(&mut self, cid: Cid) -> Result<(), Error> {
+        if !self.ipfs.is_pinned(&cid).await? {
+            self.ipfs.insert_pin(&cid).recursive().local().await?;
+        }
+
+        let old_cid = self.list.replace(cid);
+
+        let cid_str = cid.to_string();
+
+        let key = self.ipfs.cache();
+
+        if let Err(e) = self
+            .ipfs
+            .repo()
+            .data_store()
+            .put(key.as_bytes(), cid_str.as_bytes())
+            .await
+        {
+            tracing::error!(error = %e, "unable to store cache cid");
+        }
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await? {
+                self.ipfs.remove_pin(&old_cid).recursive().await?;
+            }
+        }
+
+        Ok(())
     }
 
     async fn get(&self, did: DID) -> Result<IdentityDocument, Error> {
@@ -219,24 +211,7 @@ impl IdentityCacheInner {
 
         let cid = self.ipfs.dag().put().serialize(list).await?;
 
-        if !self.ipfs.is_pinned(&cid).await? {
-            self.ipfs.insert_pin(&cid).recursive().local().await?;
-        }
-
-        let old_cid = self.list.replace(cid);
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            if let Err(e) = fs::write(path.join(".cache_id_v0"), cid).await {
-                tracing::error!("Error writing cid to file: {e}");
-            }
-        }
-
-        if let Some(old_cid) = old_cid {
-            if cid != old_cid && self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid).recursive().await?;
-            }
-        }
+        self.save(cid).await?;
 
         Ok(())
     }
@@ -319,7 +294,7 @@ mod test {
             .await
             .expect("constructed ipfs instance");
 
-        let cache = IdentityCache::new(&ipfs, None).await;
+        let cache = IdentityCache::new(&ipfs).await;
 
         for _ in 0..N {
             let (_, document) = random_document();
