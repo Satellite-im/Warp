@@ -73,7 +73,9 @@ hex = "0.4"
 libipld = { version = "0.16", features = ["serde-codec"] }
 bytes = "1"
 bincode = "1"
-image = "0.24"
+image = { version = "0.25.1", default-features = false, features = [
+    "default-formats",
+] }
 mediatype = { version = "0.19", features = ["serde"] }
 
 # Misc
