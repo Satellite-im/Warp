@@ -53,6 +53,17 @@ outside of localhost.
 | Rust | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | CMake | `brew install cmake` |
 
+## Building to WASM and using it within the browser
+
+```
+cargo install wasm-pack
+cargo install basic-http-server
+
+wasm-pack build warp --target web --out-dir ../www/wasm/warp
+wasm-pack build extensions/warp-ipfs --target web --out-dir ../../www/wasm/warp-ipfs
+basic-http-server www
+```
+
 ## Docs
 
 http://warp.satellite.im/
