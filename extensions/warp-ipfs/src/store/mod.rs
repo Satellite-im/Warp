@@ -110,9 +110,72 @@ pub(super) mod ds_key {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
+    ipfs: &rust_ipfs::Ipfs,
+    path: P,
+) -> Result<(), Error> {
+    use libipld::Cid;
+
+    let path = path.as_ref();
+    let ds = ipfs.repo().data_store();
+
+    // root id
+    if let Some(cid) = tokio::fs::read(path.join(".id"))
+        .await
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .ok()
+        .and_then(|cid_str| cid_str.parse::<Cid>().ok())
+    {
+        let key = ipfs.root();
+        let cid_str = cid.to_string();
+        ds.put(key.as_bytes(), cid_str.as_bytes()).await?;
+        _ = tokio::fs::remove_file(path.join(".id")).await;
+    }
+
+    // cache id
+    if let Some(cid) = tokio::fs::read(path.join(".cache_id_v0"))
+        .await
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .ok()
+        .and_then(|cid_str| cid_str.parse::<Cid>().ok())
+    {
+        let key = ipfs.cache();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join(".cache_id_v0")).await;
+        }
+    }
+
+    // request queue
+    if let Ok(data) = tokio::fs::read(path.join(".request_queue")).await {
+        let cid = ipfs.dag().put().serialize(&data).pin(true).await?;
+        let key = ipfs.request_queue();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join(".request_queue")).await;
+        }
+    }
+
+    // message queue
+    if let Ok(data) = tokio::fs::read(path.join("messages").join(".messaging_queue")).await {
+        let cid = ipfs.dag().put().serialize(&data).pin(true).await?;
+        let key = ipfs.messaging_queue();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join("messages").join(".messaging_queue")).await;
+        }
+    }
+
+    Ok(())
+}
+
 const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
-use self::conversation::{ConversationDocument, MessageDocument};
+use self::{
+    conversation::{ConversationDocument, MessageDocument},
+    ds_key::DataStoreKey,
+};
 
 pub trait PeerIdExt {
     fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
