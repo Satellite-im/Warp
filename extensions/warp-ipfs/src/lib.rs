@@ -390,6 +390,13 @@ impl WarpIpfs {
 
         let ipfs = uninitialized.start().await?;
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = self.inner.config.path.as_ref() {
+            if let Err(e) = store::migrate_to_ds(&ipfs, path).await {
+                tracing::warn!(error = %e, "failed to migrate to datastore");
+            }
+        }
+
         if self.inner.config.enable_relay {
             let mut relay_peers = HashSet::new();
 
@@ -589,11 +596,6 @@ impl WarpIpfs {
 
         let message_store = MessageStore::new(
             &ipfs,
-            self.inner
-                .config
-                .path
-                .as_ref()
-                .map(|path| path.join("messages")),
             discovery,
             filestore.clone(),
             self.raygun_tx.clone(),
