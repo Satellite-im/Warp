@@ -373,21 +373,15 @@ impl IdentityStore {
         }
         let config = config.clone();
 
-        let identity_cache = IdentityCache::new(&ipfs, config.path.as_ref()).await;
+        let identity_cache = IdentityCache::new(&ipfs).await;
 
         let event = tx.clone();
 
         let did_key = Arc::new(did_keypair(&tesseract)?);
 
-        let root_document =
-            RootDocumentMap::new(&ipfs, did_key.clone(), config.path.as_ref()).await;
+        let root_document = RootDocumentMap::new(&ipfs, did_key.clone()).await;
 
-        let queue = Queue::new(
-            ipfs.clone(),
-            did_key.clone(),
-            config.path.clone(),
-            discovery.clone(),
-        );
+        let queue = Queue::new(ipfs.clone(), did_key.clone(), discovery.clone());
 
         let signal = Default::default();
 

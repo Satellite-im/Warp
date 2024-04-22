@@ -8,7 +8,6 @@ use std::{
         btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet,
     },
     ffi::OsStr,
-    future::IntoFuture,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -64,7 +63,7 @@ use crate::{
     },
 };
 
-use super::{document::root::RootDocumentMap, SHUTTLE_TIMEOUT};
+use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, SHUTTLE_TIMEOUT};
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
@@ -85,7 +84,6 @@ pub struct MessageStore {
 impl MessageStore {
     pub async fn new(
         ipfs: &Ipfs,
-        path: Option<PathBuf>,
         discovery: Discovery,
         file: FileStore,
         event: EventSubscription<RayGunEventKind>,
@@ -95,14 +93,6 @@ impl MessageStore {
         info!("Initializing MessageStore");
 
         let keypair = identity.did_key();
-
-        if let Some(path) = path.as_ref() {
-            if !path.exists() {
-                fs::create_dir_all(path)
-                    .await
-                    .expect("able to create directory");
-            }
-        }
 
         let (tx, rx) = futures::channel::mpsc::channel(1024);
 
@@ -117,7 +107,6 @@ impl MessageStore {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
             keypair: keypair.clone(),
-            path,
             conversation_task: HashMap::new(),
             command_tx: tx,
             identity: identity.clone(),
@@ -617,7 +606,6 @@ impl ConversationTask {
 
 struct ConversationInner {
     ipfs: Ipfs,
-    path: Option<PathBuf>,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
     conversation_task: HashMap<Uuid, JoinHandle<()>>,
@@ -639,37 +627,6 @@ struct ConversationInner {
 
 impl ConversationInner {
     async fn migrate(&mut self) -> Result<(), Error> {
-        if let Some(path) = self.path.as_ref() {
-            let mid_file = path.join(".message_id");
-            if !mid_file.is_file() {
-                return Ok(());
-            }
-            let cid = fs::read(&mid_file)
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .and_then(|cid_str| {
-                    Cid::from_str(&cid_str)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                })?;
-
-            let list: BTreeMap<String, Cid> = self.ipfs.get_dag(cid).local().deserialized().await?;
-
-            let mut stream = FuturesUnordered::from_iter(list.values().copied().map(|cid| {
-                self.ipfs
-                    .get_dag(cid)
-                    .local()
-                    .deserialized::<ConversationDocument>()
-                    .into_future()
-            }))
-            .filter_map(|result| async move { result.ok() })
-            .boxed();
-
-            while let Some(document) = stream.next().await {
-                let _ = self.root.set_conversation_document(document).await;
-            }
-
-            _ = fs::remove_file(mid_file).await;
-        }
         Ok(())
     }
 
@@ -683,16 +640,35 @@ impl ConversationInner {
             }
         }
 
-        if let Some(path) = self.path.as_ref() {
-            if let Ok(data) = fs::read(path.join(".messaging_queue"))
-                .and_then(|data| async move {
-                    serde_json::from_slice(&data)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                })
+        let ipfs = &self.ipfs;
+        let key = ipfs.messaging_queue();
+
+        if let Ok(data) = futures::future::ready(
+            ipfs.repo()
+                .data_store()
+                .get(key.as_bytes())
                 .await
-            {
-                self.queue = data;
-            }
+                .unwrap_or_default()
+                .ok_or(Error::Other),
+        )
+        .and_then(|bytes| async move {
+            let cid_str = String::from_utf8_lossy(&bytes).to_string();
+
+            let cid = cid_str.parse::<Cid>().map_err(anyhow::Error::from)?;
+
+            Ok(cid)
+        })
+        .and_then(|cid| async move {
+            ipfs.get_dag(cid)
+                .local()
+                .deserialized::<HashMap<_, _>>()
+                .await
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from)
+        })
+        .await
+        {
+            self.queue = data;
         }
     }
 
@@ -1206,17 +1182,45 @@ impl ConversationInner {
     }
 
     async fn save_queue(&self) {
-        if let Some(path) = self.path.as_ref() {
-            let bytes = match serde_json::to_vec(&self.queue) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Error serializing queue list into bytes: {e}");
-                    return;
-                }
-            };
+        let key = self.ipfs.messaging_queue();
+        let current_cid = self
+            .ipfs
+            .repo()
+            .data_store()
+            .get(key.as_bytes())
+            .await
+            .unwrap_or_default()
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| cid_str.parse::<Cid>().ok());
 
-            if let Err(e) = fs::write(path.join(".messaging_queue"), bytes).await {
-                error!("Error saving queue: {e}");
+        let cid = match self.ipfs.dag().put().serialize(&self.queue).pin(true).await {
+            Ok(cid) => cid,
+            Err(e) => {
+                tracing::error!(error = %e, "unable to save queue");
+                return;
+            }
+        };
+
+        let cid_str = cid.to_string();
+
+        if let Err(e) = self
+            .ipfs
+            .repo()
+            .data_store()
+            .put(key.as_bytes(), cid_str.as_bytes())
+            .await
+        {
+            tracing::error!(error = %e, "unable to save queue");
+            return;
+        }
+
+        tracing::info!("messaging queue saved");
+
+        let old_cid = current_cid;
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
             }
         }
     }

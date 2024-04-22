@@ -321,7 +321,7 @@ mod test {
     ) -> Result<FileStore, Error> {
         let key = get_keypair_did(ipfs.keypair())?;
 
-        let root_document = RootDocumentMap::new(ipfs, Arc::new(key), None).await;
+        let root_document = RootDocumentMap::new(ipfs, Arc::new(key)).await;
         let store = FileStore::new(
             ipfs.clone(),
             root_document,

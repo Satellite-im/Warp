@@ -47,12 +47,6 @@ impl FileStore {
         constellation_tx: EventSubscription<ConstellationEventKind>,
         span: Span,
     ) -> Result<Self, Error> {
-        if let Some(path) = config.path.as_ref() {
-            if !path.exists() {
-                fs::create_dir_all(path).await?;
-            }
-        }
-
         let config = config.clone();
 
         let index = Directory::new("root");
