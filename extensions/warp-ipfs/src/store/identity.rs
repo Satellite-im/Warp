@@ -10,6 +10,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 
+use futures_timer::Delay;
 use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
 
 use libipld::Cid;
@@ -490,7 +491,7 @@ impl IdentityStore {
                     })
                     .unwrap_or(Duration::from_millis(300000));
 
-                let mut tick = tokio::time::interval(interval);
+                let mut tick = Delay::new(interval);
 
                 loop {
                     tokio::select! {
@@ -621,10 +622,11 @@ impl IdentityStore {
                                 error!("Error pushing identity: {e}");
                             }
                         }
-                        _ = tick.tick() => {
+                        _ = &mut tick => {
                             if auto_push {
                                 store.push_to_all().await;
                             }
+                            tick.reset(interval)
                         }
                     }
                 }

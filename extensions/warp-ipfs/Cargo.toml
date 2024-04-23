@@ -45,9 +45,11 @@ tokio-stream = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
+futures-timer = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-tokio = { version = "1", default-features = false, features = ["sync"]}
+tokio = { version = "1", default-features = false, features = ["sync"] }
+futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 
 [dev-dependencies]
 derive_more.workspace = true
