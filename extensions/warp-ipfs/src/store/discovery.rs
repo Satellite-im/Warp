@@ -92,7 +92,7 @@ impl Discovery {
                                     }
                                 }
                             }
-                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            futures_timer::Delay::new(Duration::from_secs(1)).await;
                         }
                     }
                 });
@@ -200,7 +200,7 @@ impl Discovery {
                                     }
                                 }
                             }
-                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            futures_timer::Delay::new(Duration::from_secs(5)).await;
                         }
                     }
                 });
@@ -373,7 +373,7 @@ impl DiscoveryEntry {
                     if ipfs.is_connected(entry.peer_id).await.unwrap_or_default() {
                         if !sent_initial_push {
                             if let Ok(did) = peer_id.to_did() {
-                                tokio::time::sleep(Duration::from_millis(500)).await;
+                                futures_timer::Delay::new(Duration::from_millis(500)).await;
                                 tracing::info!("Connected to {did}. Emitting initial event");
                                 let topic = format!("/peer/{did}/events");
                                 let subscribed = ipfs
@@ -388,7 +388,7 @@ impl DiscoveryEntry {
                                 }
                             }
                         }
-                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        futures_timer::Delay::new(Duration::from_secs(10)).await;
                         continue;
                     }
 
@@ -408,7 +408,7 @@ impl DiscoveryEntry {
 
                             if let Err(_e) = ipfs.connect(peer_id).await {
                                 tracing::error!("Error connecting to {peer_id}: {_e}");
-                                tokio::time::sleep(Duration::from_secs(10)).await;
+                                futures_timer::Delay::new(Duration::from_secs(10)).await;
                                 continue;
                             }
                         }
@@ -424,13 +424,13 @@ impl DiscoveryEntry {
 
                             if let Err(_e) = ipfs.connect(opts).await {
                                 tracing::error!("Error connecting to {peer_id}: {_e}");
-                                tokio::time::sleep(Duration::from_secs(10)).await;
+                                futures_timer::Delay::new(Duration::from_secs(10)).await;
                                 continue;
                             }
                         }
                     }
 
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    futures_timer::Delay::new(Duration::from_secs(10)).await;
                 }
             }
         });

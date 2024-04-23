@@ -529,7 +529,7 @@ impl WarpIpfs {
                             error!("Failed to bootstrap: {e}")
                         }
 
-                        tokio::time::sleep(Duration::from_secs(60 * 5)).await;
+                        futures_timer::Delay::new(Duration::from_secs(60 * 5)).await;
                     }
                 }
             });
