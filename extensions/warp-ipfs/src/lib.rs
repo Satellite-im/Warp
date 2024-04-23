@@ -9,6 +9,7 @@ use config::Config;
 use futures::channel::mpsc::channel;
 use futures::stream::BoxStream;
 use futures::{AsyncReadExt, StreamExt};
+use futures_timeout::TimeoutExt;
 use ipfs::libp2p::core::muxing::StreamMuxerBox;
 use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 use ipfs::libp2p::core::upgrade::Version;
@@ -443,11 +444,10 @@ impl WarpIpfs {
                 async move {
                     let mut counter = 0;
                     for relay_peer in relay_peers {
-                        match tokio::time::timeout(
-                            Duration::from_secs(5),
-                            ipfs.enable_relay(Some(relay_peer)),
-                        )
-                        .await
+                        match ipfs
+                            .enable_relay(Some(relay_peer))
+                            .timeout(Duration::from_secs(5))
+                            .await
                         {
                             Ok(Ok(_)) => {}
                             Ok(Err(e)) => {

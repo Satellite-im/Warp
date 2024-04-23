@@ -1,5 +1,6 @@
 use chrono::Utc;
 use either::Either;
+use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
 use tokio_stream::StreamMap;
 use tracing::info;
@@ -698,7 +699,7 @@ impl ConversationInner {
                             })
                             .await;
 
-                        match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                        match rx.timeout(SHUTTLE_TIMEOUT).await {
                             Ok(Ok(Ok(list))) => {
                                 providers.push(peer_id);
                                 conversation_mailbox.extend(list);

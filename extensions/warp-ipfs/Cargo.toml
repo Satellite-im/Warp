@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp.workspace = true
 
+futures-timeout.workspace = true
 rust-ipfs.workspace = true
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }

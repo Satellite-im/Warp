@@ -10,6 +10,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 
+use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
 use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
 
@@ -1686,7 +1687,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                match rx.timeout(SHUTTLE_TIMEOUT).await {
                     Ok(Ok(Ok(package))) => {
                         return Ok(package);
                     }
@@ -1741,7 +1742,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                match rx.timeout(SHUTTLE_TIMEOUT).await {
                     Ok(Ok(Ok(_))) => return Ok(()),
                     Ok(Ok(Err(e))) => {
                         tracing::error!("Identity is not registered: {e}");
@@ -1777,7 +1778,7 @@ impl IdentityStore {
                     })
                     .await;
 
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                match rx.timeout(SHUTTLE_TIMEOUT).await {
                     Ok(Ok(Ok(_))) => {
                         break;
                     }
@@ -1815,7 +1816,7 @@ impl IdentityStore {
                     )
                     .await;
 
-                match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                match rx.timeout(SHUTTLE_TIMEOUT).await {
                     Ok(Ok(Ok(list))) => {
                         let list = list
                             .iter()
@@ -2031,7 +2032,7 @@ impl IdentityStore {
                         })
                         .await;
 
-                    match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                    match rx.timeout(SHUTTLE_TIMEOUT).await {
                         Ok(Ok(Ok(list))) => {
                             for ident in &list {
                                 let ident = ident.clone().into();
@@ -2770,7 +2771,7 @@ impl IdentityStore {
             if let Some(rx) = std::mem::take(&mut rx) {
                 if let Some(timeout) = self.config.store_setting.friend_request_response_duration {
                     let start = Instant::now();
-                    if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
+                    if let Ok(Ok(res)) = rx.timeout(timeout).await {
                         let end = start.elapsed();
                         tracing::trace!("Took {}ms to receive a response", end.as_millis());
                         res?
