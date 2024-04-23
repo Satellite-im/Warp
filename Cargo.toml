@@ -7,7 +7,12 @@ repository = "https://github.com/Satellite-im/Warp"
 
 
 [workspace]
-members = ["extensions/*", "warp", "tools/*"]
+members = [
+    "extensions/*",
+    "warp",
+    "tools/*",
+    "extensions/warp-ipfs/examples/wasm-ipfs-identity",
+]
 exclude = ["deprecated/*", "tools/opencv-test", "tools/video-codec-cli"]
 
 resolver = "2"
@@ -51,7 +56,11 @@ parking_lot = { version = "0.12" }
 once_cell = "1.16"
 
 # Time crate
-chrono = { version = "~0.4.27", default-features = false, features = ["serde", "wasmbind", "now"] }
+chrono = { version = "~0.4.27", default-features = false, features = [
+    "serde",
+    "wasmbind",
+    "now",
+] }
 
 # Encoding and Serializing Crates
 serde = { version = "1.0", features = ["derive", "rc"] }
@@ -64,7 +73,9 @@ hex = "0.4"
 libipld = { version = "0.16", features = ["serde-codec"] }
 bytes = "1"
 bincode = "1"
-image = "0.24"
+image = { version = "0.25.1", default-features = false, features = [
+    "default-formats",
+] }
 mediatype = { version = "0.19", features = ["serde"] }
 
 # Misc
