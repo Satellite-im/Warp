@@ -274,10 +274,13 @@ impl Default for Config {
         Config {
             path: None,
             bootstrap: Bootstrap::Ipfs,
+            #[cfg(not(target_arch = "wasm32"))]
             listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"]
                 .iter()
                 .filter_map(|s| Multiaddr::from_str(s).ok())
                 .collect::<Vec<_>>(),
+            #[cfg(target_arch = "wasm32")]
+            listen_on: vec![],
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
                 bootstrap: false,
@@ -286,7 +289,10 @@ impl Default for Config {
             store_setting: Default::default(),
             enable_relay: true,
             save_phrase: false,
+            #[cfg(not(target_arch = "wasm32"))]
             max_storage_size: Some(10 * 1024 * 1024 * 1024),
+            #[cfg(target_arch = "wasm32")]
+            max_storage_size: Some(50 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
             thumbnail_size: (128, 128),
             chunking: None,
@@ -318,6 +324,26 @@ impl Config {
                     namespace: None,
                     discovery_type: Default::default(),
                 },
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Minimal testing configuration. Used for in-memory
+    pub fn minimal_testing() -> Config {
+        Config {
+            bootstrap: Bootstrap::Ipfs,
+            ipfs_setting: IpfsSetting {
+                bootstrap: true,
+                mdns: Mdns { enable: true },
+                relay_client: RelayClient {
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: Discovery::None,
                 ..Default::default()
             },
             ..Default::default()

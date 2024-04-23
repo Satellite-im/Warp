@@ -1,5 +1,4 @@
 #![allow(clippy::result_large_err)]
-#[cfg(not(target_arch = "wasm32"))]
 use chrono::{DateTime, Utc};
 
 use serde::{Deserialize, Serialize};
@@ -110,7 +109,6 @@ impl Item {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Item {
     /// Get id of `Item`
     pub fn id(&self) -> Uuid {

@@ -334,15 +334,25 @@ impl Debug for IdentityUpdate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             IdentityUpdate::Username(username) => write!(f, "IdentityUpdate::Username({username})"),
-            IdentityUpdate::Picture(buffer) => write!(f, "IdentityUpdate::Picture({} bytes)", buffer.len()),
-            IdentityUpdate::PicturePath(path) => write!(f, "IdentityUpdate::PicturePath({})", path.display()),
+            IdentityUpdate::Picture(buffer) => {
+                write!(f, "IdentityUpdate::Picture({} bytes)", buffer.len())
+            }
+            IdentityUpdate::PicturePath(path) => {
+                write!(f, "IdentityUpdate::PicturePath({})", path.display())
+            }
             IdentityUpdate::PictureStream(_) => write!(f, "IdentityUpdate::PictureStream"),
             IdentityUpdate::ClearPicture => write!(f, "IdentityUpdate::ClearPicture"),
-            IdentityUpdate::Banner(buffer) =>write!(f, "IdentityUpdate::Banner({} bytes)", buffer.len()),
-            IdentityUpdate::BannerPath(path) => write!(f, "IdentityUpdate::BannerPath({})", path.display()),
+            IdentityUpdate::Banner(buffer) => {
+                write!(f, "IdentityUpdate::Banner({} bytes)", buffer.len())
+            }
+            IdentityUpdate::BannerPath(path) => {
+                write!(f, "IdentityUpdate::BannerPath({})", path.display())
+            }
             IdentityUpdate::BannerStream(_) => write!(f, "IdentityUpdate::BannerStream"),
             IdentityUpdate::ClearBanner => write!(f, "IdentityUpdate::ClearBanner"),
-            IdentityUpdate::StatusMessage(status) => write!(f, "IdentityUpdate::StatusMessage({status:?})"),
+            IdentityUpdate::StatusMessage(status) => {
+                write!(f, "IdentityUpdate::StatusMessage({status:?})")
+            }
             IdentityUpdate::ClearStatusMessage => write!(f, "IdentityUpdate::ClearStatusMessage"),
         }
     }

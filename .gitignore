@@ -24,3 +24,6 @@ Cargo.lock
 .bash_history
 
 *.csv
+
+# Compiled wasm
+www/wasm

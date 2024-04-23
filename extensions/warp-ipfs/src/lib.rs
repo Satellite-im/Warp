@@ -1,5 +1,6 @@
 mod behaviour;
 pub mod config;
+pub(crate) mod rt;
 pub mod store;
 mod thumbnail;
 mod utils;
@@ -7,8 +8,10 @@ mod utils;
 use chrono::{DateTime, Utc};
 use config::Config;
 use futures::channel::mpsc::channel;
+
 use futures::stream::{self, BoxStream};
 use futures::{AsyncReadExt, StreamExt, TryStreamExt};
+
 use ipfs::libp2p::core::muxing::StreamMuxerBox;
 use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 use ipfs::libp2p::core::upgrade::Version;
@@ -32,7 +35,7 @@ use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{debug, error, info, trace, warn, Instrument, Span};
+use tracing::{error, info, warn, Instrument, Span};
 use utils::ExtensionType;
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
@@ -168,7 +171,7 @@ impl WarpIpfs {
 
         if !identity.tesseract.is_unlock() {
             let inner = identity.clone();
-            tokio::spawn(async move {
+            crate::rt::spawn(async move {
                 let mut stream = inner.tesseract.subscribe();
                 while let Some(event) = stream.next().await {
                     if matches!(event, TesseractEvent::Unlocked) {
@@ -313,6 +316,15 @@ impl WarpIpfs {
                 ..Default::default()
             });
 
+        // TODO: Uncomment for persistence on wasm once config option is added
+        // #[cfg(target_arch = "wasm32")]
+        // {
+        //     // Namespace will used the public key to prevent conflicts between multiple instances during testing.
+        //     uninitialized = uninitialized.set_storage_type(rust_ipfs::StorageType::IndexedDb {
+        //         namespace: Some(keypair.public().to_peer_id().to_string()),
+        //     });
+        // }
+
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(path) = self.inner.config.path.as_ref() {
             info!("Instance will be persistent");
@@ -397,6 +409,8 @@ impl WarpIpfs {
             }
         }
 
+        //TODO: Remove attr when bug is fixed upstream
+        #[cfg(not(target_arch = "wasm32"))]
         if self.inner.config.enable_relay {
             let mut relay_peers = HashSet::new();
 
@@ -481,7 +495,7 @@ impl WarpIpfs {
             };
 
             if self.inner.config.ipfs_setting.relay_client.background {
-                tokio::spawn(relay_connection_task);
+                crate::rt::spawn(relay_connection_task);
             } else {
                 relay_connection_task.await;
             }
@@ -508,7 +522,7 @@ impl WarpIpfs {
         ) && self.inner.config.ipfs_setting.bootstrap
             && !empty_bootstrap
         {
-            tokio::spawn({
+            crate::rt::spawn({
                 let ipfs = ipfs.clone();
                 async move {
                     loop {
@@ -788,6 +802,7 @@ impl MultiPass for WarpIpfs {
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         let mut identity = store.own_identity_document().await?;
+        #[allow(unused_variables)] // due to stub; TODO: Remove
         let ipfs = self.ipfs()?;
 
         let mut old_cid = None;
@@ -858,7 +873,6 @@ impl MultiPass for WarpIpfs {
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
-
                 let cursor = std::io::Cursor::new(data);
 
                 let image = image::io::Reader::new(cursor).with_guessed_format()?;
@@ -903,7 +917,7 @@ impl MultiPass for WarpIpfs {
                     .map(ExtensionType::from)
                     .unwrap_or(ExtensionType::Other);
 
-                trace!("image size = {}", len);
+                tracing::trace!("image size = {}", len);
 
                 let stream = async_stream::stream! {
                     let mut reader = file.compat();
@@ -923,7 +937,6 @@ impl MultiPass for WarpIpfs {
                         }
                     }
                 };
-
                 (OptType::Picture(Some(extension)), stream.boxed())
             }
             IdentityUpdate::PictureStream(stream) => (OptType::Picture(None), stream),
@@ -982,7 +995,7 @@ impl MultiPass for WarpIpfs {
                     .map(ExtensionType::from)
                     .unwrap_or(ExtensionType::Other);
 
-                trace!("image size = {}", len);
+                tracing::trace!("image size = {}", len);
 
                 let stream = async_stream::stream! {
                     let mut reader = file.compat();
@@ -1018,7 +1031,7 @@ impl MultiPass for WarpIpfs {
                     data.extend(s);
                 }
 
-                trace!("image size = {}", data.len());
+                tracing::trace!("image size = {}", data.len());
 
                 let cursor = std::io::Cursor::new(data);
 
@@ -1039,7 +1052,7 @@ impl MultiPass for WarpIpfs {
         )
         .await?;
 
-        debug!("Image cid: {cid}");
+        tracing::debug!("Image cid: {cid}");
 
         match opt {
             OptType::Picture(_) => {
@@ -1061,7 +1074,7 @@ impl MultiPass for WarpIpfs {
             OptType::Banner(_) => {
                 if let Some(banner_cid) = identity.metadata.profile_banner {
                     if banner_cid == cid {
-                        debug!("Banner is already on document. Not updating identity");
+                        tracing::debug!("Banner is already on document. Not updating identity");
                         return Ok(());
                     }
 
@@ -1075,9 +1088,6 @@ impl MultiPass for WarpIpfs {
                 identity.metadata.profile_banner = Some(cid);
             }
         }
-
-        // identity.metadata.profile_banner = Some(cid);
-        // store.identity_update(identity).await?;
 
         if let Some(cid) = old_cid {
             if let Err(e) = store.delete_photo(cid).await {
