@@ -1,6 +1,6 @@
 #![allow(clippy::result_large_err)]
 use futures::{stream::BoxStream, StreamExt};
-use std::{collections::HashMap, fmt::Debug, io::ErrorKind, sync::atomic::Ordering};
+use std::{collections::HashMap, fmt::Debug, sync::atomic::Ordering};
 use zeroize::Zeroize;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -93,7 +93,7 @@ impl Tesseract {
 
         match Self::from_file(&path) {
             Ok(tesseract) => Ok(tesseract),
-            Err(Error::IoError(e)) if e.kind() == ErrorKind::NotFound => {
+            Err(Error::IoError(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                 let tesseract = Tesseract::default();
                 tesseract.inner.check.store(true, Ordering::Relaxed);
                 let file = std::fs::canonicalize(&path).unwrap_or(path);

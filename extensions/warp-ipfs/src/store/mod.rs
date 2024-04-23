@@ -115,6 +115,7 @@ pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
     ipfs: &rust_ipfs::Ipfs,
     path: P,
 ) -> Result<(), Error> {
+    use ds_key::DataStoreKey;
     use libipld::Cid;
 
     let path = path.as_ref();
@@ -172,10 +173,7 @@ pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
 
 const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
-use self::{
-    conversation::{ConversationDocument, MessageDocument},
-    ds_key::DataStoreKey,
-};
+use self::conversation::{ConversationDocument, MessageDocument};
 
 pub trait PeerIdExt {
     fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;

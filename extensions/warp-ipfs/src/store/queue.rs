@@ -1,12 +1,8 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
 use futures::{channel::mpsc, StreamExt, TryFutureExt};
+
 use libipld::Cid;
 use rust_ipfs::Ipfs;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::error;
 use warp::{
@@ -18,6 +14,7 @@ use warp::{
     },
     error::Error,
 };
+use web_time::Instant;
 
 use crate::store::{ds_key::DataStoreKey, ecdh_encrypt, topics::PeerTopic, PeerIdExt};
 
@@ -54,7 +51,7 @@ impl Queue {
             discovery,
         };
 
-        tokio::spawn({
+        crate::rt::spawn({
             let queue = queue.clone();
 
             async move {
@@ -293,73 +290,76 @@ impl QueueEntry {
         let task = tokio::spawn({
             let entry = entry.clone();
             async move {
-                let mut retry = 10;
-                loop {
-                    let entry = entry.clone();
-                    //TODO: Replace with future event to detect connection/disconnection from peer as well as pubsub subscribing event
-                    let (connection_result, peers_result) = futures::join!(
-                        connected_to_peer(&entry.ipfs, entry.recipient.clone()),
-                        entry.ipfs.pubsub_peers(Some(entry.recipient.inbox()))
-                    );
-
-                    if matches!(
-                        connection_result,
-                        Ok(crate::store::PeerConnectionType::Connected)
-                    ) && peers_result
-                        .map(|list| {
-                            list.iter()
-                                .filter_map(|peer_id| peer_id.to_did().ok())
-                                .any(|did| did.eq(&entry.recipient))
-                        })
-                        .unwrap_or_default()
-                    {
-                        tracing::info!(
-                            "{} is connected. Attempting to send request",
-                            entry.recipient.clone()
-                        );
+                _ = async {
+                    let mut retry = 10;
+                    loop {
                         let entry = entry.clone();
+                        //TODO: Replace with future event to detect connection/disconnection from peer as well as pubsub subscribing event
+                        let (connection_result, peers_result) = futures::join!(
+                            connected_to_peer(&entry.ipfs, entry.recipient.clone()),
+                            entry.ipfs.pubsub_peers(Some(entry.recipient.inbox()))
+                        );
 
-                        let recipient = entry.recipient.clone();
+                        if matches!(
+                            connection_result,
+                            Ok(crate::store::PeerConnectionType::Connected)
+                        ) && peers_result
+                            .map(|list| {
+                                list.iter()
+                                    .filter_map(|peer_id| peer_id.to_did().ok())
+                                    .any(|did| did.eq(&entry.recipient))
+                            })
+                            .unwrap_or_default()
+                        {
+                            tracing::info!(
+                                "{} is connected. Attempting to send request",
+                                entry.recipient.clone()
+                            );
+                            let entry = entry.clone();
 
-                        let res = async move {
-                            let kp = &*entry.did;
-                            let payload_bytes = serde_json::to_vec(&entry.item)?;
+                            let recipient = entry.recipient.clone();
 
-                            let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
+                            let res = async move {
+                                let kp = &*entry.did;
+                                let payload_bytes = serde_json::to_vec(&entry.item)?;
 
-                            tracing::trace!("Payload size: {} bytes", bytes.len());
+                                let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
 
-                            tracing::info!("Sending request to {}", recipient);
+                                tracing::trace!("Payload size: {} bytes", bytes.len());
 
-                            let time = Instant::now();
+                                tracing::info!("Sending request to {}", recipient);
 
-                            entry.ipfs.pubsub_publish(recipient.inbox(), bytes).await?;
+                                let time = Instant::now();
 
-                            let elapsed = time.elapsed();
+                                entry.ipfs.pubsub_publish(recipient.inbox(), bytes).await?;
 
-                            tracing::info!("took {}ms to send", elapsed.as_millis());
+                                let elapsed = time.elapsed();
 
-                            Ok::<_, anyhow::Error>(())
-                        };
+                                tracing::info!("took {}ms to send", elapsed.as_millis());
 
-                        match res.await {
-                            Ok(_) => {
-                                let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
-                                break;
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Error sending request for {}: {e}. Retrying in {}s",
-                                    &entry.recipient,
-                                    retry
-                                );
-                                tokio::time::sleep(Duration::from_secs(retry)).await;
-                                retry += 5;
+                                Ok::<_, anyhow::Error>(())
+                            };
+
+                            match res.await {
+                                Ok(_) => {
+                                    let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
+                                    break;
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Error sending request for {}: {e}. Retrying in {}s",
+                                        &entry.recipient,
+                                        retry
+                                    );
+                                    tokio::time::sleep(Duration::from_secs(retry)).await;
+                                    retry += 5;
+                                }
                             }
                         }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
                     }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
+                .await;
             }
         });
 

@@ -13,8 +13,10 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+use web_time::Instant;
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -139,7 +141,7 @@ impl MessageStore {
             conversation_mailbox_task_rx,
         };
 
-        tokio::spawn({
+        crate::rt::spawn({
             async move {
                 select! {
                     _ = token.cancelled() => {}
@@ -770,7 +772,7 @@ impl ConversationInner {
                 };
 
 
-                tokio::spawn(async move {
+                crate::rt::spawn(async move {
                     let result = fut.await;
                     let _ = tx.send(result).await;
                 });
