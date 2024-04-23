@@ -315,6 +315,15 @@ impl WarpIpfs {
                 ..Default::default()
             });
 
+        // TODO: Uncomment for persistence on wasm once config option is added
+        // #[cfg(target_arch = "wasm32")]
+        // {
+        //     // Namespace will used the public key to prevent conflicts between multiple instances during testing.
+        //     uninitialized = uninitialized.set_storage_type(rust_ipfs::StorageType::IndexedDb {
+        //         namespace: Some(keypair.public().to_peer_id().to_string()),
+        //     });
+        // }
+
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(path) = self.inner.config.path.as_ref() {
             info!("Instance will be persistent");
@@ -399,6 +408,8 @@ impl WarpIpfs {
             }
         }
 
+        //TODO: Remove attr when bug is fixed upstream
+        #[cfg(not(target_arch = "wasm32"))]
         if self.inner.config.enable_relay {
             let mut relay_peers = HashSet::new();
 
