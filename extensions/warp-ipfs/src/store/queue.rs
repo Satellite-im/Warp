@@ -351,12 +351,12 @@ impl QueueEntry {
                                         &entry.recipient,
                                         retry
                                     );
-                                    tokio::time::sleep(Duration::from_secs(retry)).await;
+                                    futures_timer::Delay::new(Duration::from_secs(retry)).await;
                                     retry += 5;
                                 }
                             }
                         }
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        futures_timer::Delay::new(Duration::from_secs(1)).await;
                     }
                 }
                 .await;

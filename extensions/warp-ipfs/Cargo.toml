@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp.workspace = true
 
+futures-timeout.workspace = true
 rust-ipfs.workspace = true
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
@@ -47,9 +48,11 @@ web-time = "1.1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
+futures-timer = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", default-features = false, features = ["sync"] }
+futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 wasm-bindgen-futures = { version = "0.4" }
 
 [dev-dependencies]

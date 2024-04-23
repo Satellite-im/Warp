@@ -1,5 +1,7 @@
 use chrono::Utc;
 use either::Either;
+use futures_timeout::TimeoutExt;
+use futures_timer::Delay;
 use tokio_stream::StreamMap;
 use tracing::info;
 
@@ -480,14 +482,11 @@ impl ConversationTask {
 
         pin_mut!(stream);
 
-        let mut queue_timer = tokio::time::interval(Duration::from_secs(1));
+        let mut queue_timer = Delay::new(Duration::from_secs(1));
 
-        let mut pending_exchange_timer = tokio::time::interval(Duration::from_secs(1));
+        let mut pending_exchange_timer = Delay::new(Duration::from_secs(1));
 
-        let mut check_mailbox = tokio::time::interval_at(
-            tokio::time::Instant::now() + Duration::from_secs(5),
-            Duration::from_secs(60),
-        );
+        let mut check_mailbox = Delay::new(Duration::from_secs(5));
 
         loop {
             tokio::select! {
@@ -586,18 +585,21 @@ impl ConversationTask {
                         tracing::error!(conversation_id = %id, error = %e, "unable to get messages from conversation mailbox");
                     }
                 }
-                _ = queue_timer.tick() => {
+                _ = &mut queue_timer => {
                     let inner = &mut *self.inner.write().await;
                     _ = process_queue(inner).await;
+                    queue_timer.reset(Duration::from_secs(1));
                 }
-                _ = pending_exchange_timer.tick() => {
+                _ = &mut pending_exchange_timer => {
                     let inner = &mut *self.inner.write().await;
                     _ = process_pending_payload(inner).await;
+                    pending_exchange_timer.reset(Duration::from_secs(1));
                 }
 
-                _ = check_mailbox.tick() => {
+                _ = &mut check_mailbox => {
                     let inner = &mut *self.inner.write().await;
                     _ = inner.load_from_mailbox().await;
+                    check_mailbox.reset(Duration::from_secs(60));
                 }
             }
         }
@@ -699,7 +701,7 @@ impl ConversationInner {
                             })
                             .await;
 
-                        match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                        match rx.timeout(SHUTTLE_TIMEOUT).await {
                             Ok(Ok(Ok(list))) => {
                                 providers.push(peer_id);
                                 conversation_mailbox.extend(list);
