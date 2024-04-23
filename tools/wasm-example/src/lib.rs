@@ -1,10 +1,9 @@
-
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub fn function_example(arg: &str) -> String {
     web_sys::console::log_1(&format!("WASM: arg: {}", arg).into());
     web_sys::console::log_1(&"WASM: returning: bye".into());
-    return "bye".to_string();
+    "bye".to_string()
 }
 
 #[wasm_bindgen]
