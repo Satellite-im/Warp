@@ -2088,7 +2088,7 @@ impl IdentityStore {
                 e
             })?;
         let _ = self.export_root_document().await;
-
+        self.push_to_all().await;
         Ok(())
     }
 

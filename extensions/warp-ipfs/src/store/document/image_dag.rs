@@ -1,4 +1,4 @@
-use futures::{stream::BoxStream, StreamExt};
+use futures::StreamExt;
 use libipld::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
@@ -11,14 +11,14 @@ pub struct ImageDag {
     pub mime: FileType,
 }
 
-#[tracing::instrument(skip(ipfs, stream))]
+#[tracing::instrument(skip(ipfs, opt))]
 pub async fn store_photo(
     ipfs: &Ipfs,
-    stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+    opt: impl Into<rust_ipfs::unixfs::AddOpt>,
     file_type: FileType,
     limit: Option<usize>,
 ) -> Result<Cid, Error> {
-    let mut stream = ipfs.add_unixfs(stream);
+    let mut stream = ipfs.add_unixfs(opt);
 
     let (cid, size) = loop {
         let status = stream.next().await.ok_or(Error::Other)?;
