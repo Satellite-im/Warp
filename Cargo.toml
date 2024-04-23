@@ -90,6 +90,10 @@ void = "1"
 #ipfs dependency
 rust-ipfs = "0.11.8"
 
+# wasm crates
+gloo = "0.7"
+wasm-bindgen = "0.2"
+
 
 # Blink related crates
 # av-data is needed to use libaom. need to ensure that Warp and libaom use the same version of av-data
