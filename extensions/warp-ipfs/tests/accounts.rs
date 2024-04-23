@@ -5,6 +5,7 @@ mod test {
     use std::time::Duration;
 
     use crate::common::{self, create_account, create_accounts};
+    use futures::StreamExt;
     use warp::constellation::file::FileType;
     use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
     use warp::tesseract::Tesseract;
@@ -280,6 +281,30 @@ mod test {
 
         account
             .update_identity(IdentityUpdate::Picture(common::PROFILE_IMAGE.into()))
+            .await?;
+
+        let image = account.identity_picture(&did).await?;
+
+        assert_eq!(image.data(), common::PROFILE_IMAGE);
+        assert!(image
+            .image_type()
+            .eq(&FileType::Mime("image/png".parse().unwrap())));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn identity_real_profile_picture_stream() -> anyhow::Result<()> {
+        let (mut account, _, did, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::identity_real_profile_picture_stream".into()),
+        )
+        .await?;
+
+        let st = futures::stream::iter(vec![Ok(common::PROFILE_IMAGE.into())]).boxed();
+
+        account
+            .update_identity(IdentityUpdate::PictureStream(st))
             .await?;
 
         let image = account.identity_picture(&did).await?;
