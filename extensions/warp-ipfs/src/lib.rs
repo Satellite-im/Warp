@@ -10,7 +10,10 @@ use config::Config;
 use futures::channel::mpsc::channel;
 
 use futures::stream::{self, BoxStream};
-use futures::{AsyncReadExt, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
+
+#[cfg(not(target_arch = "wasm32"))]
+use futures::AsyncReadExt;
 
 use ipfs::libp2p::core::muxing::StreamMuxerBox;
 use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
@@ -889,6 +892,7 @@ impl MultiPass for WarpIpfs {
                 let stream = stream::iter(vec![Ok(data)]).boxed();
                 (OptType::Picture(Some(format)), stream)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             IdentityUpdate::PicturePath(path) => {
                 if !path.is_file() {
                     return Err(Error::IoError(std::io::Error::from(
@@ -939,6 +943,10 @@ impl MultiPass for WarpIpfs {
                 };
                 (OptType::Picture(Some(extension)), stream.boxed())
             }
+            #[cfg(target_arch = "wasm32")]
+            IdentityUpdate::PicturePath(_) => {
+                return Err(Error::Unimplemented);
+            }
             IdentityUpdate::PictureStream(stream) => (OptType::Picture(None), stream),
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
@@ -967,6 +975,7 @@ impl MultiPass for WarpIpfs {
                 let stream = stream::iter(vec![Ok(data)]).boxed();
                 (OptType::Banner(Some(format)), stream)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             IdentityUpdate::BannerPath(path) => {
                 if !path.is_file() {
                     return Err(Error::IoError(std::io::Error::from(
@@ -1017,6 +1026,10 @@ impl MultiPass for WarpIpfs {
                 };
 
                 (OptType::Picture(Some(extension)), stream.boxed())
+            }
+            #[cfg(target_arch = "wasm32")]
+            IdentityUpdate::BannerPath(_) => {
+                return Err(Error::Unimplemented);
             }
             IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
         };
