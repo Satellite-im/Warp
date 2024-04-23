@@ -1021,19 +1021,19 @@ impl MultiPass for WarpIpfs {
             IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
         };
 
+        let mut data = Vec::with_capacity(2 * 1024 * 1024);
+
+        while let Some(s) = stream.try_next().await? {
+            data.extend(s);
+        }
+
         let format = match opt {
             OptType::Picture(Some(format)) => format,
             OptType::Banner(Some(format)) => format,
             OptType::Picture(None) | OptType::Banner(None) => {
-                let mut data = Vec::with_capacity(2 * 1024 * 1024);
-
-                while let Some(s) = stream.by_ref().try_next().await? {
-                    data.extend(s);
-                }
-
                 tracing::trace!("image size = {}", data.len());
 
-                let cursor = std::io::Cursor::new(data);
+                let cursor = std::io::Cursor::new(&data);
 
                 let image = image::io::Reader::new(cursor).with_guessed_format()?;
 
@@ -1046,7 +1046,7 @@ impl MultiPass for WarpIpfs {
 
         let cid = store::document::image_dag::store_photo(
             &ipfs,
-            stream,
+            data,
             format.into(),
             Some(2 * 1024 * 1024),
         )
