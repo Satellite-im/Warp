@@ -1,4 +1,3 @@
-
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub fn function_example(arg: &str) -> String {
