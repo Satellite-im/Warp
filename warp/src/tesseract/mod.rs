@@ -19,6 +19,9 @@ use parking_lot::RwLock;
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Clone)]
 pub struct Tesseract {
