@@ -8,10 +8,15 @@ mod utils;
 use chrono::{DateTime, Utc};
 use config::Config;
 use futures::channel::mpsc::channel;
-use futures::stream::BoxStream;
-#[allow(unused_imports)] //TODO: Remove
-use futures::{AsyncReadExt, StreamExt};
+
+use futures::stream::{self, BoxStream};
+use futures::{StreamExt, TryStreamExt};
+
+#[cfg(not(target_arch = "wasm32"))]
+use futures::AsyncReadExt;
+
 use futures_timeout::TimeoutExt;
+
 use ipfs::libp2p::core::muxing::StreamMuxerBox;
 use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 use ipfs::libp2p::core::upgrade::Version;
@@ -805,7 +810,11 @@ impl MultiPass for WarpIpfs {
         let ipfs = self.ipfs()?;
 
         let mut old_cid = None;
-        match option {
+        enum OptType {
+            Picture(Option<ExtensionType>),
+            Banner(Option<ExtensionType>),
+        }
+        let (opt, mut stream) = match option {
             IdentityUpdate::Username(username) => {
                 let len = username.chars().count();
                 if !(4..=64).contains(&len) {
@@ -818,297 +827,26 @@ impl MultiPass for WarpIpfs {
                 }
 
                 identity.username = username;
-                store.identity_update(identity.clone()).await?;
+                return store.identity_update(identity).await;
             }
-            IdentityUpdate::Picture(data) => {
-                let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile picture".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
 
-                tracing::trace!("image size = {}", len);
-
-                let (data, format) = {
-                    let cursor = std::io::Cursor::new(data);
-
-                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
-
-                    let format = image
-                        .format()
-                        .and_then(|format| ExtensionType::try_from(format).ok())
-                        .unwrap_or(ExtensionType::Other);
-
-                    let inner = image.into_inner();
-
-                    let data = inner.into_inner();
-                    (data, format)
-                };
-
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
-                    format.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                tracing::debug!("Image cid: {cid}");
-
-                if let Some(picture_cid) = identity.metadata.profile_picture {
-                    if picture_cid == cid {
-                        tracing::debug!("Picture is already on document. Not updating identity");
-                        return Ok(());
-                    }
-
-                    if let Some(banner_cid) = identity.metadata.profile_banner {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(picture_cid);
-                        }
-                    }
-                }
-
-                identity.metadata.profile_picture = Some(cid);
-                store.identity_update(identity).await?;
-            }
-            IdentityUpdate::PicturePath(path) => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if !path.is_file() {
-                        return Err(Error::IoError(std::io::Error::from(
-                            std::io::ErrorKind::NotFound,
-                        )));
-                    }
-
-                    let file = tokio::fs::File::open(&path).await?;
-
-                    let metadata = file.metadata().await?;
-
-                    let len = metadata.len() as _;
-
-                    if len == 0 || len > 2 * 1024 * 1024 {
-                        return Err(Error::InvalidLength {
-                            context: "profile picture".into(),
-                            current: len,
-                            minimum: Some(1),
-                            maximum: Some(2 * 1024 * 1024),
-                        });
-                    }
-
-                    let extension = path
-                        .extension()
-                        .and_then(OsStr::to_str)
-                        .map(ExtensionType::from)
-                        .unwrap_or(ExtensionType::Other);
-
-                    tracing::trace!("image size = {}", len);
-
-                    let stream = async_stream::stream! {
-                        let mut reader = file.compat();
-                        let mut buffer = vec![0u8; 512];
-                        loop {
-                            match reader.read(&mut buffer).await {
-                                Ok(512) => yield Ok(buffer.clone()),
-                                Ok(_n) => {
-                                    yield Ok(buffer.clone());
-                                    break;
-                                },
-                                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                                Err(e) => {
-                                    yield Err(e);
-                                    break;
-                                }
-                            }
-                        }
-                    };
-
-                    let cid = store::document::image_dag::store_photo(
-                        &ipfs,
-                        stream.boxed(),
-                        extension.into(),
-                        Some(2 * 1024 * 1024),
-                    )
-                    .await?;
-
-                    tracing::debug!("Image cid: {cid}");
-
-                    if let Some(picture_cid) = identity.metadata.profile_picture {
-                        if picture_cid == cid {
-                            tracing::debug!(
-                                "Picture is already on document. Not updating identity"
-                            );
-                            return Ok(());
-                        }
-
-                        if let Some(banner_cid) = identity.metadata.profile_banner {
-                            if picture_cid != banner_cid {
-                                old_cid = Some(picture_cid);
-                            }
-                        }
-                    }
-
-                    identity.metadata.profile_picture = Some(cid);
-                    store.identity_update(identity).await?;
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    _ = path;
-                }
-            }
             IdentityUpdate::ClearPicture => {
                 let document = identity.metadata.profile_picture.take();
                 if let Some(cid) = document {
-                    old_cid = Some(cid);
-                }
-                store.identity_update(identity).await?;
-            }
-            IdentityUpdate::Banner(data) => {
-                let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile banner".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-
-                tracing::trace!("image size = {}", len);
-
-                let (data, format) = {
-                    let cursor = std::io::Cursor::new(data);
-
-                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
-
-                    let format = image
-                        .format()
-                        .and_then(|format| ExtensionType::try_from(format).ok())
-                        .unwrap_or(ExtensionType::Other);
-
-                    let inner = image.into_inner();
-
-                    let data = inner.into_inner();
-                    (data, format)
-                };
-
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
-                    format.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                tracing::debug!("Image cid: {cid}");
-
-                if let Some(banner_cid) = identity.metadata.profile_banner {
-                    if banner_cid == cid {
-                        tracing::debug!("Banner is already on document. Not updating identity");
-                        return Ok(());
-                    }
-
-                    if let Some(picture_cid) = identity.metadata.profile_picture {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(banner_cid);
-                        }
+                    if let Err(e) = store.delete_photo(cid).await {
+                        error!("Error deleting picture: {e}");
                     }
                 }
-
-                identity.metadata.profile_banner = Some(cid);
-                store.identity_update(identity).await?;
-            }
-            IdentityUpdate::BannerPath(path) => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if !path.is_file() {
-                        return Err(Error::IoError(std::io::Error::from(
-                            std::io::ErrorKind::NotFound,
-                        )));
-                    }
-
-                    let file = tokio::fs::File::open(&path).await?;
-
-                    let metadata = file.metadata().await?;
-
-                    let len = metadata.len() as _;
-
-                    if len == 0 || len > 2 * 1024 * 1024 {
-                        return Err(Error::InvalidLength {
-                            context: "profile banner".into(),
-                            current: len,
-                            minimum: Some(1),
-                            maximum: Some(2 * 1024 * 1024),
-                        });
-                    }
-
-                    let extension = path
-                        .extension()
-                        .and_then(OsStr::to_str)
-                        .map(ExtensionType::from)
-                        .unwrap_or(ExtensionType::Other);
-
-                    tracing::trace!("image size = {}", len);
-
-                    let stream = async_stream::stream! {
-                        let mut reader = file.compat();
-                        let mut buffer = vec![0u8; 512];
-                        loop {
-                            match reader.read(&mut buffer).await {
-                                Ok(512) => yield Ok(buffer.clone()),
-                                Ok(_n) => {
-                                    yield Ok(buffer.clone());
-                                    break;
-                                },
-                                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                                Err(e) => {
-                                    yield Err(e);
-                                    break;
-                                }
-                            }
-                        }
-                    };
-
-                    let cid = store::document::image_dag::store_photo(
-                        &ipfs,
-                        stream.boxed(),
-                        extension.into(),
-                        Some(2 * 1024 * 1024),
-                    )
-                    .await?;
-
-                    tracing::debug!("Image cid: {cid}");
-
-                    if let Some(banner_cid) = identity.metadata.profile_banner {
-                        if banner_cid == cid {
-                            tracing::debug!("Banner is already on document. Not updating identity");
-                            return Ok(());
-                        }
-
-                        if let Some(picture_cid) = identity.metadata.profile_picture {
-                            if picture_cid != banner_cid {
-                                old_cid = Some(banner_cid);
-                            }
-                        }
-                    }
-
-                    identity.metadata.profile_banner = Some(cid);
-                    store.identity_update(identity).await?;
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    _ = path;
-                }
+                return store.identity_update(identity).await;
             }
             IdentityUpdate::ClearBanner => {
                 let document = identity.metadata.profile_banner.take();
                 if let Some(cid) = document {
-                    old_cid = Some(cid);
+                    if let Err(e) = store.delete_photo(cid).await {
+                        error!("Error deleting picture: {e}");
+                    }
                 }
-                store.identity_update(identity).await?;
+                return store.identity_update(identity).await;
             }
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
@@ -1123,13 +861,247 @@ impl MultiPass for WarpIpfs {
                     }
                 }
                 identity.status_message = status;
-                store.identity_update(identity.clone()).await?;
+                return store.identity_update(identity).await;
             }
             IdentityUpdate::ClearStatusMessage => {
                 identity.status_message = None;
-                store.identity_update(identity.clone()).await?;
+                return store.identity_update(identity).await;
+            }
+            IdentityUpdate::Picture(data) => {
+                let len = data.len();
+                if len == 0 || len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+                let cursor = std::io::Cursor::new(data);
+
+                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                let format = image
+                    .format()
+                    .and_then(|format| ExtensionType::try_from(format).ok())
+                    .unwrap_or(ExtensionType::Other);
+
+                let inner = image.into_inner();
+
+                let data = inner.into_inner();
+
+                let stream = stream::iter(vec![Ok(data)]).boxed();
+                (OptType::Picture(Some(format)), stream)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            IdentityUpdate::PicturePath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(&path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if len == 0 || len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile picture".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let extension = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
+
+                tracing::trace!("image size = {}", len);
+
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
+                (OptType::Picture(Some(extension)), stream.boxed())
+            }
+            #[cfg(target_arch = "wasm32")]
+            IdentityUpdate::PicturePath(_) => {
+                return Err(Error::Unimplemented);
+            }
+            IdentityUpdate::PictureStream(stream) => (OptType::Picture(None), stream),
+            IdentityUpdate::Banner(data) => {
+                let len = data.len();
+                if len == 0 || len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let cursor = std::io::Cursor::new(data);
+
+                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                let format = image
+                    .format()
+                    .and_then(|format| ExtensionType::try_from(format).ok())
+                    .unwrap_or(ExtensionType::Other);
+
+                let inner = image.into_inner();
+
+                let data = inner.into_inner();
+
+                let stream = stream::iter(vec![Ok(data)]).boxed();
+                (OptType::Banner(Some(format)), stream)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            IdentityUpdate::BannerPath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(&path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if len == 0 || len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let extension = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
+
+                tracing::trace!("image size = {}", len);
+
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                (OptType::Picture(Some(extension)), stream.boxed())
+            }
+            #[cfg(target_arch = "wasm32")]
+            IdentityUpdate::BannerPath(_) => {
+                return Err(Error::Unimplemented);
+            }
+            IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
+        };
+
+        let mut data = Vec::with_capacity(2 * 1024 * 1024);
+
+        while let Some(s) = stream.try_next().await? {
+            data.extend(s);
+        }
+
+        let format = match opt {
+            OptType::Picture(Some(format)) => format,
+            OptType::Banner(Some(format)) => format,
+            OptType::Picture(None) | OptType::Banner(None) => {
+                tracing::trace!("image size = {}", data.len());
+
+                let cursor = std::io::Cursor::new(&data);
+
+                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                image
+                    .format()
+                    .and_then(|format| ExtensionType::try_from(format).ok())
+                    .unwrap_or(ExtensionType::Other)
             }
         };
+
+        let cid = store::document::image_dag::store_photo(
+            &ipfs,
+            data,
+            format.into(),
+            Some(2 * 1024 * 1024),
+        )
+        .await?;
+
+        tracing::debug!("Image cid: {cid}");
+
+        match opt {
+            OptType::Picture(_) => {
+                if let Some(picture_cid) = identity.metadata.profile_picture {
+                    if picture_cid == cid {
+                        tracing::debug!("Picture is already on document. Not updating identity");
+                        return Ok(());
+                    }
+
+                    if let Some(banner_cid) = identity.metadata.profile_banner {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(picture_cid);
+                        }
+                    }
+                }
+
+                identity.metadata.profile_picture = Some(cid);
+            }
+            OptType::Banner(_) => {
+                if let Some(banner_cid) = identity.metadata.profile_banner {
+                    if banner_cid == cid {
+                        tracing::debug!("Banner is already on document. Not updating identity");
+                        return Ok(());
+                    }
+
+                    if let Some(picture_cid) = identity.metadata.profile_picture {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(banner_cid);
+                        }
+                    }
+                }
+
+                identity.metadata.profile_banner = Some(cid);
+            }
+        }
 
         if let Some(cid) = old_cid {
             if let Err(e) = store.delete_photo(cid).await {
@@ -1137,9 +1109,7 @@ impl MultiPass for WarpIpfs {
             }
         }
 
-        store.push_to_all().await;
-
-        Ok(())
+        store.identity_update(identity).await
     }
 }
 

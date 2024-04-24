@@ -1,9 +1,10 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use crate::{constellation::file::FileType, crypto::DID, error::Error};
 
 use chrono::{DateTime, Utc};
 use derive_more::Display;
+use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
 pub const SHORT_ID_SIZE: usize = 8;
@@ -315,15 +316,44 @@ impl From<&[DID]> for Identifier {
     }
 }
 
-#[derive(Debug, Clone)]
 pub enum IdentityUpdate {
     Username(String),
     Picture(Vec<u8>),
     PicturePath(std::path::PathBuf),
+    PictureStream(BoxStream<'static, Result<Vec<u8>, std::io::Error>>),
     ClearPicture,
     Banner(Vec<u8>),
     BannerPath(std::path::PathBuf),
+    BannerStream(BoxStream<'static, Result<Vec<u8>, std::io::Error>>),
     ClearBanner,
     StatusMessage(Option<String>),
     ClearStatusMessage,
+}
+
+impl Debug for IdentityUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IdentityUpdate::Username(username) => write!(f, "IdentityUpdate::Username({username})"),
+            IdentityUpdate::Picture(buffer) => {
+                write!(f, "IdentityUpdate::Picture({} bytes)", buffer.len())
+            }
+            IdentityUpdate::PicturePath(path) => {
+                write!(f, "IdentityUpdate::PicturePath({})", path.display())
+            }
+            IdentityUpdate::PictureStream(_) => write!(f, "IdentityUpdate::PictureStream"),
+            IdentityUpdate::ClearPicture => write!(f, "IdentityUpdate::ClearPicture"),
+            IdentityUpdate::Banner(buffer) => {
+                write!(f, "IdentityUpdate::Banner({} bytes)", buffer.len())
+            }
+            IdentityUpdate::BannerPath(path) => {
+                write!(f, "IdentityUpdate::BannerPath({})", path.display())
+            }
+            IdentityUpdate::BannerStream(_) => write!(f, "IdentityUpdate::BannerStream"),
+            IdentityUpdate::ClearBanner => write!(f, "IdentityUpdate::ClearBanner"),
+            IdentityUpdate::StatusMessage(status) => {
+                write!(f, "IdentityUpdate::StatusMessage({status:?})")
+            }
+            IdentityUpdate::ClearStatusMessage => write!(f, "IdentityUpdate::ClearStatusMessage"),
+        }
+    }
 }
