@@ -404,7 +404,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let multipass_event_stream = multipass.subscribe().await?;
+    let multipass_event_stream = multipass.multipass_subscribe().await?;
     let multipass2 = multipass.clone();
     let multipass_handle = tokio::spawn(async {
         if let Err(e) = handle_multipass_event_stream(multipass2, multipass_event_stream).await {

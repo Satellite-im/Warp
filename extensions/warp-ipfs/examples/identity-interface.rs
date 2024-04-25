@@ -203,7 +203,7 @@ async fn main() -> anyhow::Result<()> {
         own_identity.short_id()
     ))?;
 
-    let mut event_stream = account.subscribe().await?;
+    let mut event_stream = account.multipass_subscribe().await?;
     loop {
         tokio::select! {
             event = event_stream.next() => {

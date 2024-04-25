@@ -68,8 +68,8 @@ use warp::multipass::identity::{
     Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, FriendsEvent, IdentityImportOption, IdentityInformation, ImportLocation,
-    MultiPass, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
+    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, MultiPass,
+    MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 
 use crate::config::{Bootstrap, DiscoveryType};
@@ -1321,8 +1321,8 @@ impl Friends for WarpIpfs {
 }
 
 #[async_trait::async_trait]
-impl FriendsEvent for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
+impl MultiPassEvent for WarpIpfs {
+    async fn multipass_subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let store = self.identity_store(true).await?;
         store.subscribe().await
     }
@@ -1603,10 +1603,11 @@ impl RayGunGroupConversation for WarpIpfs {
 
 #[async_trait::async_trait]
 impl RayGunStream for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
+    async fn raygun_subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         let rx = self.raygun_tx.subscribe().await?;
         Ok(rx)
     }
+
     async fn get_conversation_stream(
         &mut self,
         conversation_id: Uuid,
@@ -1728,7 +1729,7 @@ impl Constellation for WarpIpfs {
 
 #[async_trait::async_trait]
 impl ConstellationEvent for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
+    async fn constellation_subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
         let rx = self.constellation_tx.subscribe().await?;
         Ok(ConstellationEventStream(rx))
     }
