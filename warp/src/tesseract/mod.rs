@@ -252,7 +252,10 @@ impl Tesseract {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Tesseract {
     /// To create an instance of Tesseract
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(constructor))]
+    #[cfg_attr(
+        target_arch = "wasm32",
+        wasm_bindgen::prelude::wasm_bindgen(constructor)
+    )]
     pub fn new() -> Tesseract {
         Tesseract::default()
     }
