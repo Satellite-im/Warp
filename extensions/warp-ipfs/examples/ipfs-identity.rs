@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let (mut identity, _, _) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .finalize()
-        .await?;
+        .await;
 
     let profile = identity.create_identity(None, None).await?;
 

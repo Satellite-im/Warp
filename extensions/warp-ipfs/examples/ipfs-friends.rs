@@ -19,7 +19,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     account.create_identity(username, None).await?;
     Ok(account)

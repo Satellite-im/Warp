@@ -1,11 +1,7 @@
 use ipfs::Multiaddr;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::{
-    path::{Path, PathBuf},
-    str::FromStr,
-    time::Duration,
-};
+use std::{path::PathBuf, str::FromStr, time::Duration};
 use warp::{constellation::file::FileType, multipass::identity::Identity};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -251,22 +247,112 @@ impl Default for StoreSetting {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Config {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<PathBuf>,
-    pub bootstrap: Bootstrap,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub listen_on: Vec<Multiaddr>,
-    pub ipfs_setting: IpfsSetting,
-    pub store_setting: StoreSetting,
-    pub enable_relay: bool,
-    pub save_phrase: bool,
-    pub max_storage_size: Option<usize>,
-    pub max_file_size: Option<usize>,
-    pub thumbnail_size: (u32, u32),
-    pub chunking: Option<usize>,
-    pub thumbnail_exact_format: bool,
+    path: Option<PathBuf>,
+    bootstrap: Bootstrap,
+    listen_on: Vec<Multiaddr>,
+    ipfs_setting: IpfsSetting,
+    store_setting: StoreSetting,
+    enable_relay: bool,
+    save_phrase: bool,
+    max_storage_size: Option<usize>,
+    max_file_size: Option<usize>,
+    thumbnail_size: (u32, u32),
+    thumbnail_exact_format: bool,
+}
+
+impl Config {
+    pub fn path(&self) -> Option<&PathBuf> {
+        self.path.as_ref()
+    }
+
+    pub fn bootstrap(&self) -> &Bootstrap {
+        &self.bootstrap
+    }
+
+    pub fn listen_on(&self) -> &[Multiaddr] {
+        &self.listen_on
+    }
+
+    pub fn ipfs_setting(&self) -> &IpfsSetting {
+        &self.ipfs_setting
+    }
+
+    pub fn store_setting(&self) -> &StoreSetting {
+        &self.store_setting
+    }
+
+    pub fn enable_relay(&self) -> bool {
+        self.enable_relay
+    }
+
+    pub fn save_phrase(&self) -> bool {
+        self.save_phrase
+    }
+
+    pub fn max_storage_size(&self) -> Option<usize> {
+        self.max_storage_size
+    }
+
+    pub fn max_file_size(&self) -> Option<usize> {
+        self.max_file_size
+    }
+
+    pub fn thumbnail_size(&self) -> (u32, u32) {
+        self.thumbnail_size
+    }
+
+    pub fn thumbnail_exact_format(&self) -> bool {
+        self.thumbnail_exact_format
+    }
+}
+
+impl Config {
+    pub fn path_mut(&mut self) -> &mut Option<PathBuf> {
+        &mut self.path
+    }
+
+    pub fn bootstrap_mut(&mut self) -> &mut Bootstrap {
+        &mut self.bootstrap
+    }
+
+    pub fn listen_on_mut(&mut self) -> &mut Vec<Multiaddr> {
+        &mut self.listen_on
+    }
+
+    pub fn ipfs_setting_mut(&mut self) -> &mut IpfsSetting {
+        &mut self.ipfs_setting
+    }
+
+    pub fn store_setting_mut(&mut self) -> &mut StoreSetting {
+        &mut self.store_setting
+    }
+
+    pub fn enable_relay_mut(&mut self) -> &mut bool {
+        &mut self.enable_relay
+    }
+
+    pub fn save_phrase_mut(&mut self) -> &mut bool {
+        &mut self.save_phrase
+    }
+
+    pub fn max_storage_size_mut(&mut self) -> &mut Option<usize> {
+        &mut self.max_storage_size
+    }
+
+    pub fn max_file_size_mut(&mut self) -> &mut Option<usize> {
+        &mut self.max_file_size
+    }
+
+    pub fn thumbnail_size_mut(&mut self) -> &mut (u32, u32) {
+        &mut self.thumbnail_size
+    }
+
+    pub fn thumbnail_exact_format_mut(&mut self) -> &mut bool {
+        &mut self.thumbnail_exact_format
+    }
 }
 
 impl Default for Config {
@@ -295,19 +381,21 @@ impl Default for Config {
             max_storage_size: Some(50 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
             thumbnail_size: (128, 128),
-            chunking: None,
             thumbnail_exact_format: true,
         }
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Config {
     /// Default configuration for local development and writing test
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn development() -> Config {
         Config::default()
     }
 
     /// Test configuration. Used for in-memory
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
@@ -331,6 +419,7 @@ impl Config {
     }
 
     /// Minimal testing configuration. Used for in-memory
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn minimal_testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
@@ -351,6 +440,7 @@ impl Config {
     }
 
     /// Minimal production configuration
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
@@ -372,6 +462,7 @@ impl Config {
     }
 
     /// Recommended production configuration
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn production<P: AsRef<std::path::Path>>(path: P) -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
@@ -394,139 +485,4 @@ impl Config {
             ..Default::default()
         }
     }
-
-    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Config> {
-        let path = path.as_ref();
-        let bytes = std::fs::read(path)?;
-        let config = serde_json::from_slice(&bytes)?;
-        Ok(config)
-    }
-
-    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
-        let bytes = serde_json::to_vec(self)?;
-        std::fs::write(path, bytes)?;
-        Ok(())
-    }
-
-    pub fn from_string<S: AsRef<str>>(data: S) -> anyhow::Result<Config> {
-        let data = data.as_ref();
-        let config = serde_json::from_str(data)?;
-        Ok(config)
-    }
 }
-
-// pub mod ffi {
-//     use crate::config::Config;
-
-//     use std::ffi::CStr;
-//     use std::os::raw::c_char;
-//     use warp::error::Error;
-//     use warp::ffi::{FFIResult, FFIResult_Null, FFIResult_String};
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_from_file(
-//         file: *const c_char,
-//     ) -> FFIResult<Config> {
-//         if file.is_null() {
-//             return FFIResult::err(Error::Any(anyhow::anyhow!("file cannot be null")));
-//         }
-
-//         let file = CStr::from_ptr(file).to_string_lossy().to_string();
-
-//         Config::from_file(file).map_err(Error::from).into()
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_to_file(
-//         config: *const Config,
-//         file: *const c_char,
-//     ) -> FFIResult_Null {
-//         if config.is_null() {
-//             return FFIResult_Null::err(Error::NullPointerContext {
-//                 pointer: "config".into(),
-//             });
-//         }
-
-//         if file.is_null() {
-//             return FFIResult_Null::err(Error::NullPointerContext {
-//                 pointer: "file".into(),
-//             });
-//         }
-
-//         let file = CStr::from_ptr(file).to_string_lossy().to_string();
-
-//         Config::to_file(&*config, file)
-//             .map_err(Error::from)
-//             .into()
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_from_str(
-//         config: *const c_char,
-//     ) -> FFIResult<Config> {
-//         if config.is_null() {
-//             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
-//         }
-
-//         let data = CStr::from_ptr(config).to_string_lossy().to_string();
-
-//         Config::from_string(data).map_err(Error::from).into()
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_to_str(
-//         config: *const Config,
-//     ) -> FFIResult_String {
-//         if config.is_null() {
-//             return FFIResult_String::err(Error::Any(anyhow::anyhow!("config cannot be null")));
-//         }
-
-//         serde_json::to_string(&*config).map_err(Error::from).into()
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_development() -> *mut Config {
-//         Box::into_raw(Box::new(Config::development()))
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_testing(experimental: bool) -> *mut Config {
-//         Box::into_raw(Box::new(Config::testing(experimental)))
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_production(
-//         path: *const c_char,
-//         experimental: bool,
-//     ) -> FFIResult<Config> {
-//         if path.is_null() {
-//             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
-//         }
-
-//         let path = CStr::from_ptr(path).to_string_lossy().to_string();
-
-//         FFIResult::ok(Config::production(path, experimental))
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_minimal(
-//         path: *const c_char,
-//     ) -> FFIResult<Config> {
-//         if path.is_null() {
-//             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
-//         }
-
-//         let path = CStr::from_ptr(path).to_string_lossy().to_string();
-
-//         FFIResult::ok(Config::minimal(path))
-//     }
-// }

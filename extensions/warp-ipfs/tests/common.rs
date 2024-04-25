@@ -55,17 +55,17 @@ pub async fn create_account(
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
-    config.listen_on = vec![Multiaddr::empty().with(Protocol::Memory(0))];
-    config.ipfs_setting.memory_transport = true;
-    config.store_setting.discovery = Discovery::Namespace {
+    *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
+    config.ipfs_setting_mut().memory_transport = true;
+    config.store_setting_mut().discovery = Discovery::Namespace {
         namespace: context,
         discovery_type: Default::default(),
     };
-    config.store_setting.share_platform = true;
-    config.ipfs_setting.relay_client.relay_address = vec![];
-    config.ipfs_setting.bootstrap = false;
-    config.store_setting.update_events = UpdateEvents::Enabled;
-    config.bootstrap = Bootstrap::None;
+    config.store_setting_mut().share_platform = true;
+    config.ipfs_setting_mut().relay_client.relay_address = vec![];
+    config.ipfs_setting_mut().bootstrap = false;
+    config.store_setting_mut().update_events = UpdateEvents::Enabled;
+    *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, _, fs) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
@@ -122,23 +122,23 @@ pub async fn create_account_and_chat(
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
-    config.listen_on = vec![Multiaddr::empty().with(Protocol::Memory(0))];
-    config.ipfs_setting.memory_transport = true;
-    config.store_setting.discovery = Discovery::Namespace {
+    *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
+    config.ipfs_setting_mut().memory_transport = true;
+    config.store_setting_mut().discovery = Discovery::Namespace {
         namespace: context,
         discovery_type: Default::default(),
     };
-    config.store_setting.update_events = UpdateEvents::Enabled;
-    config.store_setting.share_platform = true;
-    config.ipfs_setting.relay_client.relay_address = vec![];
-    config.ipfs_setting.bootstrap = false;
-    config.bootstrap = Bootstrap::None;
+    config.store_setting_mut().update_events = UpdateEvents::Enabled;
+    config.store_setting_mut().share_platform = true;
+    config.ipfs_setting_mut().relay_client.relay_address = vec![];
+    config.ipfs_setting_mut().bootstrap = false;
+    *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, raygun, fs) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();

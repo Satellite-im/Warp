@@ -39,10 +39,10 @@ async fn setup<P: AsRef<Path>>(
     tesseract.unlock(passphrase.as_bytes())?;
 
     let mut config = warp_ipfs::config::Config::production(path);
-    config.store_setting.discovery = Discovery::None;
-    config.ipfs_setting.bootstrap = false;
-    config.ipfs_setting.mdns.enable = false;
-    config.enable_relay = false;
+    config.store_setting_mut().discovery = Discovery::None;
+    config.ipfs_setting_mut().bootstrap = false;
+    config.ipfs_setting_mut().mdns.enable = false;
+    *config.enable_relay_mut() = false;
 
     let (identity, raygun, constellation) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)

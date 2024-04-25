@@ -54,6 +54,7 @@ futures-timer = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 wasm-bindgen-futures = { version = "0.4" }
+wasm-bindgen.workspace = true
 
 [dev-dependencies]
 derive_more.workspace = true
