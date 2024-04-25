@@ -71,7 +71,7 @@ pub async fn create_account(
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 

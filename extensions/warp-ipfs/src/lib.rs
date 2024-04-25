@@ -9,8 +9,9 @@ use chrono::{DateTime, Utc};
 use config::Config;
 use futures::channel::mpsc::channel;
 
+use futures::future::BoxFuture;
 use futures::stream::{self, BoxStream};
-use futures::{StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 
 #[cfg(not(target_arch = "wasm32"))]
 use futures::AsyncReadExt;
@@ -138,21 +139,31 @@ impl WarpIpfsBuilder {
     //     self
     // }
 
-    pub async fn finalize(
-        self,
-    ) -> Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>), Error> {
-        let instance = WarpIpfs::new(self.config, self.tesseract).await?;
+    /// Creates trait objects of the
+    pub async fn finalize(self) -> (Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>) {
+        let instance = WarpIpfs::new(self.config, self.tesseract).await;
 
         let mp = Box::new(instance.clone()) as Box<_>;
         let rg = Box::new(instance.clone()) as Box<_>;
         let fs = Box::new(instance) as Box<_>;
 
-        Ok((mp, rg, fs))
+        (mp, rg, fs)
     }
 }
 
+impl core::future::IntoFuture for WarpIpfsBuilder {
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+    type Output = WarpIpfs;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move { WarpIpfs::new(self.config, self.tesseract).await }.boxed()
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: Tesseract) -> Result<WarpIpfs, Error> {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+    pub async fn new(config: Config, tesseract: Tesseract) -> WarpIpfs {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
@@ -183,12 +194,13 @@ impl WarpIpfs {
                         break;
                     }
                 }
-                if let Err(_e) = inner.initialize_store(false).await {}
+                _ = inner.initialize_store(false).await;
             });
-        } else if let Err(_e) = identity.initialize_store(false).await {
+        } else {
+            _ = identity.initialize_store(false).await;
         }
 
-        Ok(identity)
+        identity
     }
 
     async fn initialize_store(&self, init: bool) -> Result<(), Error> {

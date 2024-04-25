@@ -48,7 +48,7 @@ async fn setup<P: AsRef<Path>>(
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     //validating that account exist
     let _ = identity.get_own_identity().await?;

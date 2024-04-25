@@ -370,7 +370,7 @@ async fn main() -> anyhow::Result<()> {
         .set_tesseract(tesseract.clone())
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     if new_account {
         let random_name: String = rand::thread_rng()
