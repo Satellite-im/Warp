@@ -223,7 +223,7 @@ dyn_clone::clone_trait_object!(Constellation);
 #[async_trait::async_trait]
 pub trait ConstellationEvent: Sync + Send {
     /// Subscribe to an stream of events
-    async fn subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
+    async fn constellation_subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
         Err(Error::Unimplemented)
     }
 }

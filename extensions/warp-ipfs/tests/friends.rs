@@ -18,8 +18,8 @@ mod test {
         let (mut account_a, _, did_a, _) = accounts.first().cloned().unwrap();
         let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut subscribe_a = account_a.subscribe().await?;
-        let mut subscribe_b = account_b.subscribe().await?;
+        let mut subscribe_a = account_a.multipass_subscribe().await?;
+        let mut subscribe_b = account_b.multipass_subscribe().await?;
         account_a.send_request(&did_b).await?;
 
         tokio::time::timeout(Duration::from_secs(60), async {
@@ -59,8 +59,8 @@ mod test {
         let (mut account_a, _, did_a, _) = accounts.first().cloned().unwrap();
         let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut subscribe_a = account_a.subscribe().await?;
-        let mut subscribe_b = account_b.subscribe().await?;
+        let mut subscribe_a = account_a.multipass_subscribe().await?;
+        let mut subscribe_b = account_b.multipass_subscribe().await?;
 
         account_a.send_request(&did_b).await?;
 
@@ -122,8 +122,8 @@ mod test {
         let (mut account_a, _, _, _) = accounts.first().cloned().unwrap();
         let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut subscribe_a = account_a.subscribe().await?;
-        let mut subscribe_b = account_b.subscribe().await?;
+        let mut subscribe_a = account_a.multipass_subscribe().await?;
+        let mut subscribe_b = account_b.multipass_subscribe().await?;
 
         account_a.send_request(&did_b).await?;
 
@@ -163,8 +163,8 @@ mod test {
         let (mut account_a, _, _, _) = accounts.first().cloned().unwrap();
         let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut subscribe_a = account_a.subscribe().await?;
-        let mut subscribe_b = account_b.subscribe().await?;
+        let mut subscribe_a = account_a.multipass_subscribe().await?;
+        let mut subscribe_b = account_b.multipass_subscribe().await?;
 
         account_a.send_request(&did_b).await?;
 
@@ -216,8 +216,8 @@ mod test {
         let (mut account_a, _, did_a, _) = accounts.first().cloned().unwrap();
         let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut subscribe_a = account_a.subscribe().await?;
-        let mut subscribe_b = account_b.subscribe().await?;
+        let mut subscribe_a = account_a.multipass_subscribe().await?;
+        let mut subscribe_b = account_b.multipass_subscribe().await?;
 
         account_a.send_request(&did_b).await?;
         tokio::time::timeout(Duration::from_secs(60), async {
@@ -259,7 +259,7 @@ mod test {
         let (mut account_a, _, _, _) = accounts.first().cloned().unwrap();
         let (_, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut subscribe_a = account_a.subscribe().await?;
+        let mut subscribe_a = account_a.multipass_subscribe().await?;
 
         account_a.send_request(&did_b).await?;
         tokio::time::timeout(Duration::from_secs(60), async {
@@ -298,8 +298,8 @@ mod test {
         let (mut account_a, _, did_a, _) = accounts.first().cloned().unwrap();
         let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut subscribe_a = account_a.subscribe().await?;
-        let mut subscribe_b = account_b.subscribe().await?;
+        let mut subscribe_a = account_a.multipass_subscribe().await?;
+        let mut subscribe_b = account_b.multipass_subscribe().await?;
 
         account_a.block(&did_b).await?;
         account_b.block(&did_a).await?;

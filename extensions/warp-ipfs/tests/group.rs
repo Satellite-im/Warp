@@ -24,7 +24,7 @@ mod test {
 
         let (_account_a, mut chat_a, _, did_a, _) = accounts[0].clone();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(None, vec![], GroupSettings::default())
@@ -63,7 +63,7 @@ mod test {
 
         let (_account_a, mut chat_a, _, _, _) = accounts[0].clone();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(None, vec![], GroupSettings::default())
@@ -133,9 +133,9 @@ mod test {
         let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
         let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(
@@ -204,8 +204,8 @@ mod test {
         let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
         let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(None, vec![did_b.clone()], Default::default())
@@ -301,10 +301,10 @@ mod test {
         let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
         let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
-        let mut chat_subscribe_d = chat_d.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
+        let mut chat_subscribe_d = chat_d.raygun_subscribe().await?;
 
         let mut settings = GroupSettings::default();
         settings.set_members_can_change_name(true);
@@ -468,10 +468,10 @@ mod test {
         let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
         let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
-        let mut chat_subscribe_d = chat_d.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
+        let mut chat_subscribe_d = chat_d.raygun_subscribe().await?;
 
         let mut settings = GroupSettings::default();
         settings.set_members_can_add_participants(true);
@@ -632,10 +632,10 @@ mod test {
         let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
         let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
-        let mut chat_subscribe_d = chat_d.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
+        let mut chat_subscribe_d = chat_d.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(
@@ -785,8 +785,8 @@ mod test {
         let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
         let (mut account_d, _chat_d, _, did_d, _) = accounts[3].clone();
 
-        let mut subscribe_a = account_a.subscribe().await?;
-        let mut subscribe_d = account_d.subscribe().await?;
+        let mut subscribe_a = account_a.multipass_subscribe().await?;
+        let mut subscribe_d = account_d.multipass_subscribe().await?;
 
         account_a.block(&did_d).await?;
 
@@ -810,9 +810,9 @@ mod test {
         })
         .await?;
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
 
         let mut settings = GroupSettings::default();
         settings.set_members_can_add_participants(true);
@@ -893,10 +893,10 @@ mod test {
         let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
         let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
-        let mut chat_subscribe_d = chat_d.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
+        let mut chat_subscribe_d = chat_d.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(
@@ -1110,10 +1110,10 @@ mod test {
         let (_account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
         let (_account_d, mut chat_d, _, did_d, _) = accounts[3].clone();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
-        let mut chat_subscribe_d = chat_d.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
+        let mut chat_subscribe_d = chat_d.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(
@@ -1263,12 +1263,12 @@ mod test {
         let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
         let (mut _account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
 
-        let mut account_subscribe_a = _account_a.subscribe().await?;
-        let mut account_subscribe_c = _account_c.subscribe().await?;
+        let mut account_subscribe_a = _account_a.multipass_subscribe().await?;
+        let mut account_subscribe_c = _account_c.multipass_subscribe().await?;
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(
@@ -1421,12 +1421,12 @@ mod test {
         let (_account_b, mut chat_b, _, did_b, _) = accounts[1].clone();
         let (mut _account_c, mut chat_c, _, did_c, _) = accounts[2].clone();
 
-        let mut account_subscribe_a = _account_a.subscribe().await?;
-        let mut account_subscribe_c = _account_c.subscribe().await?;
+        let mut account_subscribe_a = _account_a.multipass_subscribe().await?;
+        let mut account_subscribe_c = _account_c.multipass_subscribe().await?;
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
-        let mut chat_subscribe_c = chat_c.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_c = chat_c.raygun_subscribe().await?;
 
         chat_a
             .create_group_conversation(

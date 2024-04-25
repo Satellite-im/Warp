@@ -267,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
         writeln!(stdout, "Set conversation to {}", topic)?;
     }
 
-    let mut event_stream = chat.subscribe().await?;
+    let mut event_stream = chat.raygun_subscribe().await?;
 
     loop {
         tokio::select! {
