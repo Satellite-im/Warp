@@ -1,6 +1,6 @@
 use crate::tesseract::{self, TesseractEvent};
-use wasm_bindgen::{prelude::*};
 use futures::{stream::BoxStream, StreamExt};
+use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 #[derive(Default)]
@@ -14,7 +14,7 @@ impl Tesseract {
     pub fn new() -> Tesseract {
         Tesseract::default()
     }
-    
+
     pub fn set_autosave(&self) {
         self.inner.set_autosave();
     }
@@ -47,8 +47,14 @@ impl Tesseract {
         self.inner.retrieve(key).map_err(|e| e.into())
     }
 
-    pub fn update_unlock(&self, old_passphrase: &[u8], new_passphrase: &[u8]) -> Result<(), JsError> {
-        self.inner.update_unlock(old_passphrase, new_passphrase).map_err(|e| e.into())
+    pub fn update_unlock(
+        &self,
+        old_passphrase: &[u8],
+        new_passphrase: &[u8],
+    ) -> Result<(), JsError> {
+        self.inner
+            .update_unlock(old_passphrase, new_passphrase)
+            .map_err(|e| e.into())
     }
 
     pub fn delete(&self, key: &str) -> Result<(), JsError> {
@@ -70,16 +76,30 @@ impl Tesseract {
     pub fn lock(&self) {
         self.inner.lock();
     }
-    
+
     pub fn save(&self) -> Result<(), JsError> {
         self.inner.save().map_err(|e| e.into())
     }
-    
-    // pub async fn subscribe(&self) -> JsValue {
-    //     self.inner.subscribe();
-    // }
+
+    pub fn subscribe(&self) -> Subscription {
+        Subscription {
+            inner: self.inner.subscribe(),
+        }
+    }
 
     pub fn load_from_storage(&self) -> Result<(), JsError> {
         self.inner.load_from_storage().map_err(|e| e.into())
+    }
+}
+
+#[wasm_bindgen]
+pub struct Subscription {
+    inner: BoxStream<'static, TesseractEvent>,
+}
+
+#[wasm_bindgen]
+impl Subscription {
+    pub async fn next(&mut self) -> Option<TesseractEvent> {
+        self.inner.next().await
     }
 }

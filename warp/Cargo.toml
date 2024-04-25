@@ -71,7 +71,6 @@ console_error_panic_hook = { version = "0.1.6" }
 wasm-streams = "0.4"
 wasm-bindgen-futures = { version = "0.4" }
 
-
 [features]
 default = []
 wasm_debug = []

@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 use futures::{stream::BoxStream, StreamExt};
 use std::{collections::HashMap, fmt::Debug, sync::atomic::Ordering};
+use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -28,6 +29,7 @@ pub struct Tesseract {
     inner: Arc<TesseractInner>,
 }
 
+#[wasm_bindgen]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TesseractEvent {
     Unlocked,

@@ -38,6 +38,27 @@
 
       tesseract.save()
       console.log(`saved: ${key}`)
+
+      let stream = tesseract.subscribe()
+      console.log(`subscribed to stream`)
+
+      async function stream_reader() {
+        while (true) {
+          console.log(wasm.TesseractEvent[await stream.next()])
+        }
+      }
+      stream_reader()
+      console.log(`started stream reader loop`)
+
+      async function tesseract_lock_loop() {
+        for (let i = 0; i < 10; i++) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+          tesseract.lock()
+        }
+      }
+      tesseract_lock_loop()
+      console.log(`started tesseract lock loop`)
+
     });
   </script>
   <body>
