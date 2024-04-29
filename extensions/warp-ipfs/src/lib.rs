@@ -74,6 +74,7 @@ use warp::multipass::{
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
+use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
 
@@ -744,12 +745,12 @@ impl MultiPass for WarpIpfs {
         if let Some(u) = username.map(|u| u.trim()) {
             let username_len = u.len();
 
-            if !(4..=64).contains(&username_len) {
+            if !(MIN_USERNAME_LENGTH..=MAX_USERNAME_LENGTH).contains(&username_len) {
                 return Err(Error::InvalidLength {
                     context: "username".into(),
                     current: username_len,
-                    minimum: Some(4),
-                    maximum: Some(64),
+                    minimum: Some(MIN_USERNAME_LENGTH),
+                    maximum: Some(MAX_USERNAME_LENGTH),
                 });
             }
         }
@@ -869,12 +870,12 @@ impl MultiPass for WarpIpfs {
             }
             IdentityUpdate::Picture(data) => {
                 let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if len == 0 || len > MAX_IMAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
                         minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
+                        maximum: Some(MAX_IMAGE_SIZE),
                     });
                 }
                 let cursor = std::io::Cursor::new(data);
@@ -907,12 +908,12 @@ impl MultiPass for WarpIpfs {
 
                 let len = metadata.len() as _;
 
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if len == 0 || len > MAX_IMAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "profile picture".into(),
                         current: len,
                         minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
+                        maximum: Some(MAX_IMAGE_SIZE),
                     });
                 }
 
@@ -951,12 +952,12 @@ impl MultiPass for WarpIpfs {
             IdentityUpdate::PictureStream(stream) => (OptType::Picture(None), stream),
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if len == 0 || len > MAX_IMAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
                         minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
+                        maximum: Some(MAX_IMAGE_SIZE),
                     });
                 }
 
@@ -990,12 +991,12 @@ impl MultiPass for WarpIpfs {
 
                 let len = metadata.len() as _;
 
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if len == 0 || len > MAX_IMAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
                         minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
+                        maximum: Some(MAX_IMAGE_SIZE),
                     });
                 }
 
@@ -1035,7 +1036,7 @@ impl MultiPass for WarpIpfs {
             IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
         };
 
-        let mut data = Vec::with_capacity(2 * 1024 * 1024);
+        let mut data = Vec::with_capacity(MAX_IMAGE_SIZE);
 
         while let Some(s) = stream.try_next().await? {
             data.extend(s);
@@ -1062,7 +1063,7 @@ impl MultiPass for WarpIpfs {
             &ipfs,
             data,
             format.into(),
-            Some(2 * 1024 * 1024),
+            Some(MAX_IMAGE_SIZE),
         )
         .await?;
 

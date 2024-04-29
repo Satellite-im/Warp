@@ -29,7 +29,10 @@ use warp::{
 
 use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce};
 
-use super::{document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, verify_serde_sig};
+use super::{
+    document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, verify_serde_sig,
+    MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
+};
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -781,12 +784,12 @@ impl MessageDocument {
                 .map(|s| s.chars().count())
                 .sum();
 
-            if lines_value_length > 4096 {
+            if lines_value_length > MAX_MESSAGE_SIZE {
                 return Err(Error::InvalidLength {
                     context: "message".into(),
                     current: lines_value_length,
                     minimum: None,
-                    maximum: Some(4096),
+                    maximum: Some(MAX_MESSAGE_SIZE),
                 });
             }
         }
@@ -916,12 +919,12 @@ impl MessageDocument {
                     .map(|s| s.chars().count())
                     .sum();
 
-                if lines_value_length > 4096 {
+                if lines_value_length > MAX_MESSAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "message".into(),
                         current: lines_value_length,
                         minimum: None,
-                        maximum: Some(4096),
+                        maximum: Some(MAX_MESSAGE_SIZE),
                     });
                 }
             }
@@ -1008,12 +1011,12 @@ impl MessageDocument {
                 .await
                 .unwrap_or_default();
 
-            if attachments.len() > 32 {
+            if attachments.len() > MAX_ATTACHMENT {
                 return Err(Error::InvalidLength {
                     context: "attachments".into(),
                     current: attachments.len(),
-                    minimum: Some(1),
-                    maximum: Some(32),
+                    minimum: None,
+                    maximum: Some(MAX_ATTACHMENT),
                 });
             }
 
@@ -1064,12 +1067,12 @@ impl MessageDocument {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length == 0 && lines_value_length > 4096 {
+        if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
-                minimum: Some(1),
-                maximum: Some(4096),
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
             });
         }
 

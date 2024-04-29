@@ -93,8 +93,7 @@ pub async fn get_image(
     let size = limit.unwrap_or(dag.size as _);
 
     let image = ipfs
-        .unixfs()
-        .cat(dag.link)
+        .cat_unixfs(dag.link)
         // we apply the limit in the event the stream of bytes exceeds the explicit limit
         // which may be the define sized if `limit` is `Some(_)` or no greater
         // than ImageDag::size, which by usage a limit is usually set as we set a hard limit for
