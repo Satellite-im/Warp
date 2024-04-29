@@ -74,9 +74,9 @@ use warp::multipass::{
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
-use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
+use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 
 #[derive(Clone)]
 pub struct WarpIpfs {
