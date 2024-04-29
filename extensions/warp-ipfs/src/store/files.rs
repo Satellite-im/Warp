@@ -134,7 +134,7 @@ impl FileStore {
     }
 
     pub fn max_size(&self) -> usize {
-        self.config.max_storage_size.unwrap_or(1024 * 1024 * 1024)
+        self.config.max_storage_size().unwrap_or(1024 * 1024 * 1024)
     }
 
     pub fn set_path(&mut self, path: PathBuf) {
@@ -512,7 +512,7 @@ impl FileTask {
     }
 
     fn max_size(&self) -> usize {
-        self.config.max_storage_size.unwrap_or(1024 * 1024 * 1024)
+        self.config.max_storage_size().unwrap_or(1024 * 1024 * 1024)
     }
 
     fn get_path(&self) -> PathBuf {
@@ -554,8 +554,8 @@ impl FileTask {
         }
 
         let ((width, height), exact) = (
-            self.config.thumbnail_size,
-            self.config.thumbnail_exact_format,
+            self.config.thumbnail_size(),
+            self.config.thumbnail_exact_format(),
         );
 
         let thumbnail_store = self.thumbnail_store.clone();
@@ -725,8 +725,8 @@ impl FileTask {
         let thumbnail_store = self.thumbnail_store.clone();
         let tx = self.constellation_tx.clone();
         let mut export_tx = self.export_tx.clone();
-        let thumbnail_size = self.config.thumbnail_size;
-        let thumbnail_format = self.config.thumbnail_exact_format;
+        let thumbnail_size = self.config.thumbnail_size();
+        let thumbnail_format = self.config.thumbnail_exact_format();
 
         let (name, dest_path) = split_file_from_path(name)?;
 
@@ -1077,8 +1077,8 @@ impl FileTask {
     fn sync_ref(&mut self, path: &str) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let ipfs = self.ipfs.clone();
         let thumbnail_store = self.thumbnail_store.clone();
-        let thumbnail_size = self.config.thumbnail_size;
-        let thumbnail_format = self.config.thumbnail_exact_format;
+        let thumbnail_size = self.config.thumbnail_size();
+        let thumbnail_format = self.config.thumbnail_exact_format();
 
         let directory = self.current_directory()?;
         let file = directory

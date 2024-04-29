@@ -360,17 +360,17 @@ async fn main() -> anyhow::Result<()> {
     tesseract.unlock("abcdefghik".as_bytes())?;
 
     let mut config = Config::production(multipass_dir);
-    config.ipfs_setting.portmapping = true;
-    config.ipfs_setting.agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
-    config.store_setting.emit_online_event = true;
-    config.store_setting.share_platform = true;
-    config.store_setting.update_events = UpdateEvents::Enabled;
+    config.ipfs_setting_mut().portmapping = true;
+    config.ipfs_setting_mut().agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
+    config.store_setting_mut().emit_online_event = true;
+    config.store_setting_mut().share_platform = true;
+    config.store_setting_mut().update_events = UpdateEvents::Enabled;
 
     let (mut multipass, _, _) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract.clone())
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     if new_account {
         let random_name: String = rand::thread_rng()

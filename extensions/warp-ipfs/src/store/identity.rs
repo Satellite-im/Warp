@@ -368,7 +368,7 @@ impl IdentityStore {
         >,
         span: Span,
     ) -> Result<Self, Error> {
-        if let Some(path) = config.path.as_ref() {
+        if let Some(path) = config.path() {
             if !path.exists() {
                 fs::create_dir_all(path).await?;
             }
@@ -478,11 +478,11 @@ impl IdentityStore {
                 futures::pin_mut!(event_stream);
                 futures::pin_mut!(friend_stream);
 
-                let auto_push = store.config.store_setting.auto_push.is_some();
+                let auto_push = store.config.store_setting().auto_push.is_some();
 
                 let interval = store
                     .config
-                    .store_setting
+                    .store_setting()
                     .auto_push
                     .map(|i| {
                         if i.as_millis() < 300000 {
@@ -903,7 +903,7 @@ impl IdentityStore {
     }
 
     pub async fn announce_identity_to_mesh(&self) -> Result<(), Error> {
-        if self.config.store_setting.announce_to_mesh {
+        if self.config.store_setting().announce_to_mesh {
             let kp = self.ipfs.keypair();
             let document = self.own_identity_document().await?;
             let payload = PayloadRequest::new(kp, None, document)?;
@@ -966,7 +966,7 @@ impl IdentityStore {
 
         let is_blocked_by = self.is_blocked_by(out_did).await.unwrap_or_default();
 
-        let share_platform = self.config.store_setting.share_platform;
+        let share_platform = self.config.store_setting().share_platform;
 
         let platform =
             (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
@@ -977,10 +977,10 @@ impl IdentityStore {
         identity.metadata = Default::default();
 
         let include_meta = (matches!(
-            self.config.store_setting.update_events,
+            self.config.store_setting().update_events,
             UpdateEvents::Enabled
         ) || matches!(
-            self.config.store_setting.update_events,
+            self.config.store_setting().update_events,
             UpdateEvents::FriendsOnly
         ) && is_friend)
             && (!is_blocked && !is_blocked_by);
@@ -1196,9 +1196,9 @@ impl IdentityStore {
 
                             let document_did = identity.did.clone();
 
-                            let emit = self.config.store_setting.update_events
+                            let emit = self.config.store_setting().update_events
                                 == UpdateEvents::Enabled
-                                || (self.config.store_setting.update_events
+                                || (self.config.store_setting().update_events
                                     == UpdateEvents::FriendsOnly
                                     && self.is_friend(&document_did).await.unwrap_or_default());
 
@@ -1220,7 +1220,7 @@ impl IdentityStore {
                                         identity.did
                                     );
 
-                                    if !self.config.store_setting.fetch_over_bitswap {
+                                    if !self.config.store_setting().fetch_over_bitswap {
                                         if let Err(e) = self
                                             .request(
                                                 in_did,
@@ -1289,7 +1289,7 @@ impl IdentityStore {
                                         identity.did
                                     );
 
-                                    if !self.config.store_setting.fetch_over_bitswap {
+                                    if !self.config.store_setting().fetch_over_bitswap {
                                         if let Err(e) = self
                                             .request(
                                                 in_did,
@@ -1359,7 +1359,7 @@ impl IdentityStore {
                         let document_did = identity.did.clone();
 
                         if matches!(
-                            self.config.store_setting.update_events,
+                            self.config.store_setting().update_events,
                             UpdateEvents::Enabled
                         ) {
                             let did = document_did.clone();
@@ -1368,9 +1368,9 @@ impl IdentityStore {
                         }
 
                         if !exclude_images {
-                            let emit = self.config.store_setting.update_events
+                            let emit = self.config.store_setting().update_events
                                 == UpdateEvents::Enabled
-                                || (self.config.store_setting.update_events
+                                || (self.config.store_setting().update_events
                                     == UpdateEvents::FriendsOnly
                                     && self.is_friend(&document_did).await.unwrap_or_default());
 
@@ -1387,7 +1387,7 @@ impl IdentityStore {
                                 }
 
                                 if banner.is_some() || picture.is_some() {
-                                    if !self.config.store_setting.fetch_over_bitswap {
+                                    if !self.config.store_setting().fetch_over_bitswap {
                                         self.request(
                                             in_did,
                                             RequestOption::Image { banner, picture },
@@ -1519,7 +1519,7 @@ impl IdentityStore {
     }
 
     fn own_platform(&self) -> Platform {
-        if self.config.store_setting.share_platform {
+        if self.config.store_setting().share_platform {
             if cfg!(any(
                 target_os = "windows",
                 target_os = "macos",
@@ -2228,7 +2228,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn identity_picture(&self, did: &DID) -> Result<IdentityImage, Error> {
-        if self.config.store_setting.disable_images {
+        if self.config.store_setting().disable_images {
             return Err(Error::InvalidIdentityPicture);
         }
 
@@ -2243,7 +2243,12 @@ impl IdentityStore {
                 .map_err(|_| Error::InvalidIdentityPicture);
         }
 
-        if let Some(cb) = self.config.store_setting.default_profile_picture.as_deref() {
+        if let Some(cb) = self
+            .config
+            .store_setting()
+            .default_profile_picture
+            .as_deref()
+        {
             let identity = document.resolve()?;
             let (picture, ty) = cb(&identity)?;
             let mut image = IdentityImage::default();
@@ -2258,7 +2263,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn identity_banner(&self, did: &DID) -> Result<IdentityImage, Error> {
-        if self.config.store_setting.disable_images {
+        if self.config.store_setting().disable_images {
             return Err(Error::InvalidIdentityBanner);
         }
 
@@ -2749,7 +2754,7 @@ impl IdentityStore {
 
         let wait = self
             .config
-            .store_setting
+            .store_setting()
             .friend_request_response_duration
             .is_some();
 
@@ -2784,7 +2789,8 @@ impl IdentityStore {
 
         if !queued && matches!(payload.event, Event::Request) {
             if let Some(rx) = std::mem::take(&mut rx) {
-                if let Some(timeout) = self.config.store_setting.friend_request_response_duration {
+                if let Some(timeout) = self.config.store_setting().friend_request_response_duration
+                {
                     let start = Instant::now();
                     if let Ok(Ok(res)) = rx.timeout(timeout).await {
                         let end = start.elapsed();
