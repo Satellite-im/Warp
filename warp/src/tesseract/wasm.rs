@@ -1,5 +1,6 @@
 use crate::tesseract::{self, TesseractEvent};
-use futures::{stream::BoxStream, StreamExt};
+use futures::{stream::BoxStream, Future, StreamExt};
+use js_sys::{AsyncIterator, Promise};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -81,10 +82,11 @@ impl Tesseract {
         self.inner.save().map_err(|e| e.into())
     }
 
-    pub fn subscribe(&self) -> Subscription {
-        Subscription {
+    pub fn subscribe(&self) -> AsyncIterator {
+        Into::<JsValue>::into(Subscription {
             inner: self.inner.subscribe(),
-        }
+        })
+        .into()
     }
 
     pub fn load_from_storage(&self) -> Result<(), JsError> {
@@ -99,7 +101,22 @@ pub struct Subscription {
 
 #[wasm_bindgen]
 impl Subscription {
-    pub async fn next(&mut self) -> Option<TesseractEvent> {
-        self.inner.next().await
+    pub async fn next(&mut self) -> Result<Promise, JsError> {
+        let next = self.inner.next().await;
+        match next {
+            Some(value) => Ok(Promise::resolve(&PromiseResult::new(value).into())),
+            None => Err(JsError::new("returned None")),
+        }
+    }
+}
+
+#[wasm_bindgen]
+struct PromiseResult {
+    pub value: TesseractEvent,
+    pub done: bool,
+}
+impl PromiseResult {
+    pub fn new(value: TesseractEvent) -> Self {
+        Self { value, done: false }
     }
 }

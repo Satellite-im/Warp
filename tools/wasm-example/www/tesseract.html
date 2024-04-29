@@ -39,14 +39,15 @@
       tesseract.save()
       console.log(`saved: ${key}`)
 
-      let stream = tesseract.subscribe()
+      let stream = {}
+      stream[Symbol.asyncIterator] = () => { return tesseract.subscribe() }
       console.log(`subscribed to stream`)
 
       async function stream_reader() {
-        while (true) {
-          console.log(wasm.TesseractEvent[await stream.next()])
+        for await (const value of stream) {
+          console.log(wasm.TesseractEvent[await value])
         }
-      }
+      };
       stream_reader()
       console.log(`started stream reader loop`)
 
@@ -63,7 +64,7 @@
   </script>
   <body>
     <h2>How to use this example:</h2>
-    <h3>1 - Make the sure wasm is compiled:</h3>
+    <h3>1 - Make sure the wasm is compiled:</h3>
     <pre>
       wasm-pack build warp --target web --out-dir ../tools/wasm-example/www/wasm/warp
     </pre>
