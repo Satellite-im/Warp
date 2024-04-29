@@ -8,6 +8,8 @@ use warp::{
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
 
+use crate::store::{MAX_STATUS_LENGTH, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum IdentityDocumentVersion {
@@ -230,12 +232,12 @@ impl IdentityDocument {
             return Err(Error::IdentityInvalid); //TODO: Invalid username
         }
 
-        if !(4..=64).contains(&payload.username.len()) {
+        if !(MIN_USERNAME_LENGTH..=MAX_USERNAME_LENGTH).contains(&payload.username.len()) {
             return Err(Error::InvalidLength {
                 context: "username".into(),
                 current: payload.username.len(),
-                minimum: Some(4),
-                maximum: Some(64),
+                minimum: Some(MIN_USERNAME_LENGTH),
+                maximum: Some(MAX_USERNAME_LENGTH),
             });
         }
 
@@ -256,12 +258,12 @@ impl IdentityDocument {
         }
 
         if let Some(status) = &payload.status_message {
-            if status.len() > 512 {
+            if status.len() > MAX_STATUS_LENGTH {
                 return Err(Error::InvalidLength {
                     context: "identity status message".into(),
                     current: status.len(),
                     minimum: None,
-                    maximum: Some(512),
+                    maximum: Some(MAX_STATUS_LENGTH),
                 });
             }
         }

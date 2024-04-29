@@ -56,7 +56,7 @@ use super::{
     queue::Queue,
     request::PayloadRequest,
     topics::IDENTITY_ANNOUNCEMENT,
-    SHUTTLE_TIMEOUT,
+    MAX_IMAGE_SIZE, SHUTTLE_TIMEOUT,
 };
 
 // TODO: Split into its own task
@@ -1041,14 +1041,9 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let image = super::document::image_dag::get_image(
-            &self.ipfs,
-            cid,
-            &[],
-            true,
-            Some(2 * 1024 * 1024),
-        )
-        .await?;
+        let image =
+            super::document::image_dag::get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
+                .await?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Image {
@@ -1100,14 +1095,9 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let image = super::document::image_dag::get_image(
-            &self.ipfs,
-            cid,
-            &[],
-            true,
-            Some(2 * 1024 * 1024),
-        )
-        .await?;
+        let image =
+            super::document::image_dag::get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
+                .await?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Image {
@@ -1252,7 +1242,7 @@ impl IdentityStore {
                                                         identity_profile_picture,
                                                         &peer_id,
                                                         false,
-                                                        Some(2 * 1024 * 1024),
+                                                        Some(MAX_IMAGE_SIZE),
                                                     )
                                                     .await
                                                     .map_err(|e| {
@@ -1322,7 +1312,7 @@ impl IdentityStore {
                                                         identity_profile_banner,
                                                         &peer_id,
                                                         false,
-                                                        Some(2 * 1024 * 1024),
+                                                        Some(MAX_IMAGE_SIZE),
                                                     )
                                                     .await
                                                     .map_err(|e| {
@@ -1408,7 +1398,7 @@ impl IdentityStore {
                                                                 picture,
                                                                 &peer_id,
                                                                 false,
-                                                                Some(2 * 1024 * 1024),
+                                                                Some(MAX_IMAGE_SIZE),
                                                             )
                                                             .await
                                                             .map_err(|e| {
@@ -1448,7 +1438,7 @@ impl IdentityStore {
                                                                 banner,
                                                                 &peer_id,
                                                                 false,
-                                                                Some(2 * 1024 * 1024),
+                                                                Some(MAX_IMAGE_SIZE),
                                                             )
                                                             .await
                                                             .map_err(|e| {
@@ -1499,7 +1489,7 @@ impl IdentityStore {
                                     futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
                                         .boxed(),
                                     ty,
-                                    Some(2 * 1024 * 1024),
+                                    Some(MAX_IMAGE_SIZE),
                                 )
                                 .await?;
 
@@ -2238,7 +2228,7 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.metadata.profile_picture {
-            return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
+            return get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
                 .await
                 .map_err(|_| Error::InvalidIdentityPicture);
         }
@@ -2273,7 +2263,7 @@ impl IdentityStore {
         };
 
         if let Some(cid) = document.metadata.profile_banner {
-            return get_image(&self.ipfs, cid, &[], true, Some(2 * 1024 * 1024))
+            return get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
                 .await
                 .map_err(|_| Error::InvalidIdentityPicture);
         }
