@@ -1,5 +1,5 @@
 #![allow(clippy::result_large_err)]
-use futures::{stream::BoxStream, StreamExt};
+use futures::{stream::BoxStream, Future, StreamExt};
 use std::{collections::HashMap, fmt::Debug, sync::atomic::Ordering};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
@@ -20,12 +20,12 @@ use parking_lot::RwLock;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[cfg(target_arch = "wasm32")]
-pub mod wasm;
+use js_sys::{AsyncIterator, Promise};
+use wasm_bindgen::prelude::*;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Clone)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+#[wasm_bindgen]
 pub struct Tesseract {
     inner: Arc<TesseractInner>,
 }
@@ -77,6 +77,7 @@ impl PartialEq for Tesseract {
     }
 }
 
+/// methods for non wasm targets
 #[cfg(not(target_arch = "wasm32"))]
 impl Tesseract {
     /// Loads the keystore from a file. If it does not exist, it will be created.
@@ -254,19 +255,108 @@ impl Tesseract {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+/// Methods common to wasm and non wasm targets, but not exported
 impl Tesseract {
-    /// To create an instance of Tesseract
-    #[cfg_attr(
-        target_arch = "wasm32",
-        wasm_bindgen::prelude::wasm_bindgen(constructor)
-    )]
-    pub fn new() -> Tesseract {
-        Tesseract::default()
+    /// To store a value to be encrypted into the keystore. If the key already exist, it
+    /// will be overwritten.
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), true);
+    /// ```
+    pub fn set(&self, key: &str, value: &str) -> Result<()> {
+        self.inner.set(key, value)
+    }
+
+    /// Used to retrieve and decrypt the value stored for the key
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  assert!(tesseract.exist("API"));
+    ///  let val = tesseract.retrieve("API").unwrap();
+    ///  assert_eq!(val, String::from("MYKEY"));
+    /// ```
+    pub fn retrieve(&self, key: &str) -> Result<String> {
+        self.inner.retrieve(key)
+    }
+
+    /// Used to update the passphrase to the keystore
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(b"current_phrase").unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  tesseract.update_unlock(b"current_phrase", b"new_phrase").unwrap();
+    ///  let val = tesseract.retrieve("API").unwrap();
+    ///  assert_eq!("MYKEY", val);
+    /// ```
+    pub fn update_unlock(&self, old_passphrase: &[u8], new_passphrase: &[u8]) -> Result<()> {
+        self.inner.update_unlock(old_passphrase, new_passphrase)
+    }
+
+    /// Used to delete the value from the keystore
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), true);
+    ///  tesseract.delete("API").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), false);
+    /// ```
+    pub fn delete(&self, key: &str) -> Result<()> {
+        self.inner.delete(key)
+    }
+
+    /// Store password in memory to be used to decrypt contents.
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
+    ///  assert!(tesseract.is_unlock());
+    /// ```
+    pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
+        self.inner.unlock(passphrase)
+    }
+
+    /// To save to file using internal file path.
+    /// Note: Because we do not want to interrupt the functions due to it failing to
+    ///       save for whatever reason, this function will return `Result::Ok`
+    ///       regardless of success or error but would eventually log the error.
+    ///
+    /// TODO: Handle error without subjecting function to `Result::Err`
+    pub fn save(&self) -> Result<()> {
+        self.inner.save()
+    }
+
+    pub fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
+        self.inner.subscribe()
     }
 }
 
+/// Methods common to wasm and non wasm targets
+#[wasm_bindgen]
 impl Tesseract {
+    /// To create an instance of Tesseract
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Tesseract {
+        Tesseract::default()
+    }
+
     /// Enable the ability to autosave
     ///
     /// # Example
@@ -346,21 +436,6 @@ impl Tesseract {
         self.inner.is_key_check_enabled()
     }
 
-    /// To store a value to be encrypted into the keystore. If the key already exist, it
-    /// will be overwritten.
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  assert_eq!(tesseract.exist("API"), true);
-    /// ```
-    pub fn set(&self, key: &str, value: &str) -> Result<()> {
-        self.inner.set(key, value)
-    }
-
     /// Check to see if the key store contains the key
     ///
     /// # Example
@@ -374,54 +449,6 @@ impl Tesseract {
     /// ```
     pub fn exist(&self, key: &str) -> bool {
         self.inner.exist(key)
-    }
-
-    /// Used to retrieve and decrypt the value stored for the key
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  assert!(tesseract.exist("API"));
-    ///  let val = tesseract.retrieve("API").unwrap();
-    ///  assert_eq!(val, String::from("MYKEY"));
-    /// ```
-    pub fn retrieve(&self, key: &str) -> Result<String> {
-        self.inner.retrieve(key)
-    }
-
-    /// Used to update the passphrase to the keystore
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(b"current_phrase").unwrap();
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  tesseract.update_unlock(b"current_phrase", b"new_phrase").unwrap();
-    ///  let val = tesseract.retrieve("API").unwrap();
-    ///  assert_eq!("MYKEY", val);
-    /// ```
-    pub fn update_unlock(&self, old_passphrase: &[u8], new_passphrase: &[u8]) -> Result<()> {
-        self.inner.update_unlock(old_passphrase, new_passphrase)
-    }
-
-    /// Used to delete the value from the keystore
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  assert_eq!(tesseract.exist("API"), true);
-    ///  tesseract.delete("API").unwrap();
-    ///  assert_eq!(tesseract.exist("API"), false);
-    /// ```
-    pub fn delete(&self, key: &str) -> Result<()> {
-        self.inner.delete(key)
     }
 
     /// Used to clear the whole keystore.
@@ -456,19 +483,6 @@ impl Tesseract {
         self.inner.is_unlock()
     }
 
-    /// Store password in memory to be used to decrypt contents.
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate::<32>()).unwrap();
-    ///  assert!(tesseract.is_unlock());
-    /// ```
-    pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
-        self.inner.unlock(passphrase)
-    }
-
     /// Remove password from memory securely
     ///
     /// # Example
@@ -483,29 +497,96 @@ impl Tesseract {
     pub fn lock(&self) {
         self.inner.lock();
     }
+}
 
-    /// To save to file using internal file path.
-    /// Note: Because we do not want to interrupt the functions due to it failing to
-    ///       save for whatever reason, this function will return `Result::Ok`
-    ///       regardless of success or error but would eventually log the error.
-    ///
-    /// TODO: Handle error without subjecting function to `Result::Err`
-    pub fn save(&self) -> Result<()> {
-        self.inner.save()
+/// Methods for wasm only
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Tesseract {
+    #[wasm_bindgen(js_name = set)]
+    pub fn set_wasm(&self, key: &str, value: &str) -> std::result::Result<(), JsError> {
+        self.inner.set(key, value).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = retrieve)]
+    pub fn retrieve_wasm(&self, key: &str) -> std::result::Result<String, JsError> {
+        self.inner.retrieve(key).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = update_unlock)]
+    pub fn update_unlock_wasm(
+        &self,
+        old_passphrase: &[u8],
+        new_passphrase: &[u8],
+    ) -> std::result::Result<(), JsError> {
+        self.inner
+            .update_unlock(old_passphrase, new_passphrase)
+            .map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = delete)]
+    pub fn delete_wasm(&self, key: &str) -> std::result::Result<(), JsError> {
+        self.inner.delete(key).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = unlock)]
+    pub fn unlock_wasm(&self, passphrase: &[u8]) -> std::result::Result<(), JsError> {
+        self.inner.unlock(passphrase).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = save)]
+    pub fn save_wasm(&self) -> std::result::Result<(), JsError> {
+        self.inner.save().map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = subscribe)]
+    pub fn subscribe_wasm(&self) -> AsyncIterator {
+        Into::<JsValue>::into(Subscription {
+            inner: self.inner.subscribe(),
+        })
+        .into()
+    }
+
+    /// Used to load contents from local storage
+    pub fn load_from_storage(&self) -> std::result::Result<(), JsError> {
+        self.inner.load_from_storage().map_err(|e| e.into())
     }
 }
 
-impl Tesseract {
-    pub fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
-        self.inner.subscribe()
+/// Wraps BoxStream<'static, TesseractEvent> into a js compatible struct
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct Subscription {
+    inner: BoxStream<'static, TesseractEvent>,
+}
+
+/// Provides the next() function expected by js async iterator
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Subscription {
+    pub async fn next(&mut self) -> std::result::Result<Promise, JsError> {
+        let next = self.inner.next().await;
+        match next {
+            Some(value) => Ok(Promise::resolve(
+                &TesseractEventPromiseResult::new(value).into(),
+            )),
+            None => std::result::Result::Err(JsError::new("returned None")),
+        }
     }
+}
+
+/// Wraps in the TesseractEvent promise result in the js object expected by js async iterator
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+struct TesseractEventPromiseResult {
+    pub value: TesseractEvent,
+    pub done: bool,
 }
 
 #[cfg(target_arch = "wasm32")]
-impl Tesseract {
-    /// Used to load contents from local storage
-    pub fn load_from_storage(&self) -> Result<()> {
-        self.inner.load_from_storage()
+impl TesseractEventPromiseResult {
+    pub fn new(value: TesseractEvent) -> Self {
+        Self { value, done: false }
     }
 }
 
