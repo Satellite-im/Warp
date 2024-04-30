@@ -1,7 +1,6 @@
 #![allow(clippy::result_large_err)]
-use futures::{stream::BoxStream, Future, StreamExt};
+use futures::{stream::BoxStream, StreamExt};
 use std::{collections::HashMap, fmt::Debug, sync::atomic::Ordering};
-use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,17 +19,20 @@ use parking_lot::RwLock;
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[cfg(target_arch = "wasm32")]
 use js_sys::{AsyncIterator, Promise};
+
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Clone)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Tesseract {
     inner: Arc<TesseractInner>,
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TesseractEvent {
     Unlocked,
@@ -349,10 +351,10 @@ impl Tesseract {
 }
 
 /// Methods common to wasm and non wasm targets
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
     /// To create an instance of Tesseract
-    #[wasm_bindgen(constructor)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> Tesseract {
         Tesseract::default()
     }
@@ -501,7 +503,7 @@ impl Tesseract {
 
 /// Methods for wasm only
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
     #[wasm_bindgen(js_name = set)]
     pub fn set_wasm(&self, key: &str, value: &str) -> std::result::Result<(), JsError> {
