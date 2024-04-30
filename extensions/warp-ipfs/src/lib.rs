@@ -9,12 +9,14 @@ use chrono::{DateTime, Utc};
 use config::Config;
 use futures::channel::mpsc::channel;
 
+use futures::future::BoxFuture;
 use futures::stream::{self, BoxStream};
-use futures::{StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 
 #[cfg(not(target_arch = "wasm32"))]
 use futures::AsyncReadExt;
 
+#[cfg(not(target_arch = "wasm32"))]
 use futures_timeout::TimeoutExt;
 
 use ipfs::libp2p::core::muxing::StreamMuxerBox;
@@ -68,16 +70,18 @@ use warp::multipass::identity::{
     Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, FriendsEvent, IdentityImportOption, IdentityInformation, ImportLocation,
-    MultiPass, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
+    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, MultiPass,
+    MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
+use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 
 #[derive(Clone)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct WarpIpfs {
     tesseract: Tesseract,
     inner: Arc<Inner>,
@@ -138,21 +142,31 @@ impl WarpIpfsBuilder {
     //     self
     // }
 
-    pub async fn finalize(
-        self,
-    ) -> Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>), Error> {
-        let instance = WarpIpfs::new(self.config, self.tesseract).await?;
+    /// Creates trait objects of the
+    pub async fn finalize(self) -> (Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>) {
+        let instance = WarpIpfs::new(self.config, self.tesseract).await;
 
         let mp = Box::new(instance.clone()) as Box<_>;
         let rg = Box::new(instance.clone()) as Box<_>;
         let fs = Box::new(instance) as Box<_>;
 
-        Ok((mp, rg, fs))
+        (mp, rg, fs)
     }
 }
 
+impl core::future::IntoFuture for WarpIpfsBuilder {
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+    type Output = WarpIpfs;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move { WarpIpfs::new(self.config, self.tesseract).await }.boxed()
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: Tesseract) -> Result<WarpIpfs, Error> {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+    pub async fn new(config: Config, tesseract: Tesseract) -> WarpIpfs {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
@@ -183,12 +197,13 @@ impl WarpIpfs {
                         break;
                     }
                 }
-                if let Err(_e) = inner.initialize_store(false).await {}
+                _ = inner.initialize_store(false).await;
             });
-        } else if let Err(_e) = identity.initialize_store(false).await {
+        } else {
+            _ = identity.initialize_store(false).await;
         }
 
-        Ok(identity)
+        identity
     }
 
     async fn initialize_store(&self, init: bool) -> Result<(), Error> {
@@ -258,13 +273,13 @@ impl WarpIpfs {
 
         let _g = span.enter();
 
-        let empty_bootstrap = match &self.inner.config.bootstrap {
+        let empty_bootstrap = match &self.inner.config.bootstrap() {
             Bootstrap::Ipfs => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
             Bootstrap::None => true,
         };
 
-        if empty_bootstrap && !self.inner.config.ipfs_setting.dht_client {
+        if empty_bootstrap && !self.inner.config.ipfs_setting().dht_client {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
@@ -272,7 +287,7 @@ impl WarpIpfs {
         let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
         let (msg_sh_tx, msg_sh_rx) = futures::channel::mpsc::channel(1);
 
-        let (enable, nodes) = match &self.inner.config.store_setting.discovery {
+        let (enable, nodes) = match &self.inner.config.store_setting().discovery {
             config::Discovery::Shuttle { addresses } => (true, addresses.clone()),
             _ => Default::default(),
         };
@@ -298,7 +313,7 @@ impl WarpIpfs {
                     protocol_version: "/satellite/warp/0.1".into(),
                     ..Default::default()
                 };
-                if let Some(agent) = self.inner.config.ipfs_setting.agent_version.as_ref() {
+                if let Some(agent) = self.inner.config.ipfs_setting().agent_version.as_ref() {
                     idconfig.agent_version = agent.clone();
                 }
                 idconfig
@@ -306,17 +321,17 @@ impl WarpIpfs {
             .with_bitswap()
             .with_ping(Default::default())
             .with_pubsub(PubsubConfig {
-                max_transmit_size: self.inner.config.ipfs_setting.pubsub.max_transmit_size,
+                max_transmit_size: self.inner.config.ipfs_setting().pubsub.max_transmit_size,
                 ..Default::default()
             })
             .with_relay(true)
-            .set_listening_addrs(self.inner.config.listen_on.clone())
+            .set_listening_addrs(self.inner.config.listen_on().to_vec())
             .with_custom_behaviour(behaviour)
             .set_keypair(&keypair)
             .with_rendezvous_client()
             .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
-                enable_quic: !self.inner.config.ipfs_setting.disable_quic,
+                enable_quic: !self.inner.config.ipfs_setting().disable_quic,
                 quic_max_idle_timeout: Duration::from_secs(5),
                 ..Default::default()
             });
@@ -331,7 +346,7 @@ impl WarpIpfs {
         // }
 
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(path) = self.inner.config.path.as_ref() {
+        if let Some(path) = self.inner.config.path() {
             info!("Instance will be persistent");
             info!("Path set: {}", path.display());
 
@@ -343,7 +358,7 @@ impl WarpIpfs {
         }
 
         if matches!(
-            self.inner.config.store_setting.discovery,
+            self.inner.config.store_setting().discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
@@ -360,14 +375,14 @@ impl WarpIpfs {
                 Default::default(),
             );
 
-            if self.inner.config.ipfs_setting.bootstrap {
-                for addr in self.inner.config.bootstrap.address() {
+            if self.inner.config.ipfs_setting().bootstrap {
+                for addr in self.inner.config.bootstrap().address() {
                     uninitialized = uninitialized.add_bootstrap(addr);
                 }
             }
         }
 
-        if self.inner.config.ipfs_setting.memory_transport {
+        if self.inner.config.ipfs_setting().memory_transport {
             uninitialized = uninitialized
                 .with_custom_transport(Box::new(
                     |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
@@ -396,19 +411,19 @@ impl WarpIpfs {
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        if self.inner.config.ipfs_setting.portmapping {
+        if self.inner.config.ipfs_setting().portmapping {
             uninitialized = uninitialized.with_upnp();
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        if self.inner.config.ipfs_setting.mdns.enable {
+        if self.inner.config.ipfs_setting().mdns.enable {
             uninitialized = uninitialized.with_mdns();
         }
 
         let ipfs = uninitialized.start().await?;
 
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(path) = self.inner.config.path.as_ref() {
+        if let Some(path) = self.inner.config.path() {
             if let Err(e) = store::migrate_to_ds(&ipfs, path).await {
                 tracing::warn!(error = %e, "failed to migrate to datastore");
             }
@@ -416,17 +431,17 @@ impl WarpIpfs {
 
         //TODO: Remove attr when bug is fixed upstream
         #[cfg(not(target_arch = "wasm32"))]
-        if self.inner.config.enable_relay {
+        if self.inner.config.enable_relay() {
             let mut relay_peers = HashSet::new();
 
             for mut addr in self
                 .inner
                 .config
-                .ipfs_setting
+                .ipfs_setting()
                 .relay_client
                 .relay_address
                 .iter()
-                .chain(self.inner.config.bootstrap.address().iter())
+                .chain(self.inner.config.bootstrap().address().iter())
                 .cloned()
             {
                 if addr.is_relayed() {
@@ -458,7 +473,7 @@ impl WarpIpfs {
             // Use the selected relays
             let relay_connection_task = {
                 let ipfs = ipfs.clone();
-                let quorum = self.inner.config.ipfs_setting.relay_client.quorum;
+                let quorum = self.inner.config.ipfs_setting().relay_client.quorum;
                 async move {
                     let mut counter = 0;
                     for relay_peer in relay_peers {
@@ -498,16 +513,16 @@ impl WarpIpfs {
                 }
             };
 
-            if self.inner.config.ipfs_setting.relay_client.background {
+            if self.inner.config.ipfs_setting().relay_client.background {
                 crate::rt::spawn(relay_connection_task);
             } else {
                 relay_connection_task.await;
             }
         }
 
-        if self.inner.config.ipfs_setting.dht_client
+        if self.inner.config.ipfs_setting().dht_client
             && matches!(
-                self.inner.config.store_setting.discovery,
+                self.inner.config.store_setting().discovery,
                 config::Discovery::Namespace {
                     discovery_type: DiscoveryType::DHT,
                     ..
@@ -518,12 +533,12 @@ impl WarpIpfs {
         }
 
         if matches!(
-            self.inner.config.store_setting.discovery,
+            self.inner.config.store_setting().discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
             }
-        ) && self.inner.config.ipfs_setting.bootstrap
+        ) && self.inner.config.ipfs_setting().bootstrap
             && !empty_bootstrap
         {
             crate::rt::spawn({
@@ -560,7 +575,7 @@ impl WarpIpfs {
         if let config::Discovery::Namespace {
             discovery_type: DiscoveryType::RzPoint { addresses },
             ..
-        } = &self.inner.config.store_setting.discovery
+        } = &self.inner.config.store_setting().discovery
         {
             for mut addr in addresses.iter().cloned() {
                 let Some(peer_id) = addr.extract_peer_id() else {
@@ -580,7 +595,7 @@ impl WarpIpfs {
 
         let discovery = Discovery::new(
             ipfs.clone(),
-            self.inner.config.store_setting.discovery.clone(),
+            self.inner.config.store_setting().discovery.clone(),
             relays.clone(),
         );
 
@@ -744,12 +759,12 @@ impl MultiPass for WarpIpfs {
         if let Some(u) = username.map(|u| u.trim()) {
             let username_len = u.len();
 
-            if !(4..=64).contains(&username_len) {
+            if !(MIN_USERNAME_LENGTH..=MAX_USERNAME_LENGTH).contains(&username_len) {
                 return Err(Error::InvalidLength {
                     context: "username".into(),
                     current: username_len,
-                    minimum: Some(4),
-                    maximum: Some(64),
+                    minimum: Some(MIN_USERNAME_LENGTH),
+                    maximum: Some(MAX_USERNAME_LENGTH),
                 });
             }
         }
@@ -772,7 +787,7 @@ impl MultiPass for WarpIpfs {
                 &mut tesseract,
                 &phrase,
                 None,
-                self.inner.config.save_phrase,
+                self.inner.config.save_phrase(),
                 false,
             )?;
         }
@@ -869,12 +884,12 @@ impl MultiPass for WarpIpfs {
             }
             IdentityUpdate::Picture(data) => {
                 let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if len == 0 || len > MAX_IMAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
                         minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
+                        maximum: Some(MAX_IMAGE_SIZE),
                     });
                 }
                 let cursor = std::io::Cursor::new(data);
@@ -907,12 +922,12 @@ impl MultiPass for WarpIpfs {
 
                 let len = metadata.len() as _;
 
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if len == 0 || len > MAX_IMAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "profile picture".into(),
                         current: len,
                         minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
+                        maximum: Some(MAX_IMAGE_SIZE),
                     });
                 }
 
@@ -951,12 +966,12 @@ impl MultiPass for WarpIpfs {
             IdentityUpdate::PictureStream(stream) => (OptType::Picture(None), stream),
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if len == 0 || len > MAX_IMAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
                         minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
+                        maximum: Some(MAX_IMAGE_SIZE),
                     });
                 }
 
@@ -990,12 +1005,12 @@ impl MultiPass for WarpIpfs {
 
                 let len = metadata.len() as _;
 
-                if len == 0 || len > 2 * 1024 * 1024 {
+                if len == 0 || len > MAX_IMAGE_SIZE {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
                         minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
+                        maximum: Some(MAX_IMAGE_SIZE),
                     });
                 }
 
@@ -1035,7 +1050,7 @@ impl MultiPass for WarpIpfs {
             IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
         };
 
-        let mut data = Vec::with_capacity(2 * 1024 * 1024);
+        let mut data = Vec::with_capacity(MAX_IMAGE_SIZE);
 
         while let Some(s) = stream.try_next().await? {
             data.extend(s);
@@ -1062,7 +1077,7 @@ impl MultiPass for WarpIpfs {
             &ipfs,
             data,
             format.into(),
-            Some(2 * 1024 * 1024),
+            Some(MAX_IMAGE_SIZE),
         )
         .await?;
 
@@ -1146,7 +1161,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.inner.config.save_phrase,
+                    self.inner.config.save_phrase(),
                     false,
                 )?;
 
@@ -1180,7 +1195,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.inner.config.save_phrase,
+                    self.inner.config.save_phrase(),
                     false,
                 )?;
 
@@ -1204,7 +1219,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.inner.config.save_phrase,
+                    self.inner.config.save_phrase(),
                     false,
                 )?;
 
@@ -1321,8 +1336,8 @@ impl Friends for WarpIpfs {
 }
 
 #[async_trait::async_trait]
-impl FriendsEvent for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
+impl MultiPassEvent for WarpIpfs {
+    async fn multipass_subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let store = self.identity_store(true).await?;
         store.subscribe().await
     }
@@ -1603,10 +1618,11 @@ impl RayGunGroupConversation for WarpIpfs {
 
 #[async_trait::async_trait]
 impl RayGunStream for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
+    async fn raygun_subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         let rx = self.raygun_tx.subscribe().await?;
         Ok(rx)
     }
+
     async fn get_conversation_stream(
         &mut self,
         conversation_id: Uuid,
@@ -1728,7 +1744,7 @@ impl Constellation for WarpIpfs {
 
 #[async_trait::async_trait]
 impl ConstellationEvent for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
+    async fn constellation_subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
         let rx = self.constellation_tx.subscribe().await?;
         Ok(ConstellationEventStream(rx))
     }

@@ -34,6 +34,19 @@ use warp::{
     tesseract::Tesseract,
 };
 
+pub const MAX_THUMBNAIL_SIZE: usize = 5_242_880;
+pub const MAX_IMAGE_SIZE: usize = 2_097_152;
+pub const MIN_USERNAME_LENGTH: usize = 4;
+pub const MAX_USERNAME_LENGTH: usize = 64;
+pub const MAX_STATUS_LENGTH: usize = 512;
+pub const MIN_MESSAGE_SIZE: usize = 1;
+pub const MAX_MESSAGE_SIZE: usize = 4_096;
+pub const MAX_ATTACHMENT: usize = 32;
+pub const MIN_ATTACHMENT: usize = 1;
+pub const MAX_CONVERSATIONS: usize = 1_000;
+pub const MAX_FRIENDS: usize = 1_000;
+pub const MAX_REQUEST: usize = 1_000;
+
 pub(super) mod topics {
     use std::fmt::Display;
 

@@ -1094,7 +1094,7 @@ pub trait RayGunStream: Sync + Send {
     }
 
     /// Subscribe to an stream of events
-    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
+    async fn raygun_subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         Err(Error::Unimplemented)
     }
 }

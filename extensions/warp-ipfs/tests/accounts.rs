@@ -126,7 +126,7 @@ mod test {
         let (mut account, _, _) = WarpIpfsBuilder::default()
             .set_tesseract(tesseract)
             .finalize()
-            .await?;
+            .await;
 
         account
             .create_identity(
@@ -156,7 +156,7 @@ mod test {
         let (mut account, _, _) = WarpIpfsBuilder::default()
             .set_tesseract(tesseract)
             .finalize()
-            .await?;
+            .await;
 
         account
             .create_identity(

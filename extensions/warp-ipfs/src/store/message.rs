@@ -62,10 +62,13 @@ use crate::{
         topics::PeerTopic,
         verify_serde_sig, ConversationEvents, ConversationRequestKind, ConversationRequestResponse,
         ConversationResponseKind, ConversationUpdateKind, DidExt, MessagingEvents,
+        MIN_MESSAGE_SIZE,
     },
 };
 
-use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, SHUTTLE_TIMEOUT};
+use super::{
+    document::root::RootDocumentMap, ds_key::DataStoreKey, MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+};
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
@@ -1497,13 +1500,17 @@ impl ConversationInner {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length == 0 || lines_value_length > 4096 {
-            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
-                minimum: Some(1),
-                maximum: Some(4096),
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
             });
         }
 
@@ -1582,13 +1589,17 @@ impl ConversationInner {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length == 0 || lines_value_length > 4096 {
-            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
-                minimum: Some(1),
-                maximum: Some(4096),
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
             });
         }
 
@@ -1690,13 +1701,17 @@ impl ConversationInner {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length == 0 || lines_value_length > 4096 {
-            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
-                minimum: Some(1),
-                maximum: Some(4096),
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
             });
         }
 
@@ -2047,13 +2062,17 @@ impl ConversationInner {
                 .map(|s| s.chars().count())
                 .sum();
 
-            if lines_value_length > 4096 {
-                error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+            if lines_value_length > MAX_MESSAGE_SIZE {
+                tracing::error!(
+                    current_size = lines_value_length,
+                    max = MAX_MESSAGE_SIZE,
+                    "length of message is invalid"
+                );
                 return Err(Error::InvalidLength {
                     context: "message".into(),
                     current: lines_value_length,
                     minimum: None,
-                    maximum: Some(4096),
+                    maximum: Some(MAX_MESSAGE_SIZE),
                 });
             }
         }
@@ -3359,7 +3378,7 @@ async fn message_event(
                 .map(|s| s.chars().count())
                 .sum();
 
-            if lines_value_length == 0 && lines_value_length > 4096 {
+            if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
                 tracing::error!(
                     message_length = lines_value_length,
                     "Length of message is invalid."
@@ -3367,8 +3386,8 @@ async fn message_event(
                 return Err(Error::InvalidLength {
                     context: "message".into(),
                     current: lines_value_length,
-                    minimum: Some(1),
-                    maximum: Some(4096),
+                    minimum: Some(MIN_MESSAGE_SIZE),
+                    maximum: Some(MAX_MESSAGE_SIZE),
                 });
             }
 
@@ -3410,13 +3429,17 @@ async fn message_event(
                 .map(|s| s.chars().count())
                 .sum();
 
-            if lines_value_length == 0 && lines_value_length > 4096 {
-                error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+            if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
+                tracing::error!(
+                    current_size = lines_value_length,
+                    max = MAX_MESSAGE_SIZE,
+                    "length of message is invalid"
+                );
                 return Err(Error::InvalidLength {
                     context: "message".into(),
                     current: lines_value_length,
-                    minimum: Some(1),
-                    maximum: Some(4096),
+                    minimum: Some(MIN_MESSAGE_SIZE),
+                    maximum: Some(MAX_MESSAGE_SIZE),
                 });
             }
 

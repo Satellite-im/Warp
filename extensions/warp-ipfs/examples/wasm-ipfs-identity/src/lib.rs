@@ -40,7 +40,7 @@ pub async fn run() -> Result<(), JsError> {
         .set_config(Config::minimal_testing())
         .set_tesseract(tesseract)
         .finalize()
-        .await?;
+        .await;
 
     let profile = identity.create_identity(None, None).await?;
 
