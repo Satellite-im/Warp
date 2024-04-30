@@ -93,8 +93,13 @@ void = "1"
 rust-ipfs = "0.11.9"
 
 # wasm crates
+wasm-bindgen = "0.2" 
 gloo = "0.7"
-wasm-bindgen = "0.2"
+web-sys = "0.3" 
+js-sys = "0.3" 
+console_error_panic_hook = "0.1.6"
+wasm-streams = "0.4"
+wasm-bindgen-futures = "0.4" 
 
 
 # Blink related crates
