@@ -58,6 +58,11 @@ paste.workspace = true
 tracing = { workspace = true }
 mediatype.workspace = true
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", default-features = false, features = ["sync"]}
 wasm-bindgen.workspace = true
 gloo.workspace = true
 web-sys.workspace = true
@@ -65,12 +70,6 @@ js-sys.workspace = true
 console_error_panic_hook.workspace = true
 wasm-streams.workspace = true
 wasm-bindgen-futures.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { workspace = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-tokio = { version = "1", default-features = false, features = ["sync"]}
 
 [features]
 default = []
