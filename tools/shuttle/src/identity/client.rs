@@ -119,6 +119,7 @@ enum IdentityResponse {
 }
 
 impl Behaviour {
+    #[allow(deprecated)]
     pub fn new(
         keypair: &Keypair,
         primary_keypair: Option<&Keypair>,
