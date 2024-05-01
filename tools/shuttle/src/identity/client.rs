@@ -458,6 +458,7 @@ impl NetworkBehaviour for Behaviour {
         }
     }
 
+    #[allow(deprecated)]
     fn poll(&mut self, cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         loop {
             match self.process_command.poll_next_unpin(cx) {
