@@ -9,7 +9,7 @@ repository.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rust-ipfs = { workspace = true }
+rust-ipfs = { workspace = true, features = ["webrtc_transport"] }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["net"] }

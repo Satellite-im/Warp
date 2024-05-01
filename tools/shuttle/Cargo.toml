@@ -15,7 +15,7 @@ default = []
 [dependencies]
 warp.workspace = true
 
-rust-ipfs = { workspace = true }
+rust-ipfs = { workspace = true, features = ["webrtc_transport", "experimental_stream"] }
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 futures.workspace = true

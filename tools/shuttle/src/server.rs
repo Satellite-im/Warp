@@ -3,17 +3,11 @@ use std::{path::Path, time::Duration};
 use futures::{channel::mpsc, future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use rust_ipfs::{
     libp2p::{
-        core::{
-            muxing::StreamMuxerBox,
-            transport::{Boxed, MemoryTransport, OrTransport},
-            upgrade::Version,
-        },
         request_response::{InboundRequestId, ResponseChannel},
         swarm::behaviour::toggle::Toggle,
-        Transport,
     },
     p2p::{IdentifyConfiguration, RelayConfig, TransportConfig},
-    FDLimit, Ipfs, IpfsPath, Keypair, Multiaddr, NetworkBehaviour, PeerId, UninitializedIpfs,
+    FDLimit, Ipfs, IpfsPath, Keypair, Multiaddr, NetworkBehaviour, UninitializedIpfs,
 };
 
 use warp::error::Error as WarpError;
@@ -129,8 +123,11 @@ impl ShuttleServer {
             .set_idle_connection_timeout(60 * 30)
             .default_record_key_validator()
             .set_transport_configuration(TransportConfig {
+                enable_webrtc: true,
+                enable_memory_transport: memory_transport,
                 ..Default::default()
             })
+            // TODO: Either enable GC or do manual GC during little to no activity unless we reach a specific threshold
             // .with_gc(GCConfig {
             //     duration: Duration::from_secs(60 * 60),
             //     trigger: GCTrigger::None,
@@ -139,49 +136,15 @@ impl ShuttleServer {
             .listen_as_external_addr();
 
         if enable_relay_server {
-            uninitialized = uninitialized.with_relay_server(RelayConfig {
-                max_circuits: usize::MAX,
-                max_circuits_per_peer: usize::MAX,
-                max_circuit_duration: Duration::MAX,
-                max_circuit_bytes: u64::MAX,
-                circuit_src_rate_limiters: vec![],
-                max_reservations_per_peer: usize::MAX / 2,
-                max_reservations: usize::MAX / 2,
-                reservation_duration: Duration::MAX,
-                reservation_rate_limiters: vec![],
-            });
-        }
-
-        if memory_transport {
-            uninitialized = uninitialized.with_custom_transport(Box::new(
-                |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
-                    let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-                    let transport = match relay {
-                        Some(relay) => OrTransport::new(relay, MemoryTransport::default())
-                            .upgrade(Version::V1)
-                            .authenticate(noise_config)
-                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                            .timeout(Duration::from_secs(20))
-                            .boxed(),
-                        None => MemoryTransport::default()
-                            .upgrade(Version::V1)
-                            .authenticate(noise_config)
-                            .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                            .timeout(Duration::from_secs(20))
-                            .boxed(),
-                    };
-
-                    Ok(transport)
-                },
-            ));
+            // Relay is unbound or with higher limits so we can avoid having the connection resetting
+            uninitialized = uninitialized.with_relay_server(RelayConfig::unbounded());
         }
 
         let addrs = match listen_addrs {
             [] => vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
                 "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+                "/ip4/0.0.0.0/udp/0/webrtc-direct".parse().unwrap(),
             ],
             addrs => addrs.to_vec(),
         };

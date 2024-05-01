@@ -9,7 +9,7 @@ use base64::{
 };
 use clap::Parser;
 use rust_ipfs::{
-    p2p::{RateLimit, RelayConfig},
+    p2p::{RateLimit, RelayConfig, TransportConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
@@ -150,6 +150,10 @@ struct Opt {
     /// Path to a configuration file to adjust relay setting
     #[clap(long)]
     relay_config: Option<PathBuf>,
+
+    /// Use unbounded configuration with higher limits
+    #[clap(long)]
+    unbounded: bool,
 }
 
 #[tokio::main]
@@ -222,6 +226,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         [] => vec![
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+            "/ip4/0.0.0.0/udp/0/webrtc-direct".parse().unwrap(),
         ],
         addrs => addrs.to_vec(),
     };
@@ -229,10 +234,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut uninitialized = UninitializedIpfs::new()
         .with_identify(Default::default())
         .with_ping(Default::default())
-        .with_relay_server(config.into())
+        .with_relay_server(
+            opts.unbounded
+                .then(RelayConfig::unbounded)
+                .unwrap_or(config.into()),
+        )
         .fd_limit(FDLimit::Max)
         .set_keypair(&keypair)
         .set_idle_connection_timeout(30)
+        .set_transport_configuration(TransportConfig {
+            enable_webrtc: true,
+            ..Default::default()
+        })
         .listen_as_external_addr()
         .with_custom_behaviour(ext_behaviour::Behaviour)
         .set_listening_addrs(addrs);
