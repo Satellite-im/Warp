@@ -225,6 +225,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addrs = match opts.listen_addr.as_slice() {
         [] => vec![
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+            "/ip4/0.0.0.0/tcp/0/ws".parse().unwrap(),
+            "/ip4/0.0.0.0/tcp/0/wss".parse().unwrap(),
             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
             "/ip4/0.0.0.0/udp/0/webrtc-direct".parse().unwrap(),
         ],
@@ -244,6 +246,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_idle_connection_timeout(30)
         .set_transport_configuration(TransportConfig {
             enable_webrtc: true,
+            enable_websocket: true,
+            enable_secure_websocket: true,
             ..Default::default()
         })
         .listen_as_external_addr()

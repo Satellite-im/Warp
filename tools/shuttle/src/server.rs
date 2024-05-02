@@ -125,6 +125,8 @@ impl ShuttleServer {
             .set_transport_configuration(TransportConfig {
                 enable_webrtc: true,
                 enable_memory_transport: memory_transport,
+                enable_websocket: true,
+                enable_secure_websocket: true,
                 ..Default::default()
             })
             // TODO: Either enable GC or do manual GC during little to no activity unless we reach a specific threshold
@@ -143,6 +145,8 @@ impl ShuttleServer {
         let addrs = match listen_addrs {
             [] => vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+                "/ip4/0.0.0.0/tcp/0/ws".parse().unwrap(),
+                "/ip4/0.0.0.0/tcp/0/wss".parse().unwrap(),
                 "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
                 "/ip4/0.0.0.0/udp/0/webrtc-direct".parse().unwrap(),
             ],
