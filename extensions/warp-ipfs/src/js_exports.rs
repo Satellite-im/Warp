@@ -100,7 +100,10 @@ fn to_identity_update_enum(
             Uint8Array::new(&value).to_vec(),
         )),
         IdentityUpdate::PicturePath => Ok(identity::IdentityUpdate::PicturePath(
-            value.as_string().ok_or(JsError::new("JsValue is not a string"))?.into(),
+            value
+                .as_string()
+                .ok_or(JsError::new("JsValue is not a string"))?
+                .into(),
         )),
         // IdentityUpdate::PictureStream => Ok(identity::IdentityUpdate::PictureStream(
         //     value.into()
@@ -110,7 +113,10 @@ fn to_identity_update_enum(
             Uint8Array::new(&value).to_vec(),
         )),
         IdentityUpdate::BannerPath => Ok(identity::IdentityUpdate::BannerPath(
-            value.as_string().ok_or(JsError::new("JsValue is not a string"))?.into(),
+            value
+                .as_string()
+                .ok_or(JsError::new("JsValue is not a string"))?
+                .into(),
         )),
         // IdentityUpdate::BannerStream => Ok(identity::IdentityUpdate::BannerStream(
         //     value.into()
