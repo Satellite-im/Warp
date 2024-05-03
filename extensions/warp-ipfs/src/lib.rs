@@ -317,7 +317,7 @@ impl WarpIpfs {
                     ..Default::default()
                 };
                 if let Some(agent) = self.inner.config.ipfs_setting().agent_version.as_ref() {
-                    idconfig.agent_version = agent.clone();
+                    idconfig.agent_version.clone_from(agent);
                 }
                 idconfig
             })
