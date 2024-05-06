@@ -1,7 +1,5 @@
-use std::str::FromStr;
-
-use crate::WarpIpfs;
 use js_sys::Uint8Array;
+use std::str::FromStr;
 use warp::crypto::DID;
 use warp::multipass::{
     identity::{self, Identity, IdentityProfile},
@@ -10,16 +8,47 @@ use warp::multipass::{
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
+pub struct WarpInstance {
+    multipass: MultiPassBox,
+    //pub raygun: RayGunBox,
+    //pub constellation: ConstellationBox
+}
+
+impl WarpInstance {
+    pub fn new(
+        mp: Box<dyn MultiPass>, /*rg: Box<dyn RayGun>, fs: Box<dyn Constellation>*/
+    ) -> Self {
+        let multipass = MultiPassBox::new(mp);
+        //let raygun = RayGunBox::new(rg);
+        //let constellation = ConstellationBox::new(fs);
+
+        Self {
+            multipass,
+            //raygun,
+            //constellation
+        }
+    }
+}
+#[wasm_bindgen]
+impl WarpInstance {
+    #[wasm_bindgen(getter)]
+    pub fn multipass(&self) -> MultiPassBox {
+        self.multipass.clone()
+    }
+}
+
+#[derive(Clone)]
+#[wasm_bindgen]
 pub struct MultiPassBox {
     inner: Box<dyn MultiPass>,
 }
+impl MultiPassBox {
+    pub fn new(multipass: Box<dyn MultiPass>) -> Self {
+        Self { inner: multipass }
+    }
+}
 #[wasm_bindgen]
 impl MultiPassBox {
-    pub fn new(instance: WarpIpfs) -> Self {
-        Self {
-            inner: Box::new(instance) as Box<_>,
-        }
-    }
     pub async fn create_identity(
         &mut self,
         username: Option<String>,

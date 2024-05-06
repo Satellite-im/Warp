@@ -17,10 +17,10 @@
       tesseract.unlock(passphrase)
       console.log(`unlocked`)
 
-      let ipfs = await wasm.WarpIpfs.new(wasm.Config.minimal_testing(), tesseract)
+      let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), tesseract)
       console.log(ipfs)
       
-      let multipass = wasm.MultiPassBox.new(ipfs)
+      let multipass = ipfs.multipass
       console.log(multipass)
 
       //let identity = await multipass.create_identity("username", "crop cash unable insane eight faith inflict route frame loud box vibrant")
