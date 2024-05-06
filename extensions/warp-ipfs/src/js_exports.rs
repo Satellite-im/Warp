@@ -17,7 +17,7 @@ pub struct MultiPassBox {
 impl MultiPassBox {
     pub fn new(instance: WarpIpfs) -> Self {
         Self {
-            inner: Box::new(instance.clone()) as Box<_>,
+            inner: Box::new(instance) as Box<_>,
         }
     }
     pub async fn create_identity(
