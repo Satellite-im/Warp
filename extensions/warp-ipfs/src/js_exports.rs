@@ -35,12 +35,12 @@ impl MultiPassBox {
         &self,
         id_variant: Identifier,
         id_value: JsValue,
-    ) -> Result<JsVecIdentity, JsError> {
+    ) -> Result<JsValue, JsError> {
         self.inner
             .get_identity(to_identifier_enum(id_variant, id_value)?)
             .await
             .map_err(|e| e.into())
-            .map(|ok| JsVecIdentity { inner: ok })
+            .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
     }
 
     pub async fn get_own_identity(&self) -> Result<Identity, JsError> {
@@ -56,19 +56,6 @@ impl MultiPassBox {
             .update_identity(to_identity_update_enum(option, value)?)
             .await
             .map_err(|e| e.into())
-    }
-}
-
-#[wasm_bindgen]
-pub struct JsVecIdentity {
-    inner: Vec<Identity>,
-}
-impl JsVecIdentity {
-    pub fn get(&self, i: usize) -> Identity {
-        self.inner[i].clone()
-    }
-    pub fn len(&self) -> usize {
-        self.inner.len()
     }
 }
 

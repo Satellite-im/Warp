@@ -255,7 +255,6 @@ impl Identity {
     pub fn set_modified_wasm(&mut self, time: js_sys::Date) {
         self.modified = time.into();
     }
-
 }
 impl Identity {
     pub fn set_short_id<I: Into<ShortId>>(&mut self, id: I) {
