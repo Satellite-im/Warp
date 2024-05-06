@@ -234,31 +234,28 @@ impl Identity {
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
-
-    #[cfg(target_arch = "wasm32")]
+}
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl Identity {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_short_id))]
     pub fn set_short_id_wasm(&mut self, id: String) {
         self.short_id = id.try_into().unwrap();
     }
-
-    #[cfg(target_arch = "wasm32")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_did_key))]
     pub fn set_did_key_wasm(&mut self, pubkey: String) {
         use std::str::FromStr;
         self.did_key = DID::from_str(pubkey.as_str()).unwrap();
     }
-
-    #[cfg(target_arch = "wasm32")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_created))]
     pub fn set_created_wasm(&mut self, time: js_sys::Date) {
         self.created = time.into();
     }
-
-    #[cfg(target_arch = "wasm32")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_modified))]
     pub fn set_modified_wasm(&mut self, time: js_sys::Date) {
         self.modified = time.into();
     }
+
 }
 impl Identity {
     pub fn set_short_id<I: Into<ShortId>>(&mut self, id: I) {
@@ -286,26 +283,23 @@ impl Identity {
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
     }
-
-    #[cfg(target_arch = "wasm32")]
+}
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl Identity {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = short_id))]
     pub fn short_id_wasm(&self) -> String {
         format!("{}", self.short_id)
     }
-
-    #[cfg(target_arch = "wasm32")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = did_key))]
     pub fn did_key_wasm(&self) -> String {
         format!("{}", self.did_key.clone())
     }
-
-    #[cfg(target_arch = "wasm32")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = created))]
     pub fn created_wasm(&self) -> js_sys::Date {
         self.created.into()
     }
 
-    #[cfg(target_arch = "wasm32")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = modified))]
     pub fn modified_wasm(&self) -> js_sys::Date {
         self.modified.into()
