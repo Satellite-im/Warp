@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Warp Wasm Test</title>
+  </head>
+  <script type="module">
+    import init, * as wasm from './wasm/warp-ipfs/warp_ipfs.js';
+    init().then(async (_exports) => {
+      console.log(wasm)
+
+      let tesseract = new wasm.Tesseract()
+      tesseract.load_from_storage()
+      console.log(`loaded data`)
+
+      const passphrase = new Uint8Array([1,2,3,4,5,6,7,8,9,0]);
+      tesseract.unlock(passphrase)
+      console.log(`unlocked`)
+
+      let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), tesseract)
+      console.log(ipfs)
+      
+      let multipass = ipfs.multipass
+      console.log(multipass)
+
+      //let identity = await multipass.create_identity("username", "crop cash unable insane eight faith inflict route frame loud box vibrant")
+      let profile = await multipass.create_identity(null, null)
+      console.log(profile)
+
+      const log_identity = (identity) => {
+        let obj = {}
+        obj.username = identity.username(),
+        obj.short_id = identity.short_id(),
+        obj.did_key = identity.did_key(),
+        obj.created = identity.created(),
+        obj.modified = identity.modified(),
+        obj.status_message = identity.status_message()
+        console.log(obj)
+      }
+
+      let identity = profile.identity()
+      console.log(`Done creating identity:`)
+      log_identity(identity)
+
+      await multipass.update_identity(wasm.IdentityUpdate.Username, wasm.generate_name())
+      await multipass.update_identity(wasm.IdentityUpdate.StatusMessage, "New status message")
+
+      let updated_identity = await multipass.get_own_identity()
+      console.log(`Done updating identity:`)
+      log_identity(updated_identity)
+
+    });
+  </script>
+  <body>
+    <h2>How to use this example:</h2>
+    <h3>1 - Make sure the wasm is compiled:</h3>
+    <pre>
+        wasm-pack build warp --target web --out-dir ../tools/wasm-example/www/wasm/warp
+        wasm-pack build extensions/warp-ipfs --target web --out-dir ../../tools/wasm-example/www/wasm/warp-ipfs
+    </pre>
+    <h3>2 - Check ouput in the console</h3>
+  </body>
+</html>
