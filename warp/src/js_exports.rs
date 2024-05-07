@@ -1,7 +1,7 @@
 use js_sys::Uint8Array;
 use std::str::FromStr;
-use warp::crypto::DID;
-use warp::multipass::{
+use crate::crypto::DID;
+use crate::multipass::{
     identity::{self, Identity, IdentityProfile},
     MultiPass,
 };

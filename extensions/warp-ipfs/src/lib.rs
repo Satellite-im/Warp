@@ -80,9 +80,6 @@ use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
 use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 
-#[cfg(target_arch = "wasm32")]
-mod js_exports;
-
 #[derive(Clone)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct WarpIpfs {
@@ -169,11 +166,14 @@ impl core::future::IntoFuture for WarpIpfsBuilder {
 #[cfg(target_arch = "wasm32")]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl WarpIpfs {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(constructor))]
-    pub async fn new_wasm(config: Config, tesseract: Tesseract) -> js_exports::WarpInstance {
+    #[cfg_attr(
+        target_arch = "wasm32",
+        wasm_bindgen::prelude::wasm_bindgen(constructor)
+    )]
+    pub async fn new_wasm(config: Config, tesseract: Tesseract) -> warp::js_exports::WarpInstance {
         let warp_ipfs = WarpIpfs::new(config, tesseract).await;
         let mp = Box::new(warp_ipfs.clone()) as Box<_>;
-        js_exports::WarpInstance::new(mp)
+        warp::js_exports::WarpInstance::new(mp)
     }
 }
 
