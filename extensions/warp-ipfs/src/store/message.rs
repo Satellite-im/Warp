@@ -1621,7 +1621,7 @@ impl ConversationInner {
             return Err(Error::InvalidMessage);
         }
 
-        *message.lines_mut() = messages.clone();
+        message.lines_mut().clone_from(&messages);
         message.set_modified(Utc::now());
 
         message_document

@@ -40,6 +40,7 @@ pub enum Platform {
 
 /// Profile containing the newly created `Identity` and a passphrase, if applicable.
 #[derive(Default, Debug, PartialEq, Eq)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct IdentityProfile {
     identity: Identity,
     passphrase: Option<zeroize::Zeroizing<String>>,
@@ -53,6 +54,7 @@ impl Drop for IdentityProfile {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl IdentityProfile {
     pub fn new(identity: Identity, passphrase: Option<String>) -> Self {
         Self {
@@ -61,11 +63,26 @@ impl IdentityProfile {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = identity))]
+    pub fn identity_wasm(&self) -> Identity {
+        self.identity.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_identity))]
+    pub fn set_identity_wasm(&mut self, identity: Identity) {
+        self.identity = identity;
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = passphrase))]
+    pub fn passphrase_wasm(&self) -> Option<String> {
+        self.passphrase.as_ref().map(|phrase| phrase.to_string())
+    }
+}
+impl IdentityProfile {
     /// Reference to `Identity`
     pub fn identity(&self) -> &Identity {
         &self.identity
     }
-
     /// Supplied passphrase, if applicable.
     pub fn passphrase(&self) -> Option<&str> {
         self.passphrase.as_ref().map(|phrase| phrase.as_str())
@@ -187,6 +204,7 @@ impl Display for ShortId {
 }
 
 #[derive(Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Identity {
     /// Username of the identity
     username: String,
@@ -207,11 +225,38 @@ pub struct Identity {
     status_message: Option<String>,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Identity {
     pub fn set_username(&mut self, user: &str) {
         self.username = user.to_string()
     }
 
+    pub fn set_status_message(&mut self, message: Option<String>) {
+        self.status_message = message
+    }
+}
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl Identity {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_short_id))]
+    pub fn set_short_id_wasm(&mut self, id: String) {
+        self.short_id = id.try_into().unwrap();
+    }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_did_key))]
+    pub fn set_did_key_wasm(&mut self, pubkey: String) {
+        use std::str::FromStr;
+        self.did_key = DID::from_str(pubkey.as_str()).unwrap();
+    }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_created))]
+    pub fn set_created_wasm(&mut self, time: js_sys::Date) {
+        self.created = time.into();
+    }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_modified))]
+    pub fn set_modified_wasm(&mut self, time: js_sys::Date) {
+        self.modified = time.into();
+    }
+}
+impl Identity {
     pub fn set_short_id<I: Into<ShortId>>(&mut self, id: I) {
         self.short_id = id.into()
     }
@@ -219,11 +264,6 @@ impl Identity {
     pub fn set_did_key(&mut self, pubkey: DID) {
         self.did_key = pubkey
     }
-
-    pub fn set_status_message(&mut self, message: Option<String>) {
-        self.status_message = message
-    }
-
     pub fn set_created(&mut self, time: DateTime<Utc>) {
         self.created = time;
     }
@@ -233,21 +273,44 @@ impl Identity {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Identity {
     pub fn username(&self) -> String {
         self.username.clone()
     }
 
+    pub fn status_message(&self) -> Option<String> {
+        self.status_message.clone()
+    }
+}
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl Identity {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = short_id))]
+    pub fn short_id_wasm(&self) -> String {
+        format!("{}", self.short_id)
+    }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = did_key))]
+    pub fn did_key_wasm(&self) -> String {
+        format!("{}", self.did_key.clone())
+    }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = created))]
+    pub fn created_wasm(&self) -> js_sys::Date {
+        self.created.into()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = modified))]
+    pub fn modified_wasm(&self) -> js_sys::Date {
+        self.modified.into()
+    }
+}
+impl Identity {
     pub fn short_id(&self) -> ShortId {
         self.short_id
     }
 
     pub fn did_key(&self) -> DID {
         self.did_key.clone()
-    }
-
-    pub fn status_message(&self) -> Option<String> {
-        self.status_message.clone()
     }
 
     pub fn created(&self) -> DateTime<Utc> {

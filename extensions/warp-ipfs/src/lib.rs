@@ -163,9 +163,21 @@ impl core::future::IntoFuture for WarpIpfsBuilder {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl WarpIpfs {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+    #[cfg_attr(
+        target_arch = "wasm32",
+        wasm_bindgen::prelude::wasm_bindgen(constructor)
+    )]
+    pub async fn new_wasm(config: Config, tesseract: Tesseract) -> warp::js_exports::WarpInstance {
+        let warp_ipfs = WarpIpfs::new(config, tesseract).await;
+        let mp = Box::new(warp_ipfs.clone()) as Box<_>;
+        warp::js_exports::WarpInstance::new(mp)
+    }
+}
+
+impl WarpIpfs {
     pub async fn new(config: Config, tesseract: Tesseract) -> WarpIpfs {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
@@ -314,7 +326,7 @@ impl WarpIpfs {
                     ..Default::default()
                 };
                 if let Some(agent) = self.inner.config.ipfs_setting().agent_version.as_ref() {
-                    idconfig.agent_version = agent.clone();
+                    idconfig.agent_version.clone_from(agent);
                 }
                 idconfig
             })
