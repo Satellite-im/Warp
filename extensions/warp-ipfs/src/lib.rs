@@ -173,7 +173,9 @@ impl WarpIpfs {
     pub async fn new_wasm(config: Config, tesseract: Tesseract) -> warp::js_exports::WarpInstance {
         let warp_ipfs = WarpIpfs::new(config, tesseract).await;
         let mp = Box::new(warp_ipfs.clone()) as Box<_>;
-        warp::js_exports::WarpInstance::new(mp)
+        let rg = Box::new(warp_ipfs.clone()) as Box<_>;
+        let fs = Box::new(warp_ipfs.clone()) as Box<_>;
+        warp::js_exports::WarpInstance::new(mp, rg, fs)
     }
 }
 

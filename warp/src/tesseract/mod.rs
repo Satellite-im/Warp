@@ -20,7 +20,7 @@ use parking_lot::RwLock;
 type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(target_arch = "wasm32")]
-use js_sys::{AsyncIterator, Promise};
+use crate::js_exports::stream::AsyncIterator;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -543,52 +543,14 @@ impl Tesseract {
 
     #[wasm_bindgen(js_name = subscribe)]
     pub fn subscribe_wasm(&self) -> AsyncIterator {
-        Into::<JsValue>::into(Subscription {
-            inner: self.inner.subscribe(),
-        })
-        .into()
+        AsyncIterator::new(Box::pin(
+            self.inner.subscribe().map(|t| Into::<JsValue>::into(t)),
+        ))
     }
 
     /// Used to load contents from local storage
     pub fn load_from_storage(&self) -> std::result::Result<(), JsError> {
         self.inner.load_from_storage().map_err(|e| e.into())
-    }
-}
-
-/// Wraps BoxStream<'static, TesseractEvent> into a js compatible struct
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub struct Subscription {
-    inner: BoxStream<'static, TesseractEvent>,
-}
-
-/// Provides the next() function expected by js async iterator
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl Subscription {
-    pub async fn next(&mut self) -> std::result::Result<Promise, JsError> {
-        let next = self.inner.next().await;
-        match next {
-            Some(value) => Ok(Promise::resolve(
-                &TesseractEventPromiseResult::new(value).into(),
-            )),
-            None => std::result::Result::Err(JsError::new("returned None")),
-        }
-    }
-}
-
-/// Wraps in the TesseractEvent promise result in the js object expected by js async iterator
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-struct TesseractEventPromiseResult {
-    pub value: TesseractEvent,
-    pub done: bool,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl TesseractEventPromiseResult {
-    pub fn new(value: TesseractEvent) -> Self {
-        Self { value, done: false }
     }
 }
 
