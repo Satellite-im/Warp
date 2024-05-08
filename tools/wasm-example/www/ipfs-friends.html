@@ -30,11 +30,13 @@
 
       let account_a = await account()
       console.log(account_a)
-      let subscribe_a = await account_a.multipass_subscribe()
+      let asynciterator_a = await account_a.multipass_subscribe()
+      let subscribe_a = { [Symbol.asyncIterator]() { return asynciterator_a } }
 
       let account_b = await account()
       console.log(account_b)
-      let subscribe_b = await account_a.multipass_subscribe()
+      let asynciterator_b = await account_b.multipass_subscribe()
+      let subscribe_b = { [Symbol.asyncIterator]() { return asynciterator_b } }
 
       let identity_a = await account_a.get_own_identity()
       let identity_b = await account_b.get_own_identity()
@@ -48,6 +50,21 @@
       let seen_a = false
       let seen_b = false
 
+      async function subscribe_a_reader() {
+        for await (const value of subscribe_a) {
+          let kind = wasm.MultiPassEventKindEnum[value.kind]
+          console.log(`${identity_a.username()} : ${kind}, ${value.did}`)
+        }
+      };
+      subscribe_a_reader()
+
+      async function subscribe_b_reader() {
+        for await (const value of subscribe_b) {
+          let kind = wasm.MultiPassEventKindEnum[value.kind]
+          console.log(`${identity_b.username()} : ${kind}, ${value.did}`)
+        }
+      };
+      subscribe_b_reader()
       
     });
   </script>

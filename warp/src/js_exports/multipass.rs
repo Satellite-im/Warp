@@ -418,9 +418,11 @@ pub struct MultiPassEventKind {
 
 #[wasm_bindgen]
 impl MultiPassEventKind {
+    #[wasm_bindgen(getter)]
     pub fn kind(&self) -> MultiPassEventKindEnum {
         self.kind
     }
+    #[wasm_bindgen(getter)]
     pub fn did(&self) -> String {
         self.did.clone()
     }

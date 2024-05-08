@@ -38,6 +38,7 @@ impl PromiseResult {
         Self { value, done: false }
     }
 
+    #[wasm_bindgen(getter)]
     pub fn value(&self) -> JsValue {
         self.value.clone()
     }
