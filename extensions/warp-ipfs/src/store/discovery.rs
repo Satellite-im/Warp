@@ -12,6 +12,7 @@ use tokio::{
     sync::{broadcast, RwLock},
     task::JoinHandle,
 };
+use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::{crypto::DID, error::Error};
 
 use crate::config::{Discovery as DiscoveryConfig, DiscoveryType};
@@ -313,7 +314,7 @@ pub struct DiscoveryEntry {
     ipfs: Ipfs,
     peer_id: PeerId,
     config: DiscoveryConfig,
-    task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    drop_guard: Arc<RwLock<Option<DropGuard>>>,
     sender: broadcast::Sender<DID>,
     relays: Vec<Multiaddr>,
 }
@@ -344,20 +345,23 @@ impl DiscoveryEntry {
             ipfs: ipfs.clone(),
             peer_id,
             config,
-            task: Arc::default(),
+            drop_guard: Arc::default(),
             sender,
             relays,
         }
     }
 
     pub async fn start(&self) {
-        let holder = &mut *self.task.write().await;
+        let holder = &mut *self.drop_guard.write().await;
 
         if holder.is_some() {
             return;
         }
 
-        let task = tokio::spawn({
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+
+        let fut = {
             let entry = self.clone();
             let ipfs = self.ipfs.clone();
             let peer_id = self.peer_id;
@@ -433,9 +437,18 @@ impl DiscoveryEntry {
                     futures_timer::Delay::new(Duration::from_secs(10)).await;
                 }
             }
+        };
+
+        crate::rt::spawn(async move {
+            futures::pin_mut!(fut);
+
+            tokio::select! {
+                _ = token.cancelled() => {}
+                _ = &mut fut => {}
+            }
         });
 
-        *holder = Some(task);
+        *holder = Some(drop_guard);
     }
 
     /// Returns a peer id
@@ -444,11 +457,9 @@ impl DiscoveryEntry {
     }
 
     pub async fn cancel(&self) {
-        let task = std::mem::take(&mut *self.task.write().await);
-        if let Some(task) = task {
-            if !task.is_finished() {
-                task.abort();
-            }
+        let task = std::mem::take(&mut *self.drop_guard.write().await);
+        if let Some(guard) = task {
+            drop(guard)
         }
     }
 }
