@@ -405,6 +405,7 @@ impl Config {
                 relay_client: RelayClient {
                     ..Default::default()
                 },
+                memory_transport: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {
@@ -429,6 +430,7 @@ impl Config {
                 relay_client: RelayClient {
                     ..Default::default()
                 },
+                memory_transport: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {
