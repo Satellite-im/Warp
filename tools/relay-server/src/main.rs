@@ -244,11 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let prv = tokio::fs::read_to_string(prv).await.ok();
             (cert, prv)
         }
-        _ => {
-            let (c, k, _) = generate_cert(&keypair, b"libp2p-websocket", false)?;
-
-            (Some(c.pem()), Some(k.public_key_pem()))
-        }
+        _ => (None, None),
     };
 
     let wrtc_pem = match opts
