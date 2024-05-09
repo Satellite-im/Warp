@@ -1,4 +1,4 @@
-use ipfs::Multiaddr;
+use ipfs::{Multiaddr, Protocol};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, str::FromStr, time::Duration};
@@ -84,16 +84,31 @@ pub enum RelayQuorum {
 impl Default for RelayClient {
     fn default() -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             relay_address: vec![
                 //NYC-1
                 "/ip4/146.190.184.59/tcp/4001/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(), 
-                "/ip4/146.190.184.59/udp/4001/quic-v1/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(), 
+                "/ip4/146.190.184.59/udp/4001/quic-v1/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
                 //SF-1
                 "/ip4/64.225.88.100/udp/4001/quic-v1/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(), 
                 "/ip4/64.225.88.100/tcp/4001/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(), 
                 //NYC-1-EXP
                 "/ip4/24.199.86.91/udp/46315/quic-v1/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
                 "/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
+            ],
+            // Relays that are meant to be used from a web standpoint.
+            // Note: webrtc addresses are prone to change due an upstream issue and shouldnt be relied on for primary connections
+            #[cfg(target_arch="wasm32")]
+            relay_address: vec![
+                //NYC-1
+                "/ip4/146.190.184.59/tcp/4001/wss/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
+                "/ip4/146.190.184.59/udp/4002/webrtc-direct/certhash/uEiC7m8m2pxf_DHr488akg-wSAxsa-f2agH5zc2nE70vx_g/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
+                //SF-1
+                "/ip4/64.225.88.100/tcp/4001/wss/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
+                "/ip4/64.225.88.100/udp/4002/webrtc-direct/certhash/uEiD25LqH8FlAgimcIY4XB1QiHHROlCYn7WJIukuRMe3tfQ/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
+                //NYC-1-EXP
+                "/ip4/24.199.86.91/tcp/46315/wss/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
+                "/ip4/24.199.86.91/udp/4002/webrtc-direct/certhash/uEiCZ8YAx_IZ7_x5dKltFESWHe4TUg8_gYpla6tmWR9jlfw/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
             ],
             background: true,
             quorum: Default::default()
@@ -399,12 +414,14 @@ impl Config {
     pub fn testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     ..Default::default()
                 },
+                memory_transport: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {
@@ -423,12 +440,14 @@ impl Config {
     pub fn minimal_testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     ..Default::default()
                 },
+                memory_transport: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {

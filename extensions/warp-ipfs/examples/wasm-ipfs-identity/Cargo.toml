@@ -19,3 +19,4 @@ serde_json.workspace = true
 serde.workspace = true
 warp.workspace = true
 warp-ipfs.workspace = true
+tracing-wasm = "0.2.1"
