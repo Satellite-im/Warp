@@ -1,10 +1,10 @@
-use js_sys::Uint8Array;
-use std::str::FromStr;
 use crate::crypto::DID;
 use crate::multipass::{
     identity::{self, Identity, IdentityProfile},
     MultiPass,
 };
+use js_sys::Uint8Array;
+use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]

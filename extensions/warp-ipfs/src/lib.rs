@@ -16,13 +16,8 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 #[cfg(not(target_arch = "wasm32"))]
 use futures::AsyncReadExt;
 
-#[cfg(not(target_arch = "wasm32"))]
 use futures_timeout::TimeoutExt;
 
-use ipfs::libp2p::core::muxing::StreamMuxerBox;
-use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
-use ipfs::libp2p::core::upgrade::Version;
-use ipfs::libp2p::Transport;
 use ipfs::p2p::{
     IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
 };
@@ -63,7 +58,7 @@ use warp::raygun::{
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{DhtMode, Ipfs, Keypair, PeerId, Protocol, UninitializedIpfs};
+use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
 use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
 use warp::multipass::identity::{
@@ -345,6 +340,12 @@ impl WarpIpfs {
             .set_transport_configuration(TransportConfig {
                 enable_quic: !self.inner.config.ipfs_setting().disable_quic,
                 quic_max_idle_timeout: Duration::from_secs(5),
+                enable_memory_transport: self.inner.config.ipfs_setting().memory_transport,
+                // We check the target arch since it doesnt really make much sense to have each native peer to use websocket or webrtc transport
+                // as such connections would be established through the relay
+                enable_websocket: cfg!(target_arch = "wasm32"),
+                enable_secure_websocket: cfg!(target_arch = "wasm32"),
+                enable_webrtc: cfg!(target_arch = "wasm32"),
                 ..Default::default()
             });
 
@@ -394,32 +395,10 @@ impl WarpIpfs {
             }
         }
 
+        // If memory transport is enabled, this means that test are running and in such case, we should have the addresses be
+        // treated as external addresses.
         if self.inner.config.ipfs_setting().memory_transport {
-            uninitialized = uninitialized
-                .with_custom_transport(Box::new(
-                    |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
-                        let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-                        let transport = match relay {
-                            Some(relay) => OrTransport::new(relay, MemoryTransport::default())
-                                .upgrade(Version::V1)
-                                .authenticate(noise_config)
-                                .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                                .timeout(Duration::from_secs(20))
-                                .boxed(),
-                            None => MemoryTransport::default()
-                                .upgrade(Version::V1)
-                                .authenticate(noise_config)
-                                .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                                .timeout(Duration::from_secs(20))
-                                .boxed(),
-                        };
-
-                        Ok(transport)
-                    },
-                ))
-                .listen_as_external_addr();
+            uninitialized = uninitialized.listen_as_external_addr();
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -441,8 +420,6 @@ impl WarpIpfs {
             }
         }
 
-        //TODO: Remove attr when bug is fixed upstream
-        #[cfg(not(target_arch = "wasm32"))]
         if self.inner.config.enable_relay() {
             let mut relay_peers = HashSet::new();
 
