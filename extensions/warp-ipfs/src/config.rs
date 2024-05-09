@@ -1,4 +1,4 @@
-use ipfs::Multiaddr;
+use ipfs::{Multiaddr, Protocol};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, str::FromStr, time::Duration};
@@ -399,6 +399,7 @@ impl Config {
     pub fn testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
@@ -424,6 +425,7 @@ impl Config {
     pub fn minimal_testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
