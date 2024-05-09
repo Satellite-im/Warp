@@ -9,7 +9,7 @@ use base64::{
 };
 use clap::Parser;
 use rust_ipfs::{
-    p2p::{RateLimit, RelayConfig},
+    p2p::{generate_cert, RateLimit, RelayConfig, TransportConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
@@ -150,6 +150,24 @@ struct Opt {
     /// Path to a configuration file to adjust relay setting
     #[clap(long)]
     relay_config: Option<PathBuf>,
+
+    /// Use unbounded configuration with higher limits
+    #[clap(long)]
+    unbounded: bool,
+
+    /// TLS Certificate when websocket is used
+    /// Note: websocket required a signed certificate.
+    #[clap(long)]
+    ws_tls_certificate: Option<PathBuf>,
+
+    /// TLS Private Key when websocket is used
+    #[clap(long)]
+    ws_tls_private_key: Option<PathBuf>,
+
+    /// TLS PEM when webrtc is used
+    /// Note: WebRTC certificate can be self-signed, however this may change in the future to require so it is generated internally to be more deterministic
+    #[clap(long)]
+    webrtc_pem: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -215,13 +233,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => Config::default(),
     };
 
+    let (ws_cert, ws_pk) = match (
+        opts.ws_tls_certificate
+            .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf)),
+        opts.ws_tls_private_key
+            .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf)),
+    ) {
+        (Some(cert), Some(prv)) => {
+            let cert = tokio::fs::read_to_string(cert).await.ok();
+            let prv = tokio::fs::read_to_string(prv).await.ok();
+            (cert, prv)
+        }
+        _ => (None, None),
+    };
+
+    let wrtc_pem = match opts
+        .webrtc_pem
+        .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf))
+    {
+        Some(path) => match path.is_file() {
+            true => tokio::fs::read_to_string(path).await.ok(),
+            false => {
+                let (c, k, expired) = generate_cert(&keypair, b"libp2p-webrtc", true)?;
+                let priv_key = k.serialize_pem().replace("PRIVATE KEY", "PRIVATE_KEY");
+                let cert = c.pem();
+
+                let pem = priv_key + "\n\n" + &cert;
+
+                let pem = match expired {
+                    Some(epem) => epem + "\n\n" + &pem,
+                    None => pem,
+                };
+
+                tokio::fs::write(path, pem.as_bytes()).await?;
+
+                Some(pem)
+            }
+        },
+        None => {
+            let (c, k, expired) = generate_cert(&keypair, b"libp2p-webrtc", true)?;
+            let priv_key = k.serialize_pem().replace("PRIVATE KEY", "PRIVATE_KEY");
+            let cert = c.pem();
+
+            let pem = priv_key + "\n\n" + &cert;
+
+            let pem = match expired {
+                Some(epem) => epem + "\n\n" + &pem,
+                None => pem,
+            };
+            Some(pem)
+        }
+    };
+
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
 
     let addrs = match opts.listen_addr.as_slice() {
         [] => vec![
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+            "/ip4/0.0.0.0/tcp/0/ws".parse().unwrap(),
+            "/ip4/0.0.0.0/tcp/0/wss".parse().unwrap(),
             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+            "/ip4/0.0.0.0/udp/0/webrtc-direct".parse().unwrap(),
         ],
         addrs => addrs.to_vec(),
     };
@@ -229,10 +302,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut uninitialized = UninitializedIpfs::new()
         .with_identify(Default::default())
         .with_ping(Default::default())
-        .with_relay_server(config.into())
+        .with_relay_server(
+            opts.unbounded
+                .then(RelayConfig::unbounded)
+                .unwrap_or(config.into()),
+        )
         .fd_limit(FDLimit::Max)
         .set_keypair(&keypair)
         .set_idle_connection_timeout(30)
+        .set_transport_configuration(TransportConfig {
+            enable_webrtc: true,
+            enable_websocket: true,
+            enable_secure_websocket: true,
+            websocket_pem: (ws_cert.is_some() && ws_pk.is_some()).then(|| {
+                let cert = ws_cert.expect("certificate exist");
+                let pk = ws_pk.expect("pk exist");
+                (cert, pk)
+            }),
+            webrtc_pem: wrtc_pem,
+            ..Default::default()
+        })
         .listen_as_external_addr()
         .with_custom_behaviour(ext_behaviour::Behaviour)
         .set_listening_addrs(addrs);

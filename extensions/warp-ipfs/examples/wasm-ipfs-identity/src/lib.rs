@@ -32,6 +32,7 @@ async fn update_status(account: &mut dyn MultiPass, status: &str) -> Result<(), 
 
 #[wasm_bindgen]
 pub async fn run() -> Result<(), JsError> {
+    tracing_wasm::set_as_global_default();
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let tesseract = Tesseract::default();
     tesseract.unlock(b"super duper pass")?;

@@ -90,7 +90,7 @@ either = "1"
 void = "1"
 
 #ipfs dependency
-rust-ipfs = "0.11.9"
+rust-ipfs = "0.11.16"
 
 # wasm crates
 wasm-bindgen = "0.2" 
