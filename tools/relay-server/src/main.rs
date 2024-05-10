@@ -323,7 +323,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         })
         .listen_as_external_addr()
-        .with_custom_behaviour(ext_behaviour::Behaviour)
+        .with_custom_behaviour(ext_behaviour::Behaviour::new(keypair.public().to_peer_id()))
         .set_listening_addrs(addrs);
 
     if let Some(path) = path {
@@ -340,20 +340,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 mod ext_behaviour {
-    use std::task::{Context, Poll};
+    use std::{
+        collections::{HashMap, HashSet},
+        task::{Context, Poll},
+    };
 
     use rust_ipfs::libp2p::{
         core::Endpoint,
         swarm::{
-            ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
-            THandlerOutEvent, ToSwarm,
+            ConnectionDenied, ConnectionId, ExternalAddrExpired, FromSwarm, ListenerClosed,
+            NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
         },
         Multiaddr, PeerId,
     };
-    use rust_ipfs::NetworkBehaviour;
+    use rust_ipfs::{ListenerId, NetworkBehaviour};
 
-    #[derive(Default, Debug)]
-    pub struct Behaviour;
+    #[derive(Debug)]
+    pub struct Behaviour {
+        peer_id: PeerId,
+        addrs: HashSet<Multiaddr>,
+        listened: HashMap<ListenerId, HashSet<Multiaddr>>,
+    }
+
+    impl Behaviour {
+        pub fn new(local_peer_id: PeerId) -> Self {
+            println!("PeerID: {}", local_peer_id);
+            Self {
+                peer_id: local_peer_id,
+                addrs: Default::default(),
+                listened: Default::default(),
+            }
+        }
+    }
 
     impl NetworkBehaviour for Behaviour {
         type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
@@ -407,8 +425,54 @@ mod ext_behaviour {
         }
 
         fn on_swarm_event(&mut self, event: FromSwarm) {
-            if let FromSwarm::NewListenAddr(NewListenAddr { addr, .. }) = event {
-                println!("Listening on {addr}");
+            match event {
+                FromSwarm::NewListenAddr(NewListenAddr {
+                    listener_id, addr, ..
+                }) => {
+                    let addr = addr.clone();
+
+                    let addr = addr.with_p2p(self.peer_id).unwrap();
+
+                    if !self.addrs.insert(addr.clone()) {
+                        return;
+                    }
+
+                    self.listened
+                        .entry(listener_id)
+                        .or_default()
+                        .insert(addr.clone());
+
+                    println!("Listening on {addr}");
+                }
+
+                FromSwarm::ExternalAddrConfirmed(ev) => {
+                    let addr = ev.addr.clone();
+                    let addr = addr.with_p2p(self.peer_id).unwrap();
+
+                    if !self.addrs.insert(addr.clone()) {
+                        return;
+                    }
+
+                    println!("Listening on {}", addr);
+                }
+                FromSwarm::ExternalAddrExpired(ExternalAddrExpired { addr }) => {
+                    let addr = addr.clone();
+                    let addr = addr.with_p2p(self.peer_id).unwrap();
+
+                    if self.addrs.remove(&addr) {
+                        println!("No longer listening on {addr}");
+                    }
+                }
+                FromSwarm::ListenerClosed(ListenerClosed { listener_id, .. }) => {
+                    if let Some(addrs) = self.listened.remove(&listener_id) {
+                        for addr in addrs {
+                            let addr = addr.with_p2p(self.peer_id).unwrap();
+                            self.addrs.remove(&addr);
+                            println!("No longer listening on {addr}");
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
