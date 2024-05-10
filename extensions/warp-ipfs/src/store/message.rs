@@ -28,7 +28,7 @@ use libipld::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
-use tokio::{select, task::JoinHandle};
+use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -613,7 +613,7 @@ struct ConversationInner {
     ipfs: Ipfs,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
-    conversation_task: HashMap<Uuid, JoinHandle<()>>,
+    conversation_task: HashMap<Uuid, DropGuard>,
     root: RootDocumentMap,
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
@@ -3078,11 +3078,21 @@ impl ConversationInner {
 
         let (mut tx, rx) = mpsc::channel(256);
 
-        let handle = tokio::spawn(async move {
-            while let Some(stream_type) = stream.next().await {
-                if let Err(e) = tx.send(stream_type).await {
-                    if e.is_disconnected() {
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+
+        crate::rt::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => {
                         break;
+                    }
+                    Some(stream_data) = stream.next() => {
+                        if let Err(e) = tx.send(stream_data).await {
+                            if e.is_disconnected() {
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -3092,7 +3102,7 @@ impl ConversationInner {
             .command_tx
             .send(MessagingCommand::Receiver { ch: rx })
             .await;
-        self.conversation_task.insert(conversation_id, handle);
+        self.conversation_task.insert(conversation_id, drop_guard);
 
         tracing::info!(%conversation_id, "started conversation");
         Ok(())
@@ -3100,7 +3110,7 @@ impl ConversationInner {
 
     async fn destroy_conversation(&mut self, conversation_id: Uuid) {
         if let Some(handle) = self.conversation_task.remove(&conversation_id) {
-            handle.abort();
+            drop(handle);
             self.pending_key_exchange.remove(&conversation_id);
         }
     }

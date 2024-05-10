@@ -439,7 +439,7 @@ impl Config {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn minimal_testing() -> Config {
         Config {
-            bootstrap: Bootstrap::Ipfs,
+            bootstrap: Bootstrap::None,
             listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
