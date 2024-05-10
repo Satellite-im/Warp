@@ -59,9 +59,6 @@
           if (value.kind === wasm.MultiPassEventKindEnum.IdentityUpdate && value.did === identity_b.did_key() ) {
             seen_b = true;
           }
-          if (sent && received && seen_a && seen_b) {
-            break
-          }
         }
       };
       subscribe_a_reader()
@@ -75,42 +72,41 @@
           if (value.kind === wasm.MultiPassEventKindEnum.IdentityUpdate && value.did === identity_a.did_key() ) {
             seen_a = true;
           }
-          if (sent && received && seen_a && seen_b) {
-            break
-          }
         }
       };
-      await subscribe_b_reader()
+      subscribe_b_reader()
+
+      while (!sent || !received || !seen_a || !seen_b) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
 
       console.log(`${username(identity_a)} Outgoing requests:`)
-      for (let outgoing in await account_a.list_outgoing_request()) {
-          let ident = await account_a.get_identity(wasm.Identifier.DID, outgoing)[0]
-          console.log(`To: ${username(ident)}`);
+      for (let outgoing of await account_a.list_outgoing_request()) {
+          let ident = await account_a.get_identity(wasm.Identifier.DID, outgoing)
+          console.log(`To: ${ident[0].username}`);
       }
 
       console.log(`${username(identity_b)} Incoming requests:`)
-      for (let incoming in await account_b.list_incoming_request()) {
-          let ident = await account_b.get_identity(wasm.Identifier.DID, incoming)[0]
-          console.log(`From: ${username(ident)}`);
+      for (let incoming of await account_b.list_incoming_request()) {
+          let ident = await account_b.get_identity(wasm.Identifier.DID, incoming)
+          console.log(`From: ${ident[0].username}`);
       }
 
       await account_b.accept_request(identity_a.did_key())
-      console.log(`${ident_b.username()} accepted ${ident_a.username()} request`)
+      console.log(`${identity_b.username()} accepted ${identity_a.username()} request`)
 
       await new Promise(r => setTimeout(r, 1500));
 
       console.log(`${username(identity_a)} Friends:`);
-      for (friend in await account_a.list_friends()) {
-        let friend = await account_a.get_identity(wasm.Identifier.DID, friend)[0]
-        console.log("Username: ${}", username(friend));
-        console.log("Public Key: ${}", friend.did_key());
+      for (let did of await account_a.list_friends()) {
+        let friend = await account_a.get_identity(wasm.Identifier.DID, did)
+        console.log(`Username: ${friend[0].username}, Public Key: ${friend[0].did_key}`)
       }
 
       console.log(`${username(identity_b)} Friends:`);
-      for (friend in await account_b.list_friends()) {
-        let friend = await account_b.get_identity(wasm.Identifier.DID, friend)[0]
-        console.log("Username: ${}", username(friend));
-        console.log("Public Key: ${}", friend.did_key());
+      for (let did of await account_b.list_friends()) {
+        let friend = await account_b.get_identity(wasm.Identifier.DID, did)
+        console.log(`Username: ${friend[0].username}, Public Key: ${friend[0].did_key}`)
       }
 
       await account_a.remove_friend(identity_b.did_key())
