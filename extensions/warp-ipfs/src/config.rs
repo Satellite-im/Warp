@@ -1,4 +1,4 @@
-use ipfs::Multiaddr;
+use ipfs::{Multiaddr, Protocol};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, str::FromStr, time::Duration};
@@ -414,12 +414,14 @@ impl Config {
     pub fn testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     ..Default::default()
                 },
+                memory_transport: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {
@@ -437,13 +439,15 @@ impl Config {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn minimal_testing() -> Config {
         Config {
-            bootstrap: Bootstrap::Ipfs,
+            bootstrap: Bootstrap::None,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     ..Default::default()
                 },
+                memory_transport: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {

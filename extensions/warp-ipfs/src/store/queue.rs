@@ -3,7 +3,8 @@ use futures::{channel::mpsc, StreamExt, TryFutureExt};
 use libipld::Cid;
 use rust_ipfs::Ipfs;
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::{sync::RwLock, task::JoinHandle};
+use tokio::sync::RwLock;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::error;
 use warp::{
     crypto::{
@@ -251,24 +252,13 @@ impl Queue {
     }
 }
 
+#[derive(Clone)]
 pub struct QueueEntry {
     ipfs: Ipfs,
     recipient: DID,
     did: Arc<DID>,
     item: RequestResponsePayload,
-    task: Arc<RwLock<Option<JoinHandle<()>>>>,
-}
-
-impl Clone for QueueEntry {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            recipient: self.recipient.clone(),
-            did: self.did.clone(),
-            item: self.item.clone(),
-            task: self.task.clone(),
-        }
-    }
+    drop_guard: Arc<RwLock<Option<DropGuard>>>,
 }
 
 impl QueueEntry {
@@ -284,10 +274,13 @@ impl QueueEntry {
             recipient,
             did,
             item,
-            task: Default::default(),
+            drop_guard: Default::default(),
         };
 
-        let task = tokio::spawn({
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+
+        let fut = {
             let entry = entry.clone();
             async move {
                 _ = async {
@@ -361,9 +354,18 @@ impl QueueEntry {
                 }
                 .await;
             }
+        };
+
+        crate::rt::spawn(async move {
+            futures::pin_mut!(fut);
+
+            tokio::select! {
+                _ = token.cancelled() => {}
+                _ = &mut fut => {}
+            }
         });
 
-        *entry.task.write().await = Some(task);
+        *entry.drop_guard.write().await = Some(drop_guard);
 
         entry
     }
@@ -373,10 +375,8 @@ impl QueueEntry {
     }
 
     pub async fn cancel(&self) {
-        if let Some(task) = std::mem::take(&mut *self.task.write().await) {
-            if !task.is_finished() {
-                task.abort()
-            }
+        if let Some(guard) = std::mem::take(&mut *self.drop_guard.write().await) {
+            drop(guard)
         }
     }
 }
