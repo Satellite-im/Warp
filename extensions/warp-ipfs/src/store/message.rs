@@ -3085,6 +3085,7 @@ impl ConversationInner {
             loop {
                 tokio::select! {
                     _ = token.cancelled() => {
+                        tracing::debug!(%conversation_id, "conversation closed");
                         break;
                     }
                     Some(stream_data) = stream.next() => {

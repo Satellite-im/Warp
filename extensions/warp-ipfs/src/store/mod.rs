@@ -48,27 +48,44 @@ pub const MAX_FRIENDS: usize = 1_000;
 pub const MAX_REQUEST: usize = 1_000;
 
 pub(super) mod topics {
-    use std::fmt::Display;
-
     use warp::crypto::DID;
 
     /// Topic to announce identity updates to the network
     pub const IDENTITY_ANNOUNCEMENT: &str = "/identity/announce/v0";
+    #[allow(dead_code)]
+    pub const FRIEND_ANNOUNCEMENT: &str = "/friend/announce/v0";
+    #[allow(dead_code)]
+    pub const MESSAGING_ANNOUNCEMENT: &str = "/messaging/announce/v0";
 
-    pub trait PeerTopic: Display {
+    pub trait PeerTopic {
+        fn base(&self) -> String;
+        
+        #[allow(dead_code)]
+        fn announce(&self) -> String {
+            self.base() + "/announce"
+        }
+
+        /// Topic to send/receive friend requests
         fn inbox(&self) -> String {
-            format!("/peer/{self}/inbox")
+            self.base() + "/inbox"
         }
 
+        /// Topic to send/receive identity requests/responses
         fn events(&self) -> String {
-            format!("/peer/{self}/events")
+            self.base() + "/events"
         }
+
+        /// Topic to send/receive conversation requests
         fn messaging(&self) -> String {
-            format!("{self}/messaging")
+            self.base() + "/messaging"
         }
     }
 
-    impl PeerTopic for DID {}
+    impl PeerTopic for DID {
+        fn base(&self) -> String {
+            format!("/user/{self}")
+        }
+    }
 }
 
 pub(super) mod ds_key {
