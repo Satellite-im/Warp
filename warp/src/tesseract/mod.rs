@@ -835,10 +835,6 @@ impl TesseractInner {
                 let k = Self::NAMESPACE.to_owned() + k;
                 LocalStorage::set(k, v).unwrap();
             }
-            for (k, v) in &*self.internal.read() {
-                let k = Self::NAMESPACE.to_owned() + k;
-                LocalStorage::set(k, v).unwrap();
-            }
         }
 
         Ok(())
