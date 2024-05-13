@@ -782,9 +782,7 @@ impl TesseractInner {
     }
 
     fn lock(&self) {
-        if self.save().is_ok() {
-            //
-        }
+        _ = self.save();
         self.enc_pass.write().zeroize();
         self.unlock.store(false, Ordering::Relaxed);
         self.soft_unlock.store(false, Ordering::Relaxed);
@@ -820,6 +818,23 @@ impl TesseractInner {
         use gloo::storage::{LocalStorage, Storage};
 
         if self.autosave_enabled() {
+            // Note: Since we cant serialize the hashmap, we would clear out the localstorage, based on namespace, then we will save
+            //       so if we deleted any entries internally, it will reflect here when it saves.
+            {
+                let local_storage = LocalStorage::raw();
+                let length = LocalStorage::length();
+                for index in 0..length {
+                    let key = local_storage.key(index).unwrap().unwrap();
+                    if !key.starts_with(Self::NAMESPACE) {
+                        continue;
+                    }
+                    LocalStorage::delete(&key);
+                }
+            }
+            for (k, v) in &*self.internal.read() {
+                let k = Self::NAMESPACE.to_owned() + k;
+                LocalStorage::set(k, v).unwrap();
+            }
             for (k, v) in &*self.internal.read() {
                 let k = Self::NAMESPACE.to_owned() + k;
                 LocalStorage::set(k, v).unwrap();
