@@ -814,11 +814,14 @@ impl TesseractInner {
 
 #[cfg(target_arch = "wasm32")]
 impl TesseractInner {
+    const NAMESPACE: &'static str = "warp.tesseract.";
+
     fn save(&self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 
         if self.autosave_enabled() {
             for (k, v) in &*self.internal.read() {
+                let k = Self::NAMESPACE.to_owned() + k;
                 LocalStorage::set(k, v).unwrap();
             }
         }
@@ -834,8 +837,12 @@ impl TesseractInner {
 
         for index in 0..length {
             let key = local_storage.key(index).unwrap().unwrap();
+            if !key.starts_with(Self::NAMESPACE) {
+                continue;
+            }
             let value: Vec<u8> = LocalStorage::get(&key).unwrap();
-            self.internal.write().insert(key, value);
+            let key = &key[Self::NAMESPACE.len()..];
+            self.internal.write().insert(key.to_owned(), value);
         }
 
         Ok(())
