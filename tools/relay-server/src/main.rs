@@ -270,19 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(pem)
             }
         },
-        None => {
-            let (c, k, expired) = generate_cert(&keypair, b"libp2p-webrtc", true)?;
-            let priv_key = k.serialize_pem().replace("PRIVATE KEY", "PRIVATE_KEY");
-            let cert = c.pem();
-
-            let pem = priv_key + "\n\n" + &cert;
-
-            let pem = match expired {
-                Some(epem) => epem + "\n\n" + &pem,
-                None => pem,
-            };
-            Some(pem)
-        }
+        None => None,
     };
 
     let local_peer_id = keypair.public().to_peer_id();
