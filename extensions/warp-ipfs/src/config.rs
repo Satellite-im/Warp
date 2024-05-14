@@ -116,19 +116,10 @@ pub struct Pubsub {
     pub max_transmit_size: usize,
 }
 
-impl Default for Pubsub {
-    fn default() -> Self {
-        Self {
-            max_transmit_size: 8 * 1024 * 1024,
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
-    pub pubsub: Pubsub,
     pub bootstrap: bool,
     pub portmapping: bool,
     pub agent_version: Option<String>,
@@ -170,8 +161,6 @@ pub struct StoreSetting {
     pub fetch_over_bitswap: bool,
     /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
-    /// Emit event for when a friend comes online or offline
-    pub emit_online_event: bool,
     /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<Duration>,
     /// Options to allow emitting identity events to all or just friends
@@ -201,7 +190,6 @@ impl Default for StoreSetting {
             fetch_over_bitswap: false,
             share_platform: false,
             friend_request_response_duration: None,
-            emit_online_event: false,
             update_events: Default::default(),
             disable_images: false,
             with_friends: false,
