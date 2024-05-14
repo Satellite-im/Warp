@@ -1,11 +1,11 @@
 use crate::{
-    js_exports::stream::AsyncIterator,
     crypto::DID,
+    js_exports::stream::AsyncIterator,
     raygun::{self, RayGun},
 };
 
-use serde::{Serialize, Deserialize};
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -67,7 +67,9 @@ impl RayGunBox {
             .map_err(|e| e.into())
             .map(|ok| {
                 serde_wasm_bindgen::to_value(
-                    &ok.iter().map(|c| Conversation::new(c.clone())).collect::<Vec<Conversation>>(),
+                    &ok.iter()
+                        .map(|c| Conversation::new(c.clone()))
+                        .collect::<Vec<Conversation>>(),
                 )
                 .unwrap()
             })
@@ -123,11 +125,7 @@ impl RayGunBox {
             .get_message_references(Uuid::from_str(&conversation_id).unwrap(), options.inner)
             .await
             .map_err(|e| e.into())
-            .map(|s| {
-                AsyncIterator::new(Box::pin(
-                    s.map(|t| MessageReference::new(t).into()),
-                ))
-            })
+            .map(|s| AsyncIterator::new(Box::pin(s.map(|t| MessageReference::new(t).into()))))
     }
 
     /// Retrieve a message reference from a conversation
