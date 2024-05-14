@@ -340,8 +340,6 @@ impl WarpIpfs {
             .with_rendezvous_client()
             .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
-                enable_quic: !self.inner.config.ipfs_setting().disable_quic,
-                quic_max_idle_timeout: Duration::from_secs(5),
                 enable_memory_transport: self.inner.config.ipfs_setting().memory_transport,
                 // We check the target arch since it doesnt really make much sense to have each native peer to use websocket or webrtc transport
                 // as such connections would be established through the relay

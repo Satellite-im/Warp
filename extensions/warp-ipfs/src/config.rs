@@ -1,11 +1,9 @@
 use ipfs::{Multiaddr, Protocol};
 use rust_ipfs as ipfs;
-use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, str::FromStr, time::Duration};
 use warp::{constellation::file::FileType, multipass::identity::Identity};
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Default, Debug, Clone)]
 pub enum Bootstrap {
     #[default]
     Ipfs,
@@ -13,8 +11,7 @@ pub enum Bootstrap {
     None,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum Discovery {
     Shuttle {
         addresses: Vec<Multiaddr>,
@@ -29,8 +26,7 @@ pub enum Discovery {
     None,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum DiscoveryType {
     #[default]
     DHT,
@@ -58,22 +54,21 @@ impl Bootstrap {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct Mdns {
     /// Enables mdns protocol in libp2p
     pub enable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RelayClient {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     /// List of relays to use
     pub relay_address: Vec<Multiaddr>,
     pub background: bool,
     pub quorum: RelayQuorum,
 }
 
-#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Copy)]
 pub enum RelayQuorum {
     First,
     N(u8),
@@ -116,27 +111,7 @@ impl Default for RelayClient {
     }
 }
 
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct Swarm {
-//     /// Concurrent dial factor
-//     pub dial_factor: u8,
-//     pub notify_buffer_size: usize,
-//     pub connection_buffer_size: usize,
-//     pub limit: Option<ConnectionLimit>,
-// }
-
-// impl Default for Swarm {
-//     fn default() -> Self {
-//         Self {
-//             dial_factor: 8, //Same dial factor as default for libp2p
-//             notify_buffer_size: 32,
-//             connection_buffer_size: 1024,
-//             limit: None,
-//         }
-//     }
-// }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Pubsub {
     pub max_transmit_size: usize,
 }
@@ -149,7 +124,7 @@ impl Default for Pubsub {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
@@ -160,10 +135,9 @@ pub struct IpfsSetting {
     /// Used for testing with a memory transport
     pub memory_transport: bool,
     pub dht_client: bool,
-    pub disable_quic: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum UpdateEvents {
     #[default]
     /// Emit events for all identity updates
@@ -178,20 +152,7 @@ pub type DefaultPfpFn = std::sync::Arc<
     dyn Fn(&Identity) -> Result<(Vec<u8>, FileType), std::io::Error> + Send + Sync + 'static,
 >;
 
-#[derive(Default, Clone, Serialize, Deserialize)]
-pub enum StoreOffline {
-    Remote,
-    Local {
-        path: PathBuf,
-    },
-    RemoteAndLocal {
-        path: PathBuf,
-    },
-    #[default]
-    None,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct StoreSetting {
     /// Allow only interactions with friends
     /// Note: This is ignored when it comes to chating between group chat recipients
@@ -205,19 +166,12 @@ pub struct StoreSetting {
     /// Discovery type
     pub discovery: Discovery,
 
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    /// Placeholder for a offline agents to obtain information regarding one own identity
-    pub offline_agent: Vec<Multiaddr>,
-    /// Export account on update
-    pub store_offline: StoreOffline,
-
     /// Fetch data over bitswap instead of pubsub
     pub fetch_over_bitswap: bool,
     /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
     /// Emit event for when a friend comes online or offline
     pub emit_online_event: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<Duration>,
     /// Options to allow emitting identity events to all or just friends
@@ -227,7 +181,6 @@ pub struct StoreSetting {
     /// Announce to mesh network
     pub announce_to_mesh: bool,
     /// Function to call to provide data for a default profile picture if one is not apart of the identity
-    #[serde(skip)]
     pub default_profile_picture: Option<DefaultPfpFn>,
 }
 
@@ -245,10 +198,6 @@ impl Default for StoreSetting {
                 namespace: None,
                 discovery_type: Default::default(),
             },
-
-            offline_agent: Vec::new(),
-            store_offline: StoreOffline::None,
-
             fetch_over_bitswap: false,
             share_platform: false,
             friend_request_response_duration: None,
