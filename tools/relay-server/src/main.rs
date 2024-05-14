@@ -9,7 +9,7 @@ use base64::{
 };
 use clap::Parser;
 use rust_ipfs::{
-    p2p::{generate_cert, RateLimit, RelayConfig, TransportConfig},
+    p2p::{RateLimit, RelayConfig, TransportConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
@@ -163,11 +163,6 @@ struct Opt {
     /// TLS Private Key when websocket is used
     #[clap(long)]
     ws_tls_private_key: Option<PathBuf>,
-
-    /// TLS PEM when webrtc is used
-    /// Note: WebRTC certificate can be self-signed, however this may change in the future to require so it is generated internally to be more deterministic
-    #[clap(long)]
-    webrtc_pem: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -247,44 +242,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => (None, None),
     };
 
-    let wrtc_pem = match opts
-        .webrtc_pem
-        .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf))
-    {
-        Some(path) => match path.is_file() {
-            true => tokio::fs::read_to_string(path).await.ok(),
-            false => {
-                let (c, k, expired) = generate_cert(&keypair, b"libp2p-webrtc", true)?;
-                let priv_key = k.serialize_pem().replace("PRIVATE KEY", "PRIVATE_KEY");
-                let cert = c.pem();
-
-                let pem = priv_key + "\n\n" + &cert;
-
-                let pem = match expired {
-                    Some(epem) => epem + "\n\n" + &pem,
-                    None => pem,
-                };
-
-                tokio::fs::write(path, pem.as_bytes()).await?;
-
-                Some(pem)
-            }
-        },
-        None => {
-            let (c, k, expired) = generate_cert(&keypair, b"libp2p-webrtc", true)?;
-            let priv_key = k.serialize_pem().replace("PRIVATE KEY", "PRIVATE_KEY");
-            let cert = c.pem();
-
-            let pem = priv_key + "\n\n" + &cert;
-
-            let pem = match expired {
-                Some(epem) => epem + "\n\n" + &pem,
-                None => pem,
-            };
-            Some(pem)
-        }
-    };
-
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
 
@@ -319,7 +276,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let pk = ws_pk.expect("pk exist");
                 (cert, pk)
             }),
-            webrtc_pem: wrtc_pem,
             ..Default::default()
         })
         .listen_as_external_addr()
