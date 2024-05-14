@@ -111,11 +111,6 @@ impl Default for RelayClient {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Pubsub {
-    pub max_transmit_size: usize,
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
