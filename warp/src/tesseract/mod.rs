@@ -824,11 +824,14 @@ impl TesseractInner {
                 let local_storage = LocalStorage::raw();
                 let length = LocalStorage::length();
                 for index in 0..length {
-                    let key = local_storage.key(index).unwrap().unwrap();
-                    if !key.starts_with(Self::NAMESPACE) {
-                        continue;
+                    if let Ok(key) = local_storage.key(index) {
+                        if let Some(key) = key {
+                            if !key.starts_with(Self::NAMESPACE) {
+                                continue;
+                            }
+                            LocalStorage::delete(&key);
+                        }
                     }
-                    LocalStorage::delete(&key);
                 }
             }
             for (k, v) in &*self.internal.read() {
