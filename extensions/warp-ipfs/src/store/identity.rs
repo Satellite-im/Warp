@@ -1,5 +1,5 @@
 use crate::{
-    config::{self, Discovery as DiscoveryConfig, UpdateEvents},
+    config::{self, Discovery as DiscoveryConfig},
     store::{did_to_libp2p_pub, discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 use chrono::{DateTime, Utc};
@@ -976,14 +976,17 @@ impl IdentityStore {
 
         identity.metadata = Default::default();
 
-        let include_meta = (matches!(
+        /*
+        (matches!(
             self.config.store_setting().update_events,
             UpdateEvents::Enabled
         ) || matches!(
             self.config.store_setting().update_events,
             UpdateEvents::FriendsOnly
         ) && is_friend)
-            && (!is_blocked && !is_blocked_by);
+            &&  */
+
+        let include_meta = is_friend || (!is_blocked && !is_blocked_by);
 
         tracing::debug!(?metadata, included = include_meta);
         if include_meta {
@@ -1184,21 +1187,11 @@ impl IdentityStore {
                         if document.different(&identity) {
                             tracing::info!(%identity.did, "Updating local cache");
 
-                            let document_did = identity.did.clone();
-
-                            let emit = self.config.store_setting().update_events
-                                == UpdateEvents::Enabled
-                                || (self.config.store_setting().update_events
-                                    == UpdateEvents::FriendsOnly
-                                    && self.is_friend(&document_did).await.unwrap_or_default());
-
-                            if emit {
-                                tracing::trace!("Emitting identity update event");
-                                self.emit_event(MultiPassEventKind::IdentityUpdate {
-                                    did: document.did.clone(),
-                                })
-                                .await;
-                            }
+                            tracing::trace!("Emitting identity update event");
+                            self.emit_event(MultiPassEventKind::IdentityUpdate {
+                                did: document.did.clone(),
+                            })
+                            .await;
 
                             if !exclude_images {
                                 if document.metadata.profile_picture
@@ -1254,7 +1247,6 @@ impl IdentityStore {
 
                                                     tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
 
-                                                    if emit {
                                                         store
                                                         .emit_event(
                                                             MultiPassEventKind::IdentityUpdate {
@@ -1262,7 +1254,6 @@ impl IdentityStore {
                                                             },
                                                         )
                                                         .await;
-                                                    }
 
                                                     Ok::<_, anyhow::Error>(())
                                                 }.await;
@@ -1324,15 +1315,13 @@ impl IdentityStore {
 
                                                     tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
-                                                    if emit {
-                                                        store
+                                                    store
                                                             .emit_event(
                                                                 MultiPassEventKind::IdentityUpdate {
                                                                     did,
                                                                 },
                                                             )
                                                             .await;
-                                                    }
 
                                                     Ok::<_, anyhow::Error>(())
                                                 }.await;
@@ -1348,49 +1337,34 @@ impl IdentityStore {
 
                         let document_did = identity.did.clone();
 
-                        if matches!(
-                            self.config.store_setting().update_events,
-                            UpdateEvents::Enabled
-                        ) {
-                            let did = document_did.clone();
-                            self.emit_event(MultiPassEventKind::IdentityUpdate { did })
-                                .await;
-                        }
+                        let did = document_did.clone();
+                        self.emit_event(MultiPassEventKind::IdentityUpdate { did })
+                            .await;
 
                         if !exclude_images {
-                            let emit = self.config.store_setting().update_events
-                                == UpdateEvents::Enabled
-                                || (self.config.store_setting().update_events
-                                    == UpdateEvents::FriendsOnly
-                                    && self.is_friend(&document_did).await.unwrap_or_default());
+                            let mut picture = None;
+                            let mut banner = None;
 
-                            if emit {
-                                let mut picture = None;
-                                let mut banner = None;
+                            if let Some(cid) = identity.metadata.profile_picture {
+                                picture = Some(cid);
+                            }
 
-                                if let Some(cid) = identity.metadata.profile_picture {
-                                    picture = Some(cid);
-                                }
+                            if let Some(cid) = identity.metadata.profile_banner {
+                                banner = Some(cid)
+                            }
 
-                                if let Some(cid) = identity.metadata.profile_banner {
-                                    banner = Some(cid)
-                                }
-
-                                if banner.is_some() || picture.is_some() {
-                                    if !self.config.store_setting().fetch_over_bitswap {
-                                        self.request(
-                                            in_did,
-                                            RequestOption::Image { banner, picture },
-                                        )
+                            if banner.is_some() || picture.is_some() {
+                                if !self.config.store_setting().fetch_over_bitswap {
+                                    self.request(in_did, RequestOption::Image { banner, picture })
                                         .await?;
-                                    } else {
-                                        if let Some(picture) = picture {
-                                            crate::rt::spawn({
-                                                let ipfs = self.ipfs.clone();
-                                                let did = in_did.clone();
-                                                let store = self.clone();
-                                                async move {
-                                                    _ = async {
+                                } else {
+                                    if let Some(picture) = picture {
+                                        crate::rt::spawn({
+                                            let ipfs = self.ipfs.clone();
+                                            let did = in_did.clone();
+                                            let store = self.clone();
+                                            async move {
+                                                _ = async {
                                                         let peer_id = vec![did.to_peer_id()?];
                                                         let _ =
                                                             super::document::image_dag::get_image(
@@ -1420,17 +1394,17 @@ impl IdentityStore {
 
                                                         Ok::<_, anyhow::Error>(())
                                                     }.await;
-                                                }
-                                            });
-                                        }
-                                        if let Some(banner) = banner {
-                                            crate::rt::spawn({
-                                                let store = self.clone();
-                                                let ipfs = self.ipfs.clone();
+                                            }
+                                        });
+                                    }
+                                    if let Some(banner) = banner {
+                                        crate::rt::spawn({
+                                            let store = self.clone();
+                                            let ipfs = self.ipfs.clone();
 
-                                                let did = in_did.clone();
-                                                async move {
-                                                    _ = async {
+                                            let did = in_did.clone();
+                                            async move {
+                                                _ = async {
                                                         let peer_id = vec![did.to_peer_id()?];
                                                         let _ =
                                                             super::document::image_dag::get_image(
@@ -1460,9 +1434,8 @@ impl IdentityStore {
 
                                                         Ok::<_, anyhow::Error>(())
                                                     }.await;
-                                                }
-                                            });
-                                        }
+                                            }
+                                        });
                                     }
                                 }
                             }

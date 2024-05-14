@@ -8,7 +8,7 @@ use warp::{
     tesseract::Tesseract,
 };
 use warp_ipfs::{
-    config::{Bootstrap, Discovery, UpdateEvents},
+    config::{Bootstrap, Discovery},
     WarpIpfsBuilder,
 };
 
@@ -64,7 +64,6 @@ pub async fn create_account(
     config.store_setting_mut().share_platform = true;
     config.ipfs_setting_mut().relay_client.relay_address = vec![];
     config.ipfs_setting_mut().bootstrap = false;
-    config.store_setting_mut().update_events = UpdateEvents::Enabled;
     *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, _, fs) = WarpIpfsBuilder::default()
@@ -128,7 +127,6 @@ pub async fn create_account_and_chat(
         namespace: context,
         discovery_type: Default::default(),
     };
-    config.store_setting_mut().update_events = UpdateEvents::Enabled;
     config.store_setting_mut().share_platform = true;
     config.ipfs_setting_mut().relay_client.relay_address = vec![];
     config.ipfs_setting_mut().bootstrap = false;

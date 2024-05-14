@@ -123,17 +123,6 @@ pub struct IpfsSetting {
     pub dht_client: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum UpdateEvents {
-    #[default]
-    /// Emit events for all identity updates
-    Enabled,
-    /// Emit events for identity updates from friends
-    FriendsOnly,
-    /// Disable events
-    Disable,
-}
-
 pub type DefaultPfpFn = std::sync::Arc<
     dyn Fn(&Identity) -> Result<(Vec<u8>, FileType), std::io::Error> + Send + Sync + 'static,
 >;
@@ -158,8 +147,6 @@ pub struct StoreSetting {
     pub share_platform: bool,
     /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<Duration>,
-    /// Options to allow emitting identity events to all or just friends
-    pub update_events: UpdateEvents,
     /// Disable providing images for identities
     pub disable_images: bool,
     /// Announce to mesh network
@@ -185,7 +172,6 @@ impl Default for StoreSetting {
             fetch_over_bitswap: false,
             share_platform: false,
             friend_request_response_duration: None,
-            update_events: Default::default(),
             disable_images: false,
             with_friends: false,
             default_profile_picture: None,
