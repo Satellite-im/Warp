@@ -1,45 +1,36 @@
-mod behaviour;
-pub mod config;
-pub(crate) mod rt;
-pub mod store;
-mod thumbnail;
-mod utils;
-
-use chrono::{DateTime, Utc};
-use config::Config;
-use futures::channel::mpsc::channel;
-
-use futures::future::BoxFuture;
-use futures::stream::{self, BoxStream};
-use futures::{FutureExt, StreamExt, TryStreamExt};
-
-#[cfg(not(target_arch = "wasm32"))]
-use futures::AsyncReadExt;
-
-use futures_timeout::TimeoutExt;
-
-use ipfs::p2p::{
-    IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
-};
-
-use parking_lot::RwLock;
-use rust_ipfs as ipfs;
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use futures::channel::mpsc::channel;
+use futures::future::BoxFuture;
+use futures::stream::{self, BoxStream};
+#[cfg(not(target_arch = "wasm32"))]
+use futures::AsyncReadExt;
+use futures::{FutureExt, StreamExt, TryStreamExt};
+use futures_timeout::TimeoutExt;
+use ipfs::p2p::{
+    IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
+};
+use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
+use parking_lot::RwLock;
+use rust_ipfs as ipfs;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_util::compat::TokioAsyncReadCompatExt;
+use tracing::{error, info, warn, Instrument, Span};
+use uuid::Uuid;
+
+use config::Config;
 use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
 use store::files::FileStore;
 use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{error, info, warn, Instrument, Span};
 use utils::ExtensionType;
-use uuid::Uuid;
 use warp::constellation::directory::Directory;
 use warp::constellation::file::FileType;
 use warp::constellation::{
@@ -48,7 +39,16 @@ use warp::constellation::{
 };
 use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
+use warp::crypto::{KeyMaterial, DID};
+use warp::error::Error;
 use warp::module::Module;
+use warp::multipass::identity::{
+    Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
+};
+use warp::multipass::{
+    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, MultiPass,
+    MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
+};
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
@@ -58,22 +58,18 @@ use warp::raygun::{
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
-use warp::crypto::{KeyMaterial, DID};
-use warp::error::Error;
-use warp::multipass::identity::{
-    Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
-};
-use warp::multipass::{
-    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, MultiPass,
-    MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
-};
-
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
 use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+
+mod behaviour;
+pub mod config;
+pub(crate) mod rt;
+pub mod store;
+mod thumbnail;
+mod utils;
 
 const PUBSUB_MAX_BUF: usize = 8_388_608;
 
@@ -389,14 +385,6 @@ impl WarpIpfs {
                 }),
                 Default::default(),
             );
-
-            let bootstrap = self.inner.config.bootstrap();
-
-            if !matches!(bootstrap, Bootstrap::None) {
-                for addr in self.inner.config.bootstrap().address() {
-                    uninitialized = uninitialized.add_bootstrap(addr);
-                }
-            }
         }
 
         // If memory transport is enabled, this means that test are running and in such case, we should have the addresses be
@@ -513,38 +501,49 @@ impl WarpIpfs {
             }
         }
 
-        if self.inner.config.ipfs_setting().dht_client
-            && matches!(
-                self.inner.config.store_setting().discovery,
-                config::Discovery::Namespace {
-                    discovery_type: DiscoveryType::DHT,
-                    ..
-                }
-            )
-        {
-            ipfs.dht_mode(DhtMode::Client).await?;
-        }
-
         if matches!(
             self.inner.config.store_setting().discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
             }
-        ) && !empty_bootstrap
-        {
-            crate::rt::spawn({
-                let ipfs = ipfs.clone();
-                async move {
-                    loop {
-                        if let Err(e) = ipfs.bootstrap().await {
-                            error!("Failed to bootstrap: {e}")
+        ) {
+            match self.inner.config.bootstrap() {
+                Bootstrap::Custom(addrs) => {
+                    for addr in addrs {
+                        if let Err(e) = ipfs.add_bootstrap(addr.clone()).await {
+                            tracing::warn!(address = %addr, error = %e, "unable to add address to bootstrap");
                         }
-
-                        futures_timer::Delay::new(Duration::from_secs(60 * 5)).await;
                     }
                 }
-            });
+                Bootstrap::Ipfs => {
+                    if let Err(e) = ipfs.default_bootstrap().await {
+                        tracing::warn!(error = %e, "unable to add ipfs bootstrap");
+                    }
+                }
+                _ => {}
+            };
+
+            if self.inner.config.ipfs_setting().dht_client {
+                if let Err(e) = ipfs.dht_mode(DhtMode::Client).await {
+                    tracing::warn!(error = %e, "unable to set dht to client mode");
+                }
+            }
+
+            if !empty_bootstrap {
+                crate::rt::spawn({
+                    let ipfs = ipfs.clone();
+                    async move {
+                        loop {
+                            if let Err(e) = ipfs.bootstrap().await {
+                                error!("Failed to bootstrap: {e}")
+                            }
+
+                            futures_timer::Delay::new(Duration::from_secs(60 * 5)).await;
+                        }
+                    }
+                });
+            }
         }
 
         let relays = ipfs
