@@ -1,24 +1,24 @@
+use std::sync::Arc;
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
 };
-use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{
     channel::oneshot::{self, Canceled},
-    SinkExt,
-    stream::SelectAll, StreamExt,
+    stream::SelectAll,
+    SinkExt, StreamExt,
 };
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
-use ipfs::{Ipfs, Keypair, p2p::MultiaddrExt};
+use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{error, Span, warn};
+use tracing::{error, warn, Span};
 use web_time::Instant;
 
 use shuttle::identity::{RequestEvent, RequestPayload};
@@ -28,7 +28,7 @@ use warp::{
     multipass::identity::{IdentityImage, Platform},
 };
 use warp::{
-    crypto::{DID, did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint},
+    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     multipass::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
@@ -39,22 +39,22 @@ use warp::{
 
 use crate::{
     config::{self, Discovery as DiscoveryConfig},
-    store::{did_to_libp2p_pub, DidExt, discovery::Discovery, PeerIdExt, topics::PeerTopic},
+    store::{did_to_libp2p_pub, discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 
 use super::{
     connected_to_peer, did_keypair,
     document::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
-        ResolvedRootDocument, root::RootDocumentMap, RootDocument,
+        root::RootDocumentMap, ResolvedRootDocument, RootDocument,
     },
     ecdh_decrypt, ecdh_encrypt,
     event_subscription::EventSubscription,
-    MAX_IMAGE_SIZE,
     phonebook::PhoneBook,
     queue::Queue,
     request::PayloadRequest,
-    SHUTTLE_TIMEOUT, topics::IDENTITY_ANNOUNCEMENT,
+    topics::IDENTITY_ANNOUNCEMENT,
+    MAX_IMAGE_SIZE, SHUTTLE_TIMEOUT,
 };
 
 // TODO: Split into its own task

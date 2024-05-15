@@ -93,11 +93,9 @@ async fn setup<P: AsRef<Path>>(
 
     if opt.enable_discovery {
         let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
-            (Some(addr), None) => {
-                DiscoveryType::RzPoint {
-                    addresses: vec![addr.clone()],
-                }
-            }
+            (Some(addr), None) => DiscoveryType::RzPoint {
+                addresses: vec![addr.clone()],
+            },
             (Some(_), Some(_)) => unimplemented!(),
             _ => DiscoveryType::DHT,
         };

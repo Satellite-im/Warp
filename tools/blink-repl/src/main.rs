@@ -10,13 +10,13 @@ use rand::{distributions::Alphanumeric, Rng};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use warp::crypto::DID;
+use warp::multipass::identity::Identity;
+use warp::tesseract::Tesseract;
 use warp::{
     blink::{AudioTestEvent, Blink, BlinkEventKind, BlinkEventStream},
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
-use warp::crypto::DID;
-use warp::multipass::identity::Identity;
-use warp::tesseract::Tesseract;
 use warp_ipfs::{config::Config, WarpIpfsBuilder};
 
 mod logger;
