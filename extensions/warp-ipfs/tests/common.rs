@@ -63,7 +63,6 @@ pub async fn create_account(
     };
     config.store_setting_mut().share_platform = true;
     config.ipfs_setting_mut().relay_client.relay_address = vec![];
-    config.ipfs_setting_mut().bootstrap = false;
     *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, _, fs) = WarpIpfsBuilder::default()
@@ -129,7 +128,6 @@ pub async fn create_account_and_chat(
     };
     config.store_setting_mut().share_platform = true;
     config.ipfs_setting_mut().relay_client.relay_address = vec![];
-    config.ipfs_setting_mut().bootstrap = false;
     *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, raygun, fs) = WarpIpfsBuilder::default()

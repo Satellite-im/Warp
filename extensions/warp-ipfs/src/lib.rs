@@ -390,7 +390,9 @@ impl WarpIpfs {
                 Default::default(),
             );
 
-            if self.inner.config.ipfs_setting().bootstrap {
+            let bootstrap = self.inner.config.bootstrap();
+
+            if !matches!(bootstrap, Bootstrap::None) {
                 for addr in self.inner.config.bootstrap().address() {
                     uninitialized = uninitialized.add_bootstrap(addr);
                 }
@@ -529,8 +531,7 @@ impl WarpIpfs {
                 discovery_type: DiscoveryType::DHT,
                 ..
             }
-        ) && self.inner.config.ipfs_setting().bootstrap
-            && !empty_bootstrap
+        ) && !empty_bootstrap
         {
             crate::rt::spawn({
                 let ipfs = ipfs.clone();

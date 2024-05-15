@@ -94,7 +94,6 @@ async fn setup<P: AsRef<Path>>(
     if opt.enable_discovery {
         let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
             (Some(addr), None) => {
-                config.ipfs_setting_mut().bootstrap = false;
                 DiscoveryType::RzPoint {
                     addresses: vec![addr.clone()],
                 }
@@ -113,13 +112,9 @@ async fn setup<P: AsRef<Path>>(
             },
         };
         config.store_setting_mut().discovery = dis_ty;
-        if let Some(bootstrap) = opt.bootstrap {
-            config.ipfs_setting_mut().bootstrap = bootstrap;
-        }
     } else {
         config.store_setting_mut().discovery = Discovery::None;
         *config.bootstrap_mut() = Bootstrap::None;
-        config.ipfs_setting_mut().bootstrap = false;
     }
 
     if opt.disable_relay {

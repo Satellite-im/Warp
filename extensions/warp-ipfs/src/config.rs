@@ -21,7 +21,7 @@ pub enum Discovery {
         namespace: Option<String>,
         discovery_type: DiscoveryType,
     },
-    /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
+    /// Disables Discovery
     #[default]
     None,
 }
@@ -115,7 +115,6 @@ impl Default for RelayClient {
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
-    pub bootstrap: bool,
     pub portmapping: bool,
     pub agent_version: Option<String>,
     /// Used for testing with a memory transport
@@ -302,7 +301,6 @@ impl Default for Config {
             listen_on: vec![],
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                bootstrap: false,
                 ..Default::default()
             },
             store_setting: Default::default(),
@@ -334,7 +332,6 @@ impl Config {
             bootstrap: Bootstrap::Ipfs,
             listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
-                bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     ..Default::default()
@@ -360,7 +357,6 @@ impl Config {
             bootstrap: Bootstrap::None,
             listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
-                bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     ..Default::default()
@@ -384,7 +380,6 @@ impl Config {
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                bootstrap: false,
                 relay_client: RelayClient {
                     ..Default::default()
                 },
@@ -406,7 +401,6 @@ impl Config {
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                bootstrap: true,
                 relay_client: RelayClient {
                     ..Default::default()
                 },
