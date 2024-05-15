@@ -335,7 +335,6 @@ impl WarpIpfs {
             .set_listening_addrs(self.inner.config.listen_on().to_vec())
             .with_custom_behaviour(behaviour)
             .set_keypair(&keypair)
-            .with_rendezvous_client()
             .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
                 enable_memory_transport: self.inner.config.ipfs_setting().memory_transport,
@@ -385,6 +384,16 @@ impl WarpIpfs {
                 }),
                 Default::default(),
             );
+        }
+
+        if matches!(
+            self.inner.config.store_setting().discovery,
+            config::Discovery::Namespace {
+                discovery_type: DiscoveryType::RzPoint { .. },
+                ..
+            }
+        ) {
+            uninitialized = uninitialized.with_rendezvous_client();
         }
 
         // If memory transport is enabled, this means that test are running and in such case, we should have the addresses be
