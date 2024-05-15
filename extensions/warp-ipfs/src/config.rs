@@ -7,9 +7,9 @@ use warp::{constellation::file::FileType, multipass::identity::Identity};
 
 #[derive(Default, Debug, Clone)]
 pub enum Bootstrap {
-    #[default]
     Ipfs,
     Custom(Vec<Multiaddr>),
+    #[default]
     None,
 }
 
