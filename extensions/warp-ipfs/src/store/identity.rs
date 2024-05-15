@@ -1,39 +1,34 @@
-use crate::{
-    config::{self, Discovery as DiscoveryConfig},
-    store::{did_to_libp2p_pub, discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
-};
-use chrono::{DateTime, Utc};
-
-use futures::{
-    channel::oneshot::{self, Canceled},
-    stream::SelectAll,
-    SinkExt, StreamExt,
-};
-
-use futures_timeout::TimeoutExt;
-use futures_timer::Delay;
-use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
-
-use libipld::Cid;
-use rust_ipfs as ipfs;
-use serde::{Deserialize, Serialize};
-use shuttle::identity::{RequestEvent, RequestPayload};
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
 };
+use std::sync::Arc;
+
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use futures::{
+    channel::oneshot::{self, Canceled},
+    SinkExt,
+    stream::SelectAll, StreamExt,
+};
+use futures_timeout::TimeoutExt;
+use futures_timer::Delay;
+use ipfs::{Ipfs, Keypair, p2p::MultiaddrExt};
+use libipld::Cid;
+use rust_ipfs as ipfs;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+use tracing::{error, Span, warn};
 use web_time::Instant;
 
-use tokio::sync::RwLock;
-use tracing::{error, warn, Span};
-
+use shuttle::identity::{RequestEvent, RequestPayload};
 use warp::{
     constellation::file::FileType,
     crypto::{did_key::CoreSign, zeroize::Zeroizing},
     multipass::identity::{IdentityImage, Platform},
 };
 use warp::{
-    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
+    crypto::{DID, did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint},
     error::Error,
     multipass::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
@@ -42,21 +37,24 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use std::sync::Arc;
+use crate::{
+    config::{self, Discovery as DiscoveryConfig},
+    store::{did_to_libp2p_pub, DidExt, discovery::Discovery, PeerIdExt, topics::PeerTopic},
+};
 
 use super::{
     connected_to_peer, did_keypair,
     document::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
-        root::RootDocumentMap, ResolvedRootDocument, RootDocument,
+        ResolvedRootDocument, root::RootDocumentMap, RootDocument,
     },
     ecdh_decrypt, ecdh_encrypt,
     event_subscription::EventSubscription,
+    MAX_IMAGE_SIZE,
     phonebook::PhoneBook,
     queue::Queue,
     request::PayloadRequest,
-    topics::IDENTITY_ANNOUNCEMENT,
-    MAX_IMAGE_SIZE, SHUTTLE_TIMEOUT,
+    SHUTTLE_TIMEOUT, topics::IDENTITY_ANNOUNCEMENT,
 };
 
 // TODO: Split into its own task
@@ -332,11 +330,7 @@ pub enum ResponseOption {
     /// Identity request
     Identity { identity: IdentityDocument },
     /// Pictures
-    Image {
-        cid: Cid,
-        ty: FileType,
-        data: Vec<u8>,
-    },
+    Image { cid: Cid, ty: FileType, data: Bytes },
 }
 
 impl std::fmt::Debug for ResponseOption {
@@ -971,6 +965,8 @@ impl IdentityStore {
         let platform =
             (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
 
+        identity.metadata.platform = platform;
+
         let mut metadata = identity.metadata;
         metadata.platform = platform;
 
@@ -1052,7 +1048,7 @@ impl IdentityStore {
             option: ResponseOption::Image {
                 cid,
                 ty: image.image_type().clone(),
-                data: image.data().to_vec(),
+                data: Bytes::copy_from_slice(image.data()),
             },
         };
 
@@ -1106,7 +1102,7 @@ impl IdentityStore {
             option: ResponseOption::Image {
                 cid,
                 ty: image.image_type().clone(),
-                data: image.data().to_vec(),
+                data: Bytes::copy_from_slice(image.data()),
             },
         };
 
