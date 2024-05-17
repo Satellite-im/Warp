@@ -1,12 +1,12 @@
 #![allow(clippy::result_large_err)]
 
-use std::{collections::HashMap, fmt::Debug};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::{collections::HashMap, fmt::Debug};
 
 use futures::{stream::BoxStream, StreamExt};
 use parking_lot::RwLock;
@@ -15,9 +15,9 @@ use zeroize::Zeroize;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use crate::{crypto::cipher::Cipher, error::Error};
 #[cfg(target_arch = "wasm32")]
 use crate::js_exports::stream::AsyncIterator;
+use crate::{crypto::cipher::Cipher, error::Error};
 
 type Result<T> = std::result::Result<T, Error>;
 
