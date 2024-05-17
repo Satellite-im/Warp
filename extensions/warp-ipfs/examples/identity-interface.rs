@@ -72,12 +72,9 @@ async fn account(
 
     if opt.enable_discovery {
         let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
-            (Some(addr), None) => {
-                config.ipfs_setting_mut().bootstrap = false;
-                DiscoveryType::RzPoint {
-                    addresses: vec![addr.clone()],
-                }
-            }
+            (Some(addr), None) => DiscoveryType::RzPoint {
+                addresses: vec![addr.clone()],
+            },
             (Some(_), Some(_)) => unimplemented!(),
             _ => DiscoveryType::DHT,
         };
@@ -92,13 +89,9 @@ async fn account(
             },
         };
         config.store_setting_mut().discovery = dis_ty;
-        if let Some(bootstrap) = opt.bootstrap {
-            config.ipfs_setting_mut().bootstrap = bootstrap;
-        }
     } else {
         config.store_setting_mut().discovery = Discovery::None;
         *config.bootstrap_mut() = Bootstrap::None;
-        config.ipfs_setting_mut().bootstrap = false;
     }
 
     if opt.disable_relay {

@@ -1,7 +1,9 @@
-use clap::Parser;
-use comfy_table::Table;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+use clap::Parser;
+use comfy_table::Table;
+
 use warp::constellation::Constellation;
 use warp::crypto::zeroize::Zeroizing;
 use warp::multipass::identity::Identifier;
@@ -40,7 +42,6 @@ async fn setup<P: AsRef<Path>>(
 
     let mut config = warp_ipfs::config::Config::production(path);
     config.store_setting_mut().discovery = Discovery::None;
-    config.ipfs_setting_mut().bootstrap = false;
     config.ipfs_setting_mut().mdns.enable = false;
     *config.enable_relay_mut() = false;
 
