@@ -132,49 +132,54 @@ pub struct MessageOptions {
 }
 
 impl MessageOptions {
-    pub fn set_date_range(mut self, range: Range<DateTime<Utc>>) -> MessageOptions {
+    pub fn set_date_range(mut self, range: Range<DateTime<Utc>>) -> Self {
         self.date_range = Some(range);
         self
     }
 
-    pub fn set_range(mut self, range: Range<usize>) -> MessageOptions {
+    pub fn set_range(mut self, range: Range<usize>) -> Self {
         self.range = Some(range);
         self
     }
 
-    pub fn set_limit(mut self, limit: u8) -> MessageOptions {
+    pub fn set_limit(mut self, limit: u8) -> Self {
         self.limit = Some(limit);
         self
     }
 
-    pub fn set_keyword(mut self, keyword: &str) -> MessageOptions {
+    pub fn set_skip(mut self, skip: i64) -> Self {
+        self.skip = Some(skip);
+        self
+    }
+
+    pub fn set_keyword(mut self, keyword: &str) -> Self {
         self.keyword = Some(keyword.to_string());
         self
     }
 
-    pub fn set_first_message(mut self) -> MessageOptions {
+    pub fn set_first_message(mut self) -> Self {
         self.first_message = true;
         self.last_message = false;
         self
     }
 
-    pub fn set_last_message(mut self) -> MessageOptions {
+    pub fn set_last_message(mut self) -> Self {
         self.first_message = false;
         self.last_message = true;
         self
     }
 
-    pub fn set_pinned(mut self) -> MessageOptions {
+    pub fn set_pinned(mut self) -> Self {
         self.pinned = true;
         self
     }
 
-    pub fn set_reverse(mut self) -> MessageOptions {
+    pub fn set_reverse(mut self) -> Self {
         self.reverse = true;
         self
     }
 
-    pub fn set_messages_type(mut self, r#type: MessagesType) -> MessageOptions {
+    pub fn set_messages_type(mut self, r#type: MessagesType) -> Self {
         self.messages_type = r#type;
         self
     }
@@ -188,9 +193,7 @@ impl MessageOptions {
     pub fn range(&self) -> Option<Range<usize>> {
         self.range.clone()
     }
-}
 
-impl MessageOptions {
     pub fn limit(&self) -> Option<u8> {
         self.limit
     }
@@ -472,10 +475,13 @@ impl Default for ConversationSettings {
 
 /// Settings for a direct conversation.
 // Any future direct conversation settings go here.
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[repr(C)]
 pub struct DirectConversationSettings {}
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[display(
     fmt = "Everyone can add participants: {}, Everyone can change name: {}",
@@ -492,6 +498,7 @@ pub struct GroupSettings {
     members_can_change_name: bool,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl GroupSettings {
     pub fn members_can_add_participants(&self) -> bool {
         self.members_can_add_participants
@@ -510,6 +517,7 @@ impl GroupSettings {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
 #[repr(C)]
 #[serde(rename_all = "snake_case")]
@@ -849,6 +857,7 @@ impl Message {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
 #[repr(C)]
@@ -866,6 +875,7 @@ pub enum MessageStatus {
     Delivered,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum ReactionState {
@@ -873,6 +883,7 @@ pub enum ReactionState {
     Remove,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum PinState {
@@ -880,6 +891,7 @@ pub enum PinState {
     Unpin,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum EmbedState {

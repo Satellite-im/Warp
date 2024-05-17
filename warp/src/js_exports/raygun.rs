@@ -1,7 +1,10 @@
 use crate::{
     crypto::DID,
     js_exports::stream::AsyncIterator,
-    raygun::{self, RayGun},
+    raygun::{
+        self, EmbedState, GroupSettings, MessageStatus, MessageType, PinState, RayGun,
+        ReactionState,
+    },
 };
 
 use futures::StreamExt;
@@ -44,7 +47,7 @@ impl RayGunBox {
             .map(|did| DID::from_str(did).unwrap())
             .collect();
         self.inner
-            .create_group_conversation(name, recipients, settings.inner)
+            .create_group_conversation(name, recipients, settings)
             .await
             .map_err(|e| e.into())
             .map(|ok| Conversation::new(ok))
@@ -112,7 +115,6 @@ impl RayGunBox {
             )
             .await
             .map_err(|e| e.into())
-            .map(|ok| MessageStatus::new(ok))
     }
 
     /// Retrieve all message references from a conversation
@@ -214,7 +216,7 @@ impl RayGunBox {
             .react(
                 Uuid::from_str(&conversation_id).unwrap(),
                 Uuid::from_str(&message_id).unwrap(),
-                state.inner,
+                state,
                 emoji,
             )
             .await
@@ -232,7 +234,7 @@ impl RayGunBox {
             .pin(
                 Uuid::from_str(&conversation_id).unwrap(),
                 Uuid::from_str(&message_id).unwrap(),
-                state.inner,
+                state,
             )
             .await
             .map_err(|e| e.into())
@@ -266,7 +268,7 @@ impl RayGunBox {
             .embeds(
                 Uuid::from_str(&conversation_id).unwrap(),
                 Uuid::from_str(&message_id).unwrap(),
-                state.inner,
+                state,
             )
             .await
             .map_err(|e| e.into())
@@ -276,10 +278,13 @@ impl RayGunBox {
     pub async fn update_conversation_settings(
         &mut self,
         conversation_id: String,
-        settings: ConversationSettings,
+        settings: JsValue,
     ) -> Result<(), JsError> {
         self.inner
-            .update_conversation_settings(Uuid::from_str(&conversation_id).unwrap(), settings.inner)
+            .update_conversation_settings(
+                Uuid::from_str(&conversation_id).unwrap(),
+                serde_wasm_bindgen::from_value(settings).unwrap(),
+            )
             .await
             .map_err(|e| e.into())
     }
@@ -311,8 +316,8 @@ impl Conversation {
     pub fn modified(&self) -> js_sys::Date {
         self.inner.modified().into()
     }
-    pub fn settings(&self) -> ConversationSettings {
-        ConversationSettings::new(self.inner.settings())
+    pub fn settings(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.settings()).unwrap()
     }
     pub fn recipients(&self) -> Vec<String> {
         self.inner
@@ -324,58 +329,73 @@ impl Conversation {
 }
 
 #[wasm_bindgen]
-pub struct ConversationSettings {
-    inner: raygun::ConversationSettings,
-}
-#[wasm_bindgen]
-impl ConversationSettings {
-    fn new(inner: raygun::ConversationSettings) -> Self {
-        Self { inner }
-    }
-}
-
-#[wasm_bindgen]
-pub struct EmbedState {
-    inner: raygun::EmbedState,
-}
-#[wasm_bindgen]
-impl EmbedState {
-    fn new(inner: raygun::EmbedState) -> Self {
-        Self { inner }
-    }
-}
-
-#[wasm_bindgen]
-pub struct PinState {
-    inner: raygun::PinState,
-}
-#[wasm_bindgen]
-impl PinState {
-    fn new(inner: raygun::PinState) -> Self {
-        Self { inner }
-    }
-}
-
-#[wasm_bindgen]
-pub struct ReactionState {
-    inner: raygun::ReactionState,
-}
-#[wasm_bindgen]
-impl ReactionState {
-    fn new(inner: raygun::ReactionState) -> Self {
-        Self { inner }
-    }
-}
-
-#[wasm_bindgen]
 pub struct Messages {
-    inner: raygun::Messages,
+    variant: MessagesEnum,
+    value: JsValue,
 }
 #[wasm_bindgen]
 impl Messages {
-    fn new(inner: raygun::Messages) -> Self {
-        Self { inner }
+    fn new(messages: raygun::Messages) -> Self {
+        match messages {
+            raygun::Messages::List(list) => Self {
+                variant: MessagesEnum::List,
+                value: serde_wasm_bindgen::to_value(
+                    &list
+                        .iter()
+                        .map(|m| Message::new(m.clone()))
+                        .collect::<Vec<Message>>(),
+                )
+                .unwrap(),
+            },
+            raygun::Messages::Stream(stream) => Self {
+                variant: MessagesEnum::List,
+                value: AsyncIterator::new(Box::pin(stream.map(|s| Message::new(s).into()))).into(),
+            },
+            raygun::Messages::Page { pages, total } => {
+                let pages = pages
+                    .iter()
+                    .map(|p| MessagePage {
+                        id: p.id(),
+                        messages: p
+                            .messages()
+                            .iter()
+                            .map(|m| Message::new(m.clone()))
+                            .collect(),
+                        total: p.total(),
+                    })
+                    .collect();
+
+                Self {
+                    variant: MessagesEnum::Page,
+                    value: serde_wasm_bindgen::to_value(&Page { pages, total }).unwrap(),
+                }
+            }
+        }
     }
+    pub fn variant(&self) -> MessagesEnum {
+        self.variant
+    }
+    pub fn value(&self) -> JsValue {
+        self.value.clone()
+    }
+}
+#[derive(Serialize, Deserialize)]
+pub struct Page {
+    pub pages: Vec<MessagePage>,
+    pub total: usize,
+}
+#[derive(Serialize, Deserialize)]
+pub struct MessagePage {
+    pub id: usize,
+    pub messages: Vec<Message>,
+    pub total: usize,
+}
+#[wasm_bindgen]
+#[derive(Copy, Clone)]
+pub enum MessagesEnum {
+    List,
+    Stream,
+    Page,
 }
 
 #[wasm_bindgen]
@@ -384,8 +404,100 @@ pub struct MessageOptions {
 }
 #[wasm_bindgen]
 impl MessageOptions {
-    fn new(inner: raygun::MessageOptions) -> Self {
-        Self { inner }
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: raygun::MessageOptions::default(),
+        }
+    }
+
+    pub fn set_date_range(&mut self, range: JsValue) {
+        self.inner = self
+            .inner
+            .clone()
+            .set_date_range(serde_wasm_bindgen::from_value(range).unwrap());
+    }
+
+    pub fn set_range(&mut self, range: JsValue) {
+        self.inner = self
+            .inner
+            .clone()
+            .set_range(serde_wasm_bindgen::from_value(range).unwrap());
+    }
+
+    pub fn set_limit(&mut self, limit: u8) {
+        self.inner = self.inner.clone().set_limit(limit);
+    }
+
+    pub fn set_skip(&mut self, skip: i64) {
+        self.inner = self.inner.clone().set_skip(skip);
+    }
+
+    pub fn set_keyword(&mut self, keyword: &str) {
+        self.inner = self.inner.clone().set_keyword(keyword);
+    }
+
+    pub fn set_first_message(&mut self) {
+        self.inner = self.inner.clone().set_first_message();
+    }
+
+    pub fn set_last_message(&mut self) {
+        self.inner = self.inner.clone().set_last_message();
+    }
+
+    pub fn set_pinned(&mut self) {
+        self.inner = self.inner.clone().set_pinned();
+    }
+
+    pub fn set_reverse(&mut self) {
+        self.inner = self.inner.clone().set_reverse();
+    }
+
+    pub fn set_messages_type(&mut self, ty: JsValue) {
+        self.inner = self
+            .inner
+            .clone()
+            .set_messages_type(serde_wasm_bindgen::from_value(ty).unwrap());
+    }
+
+    pub fn date_range(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.date_range()).unwrap()
+    }
+
+    pub fn range(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.range()).unwrap()
+    }
+
+    pub fn limit(&self) -> Option<u8> {
+        self.inner.limit()
+    }
+
+    pub fn skip(&self) -> Option<i64> {
+        self.inner.skip()
+    }
+
+    pub fn keyword(&self) -> Option<String> {
+        self.inner.keyword().clone()
+    }
+
+    pub fn first_message(&self) -> bool {
+        self.inner.first_message()
+    }
+
+    pub fn last_message(&self) -> bool {
+        self.inner.last_message()
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.inner.pinned()
+    }
+
+    pub fn messages_type(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.messages_type()).unwrap()
+    }
+
+    pub fn reverse(&self) -> bool {
+        self.inner.reverse()
     }
 }
 
@@ -398,20 +510,75 @@ impl MessageReference {
     fn new(inner: raygun::MessageReference) -> Self {
         Self { inner }
     }
-}
 
-#[wasm_bindgen]
-pub struct MessageStatus {
-    inner: raygun::MessageStatus,
-}
-#[wasm_bindgen]
-impl MessageStatus {
-    fn new(inner: raygun::MessageStatus) -> Self {
-        Self { inner }
+    pub fn id(&self) -> String {
+        self.inner.id().to_string()
+    }
+
+    pub fn conversation_id(&self) -> String {
+        self.inner.conversation_id().to_string()
+    }
+
+    pub fn sender(&self) -> String {
+        self.inner.sender().to_string()
+    }
+
+    pub fn date(&self) -> js_sys::Date {
+        self.inner.date().into()
+    }
+
+    pub fn modified(&self) -> Option<js_sys::Date> {
+        self.inner.modified().map(|d| d.into())
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.inner.pinned()
+    }
+
+    pub fn replied(&self) -> Option<String> {
+        self.inner.replied().map(|uuid| uuid.to_string())
+    }
+
+    pub fn deleted(&self) -> bool {
+        self.inner.deleted()
+    }
+
+    pub fn set_id(&mut self, id: String) {
+        self.inner.set_id(Uuid::from_str(&id).unwrap());
+    }
+
+    pub fn set_conversation_id(&mut self, id: String) {
+        self.inner.set_conversation_id(Uuid::from_str(&id).unwrap());
+    }
+
+    pub fn set_sender(&mut self, id: String) {
+        self.inner.set_sender(DID::from_str(&id).unwrap());
+    }
+
+    pub fn set_date(&mut self, date: js_sys::Date) {
+        self.inner.set_date(date.into());
+    }
+
+    pub fn set_modified(&mut self, date: js_sys::Date) {
+        self.inner.set_modified(date.into());
+    }
+
+    pub fn set_pinned(&mut self, pin: bool) {
+        self.inner.set_pinned(pin)
+    }
+
+    pub fn set_replied(&mut self, replied: Option<String>) {
+        self.inner
+            .set_replied(replied.map(|uuid| Uuid::from_str(&uuid).unwrap()));
+    }
+
+    pub fn set_delete(&mut self, deleted: bool) {
+        self.inner.set_delete(deleted)
     }
 }
 
 #[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
 pub struct Message {
     inner: raygun::Message,
 }
@@ -420,15 +587,121 @@ impl Message {
     fn new(inner: raygun::Message) -> Self {
         Self { inner }
     }
-}
 
-#[wasm_bindgen]
-pub struct GroupSettings {
-    inner: raygun::GroupSettings,
-}
-#[wasm_bindgen]
-impl GroupSettings {
-    fn new(inner: raygun::GroupSettings) -> Self {
-        Self { inner }
+    pub fn id(&self) -> String {
+        self.inner.id().to_string()
+    }
+
+    pub fn message_type(&self) -> raygun::MessageType {
+        self.inner.message_type()
+    }
+
+    pub fn conversation_id(&self) -> String {
+        self.inner.conversation_id().to_string()
+    }
+
+    pub fn sender(&self) -> String {
+        self.inner.sender().to_string()
+    }
+
+    pub fn date(&self) -> js_sys::Date {
+        self.inner.date().into()
+    }
+
+    pub fn modified(&self) -> Option<js_sys::Date> {
+        self.inner.modified().map(|d| d.into())
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.inner.pinned()
+    }
+
+    pub fn reactions(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.reactions()).unwrap()
+    }
+
+    pub fn mentions(&self) -> Vec<String> {
+        self.inner
+            .mentions()
+            .iter()
+            .map(|did| did.to_string())
+            .collect()
+    }
+
+    pub fn lines(&self) -> Vec<String> {
+        self.inner.lines()
+    }
+
+    pub fn attachments(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.attachments()).unwrap()
+    }
+
+    pub fn metadata(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.metadata()).unwrap()
+    }
+
+    pub fn replied(&self) -> Option<String> {
+        self.inner.replied().map(|uuid| uuid.to_string())
+    }
+
+    pub fn set_id(&mut self, id: String) {
+        self.inner.set_id(Uuid::from_str(&id).unwrap());
+    }
+
+    pub fn set_message_type(&mut self, message_type: MessageType) {
+        self.inner.set_message_type(message_type);
+    }
+
+    pub fn set_conversation_id(&mut self, id: String) {
+        self.inner.set_conversation_id(Uuid::from_str(&id).unwrap());
+    }
+
+    pub fn set_sender(&mut self, id: String) {
+        self.inner.set_sender(DID::from_str(&id).unwrap());
+    }
+
+    pub fn set_date(&mut self, date: js_sys::Date) {
+        self.inner.set_date(date.into());
+    }
+
+    pub fn set_modified(&mut self, date: js_sys::Date) {
+        self.inner.set_modified(date.into());
+    }
+
+    pub fn set_pinned(&mut self, pin: bool) {
+        self.inner.set_pinned(pin)
+    }
+
+    pub fn set_reactions(&mut self, reaction: JsValue) {
+        self.inner
+            .set_reactions(serde_wasm_bindgen::from_value(reaction).unwrap());
+    }
+
+    pub fn set_mentions(&mut self, mentions: Vec<String>) {
+        self.inner.set_mentions(
+            mentions
+                .iter()
+                .map(|did| DID::from_str(did).unwrap())
+                .collect(),
+        )
+    }
+
+    pub fn set_lines(&mut self, val: Vec<String>) {
+        self.inner.set_lines(val);
+    }
+
+    pub fn set_attachment(&mut self, attachments: JsValue) {
+        self.inner
+            .set_attachment(serde_wasm_bindgen::from_value(attachments).unwrap())
+    }
+
+    pub fn set_metadata(&mut self, metadata: JsValue) {
+        self.inner
+            .set_metadata(serde_wasm_bindgen::from_value(metadata).unwrap())
+    }
+
+    pub fn set_replied(&mut self, replied: Option<String>) {
+        self.inner
+            .set_replied(replied.map(|s| Uuid::from_str(&s).unwrap()));
     }
 }
