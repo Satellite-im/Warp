@@ -31,10 +31,50 @@
       let identity_b = await warp_b.multipass.get_own_identity()
       console.log(identity_b)
 
-      let conversation = await warp_a.raygun.create_conversation(identity_b.did_key())
-      console.log(conversation)
-      console.log(conversation.settings())
       
+
+      let conversation_a = await warp_a.raygun.create_conversation(identity_b.did_key())
+      console.log(conversation_a)
+      let asynciterator_a = await warp_a.raygun.get_conversation_stream(conversation_a.id());
+      let subscribe_a = { [Symbol.asyncIterator]() { return asynciterator_a } }
+      async function subscribe_a_reader() {
+        for await (const value of subscribe_a) {
+          if (value.message_received) {
+            let conversation_id = value.message_received.conversation_id
+            let message_id = value.message_received.message_id
+            let message = await warp_a.raygun.get_message(conversation_id, message_id)
+            let lines = message.lines()
+            console.log(`${identity_a.username()} saw: ${lines}`)
+            lines[1] = (parseInt(lines[1]) + 1).toString()
+            await warp_a.raygun.send(conversation_id, lines)
+          }
+        }
+      };
+      subscribe_a_reader()
+
+      let conversation_b = await warp_b.raygun.create_conversation(identity_a.did_key())
+      console.log(conversation_b)
+      let asynciterator_b = await warp_b.raygun.get_conversation_stream(conversation_b.id());
+      let subscribe_b = { [Symbol.asyncIterator]() { return asynciterator_b } }
+      async function subscribe_b_reader() {
+        for await (const value of subscribe_b) {
+          if (value.message_received) {
+            let conversation_id = value.message_received.conversation_id
+            let message_id = value.message_received.message_id
+            let message = await warp_b.raygun.get_message(conversation_id, message_id)
+            let lines = message.lines()
+            console.log(`${identity_b.username()} saw: ${lines}`)
+            lines[1] = (parseInt(lines[1]) + 1).toString()
+            await warp_b.raygun.send(conversation_id, lines)
+          }
+        }
+      };
+      subscribe_b_reader()
+
+      let msg = ["hello", "1"]
+      let msg_id = await warp_a.raygun.send(conversation_a.id(), msg)
+      console.log(`identity: ${identity_a.username()} \nmsg_id: ${msg_id} \nmsg: ${msg} `)
+
     });
   </script>
   <body>

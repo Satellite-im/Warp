@@ -2,8 +2,8 @@ use crate::{
     crypto::DID,
     js_exports::stream::AsyncIterator,
     raygun::{
-        self, EmbedState, GroupSettings, MessageStatus, MessageType, PinState, RayGun,
-        ReactionState,
+        self, EmbedState, GroupSettings, MessageEvent, MessageStatus, MessageType, PinState,
+        RayGun, ReactionState,
     },
 };
 
@@ -285,6 +285,67 @@ impl RayGunBox {
                 Uuid::from_str(&conversation_id).unwrap(),
                 serde_wasm_bindgen::from_value(settings).unwrap(),
             )
+            .await
+            .map_err(|e| e.into())
+    }
+}
+
+/// impl RayGunStream trait
+#[wasm_bindgen]
+impl RayGunBox {
+    /// Subscribe to an stream of events from the conversation
+    pub async fn get_conversation_stream(
+        &mut self,
+        conversation_id: String,
+    ) -> Result<AsyncIterator, JsError> {
+        self.inner
+            .get_conversation_stream(Uuid::from_str(&conversation_id).unwrap())
+            .await
+            .map_err(|e| e.into())
+            .map(|ok| {
+                AsyncIterator::new(Box::pin(
+                    ok.map(|s| serde_wasm_bindgen::to_value(&s).unwrap()),
+                ))
+            })
+    }
+
+    /// Subscribe to an stream of events
+    pub async fn raygun_subscribe(&mut self) -> Result<AsyncIterator, JsError> {
+        self.inner
+            .raygun_subscribe()
+            .await
+            .map_err(|e| e.into())
+            .map(|ok| {
+                AsyncIterator::new(Box::pin(
+                    ok.map(|s| serde_wasm_bindgen::to_value(&s).unwrap()),
+                ))
+            })
+    }
+}
+
+/// impl RayGunEvents trait
+#[wasm_bindgen]
+impl RayGunBox {
+    /// Send an event to a conversation
+    pub async fn send_event(
+        &mut self,
+        conversation_id: String,
+        event: MessageEvent,
+    ) -> Result<(), JsError> {
+        self.inner
+            .send_event(Uuid::from_str(&conversation_id).unwrap(), event)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Cancel event that was sent, if any.
+    pub async fn cancel_event(
+        &mut self,
+        conversation_id: String,
+        event: MessageEvent,
+    ) -> Result<(), JsError> {
+        self.inner
+            .cancel_event(Uuid::from_str(&conversation_id).unwrap(), event)
             .await
             .map_err(|e| e.into())
     }
