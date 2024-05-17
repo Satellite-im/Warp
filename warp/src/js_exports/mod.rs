@@ -13,6 +13,11 @@ pub mod multipass;
 pub mod raygun;
 pub mod stream;
 
+#[wasm_bindgen(start)]
+pub fn initialize() {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+}
+
 #[wasm_bindgen]
 pub struct WarpInstance {
     multipass: MultiPassBox,
