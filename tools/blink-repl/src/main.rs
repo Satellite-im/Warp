@@ -1,29 +1,23 @@
+use std::path::Path;
+use std::str::FromStr;
+
 use anyhow::bail;
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::{channel::oneshot, StreamExt};
-
 use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+use warp::crypto::DID;
+use warp::multipass::identity::Identity;
+use warp::tesseract::Tesseract;
 use warp::{
     blink::{AudioTestEvent, Blink, BlinkEventKind, BlinkEventStream},
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
-
-use std::path::Path;
-
-use std::str::FromStr;
-
-use warp::crypto::DID;
-use warp::multipass::identity::Identity;
-
-use warp::tesseract::Tesseract;
-use warp_ipfs::{
-    config::{Config, UpdateEvents},
-    WarpIpfsBuilder,
-};
+use warp_ipfs::{config::Config, WarpIpfsBuilder};
 
 mod logger;
 
@@ -362,9 +356,7 @@ async fn main() -> anyhow::Result<()> {
     let mut config = Config::production(multipass_dir);
     config.ipfs_setting_mut().portmapping = true;
     config.ipfs_setting_mut().agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
-    config.store_setting_mut().emit_online_event = true;
     config.store_setting_mut().share_platform = true;
-    config.store_setting_mut().update_events = UpdateEvents::Enabled;
 
     let (mut multipass, _, _) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract.clone())

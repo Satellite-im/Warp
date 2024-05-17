@@ -145,22 +145,27 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
 }
 
 impl<M> PayloadRequest<M> {
+    #[inline]
     pub fn sender(&self) -> &PeerId {
         self.on_behalf.as_ref().unwrap_or(&self.sender)
     }
 
+    #[inline]
     pub fn original_sender(&self) -> &PeerId {
         &self.sender
     }
 
+    #[inline]
     pub fn cosigner(&self) -> Option<&PeerId> {
         self.on_behalf.as_ref()
     }
 
+    #[inline]
     pub fn message(&self) -> &M {
         &self.message
     }
 
+    #[inline]
     pub fn date(&self) -> DateTime<Utc> {
         self.date
     }
