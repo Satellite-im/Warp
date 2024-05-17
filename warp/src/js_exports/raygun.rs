@@ -538,7 +538,7 @@ impl MessageOptions {
     }
 
     pub fn keyword(&self) -> Option<String> {
-        self.inner.keyword().clone()
+        self.inner.keyword()
     }
 
     pub fn first_message(&self) -> bool {
