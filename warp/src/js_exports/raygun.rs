@@ -520,46 +520,6 @@ impl MessageOptions {
             .clone()
             .set_messages_type(serde_wasm_bindgen::from_value(ty).unwrap());
     }
-
-    pub fn date_range(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.date_range()).unwrap()
-    }
-
-    pub fn range(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.range()).unwrap()
-    }
-
-    pub fn limit(&self) -> Option<u8> {
-        self.inner.limit()
-    }
-
-    pub fn skip(&self) -> Option<i64> {
-        self.inner.skip()
-    }
-
-    pub fn keyword(&self) -> Option<String> {
-        self.inner.keyword()
-    }
-
-    pub fn first_message(&self) -> bool {
-        self.inner.first_message()
-    }
-
-    pub fn last_message(&self) -> bool {
-        self.inner.last_message()
-    }
-
-    pub fn pinned(&self) -> bool {
-        self.inner.pinned()
-    }
-
-    pub fn messages_type(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.messages_type()).unwrap()
-    }
-
-    pub fn reverse(&self) -> bool {
-        self.inner.reverse()
-    }
 }
 
 #[wasm_bindgen]
