@@ -1,22 +1,23 @@
 #![allow(clippy::result_large_err)]
 
+use std::{collections::HashMap, fmt::Debug};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::{collections::HashMap, fmt::Debug};
 
 use futures::{stream::BoxStream, StreamExt};
 use parking_lot::RwLock;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
 
 #[cfg(target_arch = "wasm32")]
-use crate::js_exports::stream::AsyncIterator;
+use wasm_bindgen::prelude::*;
+
 use crate::{crypto::cipher::Cipher, error::Error};
+#[cfg(target_arch = "wasm32")]
+use crate::js_exports::stream::AsyncIterator;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -745,7 +746,7 @@ impl TesseractInner {
 
         let pkey = Cipher::self_decrypt(&self.enc_pass)?;
         let data = self.internal.get(key).ok_or(Error::ObjectNotFound)?;
-        Cipher::direct_decrypt(&data, &pkey)?;
+        Cipher::direct_decrypt(data, &pkey)?;
         Ok(())
     }
     fn delete(&mut self, key: &str) -> Result<()> {
