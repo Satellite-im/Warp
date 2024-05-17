@@ -603,39 +603,6 @@ impl MessageReference {
     pub fn deleted(&self) -> bool {
         self.inner.deleted()
     }
-
-    pub fn set_id(&mut self, id: String) {
-        self.inner.set_id(Uuid::from_str(&id).unwrap());
-    }
-
-    pub fn set_conversation_id(&mut self, id: String) {
-        self.inner.set_conversation_id(Uuid::from_str(&id).unwrap());
-    }
-
-    pub fn set_sender(&mut self, id: String) {
-        self.inner.set_sender(DID::from_str(&id).unwrap());
-    }
-
-    pub fn set_date(&mut self, date: js_sys::Date) {
-        self.inner.set_date(date.into());
-    }
-
-    pub fn set_modified(&mut self, date: js_sys::Date) {
-        self.inner.set_modified(date.into());
-    }
-
-    pub fn set_pinned(&mut self, pin: bool) {
-        self.inner.set_pinned(pin)
-    }
-
-    pub fn set_replied(&mut self, replied: Option<String>) {
-        self.inner
-            .set_replied(replied.map(|uuid| Uuid::from_str(&uuid).unwrap()));
-    }
-
-    pub fn set_delete(&mut self, deleted: bool) {
-        self.inner.set_delete(deleted)
-    }
 }
 
 #[wasm_bindgen]
@@ -703,66 +670,5 @@ impl Message {
 
     pub fn replied(&self) -> Option<String> {
         self.inner.replied().map(|uuid| uuid.to_string())
-    }
-
-    pub fn set_id(&mut self, id: String) {
-        self.inner.set_id(Uuid::from_str(&id).unwrap());
-    }
-
-    pub fn set_message_type(&mut self, message_type: MessageType) {
-        self.inner.set_message_type(message_type);
-    }
-
-    pub fn set_conversation_id(&mut self, id: String) {
-        self.inner.set_conversation_id(Uuid::from_str(&id).unwrap());
-    }
-
-    pub fn set_sender(&mut self, id: String) {
-        self.inner.set_sender(DID::from_str(&id).unwrap());
-    }
-
-    pub fn set_date(&mut self, date: js_sys::Date) {
-        self.inner.set_date(date.into());
-    }
-
-    pub fn set_modified(&mut self, date: js_sys::Date) {
-        self.inner.set_modified(date.into());
-    }
-
-    pub fn set_pinned(&mut self, pin: bool) {
-        self.inner.set_pinned(pin)
-    }
-
-    pub fn set_reactions(&mut self, reaction: JsValue) {
-        self.inner
-            .set_reactions(serde_wasm_bindgen::from_value(reaction).unwrap());
-    }
-
-    pub fn set_mentions(&mut self, mentions: Vec<String>) {
-        self.inner.set_mentions(
-            mentions
-                .iter()
-                .map(|did| DID::from_str(did).unwrap())
-                .collect(),
-        )
-    }
-
-    pub fn set_lines(&mut self, val: Vec<String>) {
-        self.inner.set_lines(val);
-    }
-
-    pub fn set_attachment(&mut self, attachments: JsValue) {
-        self.inner
-            .set_attachment(serde_wasm_bindgen::from_value(attachments).unwrap())
-    }
-
-    pub fn set_metadata(&mut self, metadata: JsValue) {
-        self.inner
-            .set_metadata(serde_wasm_bindgen::from_value(metadata).unwrap())
-    }
-
-    pub fn set_replied(&mut self, replied: Option<String>) {
-        self.inner
-            .set_replied(replied.map(|s| Uuid::from_str(&s).unwrap()));
     }
 }
