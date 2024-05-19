@@ -17,6 +17,7 @@ use warp::constellation::{
 };
 
 use crate::store::document::image_dag::ImageDag;
+use crate::store::MAX_THUMBNAIL_SIZE;
 
 use super::FileAttachmentDocument;
 
@@ -114,9 +115,9 @@ impl DirectoryDocument {
 
             if resolve_thumbnail {
                 let data = ipfs
-                    .unixfs()
-                    .cat(image.link)
+                    .cat_unixfs(image.link)
                     .timeout(Duration::from_secs(10))
+                    .max_length(MAX_THUMBNAIL_SIZE)
                     .await
                     .unwrap_or_default();
 
@@ -275,9 +276,9 @@ impl FileDocument {
 
             if resolve_thumbnail {
                 let data = ipfs
-                    .unixfs()
-                    .cat(image.link)
+                    .cat_unixfs(image.link)
                     .timeout(Duration::from_secs(10))
+                    .max_length(MAX_THUMBNAIL_SIZE)
                     .await
                     .unwrap_or_default();
 
@@ -321,7 +322,7 @@ mod test {
     ) -> Result<FileStore, Error> {
         let key = get_keypair_did(ipfs.keypair())?;
 
-        let root_document = RootDocumentMap::new(ipfs, Arc::new(key), None).await;
+        let root_document = RootDocumentMap::new(ipfs, Arc::new(key)).await;
         let store = FileStore::new(
             ipfs.clone(),
             root_document,

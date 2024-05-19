@@ -70,7 +70,7 @@ pub trait MultiPass:
     + IdentityInformation
     + MultiPassImportExport
     + Friends
-    + FriendsEvent
+    + MultiPassEvent
     + Sync
     + Send
     + SingleHandle
@@ -194,9 +194,9 @@ pub trait Friends: Sync + Send {
 }
 
 #[async_trait::async_trait]
-pub trait FriendsEvent: Sync + Send {
+pub trait MultiPassEvent: Sync + Send {
     /// Subscribe to an stream of events
-    async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
+    async fn multipass_subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         Err(Error::Unimplemented)
     }
 }

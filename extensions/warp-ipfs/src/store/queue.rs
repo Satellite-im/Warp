@@ -1,13 +1,10 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use futures::{channel::mpsc, StreamExt, TryFutureExt};
 
-use futures::{channel::mpsc, StreamExt};
+use libipld::Cid;
 use rust_ipfs::Ipfs;
-use tokio::{sync::RwLock, task::JoinHandle};
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::error;
 use warp::{
     crypto::{
@@ -18,13 +15,13 @@ use warp::{
     },
     error::Error,
 };
+use web_time::Instant;
 
-use crate::store::{ecdh_encrypt, topics::PeerTopic, PeerIdExt};
+use crate::store::{ds_key::DataStoreKey, ecdh_encrypt, topics::PeerTopic, PeerIdExt};
 
 use super::{connected_to_peer, discovery::Discovery, identity::RequestResponsePayload};
 
 pub struct Queue {
-    path: Option<PathBuf>,
     ipfs: Ipfs,
     entries: Arc<RwLock<HashMap<DID, QueueEntry>>>,
     removal: mpsc::UnboundedSender<DID>,
@@ -35,7 +32,6 @@ pub struct Queue {
 impl Clone for Queue {
     fn clone(&self) -> Self {
         Self {
-            path: self.path.clone(),
             ipfs: self.ipfs.clone(),
             entries: self.entries.clone(),
             removal: self.removal.clone(),
@@ -46,10 +42,9 @@ impl Clone for Queue {
 }
 
 impl Queue {
-    pub fn new(ipfs: Ipfs, did: Arc<DID>, path: Option<PathBuf>, discovery: Discovery) -> Queue {
+    pub fn new(ipfs: Ipfs, did: Arc<DID>, discovery: Discovery) -> Queue {
         let (tx, mut rx) = mpsc::unbounded();
         let queue = Queue {
-            path,
             ipfs,
             entries: Default::default(),
             removal: tx,
@@ -57,7 +52,7 @@ impl Queue {
             discovery,
         };
 
-        tokio::spawn({
+        crate::rt::spawn({
             let queue = queue.clone();
 
             async move {
@@ -129,84 +124,141 @@ impl Queue {
 
 impl Queue {
     pub async fn load(&self) -> Result<(), Error> {
-        if let Some(path) = self.path.as_ref() {
-            let data = fs::read(path.join(".request_queue")).await?;
+        let ipfs = &self.ipfs;
+        let key = ipfs.request_queue();
 
-            let prikey =
-                Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
-            let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
+        let data = match futures::future::ready(
+            ipfs.repo()
+                .data_store()
+                .get(key.as_bytes())
+                .await
+                .unwrap_or_default()
+                .ok_or(Error::Other),
+        )
+        .and_then(|bytes| async move {
+            let cid_str = String::from_utf8_lossy(&bytes).to_string();
 
-            let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-                .map(Zeroizing::new)
-                .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
+            let cid = cid_str.parse::<Cid>().map_err(anyhow::Error::from)?;
 
-            let data = Cipher::direct_decrypt(&data, &prik)?;
-
-            let map: HashMap<DID, RequestResponsePayload> = serde_json::from_slice(&data)?;
-
-            for (did, payload) in map {
-                self.raw_insert(&did, payload).await;
+            Ok(cid)
+        })
+        .and_then(|cid| async move {
+            ipfs.get_dag(cid)
+                .local()
+                .deserialized::<Vec<_>>()
+                .await
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from)
+        })
+        .await
+        {
+            Ok(data) => data,
+            Err(_) => {
+                // We will ignore the error since the queue may not exist initially
+                // though the queue will be dealt away with in the future
+                return Ok(());
             }
+        };
+
+        let prikey = Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
+        let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
+
+        let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
+            .map(Zeroizing::new)
+            .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
+
+        let data = Cipher::direct_decrypt(&data, &prik)?;
+
+        let map: HashMap<DID, RequestResponsePayload> = serde_json::from_slice(&data)?;
+
+        for (did, payload) in map {
+            self.raw_insert(&did, payload).await;
         }
+
         Ok(())
     }
 
     pub async fn save(&self) {
-        if let Some(path) = self.path.as_ref() {
-            let queue_list = self.map().await;
-            let bytes = match serde_json::to_vec(&queue_list) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Error serializing queue list into bytes: {e}");
-                    return;
-                }
-            };
+        let key = self.ipfs.request_queue();
 
-            let prikey =
-                Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
-            let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
+        let current_cid = self
+            .ipfs
+            .repo()
+            .data_store()
+            .get(key.as_bytes())
+            .await
+            .unwrap_or_default()
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| cid_str.parse::<Cid>().ok());
 
-            let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
-                Ok(pri) => Zeroizing::new(pri),
-                Err(e) => {
-                    error!("Error generating key: {e:?}");
-                    return;
-                }
-            };
+        let queue_list = self.map().await;
+        let bytes = match serde_json::to_vec(&queue_list) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Error serializing queue list into bytes: {e}");
+                return;
+            }
+        };
 
-            let data = match Cipher::direct_encrypt(&bytes, &prik) {
-                Ok(d) => d,
-                Err(e) => {
-                    error!("Error encrypting queue: {e}");
-                    return;
-                }
-            };
+        let prikey = Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
+        let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
 
-            if let Err(e) = fs::write(path.join(".request_queue"), data).await {
-                error!("Error saving queue: {e}");
+        let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
+            Ok(pri) => Zeroizing::new(pri),
+            Err(e) => {
+                error!("Error generating key: {e:?}");
+                return;
+            }
+        };
+
+        let data = match Cipher::direct_encrypt(&bytes, &prik) {
+            Ok(d) => d,
+            Err(e) => {
+                error!("Error encrypting queue: {e}");
+                return;
+            }
+        };
+
+        let cid = match self.ipfs.dag().put().serialize(&data).pin(true).await {
+            Ok(cid) => cid,
+            Err(e) => {
+                tracing::error!(error = %e, "unable to save queue");
+                return;
+            }
+        };
+
+        let cid_str = cid.to_string();
+
+        if let Err(e) = self
+            .ipfs
+            .repo()
+            .data_store()
+            .put(key.as_bytes(), cid_str.as_bytes())
+            .await
+        {
+            tracing::error!(error = %e, "unable to save queue");
+            return;
+        }
+
+        tracing::info!("friend request queue saved");
+
+        let old_cid = current_cid;
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
             }
         }
     }
 }
 
+#[derive(Clone)]
 pub struct QueueEntry {
     ipfs: Ipfs,
     recipient: DID,
     did: Arc<DID>,
     item: RequestResponsePayload,
-    task: Arc<RwLock<Option<JoinHandle<()>>>>,
-}
-
-impl Clone for QueueEntry {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            recipient: self.recipient.clone(),
-            did: self.did.clone(),
-            item: self.item.clone(),
-            task: self.task.clone(),
-        }
-    }
+    drop_guard: Arc<RwLock<Option<DropGuard>>>,
 }
 
 impl QueueEntry {
@@ -222,83 +274,98 @@ impl QueueEntry {
             recipient,
             did,
             item,
-            task: Default::default(),
+            drop_guard: Default::default(),
         };
 
-        let task = tokio::spawn({
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+
+        let fut = {
             let entry = entry.clone();
             async move {
-                let mut retry = 10;
-                loop {
-                    let entry = entry.clone();
-                    //TODO: Replace with future event to detect connection/disconnection from peer as well as pubsub subscribing event
-                    let (connection_result, peers_result) = futures::join!(
-                        connected_to_peer(&entry.ipfs, entry.recipient.clone()),
-                        entry.ipfs.pubsub_peers(Some(entry.recipient.inbox()))
-                    );
-
-                    if matches!(
-                        connection_result,
-                        Ok(crate::store::PeerConnectionType::Connected)
-                    ) && peers_result
-                        .map(|list| {
-                            list.iter()
-                                .filter_map(|peer_id| peer_id.to_did().ok())
-                                .any(|did| did.eq(&entry.recipient))
-                        })
-                        .unwrap_or_default()
-                    {
-                        tracing::info!(
-                            "{} is connected. Attempting to send request",
-                            entry.recipient.clone()
-                        );
+                _ = async {
+                    let mut retry = 10;
+                    loop {
                         let entry = entry.clone();
+                        //TODO: Replace with future event to detect connection/disconnection from peer as well as pubsub subscribing event
+                        let (connection_result, peers_result) = futures::join!(
+                            connected_to_peer(&entry.ipfs, entry.recipient.clone()),
+                            entry.ipfs.pubsub_peers(Some(entry.recipient.inbox()))
+                        );
 
-                        let recipient = entry.recipient.clone();
+                        if matches!(
+                            connection_result,
+                            Ok(crate::store::PeerConnectionType::Connected)
+                        ) && peers_result
+                            .map(|list| {
+                                list.iter()
+                                    .filter_map(|peer_id| peer_id.to_did().ok())
+                                    .any(|did| did.eq(&entry.recipient))
+                            })
+                            .unwrap_or_default()
+                        {
+                            tracing::info!(
+                                "{} is connected. Attempting to send request",
+                                entry.recipient.clone()
+                            );
+                            let entry = entry.clone();
 
-                        let res = async move {
-                            let kp = &*entry.did;
-                            let payload_bytes = serde_json::to_vec(&entry.item)?;
+                            let recipient = entry.recipient.clone();
 
-                            let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
+                            let res = async move {
+                                let kp = &*entry.did;
+                                let payload_bytes = serde_json::to_vec(&entry.item)?;
 
-                            tracing::trace!("Payload size: {} bytes", bytes.len());
+                                let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
 
-                            tracing::info!("Sending request to {}", recipient);
+                                tracing::trace!("Payload size: {} bytes", bytes.len());
 
-                            let time = Instant::now();
+                                tracing::info!("Sending request to {}", recipient);
 
-                            entry.ipfs.pubsub_publish(recipient.inbox(), bytes).await?;
+                                let time = Instant::now();
 
-                            let elapsed = time.elapsed();
+                                entry.ipfs.pubsub_publish(recipient.inbox(), bytes).await?;
 
-                            tracing::info!("took {}ms to send", elapsed.as_millis());
+                                let elapsed = time.elapsed();
 
-                            Ok::<_, anyhow::Error>(())
-                        };
+                                tracing::info!("took {}ms to send", elapsed.as_millis());
 
-                        match res.await {
-                            Ok(_) => {
-                                let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
-                                break;
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Error sending request for {}: {e}. Retrying in {}s",
-                                    &entry.recipient,
-                                    retry
-                                );
-                                tokio::time::sleep(Duration::from_secs(retry)).await;
-                                retry += 5;
+                                Ok::<_, anyhow::Error>(())
+                            };
+
+                            match res.await {
+                                Ok(_) => {
+                                    let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
+                                    break;
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Error sending request for {}: {e}. Retrying in {}s",
+                                        &entry.recipient,
+                                        retry
+                                    );
+                                    futures_timer::Delay::new(Duration::from_secs(retry)).await;
+                                    retry += 5;
+                                }
                             }
                         }
+                        futures_timer::Delay::new(Duration::from_secs(1)).await;
                     }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
+                .await;
+            }
+        };
+
+        crate::rt::spawn(async move {
+            futures::pin_mut!(fut);
+
+            tokio::select! {
+                _ = token.cancelled() => {}
+                _ = &mut fut => {}
             }
         });
 
-        *entry.task.write().await = Some(task);
+        *entry.drop_guard.write().await = Some(drop_guard);
 
         entry
     }
@@ -308,10 +375,8 @@ impl QueueEntry {
     }
 
     pub async fn cancel(&self) {
-        if let Some(task) = std::mem::take(&mut *self.task.write().await) {
-            if !task.is_finished() {
-                task.abort()
-            }
+        if let Some(guard) = std::mem::take(&mut *self.drop_guard.write().await) {
+            drop(guard)
         }
     }
 }

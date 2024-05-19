@@ -93,12 +93,9 @@ async fn setup<P: AsRef<Path>>(
 
     if opt.enable_discovery {
         let discovery_type = match (&opt.discovery_point, &opt.shuttle_point) {
-            (Some(addr), None) => {
-                config.ipfs_setting.bootstrap = false;
-                DiscoveryType::RzPoint {
-                    addresses: vec![addr.clone()],
-                }
-            }
+            (Some(addr), None) => DiscoveryType::RzPoint {
+                addresses: vec![addr.clone()],
+            },
             (Some(_), Some(_)) => unimplemented!(),
             _ => DiscoveryType::DHT,
         };
@@ -112,37 +109,34 @@ async fn setup<P: AsRef<Path>>(
                 discovery_type,
             },
         };
-        config.store_setting.discovery = dis_ty;
-        if let Some(bootstrap) = opt.bootstrap {
-            config.ipfs_setting.bootstrap = bootstrap;
-        }
+        config.store_setting_mut().discovery = dis_ty;
     } else {
-        config.store_setting.discovery = Discovery::None;
-        config.bootstrap = Bootstrap::None;
-        config.ipfs_setting.bootstrap = false;
+        config.store_setting_mut().discovery = Discovery::None;
+        *config.bootstrap_mut() = Bootstrap::None;
     }
 
     if opt.disable_relay {
-        config.enable_relay = false;
+        *config.enable_relay_mut() = false;
     }
     if opt.upnp {
-        config.ipfs_setting.portmapping = true;
+        config.ipfs_setting_mut().portmapping = true;
     }
 
-    config.store_setting.share_platform = opt.provide_platform_info;
+    config.store_setting_mut().share_platform = opt.provide_platform_info;
 
     if let Some(oride) = opt.r#override {
-        config.store_setting.fetch_over_bitswap = oride;
+        config.store_setting_mut().fetch_over_bitswap = oride;
     }
 
-    config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
-    config.ipfs_setting.mdns.enable = opt.mdns;
+    config.store_setting_mut().friend_request_response_duration =
+        opt.wait.map(Duration::from_millis);
+    config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
     let (mut account, raygun, filesystem) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     let mut profile = None;
 
@@ -267,7 +261,7 @@ async fn main() -> anyhow::Result<()> {
         writeln!(stdout, "Set conversation to {}", topic)?;
     }
 
-    let mut event_stream = chat.subscribe().await?;
+    let mut event_stream = chat.raygun_subscribe().await?;
 
     loop {
         tokio::select! {

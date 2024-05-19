@@ -10,7 +10,7 @@ async fn main() -> anyhow::Result<()> {
     let (mut account, _, mut filesystem) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .finalize()
-        .await?;
+        .await;
 
     account.create_identity(None, None).await?;
 

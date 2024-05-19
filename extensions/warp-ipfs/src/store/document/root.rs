@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, future::IntoFuture, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, future::IntoFuture, sync::Arc};
 
 use chrono::Utc;
 use futures::{
@@ -15,8 +15,8 @@ use warp::{
 };
 
 use crate::store::{
-    conversation::ConversationDocument, ecdh_decrypt, ecdh_encrypt, identity::Request,
-    keystore::Keystore, VecExt,
+    conversation::ConversationDocument, ds_key::DataStoreKey, ecdh_decrypt, ecdh_encrypt,
+    identity::Request, keystore::Keystore, VecExt,
 };
 
 use super::{
@@ -29,20 +29,21 @@ pub struct RootDocumentMap {
 }
 
 impl RootDocumentMap {
-    pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>, path: Option<&PathBuf>) -> Self {
-        let cid = match path.as_ref() {
-            Some(path) => fs::read(path.join(".id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .ok()
-                .and_then(|cid_str| cid_str.parse().ok()),
-            None => None,
-        };
+    pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>) -> Self {
+        let key = ipfs.root();
+
+        let cid = ipfs
+            .repo()
+            .data_store()
+            .get(key.as_bytes())
+            .await
+            .unwrap_or_default()
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| cid_str.parse().ok());
 
         let mut inner = RootDocumentInner {
             ipfs: ipfs.clone(),
             keypair,
-            path: path.cloned(),
             cid,
         };
 
@@ -213,7 +214,6 @@ impl RootDocumentMap {
 #[derive(Debug)]
 struct RootDocumentInner {
     keypair: Arc<DID>,
-    path: Option<PathBuf>,
     ipfs: Ipfs,
     cid: Option<Cid>,
 }
@@ -319,11 +319,18 @@ impl RootDocumentInner {
 
         let old_cid = self.cid.replace(root_cid);
 
-        if let Some(path) = self.path.as_ref() {
-            let cid = root_cid.to_string();
-            if let Err(e) = fs::write(path.join(".id"), cid).await {
-                tracing::error!("Error writing to '.id': {e}.")
-            }
+        let key = self.ipfs.root();
+
+        let cid_str = root_cid.to_string();
+
+        if let Err(e) = self
+            .ipfs
+            .repo()
+            .data_store()
+            .put(key.as_bytes(), cid_str.as_bytes())
+            .await
+        {
+            tracing::error!(error = %e, "unable to store root cid");
         }
 
         if let Some(old_cid) = old_cid {

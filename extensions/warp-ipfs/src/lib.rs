@@ -1,40 +1,36 @@
-mod behaviour;
-pub mod config;
-pub mod store;
-mod thumbnail;
-mod utils;
-
-use chrono::{DateTime, Utc};
-use config::Config;
-use futures::channel::mpsc::channel;
-use futures::stream::BoxStream;
-use futures::{AsyncReadExt, StreamExt};
-use ipfs::libp2p::core::muxing::StreamMuxerBox;
-use ipfs::libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
-use ipfs::libp2p::core::upgrade::Version;
-use ipfs::libp2p::Transport;
-use ipfs::p2p::{
-    IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
-};
-
-use parking_lot::RwLock;
-use rust_ipfs as ipfs;
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use futures::channel::mpsc::channel;
+use futures::future::BoxFuture;
+use futures::stream::{self, BoxStream};
+#[cfg(not(target_arch = "wasm32"))]
+use futures::AsyncReadExt;
+use futures::{FutureExt, StreamExt, TryStreamExt};
+use futures_timeout::TimeoutExt;
+use ipfs::p2p::{
+    IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
+};
+use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
+use parking_lot::RwLock;
+use rust_ipfs as ipfs;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_util::compat::TokioAsyncReadCompatExt;
+use tracing::{error, info, warn, Instrument, Span};
+use uuid::Uuid;
+
+use config::Config;
 use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
 use store::files::FileStore;
 use store::identity::{IdentityStore, LookupBy};
 use store::message::MessageStore;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{debug, error, info, trace, warn, Instrument, Span};
 use utils::ExtensionType;
-use uuid::Uuid;
 use warp::constellation::directory::Directory;
 use warp::constellation::file::FileType;
 use warp::constellation::{
@@ -43,7 +39,16 @@ use warp::constellation::{
 };
 use warp::crypto::keypair::PhraseType;
 use warp::crypto::zeroize::Zeroizing;
+use warp::crypto::{KeyMaterial, DID};
+use warp::error::Error;
 use warp::module::Module;
+use warp::multipass::identity::{
+    Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
+};
+use warp::multipass::{
+    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, MultiPass,
+    MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
+};
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
@@ -53,23 +58,23 @@ use warp::raygun::{
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{DhtMode, Ipfs, Keypair, PeerId, Protocol, UninitializedIpfs};
-use warp::crypto::{KeyMaterial, DID};
-use warp::error::Error;
-use warp::multipass::identity::{
-    Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
-};
-use warp::multipass::{
-    identity, Friends, FriendsEvent, IdentityImportOption, IdentityInformation, ImportLocation,
-    MultiPass, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
-};
-
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
+use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+
+mod behaviour;
+pub mod config;
+pub(crate) mod rt;
+pub mod store;
+mod thumbnail;
+mod utils;
+
+const PUBSUB_MAX_BUF: usize = 8_388_608;
 
 #[derive(Clone)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct WarpIpfs {
     tesseract: Tesseract,
     inner: Arc<Inner>,
@@ -130,21 +135,45 @@ impl WarpIpfsBuilder {
     //     self
     // }
 
-    pub async fn finalize(
-        self,
-    ) -> Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>), Error> {
-        let instance = WarpIpfs::new(self.config, self.tesseract).await?;
+    /// Creates trait objects of the
+    pub async fn finalize(self) -> (Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>) {
+        let instance = WarpIpfs::new(self.config, self.tesseract).await;
 
         let mp = Box::new(instance.clone()) as Box<_>;
         let rg = Box::new(instance.clone()) as Box<_>;
         let fs = Box::new(instance) as Box<_>;
 
-        Ok((mp, rg, fs))
+        (mp, rg, fs)
+    }
+}
+
+impl core::future::IntoFuture for WarpIpfsBuilder {
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+    type Output = WarpIpfs;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move { WarpIpfs::new(self.config, self.tesseract).await }.boxed()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl WarpIpfs {
+    #[cfg_attr(
+        target_arch = "wasm32",
+        wasm_bindgen::prelude::wasm_bindgen(constructor)
+    )]
+    pub async fn new_wasm(config: Config, tesseract: Tesseract) -> warp::js_exports::WarpInstance {
+        let warp_ipfs = WarpIpfs::new(config, tesseract).await;
+        let mp = Box::new(warp_ipfs.clone()) as Box<_>;
+        let rg = Box::new(warp_ipfs.clone()) as Box<_>;
+        let fs = Box::new(warp_ipfs.clone()) as Box<_>;
+        warp::js_exports::WarpInstance::new(mp, rg, fs)
     }
 }
 
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: Tesseract) -> Result<WarpIpfs, Error> {
+    pub async fn new(config: Config, tesseract: Tesseract) -> WarpIpfs {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
@@ -168,19 +197,20 @@ impl WarpIpfs {
 
         if !identity.tesseract.is_unlock() {
             let inner = identity.clone();
-            tokio::spawn(async move {
+            crate::rt::spawn(async move {
                 let mut stream = inner.tesseract.subscribe();
                 while let Some(event) = stream.next().await {
                     if matches!(event, TesseractEvent::Unlocked) {
                         break;
                     }
                 }
-                if let Err(_e) = inner.initialize_store(false).await {}
+                _ = inner.initialize_store(false).await;
             });
-        } else if let Err(_e) = identity.initialize_store(false).await {
+        } else {
+            _ = identity.initialize_store(false).await;
         }
 
-        Ok(identity)
+        identity
     }
 
     async fn initialize_store(&self, init: bool) -> Result<(), Error> {
@@ -250,13 +280,13 @@ impl WarpIpfs {
 
         let _g = span.enter();
 
-        let empty_bootstrap = match &self.inner.config.bootstrap {
+        let empty_bootstrap = match &self.inner.config.bootstrap() {
             Bootstrap::Ipfs => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
             Bootstrap::None => true,
         };
 
-        if empty_bootstrap && !self.inner.config.ipfs_setting.dht_client {
+        if empty_bootstrap && !self.inner.config.ipfs_setting().dht_client {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
@@ -264,7 +294,7 @@ impl WarpIpfs {
         let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
         let (msg_sh_tx, msg_sh_rx) = futures::channel::mpsc::channel(1);
 
-        let (enable, nodes) = match &self.inner.config.store_setting.discovery {
+        let (enable, nodes) = match &self.inner.config.store_setting().discovery {
             config::Discovery::Shuttle { addresses } => (true, addresses.clone()),
             _ => Default::default(),
         };
@@ -290,31 +320,43 @@ impl WarpIpfs {
                     protocol_version: "/satellite/warp/0.1".into(),
                     ..Default::default()
                 };
-                if let Some(agent) = self.inner.config.ipfs_setting.agent_version.as_ref() {
-                    idconfig.agent_version = agent.clone();
+                if let Some(agent) = self.inner.config.ipfs_setting().agent_version.as_ref() {
+                    idconfig.agent_version.clone_from(agent);
                 }
                 idconfig
             })
             .with_bitswap()
             .with_ping(Default::default())
             .with_pubsub(PubsubConfig {
-                max_transmit_size: self.inner.config.ipfs_setting.pubsub.max_transmit_size,
+                max_transmit_size: PUBSUB_MAX_BUF,
                 ..Default::default()
             })
             .with_relay(true)
-            .set_listening_addrs(self.inner.config.listen_on.clone())
+            .set_listening_addrs(self.inner.config.listen_on().to_vec())
             .with_custom_behaviour(behaviour)
             .set_keypair(&keypair)
-            .with_rendezvous_client()
             .set_span(span.clone())
             .set_transport_configuration(TransportConfig {
-                enable_quic: !self.inner.config.ipfs_setting.disable_quic,
-                quic_max_idle_timeout: Duration::from_secs(5),
+                enable_memory_transport: self.inner.config.ipfs_setting().memory_transport,
+                // We check the target arch since it doesnt really make much sense to have each native peer to use websocket or webrtc transport
+                // as such connections would be established through the relay
+                enable_websocket: cfg!(target_arch = "wasm32"),
+                enable_secure_websocket: cfg!(target_arch = "wasm32"),
+                enable_webrtc: cfg!(target_arch = "wasm32"),
                 ..Default::default()
             });
 
+        // TODO: Uncomment for persistence on wasm once config option is added
+        // #[cfg(target_arch = "wasm32")]
+        // {
+        //     // Namespace will used the public key to prevent conflicts between multiple instances during testing.
+        //     uninitialized = uninitialized.set_storage_type(rust_ipfs::StorageType::IndexedDb {
+        //         namespace: Some(keypair.public().to_peer_id().to_string()),
+        //     });
+        // }
+
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(path) = self.inner.config.path.as_ref() {
+        if let Some(path) = self.inner.config.path() {
             info!("Instance will be persistent");
             info!("Path set: {}", path.display());
 
@@ -326,7 +368,7 @@ impl WarpIpfs {
         }
 
         if matches!(
-            self.inner.config.store_setting.discovery,
+            self.inner.config.store_setting().discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
@@ -342,65 +384,54 @@ impl WarpIpfs {
                 }),
                 Default::default(),
             );
-
-            if self.inner.config.ipfs_setting.bootstrap {
-                for addr in self.inner.config.bootstrap.address() {
-                    uninitialized = uninitialized.add_bootstrap(addr);
-                }
-            }
         }
 
-        if self.inner.config.ipfs_setting.memory_transport {
-            uninitialized = uninitialized
-                .with_custom_transport(Box::new(
-                    |keypair, relay| -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
-                        let noise_config = rust_ipfs::libp2p::noise::Config::new(keypair)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        if matches!(
+            self.inner.config.store_setting().discovery,
+            config::Discovery::Namespace {
+                discovery_type: DiscoveryType::RzPoint { .. },
+                ..
+            }
+        ) {
+            uninitialized = uninitialized.with_rendezvous_client();
+        }
 
-                        let transport = match relay {
-                            Some(relay) => OrTransport::new(relay, MemoryTransport::default())
-                                .upgrade(Version::V1)
-                                .authenticate(noise_config)
-                                .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                                .timeout(Duration::from_secs(20))
-                                .boxed(),
-                            None => MemoryTransport::default()
-                                .upgrade(Version::V1)
-                                .authenticate(noise_config)
-                                .multiplex(rust_ipfs::libp2p::yamux::Config::default())
-                                .timeout(Duration::from_secs(20))
-                                .boxed(),
-                        };
-
-                        Ok(transport)
-                    },
-                ))
-                .listen_as_external_addr();
+        // If memory transport is enabled, this means that test are running and in such case, we should have the addresses be
+        // treated as external addresses.
+        if self.inner.config.ipfs_setting().memory_transport {
+            uninitialized = uninitialized.listen_as_external_addr();
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        if self.inner.config.ipfs_setting.portmapping {
+        if self.inner.config.ipfs_setting().portmapping {
             uninitialized = uninitialized.with_upnp();
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        if self.inner.config.ipfs_setting.mdns.enable {
+        if self.inner.config.ipfs_setting().mdns.enable {
             uninitialized = uninitialized.with_mdns();
         }
 
         let ipfs = uninitialized.start().await?;
 
-        if self.inner.config.enable_relay {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = self.inner.config.path() {
+            if let Err(e) = store::migrate_to_ds(&ipfs, path).await {
+                tracing::warn!(error = %e, "failed to migrate to datastore");
+            }
+        }
+
+        if self.inner.config.enable_relay() {
             let mut relay_peers = HashSet::new();
 
             for mut addr in self
                 .inner
                 .config
-                .ipfs_setting
+                .ipfs_setting()
                 .relay_client
                 .relay_address
                 .iter()
-                .chain(self.inner.config.bootstrap.address().iter())
+                .chain(self.inner.config.bootstrap().address().iter())
                 .cloned()
             {
                 if addr.is_relayed() {
@@ -432,15 +463,14 @@ impl WarpIpfs {
             // Use the selected relays
             let relay_connection_task = {
                 let ipfs = ipfs.clone();
-                let quorum = self.inner.config.ipfs_setting.relay_client.quorum;
+                let quorum = self.inner.config.ipfs_setting().relay_client.quorum;
                 async move {
                     let mut counter = 0;
                     for relay_peer in relay_peers {
-                        match tokio::time::timeout(
-                            Duration::from_secs(5),
-                            ipfs.enable_relay(Some(relay_peer)),
-                        )
-                        .await
+                        match ipfs
+                            .enable_relay(Some(relay_peer))
+                            .timeout(Duration::from_secs(5))
+                            .await
                         {
                             Ok(Ok(_)) => {}
                             Ok(Err(e)) => {
@@ -473,46 +503,56 @@ impl WarpIpfs {
                 }
             };
 
-            if self.inner.config.ipfs_setting.relay_client.background {
-                tokio::spawn(relay_connection_task);
+            if self.inner.config.ipfs_setting().relay_client.background {
+                crate::rt::spawn(relay_connection_task);
             } else {
                 relay_connection_task.await;
             }
         }
 
-        if self.inner.config.ipfs_setting.dht_client
-            && matches!(
-                self.inner.config.store_setting.discovery,
-                config::Discovery::Namespace {
-                    discovery_type: DiscoveryType::DHT,
-                    ..
-                }
-            )
-        {
-            ipfs.dht_mode(DhtMode::Client).await?;
-        }
-
         if matches!(
-            self.inner.config.store_setting.discovery,
+            self.inner.config.store_setting().discovery,
             config::Discovery::Namespace {
                 discovery_type: DiscoveryType::DHT,
                 ..
             }
-        ) && self.inner.config.ipfs_setting.bootstrap
-            && !empty_bootstrap
-        {
-            tokio::spawn({
-                let ipfs = ipfs.clone();
-                async move {
-                    loop {
-                        if let Err(e) = ipfs.bootstrap().await {
-                            error!("Failed to bootstrap: {e}")
+        ) {
+            match self.inner.config.bootstrap() {
+                Bootstrap::Custom(addrs) => {
+                    for addr in addrs {
+                        if let Err(e) = ipfs.add_bootstrap(addr.clone()).await {
+                            tracing::warn!(address = %addr, error = %e, "unable to add address to bootstrap");
                         }
-
-                        tokio::time::sleep(Duration::from_secs(60 * 5)).await;
                     }
                 }
-            });
+                Bootstrap::Ipfs => {
+                    if let Err(e) = ipfs.default_bootstrap().await {
+                        tracing::warn!(error = %e, "unable to add ipfs bootstrap");
+                    }
+                }
+                _ => {}
+            };
+
+            if self.inner.config.ipfs_setting().dht_client {
+                if let Err(e) = ipfs.dht_mode(DhtMode::Client).await {
+                    tracing::warn!(error = %e, "unable to set dht to client mode");
+                }
+            }
+
+            if !empty_bootstrap {
+                crate::rt::spawn({
+                    let ipfs = ipfs.clone();
+                    async move {
+                        loop {
+                            if let Err(e) = ipfs.bootstrap().await {
+                                error!("Failed to bootstrap: {e}")
+                            }
+
+                            futures_timer::Delay::new(Duration::from_secs(60 * 5)).await;
+                        }
+                    }
+                });
+            }
         }
 
         let relays = ipfs
@@ -535,7 +575,7 @@ impl WarpIpfs {
         if let config::Discovery::Namespace {
             discovery_type: DiscoveryType::RzPoint { addresses },
             ..
-        } = &self.inner.config.store_setting.discovery
+        } = &self.inner.config.store_setting().discovery
         {
             for mut addr in addresses.iter().cloned() {
                 let Some(peer_id) = addr.extract_peer_id() else {
@@ -555,7 +595,7 @@ impl WarpIpfs {
 
         let discovery = Discovery::new(
             ipfs.clone(),
-            self.inner.config.store_setting.discovery.clone(),
+            self.inner.config.store_setting().discovery.clone(),
             relays.clone(),
         );
 
@@ -589,11 +629,6 @@ impl WarpIpfs {
 
         let message_store = MessageStore::new(
             &ipfs,
-            self.inner
-                .config
-                .path
-                .as_ref()
-                .map(|path| path.join("messages")),
             discovery,
             filestore.clone(),
             self.raygun_tx.clone(),
@@ -724,12 +759,12 @@ impl MultiPass for WarpIpfs {
         if let Some(u) = username.map(|u| u.trim()) {
             let username_len = u.len();
 
-            if !(4..=64).contains(&username_len) {
+            if !(MIN_USERNAME_LENGTH..=MAX_USERNAME_LENGTH).contains(&username_len) {
                 return Err(Error::InvalidLength {
                     context: "username".into(),
                     current: username_len,
-                    minimum: Some(4),
-                    maximum: Some(64),
+                    minimum: Some(MIN_USERNAME_LENGTH),
+                    maximum: Some(MAX_USERNAME_LENGTH),
                 });
             }
         }
@@ -752,7 +787,7 @@ impl MultiPass for WarpIpfs {
                 &mut tesseract,
                 &phrase,
                 None,
-                self.inner.config.save_phrase,
+                self.inner.config.save_phrase(),
                 false,
             )?;
         }
@@ -786,10 +821,15 @@ impl MultiPass for WarpIpfs {
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         let mut identity = store.own_identity_document().await?;
+        #[allow(unused_variables)] // due to stub; TODO: Remove
         let ipfs = self.ipfs()?;
 
         let mut old_cid = None;
-        match option {
+        enum OptType {
+            Picture(Option<ExtensionType>),
+            Banner(Option<ExtensionType>),
+        }
+        let (opt, mut stream) = match option {
             IdentityUpdate::Username(username) => {
                 let len = username.chars().count();
                 if !(4..=64).contains(&len) {
@@ -802,285 +842,26 @@ impl MultiPass for WarpIpfs {
                 }
 
                 identity.username = username;
-                store.identity_update(identity.clone()).await?;
+                return store.identity_update(identity).await;
             }
-            IdentityUpdate::Picture(data) => {
-                let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile picture".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
 
-                trace!("image size = {}", len);
-
-                let (data, format) = tokio::task::spawn_blocking(move || {
-                    let cursor = std::io::Cursor::new(data);
-
-                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
-
-                    let format = image
-                        .format()
-                        .and_then(|format| ExtensionType::try_from(format).ok())
-                        .unwrap_or(ExtensionType::Other);
-
-                    let inner = image.into_inner();
-
-                    let data = inner.into_inner();
-                    Ok::<_, Error>((data, format))
-                })
-                .await
-                .map_err(anyhow::Error::from)??;
-
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
-                    format.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                debug!("Image cid: {cid}");
-
-                if let Some(picture_cid) = identity.metadata.profile_picture {
-                    if picture_cid == cid {
-                        debug!("Picture is already on document. Not updating identity");
-                        return Ok(());
-                    }
-
-                    if let Some(banner_cid) = identity.metadata.profile_banner {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(picture_cid);
-                        }
-                    }
-                }
-
-                identity.metadata.profile_picture = Some(cid);
-                store.identity_update(identity).await?;
-            }
-            IdentityUpdate::PicturePath(path) => {
-                if !path.is_file() {
-                    return Err(Error::IoError(std::io::Error::from(
-                        std::io::ErrorKind::NotFound,
-                    )));
-                }
-
-                let file = tokio::fs::File::open(&path).await?;
-
-                let metadata = file.metadata().await?;
-
-                let len = metadata.len() as _;
-
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile picture".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-
-                let extension = path
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .map(ExtensionType::from)
-                    .unwrap_or(ExtensionType::Other);
-
-                trace!("image size = {}", len);
-
-                let stream = async_stream::stream! {
-                    let mut reader = file.compat();
-                    let mut buffer = vec![0u8; 512];
-                    loop {
-                        match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
-                            Ok(_n) => {
-                                yield Ok(buffer.clone());
-                                break;
-                            },
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                            Err(e) => {
-                                yield Err(e);
-                                break;
-                            }
-                        }
-                    }
-                };
-
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    stream.boxed(),
-                    extension.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                debug!("Image cid: {cid}");
-
-                if let Some(picture_cid) = identity.metadata.profile_picture {
-                    if picture_cid == cid {
-                        debug!("Picture is already on document. Not updating identity");
-                        return Ok(());
-                    }
-
-                    if let Some(banner_cid) = identity.metadata.profile_banner {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(picture_cid);
-                        }
-                    }
-                }
-
-                identity.metadata.profile_picture = Some(cid);
-                store.identity_update(identity).await?;
-            }
             IdentityUpdate::ClearPicture => {
                 let document = identity.metadata.profile_picture.take();
                 if let Some(cid) = document {
-                    old_cid = Some(cid);
-                }
-                store.identity_update(identity).await?;
-            }
-            IdentityUpdate::Banner(data) => {
-                let len = data.len();
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile banner".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-
-                trace!("image size = {}", len);
-
-                let (data, format) = tokio::task::spawn_blocking(move || {
-                    let cursor = std::io::Cursor::new(data);
-
-                    let image = image::io::Reader::new(cursor).with_guessed_format()?;
-
-                    let format = image
-                        .format()
-                        .and_then(|format| ExtensionType::try_from(format).ok())
-                        .unwrap_or(ExtensionType::Other);
-
-                    let inner = image.into_inner();
-
-                    let data = inner.into_inner();
-                    Ok::<_, Error>((data, format))
-                })
-                .await
-                .map_err(anyhow::Error::from)??;
-
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
-                    format.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                debug!("Image cid: {cid}");
-
-                if let Some(banner_cid) = identity.metadata.profile_banner {
-                    if banner_cid == cid {
-                        debug!("Banner is already on document. Not updating identity");
-                        return Ok(());
-                    }
-
-                    if let Some(picture_cid) = identity.metadata.profile_picture {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(banner_cid);
-                        }
+                    if let Err(e) = store.delete_photo(cid).await {
+                        error!("Error deleting picture: {e}");
                     }
                 }
-
-                identity.metadata.profile_banner = Some(cid);
-                store.identity_update(identity).await?;
-            }
-            IdentityUpdate::BannerPath(path) => {
-                if !path.is_file() {
-                    return Err(Error::IoError(std::io::Error::from(
-                        std::io::ErrorKind::NotFound,
-                    )));
-                }
-
-                let file = tokio::fs::File::open(&path).await?;
-
-                let metadata = file.metadata().await?;
-
-                let len = metadata.len() as _;
-
-                if len == 0 || len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile banner".into(),
-                        current: len,
-                        minimum: Some(1),
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-
-                let extension = path
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .map(ExtensionType::from)
-                    .unwrap_or(ExtensionType::Other);
-
-                trace!("image size = {}", len);
-
-                let stream = async_stream::stream! {
-                    let mut reader = file.compat();
-                    let mut buffer = vec![0u8; 512];
-                    loop {
-                        match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
-                            Ok(_n) => {
-                                yield Ok(buffer.clone());
-                                break;
-                            },
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                            Err(e) => {
-                                yield Err(e);
-                                break;
-                            }
-                        }
-                    }
-                };
-
-                let cid = store::document::image_dag::store_photo(
-                    &ipfs,
-                    stream.boxed(),
-                    extension.into(),
-                    Some(2 * 1024 * 1024),
-                )
-                .await?;
-
-                debug!("Image cid: {cid}");
-
-                if let Some(banner_cid) = identity.metadata.profile_banner {
-                    if banner_cid == cid {
-                        debug!("Banner is already on document. Not updating identity");
-                        return Ok(());
-                    }
-
-                    if let Some(picture_cid) = identity.metadata.profile_picture {
-                        if picture_cid != banner_cid {
-                            old_cid = Some(banner_cid);
-                        }
-                    }
-                }
-
-                identity.metadata.profile_banner = Some(cid);
-                store.identity_update(identity).await?;
+                return store.identity_update(identity).await;
             }
             IdentityUpdate::ClearBanner => {
                 let document = identity.metadata.profile_banner.take();
                 if let Some(cid) = document {
-                    old_cid = Some(cid);
+                    if let Err(e) = store.delete_photo(cid).await {
+                        error!("Error deleting picture: {e}");
+                    }
                 }
-                store.identity_update(identity).await?;
+                return store.identity_update(identity).await;
             }
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
@@ -1095,13 +876,247 @@ impl MultiPass for WarpIpfs {
                     }
                 }
                 identity.status_message = status;
-                store.identity_update(identity.clone()).await?;
+                return store.identity_update(identity).await;
             }
             IdentityUpdate::ClearStatusMessage => {
                 identity.status_message = None;
-                store.identity_update(identity.clone()).await?;
+                return store.identity_update(identity).await;
+            }
+            IdentityUpdate::Picture(data) => {
+                let len = data.len();
+                if len == 0 || len > MAX_IMAGE_SIZE {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(MAX_IMAGE_SIZE),
+                    });
+                }
+                let cursor = std::io::Cursor::new(data);
+
+                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                let format = image
+                    .format()
+                    .and_then(|format| ExtensionType::try_from(format).ok())
+                    .unwrap_or(ExtensionType::Other);
+
+                let inner = image.into_inner();
+
+                let data = inner.into_inner();
+
+                let stream = stream::iter(vec![Ok(data)]).boxed();
+                (OptType::Picture(Some(format)), stream)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            IdentityUpdate::PicturePath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(&path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if len == 0 || len > MAX_IMAGE_SIZE {
+                    return Err(Error::InvalidLength {
+                        context: "profile picture".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(MAX_IMAGE_SIZE),
+                    });
+                }
+
+                let extension = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
+
+                tracing::trace!("image size = {}", len);
+
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
+                (OptType::Picture(Some(extension)), stream.boxed())
+            }
+            #[cfg(target_arch = "wasm32")]
+            IdentityUpdate::PicturePath(_) => {
+                return Err(Error::Unimplemented);
+            }
+            IdentityUpdate::PictureStream(stream) => (OptType::Picture(None), stream),
+            IdentityUpdate::Banner(data) => {
+                let len = data.len();
+                if len == 0 || len > MAX_IMAGE_SIZE {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(MAX_IMAGE_SIZE),
+                    });
+                }
+
+                let cursor = std::io::Cursor::new(data);
+
+                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                let format = image
+                    .format()
+                    .and_then(|format| ExtensionType::try_from(format).ok())
+                    .unwrap_or(ExtensionType::Other);
+
+                let inner = image.into_inner();
+
+                let data = inner.into_inner();
+
+                let stream = stream::iter(vec![Ok(data)]).boxed();
+                (OptType::Banner(Some(format)), stream)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            IdentityUpdate::BannerPath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(&path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if len == 0 || len > MAX_IMAGE_SIZE {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(MAX_IMAGE_SIZE),
+                    });
+                }
+
+                let extension = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
+
+                tracing::trace!("image size = {}", len);
+
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                (OptType::Picture(Some(extension)), stream.boxed())
+            }
+            #[cfg(target_arch = "wasm32")]
+            IdentityUpdate::BannerPath(_) => {
+                return Err(Error::Unimplemented);
+            }
+            IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
+        };
+
+        let mut data = Vec::with_capacity(MAX_IMAGE_SIZE);
+
+        while let Some(s) = stream.try_next().await? {
+            data.extend(s);
+        }
+
+        let format = match opt {
+            OptType::Picture(Some(format)) => format,
+            OptType::Banner(Some(format)) => format,
+            OptType::Picture(None) | OptType::Banner(None) => {
+                tracing::trace!("image size = {}", data.len());
+
+                let cursor = std::io::Cursor::new(&data);
+
+                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+
+                image
+                    .format()
+                    .and_then(|format| ExtensionType::try_from(format).ok())
+                    .unwrap_or(ExtensionType::Other)
             }
         };
+
+        let cid = store::document::image_dag::store_photo(
+            &ipfs,
+            data,
+            format.into(),
+            Some(MAX_IMAGE_SIZE),
+        )
+        .await?;
+
+        tracing::debug!("Image cid: {cid}");
+
+        match opt {
+            OptType::Picture(_) => {
+                if let Some(picture_cid) = identity.metadata.profile_picture {
+                    if picture_cid == cid {
+                        tracing::debug!("Picture is already on document. Not updating identity");
+                        return Ok(());
+                    }
+
+                    if let Some(banner_cid) = identity.metadata.profile_banner {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(picture_cid);
+                        }
+                    }
+                }
+
+                identity.metadata.profile_picture = Some(cid);
+            }
+            OptType::Banner(_) => {
+                if let Some(banner_cid) = identity.metadata.profile_banner {
+                    if banner_cid == cid {
+                        tracing::debug!("Banner is already on document. Not updating identity");
+                        return Ok(());
+                    }
+
+                    if let Some(picture_cid) = identity.metadata.profile_picture {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(banner_cid);
+                        }
+                    }
+                }
+
+                identity.metadata.profile_banner = Some(cid);
+            }
+        }
 
         if let Some(cid) = old_cid {
             if let Err(e) = store.delete_photo(cid).await {
@@ -1109,9 +1124,7 @@ impl MultiPass for WarpIpfs {
             }
         }
 
-        store.push_to_all().await;
-
-        Ok(())
+        store.identity_update(identity).await
     }
 }
 
@@ -1148,7 +1161,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.inner.config.save_phrase,
+                    self.inner.config.save_phrase(),
                     false,
                 )?;
 
@@ -1182,7 +1195,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.inner.config.save_phrase,
+                    self.inner.config.save_phrase(),
                     false,
                 )?;
 
@@ -1206,7 +1219,7 @@ impl MultiPassImportExport for WarpIpfs {
                     &mut self.tesseract,
                     &passphrase,
                     None,
-                    self.inner.config.save_phrase,
+                    self.inner.config.save_phrase(),
                     false,
                 )?;
 
@@ -1323,8 +1336,8 @@ impl Friends for WarpIpfs {
 }
 
 #[async_trait::async_trait]
-impl FriendsEvent for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
+impl MultiPassEvent for WarpIpfs {
+    async fn multipass_subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let store = self.identity_store(true).await?;
         store.subscribe().await
     }
@@ -1615,10 +1628,11 @@ impl RayGunGroupConversation for WarpIpfs {
 
 #[async_trait::async_trait]
 impl RayGunStream for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
+    async fn raygun_subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         let rx = self.raygun_tx.subscribe().await?;
         Ok(rx)
     }
+
     async fn get_conversation_stream(
         &mut self,
         conversation_id: Uuid,
@@ -1740,7 +1754,7 @@ impl Constellation for WarpIpfs {
 
 #[async_trait::async_trait]
 impl ConstellationEvent for WarpIpfs {
-    async fn subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
+    async fn constellation_subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
         let rx = self.constellation_tx.subscribe().await?;
         Ok(ConstellationEventStream(rx))
     }

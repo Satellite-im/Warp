@@ -9,7 +9,7 @@ use base64::{
 };
 use clap::Parser;
 use rust_ipfs::{
-    p2p::{RateLimit, RelayConfig},
+    p2p::{RateLimit, RelayConfig, TransportConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
 };
 
@@ -150,6 +150,19 @@ struct Opt {
     /// Path to a configuration file to adjust relay setting
     #[clap(long)]
     relay_config: Option<PathBuf>,
+
+    /// Use unbounded configuration with higher limits
+    #[clap(long)]
+    unbounded: bool,
+
+    /// TLS Certificate when websocket is used
+    /// Note: websocket required a signed certificate.
+    #[clap(long)]
+    ws_tls_certificate: Option<PathBuf>,
+
+    /// TLS Private Key when websocket is used
+    #[clap(long)]
+    ws_tls_private_key: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -215,13 +228,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => Config::default(),
     };
 
+    let (ws_cert, ws_pk) = match (
+        opts.ws_tls_certificate
+            .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf)),
+        opts.ws_tls_private_key
+            .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf)),
+    ) {
+        (Some(cert), Some(prv)) => {
+            let cert = tokio::fs::read_to_string(cert).await.ok();
+            let prv = tokio::fs::read_to_string(prv).await.ok();
+            (cert, prv)
+        }
+        _ => (None, None),
+    };
+
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
 
     let addrs = match opts.listen_addr.as_slice() {
         [] => vec![
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+            "/ip4/0.0.0.0/tcp/0/ws".parse().unwrap(),
+            "/ip4/0.0.0.0/tcp/0/wss".parse().unwrap(),
             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+            "/ip4/0.0.0.0/udp/0/webrtc-direct".parse().unwrap(),
         ],
         addrs => addrs.to_vec(),
     };
@@ -229,12 +259,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut uninitialized = UninitializedIpfs::new()
         .with_identify(Default::default())
         .with_ping(Default::default())
-        .with_relay_server(config.into())
+        .with_relay_server(
+            opts.unbounded
+                .then(RelayConfig::unbounded)
+                .unwrap_or(config.into()),
+        )
         .fd_limit(FDLimit::Max)
         .set_keypair(&keypair)
         .set_idle_connection_timeout(30)
+        .set_transport_configuration(TransportConfig {
+            enable_webrtc: true,
+            enable_websocket: true,
+            enable_secure_websocket: true,
+            websocket_pem: (ws_cert.is_some() && ws_pk.is_some()).then(|| {
+                let cert = ws_cert.expect("certificate exist");
+                let pk = ws_pk.expect("pk exist");
+                (cert, pk)
+            }),
+            ..Default::default()
+        })
         .listen_as_external_addr()
-        .with_custom_behaviour(ext_behaviour::Behaviour)
+        .with_custom_behaviour(ext_behaviour::Behaviour::new(keypair.public().to_peer_id()))
         .set_listening_addrs(addrs);
 
     if let Some(path) = path {
@@ -251,20 +296,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 mod ext_behaviour {
-    use std::task::{Context, Poll};
+    use std::{
+        collections::{HashMap, HashSet},
+        task::{Context, Poll},
+    };
 
     use rust_ipfs::libp2p::{
         core::Endpoint,
         swarm::{
-            ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
-            THandlerOutEvent, ToSwarm,
+            ConnectionDenied, ConnectionId, ExternalAddrExpired, FromSwarm, ListenerClosed,
+            NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
         },
         Multiaddr, PeerId,
     };
-    use rust_ipfs::NetworkBehaviour;
+    use rust_ipfs::{ListenerId, NetworkBehaviour};
 
-    #[derive(Default, Debug)]
-    pub struct Behaviour;
+    #[derive(Debug)]
+    pub struct Behaviour {
+        peer_id: PeerId,
+        addrs: HashSet<Multiaddr>,
+        listened: HashMap<ListenerId, HashSet<Multiaddr>>,
+    }
+
+    impl Behaviour {
+        pub fn new(local_peer_id: PeerId) -> Self {
+            println!("PeerID: {}", local_peer_id);
+            Self {
+                peer_id: local_peer_id,
+                addrs: Default::default(),
+                listened: Default::default(),
+            }
+        }
+    }
 
     impl NetworkBehaviour for Behaviour {
         type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
@@ -318,8 +381,54 @@ mod ext_behaviour {
         }
 
         fn on_swarm_event(&mut self, event: FromSwarm) {
-            if let FromSwarm::NewListenAddr(NewListenAddr { addr, .. }) = event {
-                println!("Listening on {addr}");
+            match event {
+                FromSwarm::NewListenAddr(NewListenAddr {
+                    listener_id, addr, ..
+                }) => {
+                    let addr = addr.clone();
+
+                    let addr = addr.with_p2p(self.peer_id).unwrap();
+
+                    if !self.addrs.insert(addr.clone()) {
+                        return;
+                    }
+
+                    self.listened
+                        .entry(listener_id)
+                        .or_default()
+                        .insert(addr.clone());
+
+                    println!("Listening on {addr}");
+                }
+
+                FromSwarm::ExternalAddrConfirmed(ev) => {
+                    let addr = ev.addr.clone();
+                    let addr = addr.with_p2p(self.peer_id).unwrap();
+
+                    if !self.addrs.insert(addr.clone()) {
+                        return;
+                    }
+
+                    println!("Listening on {}", addr);
+                }
+                FromSwarm::ExternalAddrExpired(ExternalAddrExpired { addr }) => {
+                    let addr = addr.clone();
+                    let addr = addr.with_p2p(self.peer_id).unwrap();
+
+                    if self.addrs.remove(&addr) {
+                        println!("No longer listening on {addr}");
+                    }
+                }
+                FromSwarm::ListenerClosed(ListenerClosed { listener_id, .. }) => {
+                    if let Some(addrs) = self.listened.remove(&listener_id) {
+                        for addr in addrs {
+                            let addr = addr.with_p2p(self.peer_id).unwrap();
+                            self.addrs.remove(&addr);
+                            println!("No longer listening on {addr}");
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Warp Wasm Test</title>
+  </head>
+  <script type="module">
+    import init, * as wasm from './wasm/wasm-example/wasm_example.js';
+    init().then((_exports) => {
+      console.log(wasm)
+
+      // call free floating function
+      console.log("wasm.function_example('hello') result was: ", wasm.function_example("hello") )
+
+      // create struct and call methods
+      let obj = new wasm.StructExample("foo");
+      console.log("new wasm.StructExample('foo') has value: ", obj.get())
+      obj.set("bar")
+      console.log("obj.set('bar') changed the value to: ", obj.get())
+    });
+  </script>
+  <body>
+    <h2>How to use this example:</h2>
+    <h3>1 - Make sure the wasm is compiled:</h3>
+    <pre>
+      wasm-pack build tools/wasm-example --target web --out-dir tools/wasm-example/www/wasm/wasm-example
+    </pre>
+    <h3>2 - Check ouput in the console</h3>
+  </body>
+</html>

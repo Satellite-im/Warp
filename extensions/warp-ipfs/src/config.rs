@@ -1,24 +1,19 @@
-use ipfs::Multiaddr;
+use std::{path::PathBuf, str::FromStr, time::Duration};
+
+use ipfs::{Multiaddr, Protocol};
 use rust_ipfs as ipfs;
-use serde::{Deserialize, Serialize};
-use std::{
-    path::{Path, PathBuf},
-    str::FromStr,
-    time::Duration,
-};
+
 use warp::{constellation::file::FileType, multipass::identity::Identity};
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Default, Debug, Clone)]
 pub enum Bootstrap {
-    #[default]
     Ipfs,
     Custom(Vec<Multiaddr>),
+    #[default]
     None,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum Discovery {
     Shuttle {
         addresses: Vec<Multiaddr>,
@@ -28,13 +23,12 @@ pub enum Discovery {
         namespace: Option<String>,
         discovery_type: DiscoveryType,
     },
-    /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
+    /// Disables Discovery
     #[default]
     None,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum DiscoveryType {
     #[default]
     DHT,
@@ -45,39 +39,30 @@ pub enum DiscoveryType {
 
 impl Bootstrap {
     /// List of bootstrap multiaddr
-    pub fn address(&self) -> Vec<Multiaddr> {
+    pub fn address(&self) -> &[Multiaddr] {
         match self {
-            Bootstrap::Ipfs => [
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-            ]
-            .iter()
-            .filter_map(|s| Multiaddr::from_str(s).ok())
-            .collect::<Vec<_>>(),
-            Bootstrap::Custom(address) => address.clone(),
-            Bootstrap::None => vec![],
+            Bootstrap::Ipfs => &[],
+            Bootstrap::Custom(address) => address,
+            Bootstrap::None => &[],
         }
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct Mdns {
     /// Enables mdns protocol in libp2p
     pub enable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RelayClient {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     /// List of relays to use
     pub relay_address: Vec<Multiaddr>,
     pub background: bool,
     pub quorum: RelayQuorum,
 }
 
-#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Copy)]
 pub enum RelayQuorum {
     First,
     N(u8),
@@ -88,10 +73,11 @@ pub enum RelayQuorum {
 impl Default for RelayClient {
     fn default() -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             relay_address: vec![
                 //NYC-1
                 "/ip4/146.190.184.59/tcp/4001/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(), 
-                "/ip4/146.190.184.59/udp/4001/quic-v1/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(), 
+                "/ip4/146.190.184.59/udp/4001/quic-v1/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
                 //SF-1
                 "/ip4/64.225.88.100/udp/4001/quic-v1/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(), 
                 "/ip4/64.225.88.100/tcp/4001/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(), 
@@ -99,88 +85,42 @@ impl Default for RelayClient {
                 "/ip4/24.199.86.91/udp/46315/quic-v1/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
                 "/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
             ],
+            // Relays that are meant to be used from a web standpoint.
+            // Note: webrtc addresses are prone to change due an upstream issue and shouldnt be relied on for primary connections
+            #[cfg(target_arch="wasm32")]
+            relay_address: vec![
+                //NYC-1
+                "/ip4/146.190.184.59/tcp/4001/wss/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
+                "/ip4/146.190.184.59/udp/4002/webrtc-direct/certhash/uEiC7m8m2pxf_DHr488akg-wSAxsa-f2agH5zc2nE70vx_g/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
+                //SF-1
+                "/ip4/64.225.88.100/tcp/4001/wss/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
+                "/ip4/64.225.88.100/udp/4002/webrtc-direct/certhash/uEiD25LqH8FlAgimcIY4XB1QiHHROlCYn7WJIukuRMe3tfQ/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
+                //NYC-1-EXP
+                "/ip4/24.199.86.91/tcp/46315/wss/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
+                "/ip4/24.199.86.91/udp/4002/webrtc-direct/certhash/uEiCZ8YAx_IZ7_x5dKltFESWHe4TUg8_gYpla6tmWR9jlfw/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
+            ],
             background: true,
             quorum: Default::default()
         }
     }
 }
 
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct Swarm {
-//     /// Concurrent dial factor
-//     pub dial_factor: u8,
-//     pub notify_buffer_size: usize,
-//     pub connection_buffer_size: usize,
-//     pub limit: Option<ConnectionLimit>,
-// }
-
-// impl Default for Swarm {
-//     fn default() -> Self {
-//         Self {
-//             dial_factor: 8, //Same dial factor as default for libp2p
-//             notify_buffer_size: 32,
-//             connection_buffer_size: 1024,
-//             limit: None,
-//         }
-//     }
-// }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Pubsub {
-    pub max_transmit_size: usize,
-}
-
-impl Default for Pubsub {
-    fn default() -> Self {
-        Self {
-            max_transmit_size: 8 * 1024 * 1024,
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
-    pub pubsub: Pubsub,
-    pub bootstrap: bool,
     pub portmapping: bool,
     pub agent_version: Option<String>,
     /// Used for testing with a memory transport
     pub memory_transport: bool,
     pub dht_client: bool,
-    pub disable_quic: bool,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub enum UpdateEvents {
-    #[default]
-    /// Emit events for all identity updates
-    Enabled,
-    /// Emit events for identity updates from friends
-    FriendsOnly,
-    /// Disable events
-    Disable,
 }
 
 pub type DefaultPfpFn = std::sync::Arc<
     dyn Fn(&Identity) -> Result<(Vec<u8>, FileType), std::io::Error> + Send + Sync + 'static,
 >;
 
-#[derive(Default, Clone, Serialize, Deserialize)]
-pub enum StoreOffline {
-    Remote,
-    Local {
-        path: PathBuf,
-    },
-    RemoteAndLocal {
-        path: PathBuf,
-    },
-    #[default]
-    None,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct StoreSetting {
     /// Allow only interactions with friends
     /// Note: This is ignored when it comes to chating between group chat recipients
@@ -194,29 +134,17 @@ pub struct StoreSetting {
     /// Discovery type
     pub discovery: Discovery,
 
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    /// Placeholder for a offline agents to obtain information regarding one own identity
-    pub offline_agent: Vec<Multiaddr>,
-    /// Export account on update
-    pub store_offline: StoreOffline,
-
     /// Fetch data over bitswap instead of pubsub
     pub fetch_over_bitswap: bool,
     /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
-    /// Emit event for when a friend comes online or offline
-    pub emit_online_event: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<Duration>,
-    /// Options to allow emitting identity events to all or just friends
-    pub update_events: UpdateEvents,
     /// Disable providing images for identities
     pub disable_images: bool,
     /// Announce to mesh network
     pub announce_to_mesh: bool,
     /// Function to call to provide data for a default profile picture if one is not apart of the identity
-    #[serde(skip)]
     pub default_profile_picture: Option<DefaultPfpFn>,
 }
 
@@ -234,15 +162,9 @@ impl Default for StoreSetting {
                 namespace: None,
                 discovery_type: Default::default(),
             },
-
-            offline_agent: Vec::new(),
-            store_offline: StoreOffline::None,
-
             fetch_over_bitswap: false,
             share_platform: false,
             friend_request_response_duration: None,
-            emit_online_event: false,
-            update_events: Default::default(),
             disable_images: false,
             with_friends: false,
             default_profile_picture: None,
@@ -251,22 +173,112 @@ impl Default for StoreSetting {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Config {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<PathBuf>,
-    pub bootstrap: Bootstrap,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub listen_on: Vec<Multiaddr>,
-    pub ipfs_setting: IpfsSetting,
-    pub store_setting: StoreSetting,
-    pub enable_relay: bool,
-    pub save_phrase: bool,
-    pub max_storage_size: Option<usize>,
-    pub max_file_size: Option<usize>,
-    pub thumbnail_size: (u32, u32),
-    pub chunking: Option<usize>,
-    pub thumbnail_exact_format: bool,
+    path: Option<PathBuf>,
+    bootstrap: Bootstrap,
+    listen_on: Vec<Multiaddr>,
+    ipfs_setting: IpfsSetting,
+    store_setting: StoreSetting,
+    enable_relay: bool,
+    save_phrase: bool,
+    max_storage_size: Option<usize>,
+    max_file_size: Option<usize>,
+    thumbnail_size: (u32, u32),
+    thumbnail_exact_format: bool,
+}
+
+impl Config {
+    pub fn path(&self) -> Option<&PathBuf> {
+        self.path.as_ref()
+    }
+
+    pub fn bootstrap(&self) -> &Bootstrap {
+        &self.bootstrap
+    }
+
+    pub fn listen_on(&self) -> &[Multiaddr] {
+        &self.listen_on
+    }
+
+    pub fn ipfs_setting(&self) -> &IpfsSetting {
+        &self.ipfs_setting
+    }
+
+    pub fn store_setting(&self) -> &StoreSetting {
+        &self.store_setting
+    }
+
+    pub fn enable_relay(&self) -> bool {
+        self.enable_relay
+    }
+
+    pub fn save_phrase(&self) -> bool {
+        self.save_phrase
+    }
+
+    pub fn max_storage_size(&self) -> Option<usize> {
+        self.max_storage_size
+    }
+
+    pub fn max_file_size(&self) -> Option<usize> {
+        self.max_file_size
+    }
+
+    pub fn thumbnail_size(&self) -> (u32, u32) {
+        self.thumbnail_size
+    }
+
+    pub fn thumbnail_exact_format(&self) -> bool {
+        self.thumbnail_exact_format
+    }
+}
+
+impl Config {
+    pub fn path_mut(&mut self) -> &mut Option<PathBuf> {
+        &mut self.path
+    }
+
+    pub fn bootstrap_mut(&mut self) -> &mut Bootstrap {
+        &mut self.bootstrap
+    }
+
+    pub fn listen_on_mut(&mut self) -> &mut Vec<Multiaddr> {
+        &mut self.listen_on
+    }
+
+    pub fn ipfs_setting_mut(&mut self) -> &mut IpfsSetting {
+        &mut self.ipfs_setting
+    }
+
+    pub fn store_setting_mut(&mut self) -> &mut StoreSetting {
+        &mut self.store_setting
+    }
+
+    pub fn enable_relay_mut(&mut self) -> &mut bool {
+        &mut self.enable_relay
+    }
+
+    pub fn save_phrase_mut(&mut self) -> &mut bool {
+        &mut self.save_phrase
+    }
+
+    pub fn max_storage_size_mut(&mut self) -> &mut Option<usize> {
+        &mut self.max_storage_size
+    }
+
+    pub fn max_file_size_mut(&mut self) -> &mut Option<usize> {
+        &mut self.max_file_size
+    }
+
+    pub fn thumbnail_size_mut(&mut self) -> &mut (u32, u32) {
+        &mut self.thumbnail_size
+    }
+
+    pub fn thumbnail_exact_format_mut(&mut self) -> &mut bool {
+        &mut self.thumbnail_exact_format
+    }
 }
 
 impl Default for Config {
@@ -274,43 +286,51 @@ impl Default for Config {
         Config {
             path: None,
             bootstrap: Bootstrap::Ipfs,
+            #[cfg(not(target_arch = "wasm32"))]
             listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"]
                 .iter()
                 .filter_map(|s| Multiaddr::from_str(s).ok())
                 .collect::<Vec<_>>(),
+            #[cfg(target_arch = "wasm32")]
+            listen_on: vec![],
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                bootstrap: false,
                 ..Default::default()
             },
             store_setting: Default::default(),
             enable_relay: true,
             save_phrase: false,
+            #[cfg(not(target_arch = "wasm32"))]
             max_storage_size: Some(10 * 1024 * 1024 * 1024),
+            #[cfg(target_arch = "wasm32")]
+            max_storage_size: Some(50 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
             thumbnail_size: (128, 128),
-            chunking: None,
             thumbnail_exact_format: true,
         }
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Config {
     /// Default configuration for local development and writing test
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn development() -> Config {
         Config::default()
     }
 
     /// Test configuration. Used for in-memory
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
             ipfs_setting: IpfsSetting {
-                bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     ..Default::default()
                 },
+                memory_transport: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {
@@ -324,14 +344,36 @@ impl Config {
         }
     }
 
+    /// Minimal testing configuration. Used for in-memory
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+    pub fn minimal_testing() -> Config {
+        Config {
+            bootstrap: Bootstrap::None,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                relay_client: RelayClient {
+                    ..Default::default()
+                },
+                memory_transport: true,
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: Discovery::None,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     /// Minimal production configuration
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                bootstrap: false,
                 relay_client: RelayClient {
                     ..Default::default()
                 },
@@ -346,13 +388,13 @@ impl Config {
     }
 
     /// Recommended production configuration
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn production<P: AsRef<std::path::Path>>(path: P) -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                bootstrap: true,
                 relay_client: RelayClient {
                     ..Default::default()
                 },
@@ -368,139 +410,4 @@ impl Config {
             ..Default::default()
         }
     }
-
-    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Config> {
-        let path = path.as_ref();
-        let bytes = std::fs::read(path)?;
-        let config = serde_json::from_slice(&bytes)?;
-        Ok(config)
-    }
-
-    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
-        let bytes = serde_json::to_vec(self)?;
-        std::fs::write(path, bytes)?;
-        Ok(())
-    }
-
-    pub fn from_string<S: AsRef<str>>(data: S) -> anyhow::Result<Config> {
-        let data = data.as_ref();
-        let config = serde_json::from_str(data)?;
-        Ok(config)
-    }
 }
-
-// pub mod ffi {
-//     use crate::config::Config;
-
-//     use std::ffi::CStr;
-//     use std::os::raw::c_char;
-//     use warp::error::Error;
-//     use warp::ffi::{FFIResult, FFIResult_Null, FFIResult_String};
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_from_file(
-//         file: *const c_char,
-//     ) -> FFIResult<Config> {
-//         if file.is_null() {
-//             return FFIResult::err(Error::Any(anyhow::anyhow!("file cannot be null")));
-//         }
-
-//         let file = CStr::from_ptr(file).to_string_lossy().to_string();
-
-//         Config::from_file(file).map_err(Error::from).into()
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_to_file(
-//         config: *const Config,
-//         file: *const c_char,
-//     ) -> FFIResult_Null {
-//         if config.is_null() {
-//             return FFIResult_Null::err(Error::NullPointerContext {
-//                 pointer: "config".into(),
-//             });
-//         }
-
-//         if file.is_null() {
-//             return FFIResult_Null::err(Error::NullPointerContext {
-//                 pointer: "file".into(),
-//             });
-//         }
-
-//         let file = CStr::from_ptr(file).to_string_lossy().to_string();
-
-//         Config::to_file(&*config, file)
-//             .map_err(Error::from)
-//             .into()
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_from_str(
-//         config: *const c_char,
-//     ) -> FFIResult<Config> {
-//         if config.is_null() {
-//             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
-//         }
-
-//         let data = CStr::from_ptr(config).to_string_lossy().to_string();
-
-//         Config::from_string(data).map_err(Error::from).into()
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_to_str(
-//         config: *const Config,
-//     ) -> FFIResult_String {
-//         if config.is_null() {
-//             return FFIResult_String::err(Error::Any(anyhow::anyhow!("config cannot be null")));
-//         }
-
-//         serde_json::to_string(&*config).map_err(Error::from).into()
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_development() -> *mut Config {
-//         Box::into_raw(Box::new(Config::development()))
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_testing(experimental: bool) -> *mut Config {
-//         Box::into_raw(Box::new(Config::testing(experimental)))
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_production(
-//         path: *const c_char,
-//         experimental: bool,
-//     ) -> FFIResult<Config> {
-//         if path.is_null() {
-//             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
-//         }
-
-//         let path = CStr::from_ptr(path).to_string_lossy().to_string();
-
-//         FFIResult::ok(Config::production(path, experimental))
-//     }
-
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn mp_ipfs_config_minimal(
-//         path: *const c_char,
-//     ) -> FFIResult<Config> {
-//         if path.is_null() {
-//             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
-//         }
-
-//         let path = CStr::from_ptr(path).to_string_lossy().to_string();
-
-//         FFIResult::ok(Config::minimal(path))
-//     }
-// }

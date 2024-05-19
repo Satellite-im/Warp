@@ -4,8 +4,9 @@ pub mod identity;
 pub mod image_dag;
 pub mod root;
 
-use chrono::{DateTime, Utc};
+use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 
+use chrono::{DateTime, Utc};
 use futures::{
     stream::{self, BoxStream},
     StreamExt, TryFutureExt,
@@ -14,8 +15,8 @@ use ipfs::{Ipfs, Keypair, PeerId};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 use uuid::Uuid;
+
 use warp::{
     constellation::{
         directory::Directory,
@@ -29,13 +30,13 @@ use warp::{
 
 use crate::store::get_keypair_did;
 
+use super::keystore::Keystore;
+
 use self::{
     files::{DirectoryDocument, FileDocument},
     identity::IdentityDocument,
     image_dag::ImageDag,
 };
-
-use super::keystore::Keystore;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ResolvedRootDocument {
@@ -405,6 +406,9 @@ pub struct FileAttachmentDocument {
     pub creation: DateTime<Utc>,
     pub thumbnail: Option<Cid>,
     pub file_type: FileType,
+    // Note: We use `String` instead of `Cid` to create a stop point when it comes to walking dag
+    //       since we dont want to calculate the depth of the message to prevent the fetching before
+    //       it is requested
     pub data: String,
 }
 

@@ -1,4 +1,4 @@
-use futures::{stream::BoxStream, StreamExt};
+use futures::StreamExt;
 use libipld::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
@@ -11,14 +11,14 @@ pub struct ImageDag {
     pub mime: FileType,
 }
 
-#[tracing::instrument(skip(ipfs, stream))]
+#[tracing::instrument(skip(ipfs, opt))]
 pub async fn store_photo(
     ipfs: &Ipfs,
-    stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+    opt: impl Into<rust_ipfs::unixfs::AddOpt>,
     file_type: FileType,
     limit: Option<usize>,
 ) -> Result<Cid, Error> {
-    let mut stream = ipfs.add_unixfs(stream);
+    let mut stream = ipfs.add_unixfs(opt);
 
     let (cid, size) = loop {
         let status = stream.next().await.ok_or(Error::Other)?;
@@ -81,22 +81,24 @@ pub async fn get_image(
 ) -> Result<IdentityImage, Error> {
     let dag: ImageDag = ipfs.get_dag(cid).set_local(local).deserialized().await?;
 
-    match limit {
-        Some(size) if dag.size > size as _ => {
-            return Err(Error::InvalidLength {
-                context: "image".into(),
-                current: dag.size as _,
-                minimum: None,
-                maximum: limit,
-            });
-        }
-        Some(_) => {}
-        None => {}
+    if matches!(limit, Some(size) if dag.size > size as _ ) {
+        return Err(Error::InvalidLength {
+            context: "image".into(),
+            current: dag.size as _,
+            minimum: None,
+            maximum: limit,
+        });
     }
 
+    let size = limit.unwrap_or(dag.size as _);
+
     let image = ipfs
-        .unixfs()
-        .cat(dag.link)
+        .cat_unixfs(dag.link)
+        // we apply the limit in the event the stream of bytes exceeds the explicit limit
+        // which may be the define sized if `limit` is `Some(_)` or no greater
+        // than ImageDag::size, which by usage a limit is usually set as we set a hard limit for
+        // profile images and banners to 2MB
+        .max_length(size)
         .providers(peers)
         .set_local(local)
         .await

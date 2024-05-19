@@ -43,7 +43,7 @@ impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
 
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
-        tokio::spawn(async move {
+        crate::rt::spawn(async move {
             select! {
                 _ = token.cancelled() => {}
                 _ = task.run() => {}

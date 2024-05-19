@@ -19,7 +19,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     account.create_identity(username, None).await?;
     Ok(account)
@@ -34,10 +34,10 @@ async fn main() -> anyhow::Result<()> {
     let mut rng = rand::thread_rng();
 
     let mut account_a = account(None).await?;
-    let mut subscribe_a = account_a.subscribe().await?;
+    let mut subscribe_a = account_a.multipass_subscribe().await?;
 
     let mut account_b = account(None).await?;
-    let mut subscribe_b = account_b.subscribe().await?;
+    let mut subscribe_b = account_b.multipass_subscribe().await?;
 
     let ident_a = account_a.get_own_identity().await?;
     let ident_b = account_b.get_own_identity().await?;

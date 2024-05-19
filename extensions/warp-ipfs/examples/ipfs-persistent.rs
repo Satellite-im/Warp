@@ -69,13 +69,13 @@ async fn setup_persistent<P: AsRef<Path>>(
 
     let mut config = Config::production(path);
 
-    config.ipfs_setting.mdns.enable = opt.mdns;
+    config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
     let (mut account, _, filesystem) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     if account.get_own_identity().await.is_err() {
         account.create_identity(username, None).await?;

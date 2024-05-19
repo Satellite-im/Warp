@@ -1,5 +1,7 @@
 use chrono::Utc;
 use either::Either;
+use futures_timeout::TimeoutExt;
+use futures_timer::Delay;
 use tokio_stream::StreamMap;
 use tracing::info;
 
@@ -8,12 +10,13 @@ use std::{
         btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet,
     },
     ffi::OsStr,
-    future::IntoFuture,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+use web_time::Instant;
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -25,7 +28,7 @@ use libipld::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
-use tokio::{select, task::JoinHandle};
+use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -59,10 +62,13 @@ use crate::{
         topics::PeerTopic,
         verify_serde_sig, ConversationEvents, ConversationRequestKind, ConversationRequestResponse,
         ConversationResponseKind, ConversationUpdateKind, DidExt, MessagingEvents,
+        MIN_MESSAGE_SIZE,
     },
 };
 
-use super::{document::root::RootDocumentMap, SHUTTLE_TIMEOUT};
+use super::{
+    document::root::RootDocumentMap, ds_key::DataStoreKey, MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+};
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
@@ -83,7 +89,6 @@ pub struct MessageStore {
 impl MessageStore {
     pub async fn new(
         ipfs: &Ipfs,
-        path: Option<PathBuf>,
         discovery: Discovery,
         file: FileStore,
         event: EventSubscription<RayGunEventKind>,
@@ -93,14 +98,6 @@ impl MessageStore {
         info!("Initializing MessageStore");
 
         let keypair = identity.did_key();
-
-        if let Some(path) = path.as_ref() {
-            if !path.exists() {
-                fs::create_dir_all(path)
-                    .await
-                    .expect("able to create directory");
-            }
-        }
 
         let (tx, rx) = futures::channel::mpsc::channel(1024);
 
@@ -115,7 +112,6 @@ impl MessageStore {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
             keypair: keypair.clone(),
-            path,
             conversation_task: HashMap::new(),
             command_tx: tx,
             identity: identity.clone(),
@@ -148,7 +144,7 @@ impl MessageStore {
             conversation_mailbox_task_rx,
         };
 
-        tokio::spawn({
+        crate::rt::spawn({
             async move {
                 select! {
                     _ = token.cancelled() => {}
@@ -500,14 +496,11 @@ impl ConversationTask {
 
         pin_mut!(stream);
 
-        let mut queue_timer = tokio::time::interval(Duration::from_secs(1));
+        let mut queue_timer = Delay::new(Duration::from_secs(1));
 
-        let mut pending_exchange_timer = tokio::time::interval(Duration::from_secs(1));
+        let mut pending_exchange_timer = Delay::new(Duration::from_secs(1));
 
-        let mut check_mailbox = tokio::time::interval_at(
-            tokio::time::Instant::now() + Duration::from_secs(5),
-            Duration::from_secs(60),
-        );
+        let mut check_mailbox = Delay::new(Duration::from_secs(5));
 
         loop {
             tokio::select! {
@@ -606,18 +599,21 @@ impl ConversationTask {
                         tracing::error!(conversation_id = %id, error = %e, "unable to get messages from conversation mailbox");
                     }
                 }
-                _ = queue_timer.tick() => {
+                _ = &mut queue_timer => {
                     let inner = &mut *self.inner.write().await;
                     _ = process_queue(inner).await;
+                    queue_timer.reset(Duration::from_secs(1));
                 }
-                _ = pending_exchange_timer.tick() => {
+                _ = &mut pending_exchange_timer => {
                     let inner = &mut *self.inner.write().await;
                     _ = process_pending_payload(inner).await;
+                    pending_exchange_timer.reset(Duration::from_secs(1));
                 }
 
-                _ = check_mailbox.tick() => {
+                _ = &mut check_mailbox => {
                     let inner = &mut *self.inner.write().await;
                     _ = inner.load_from_mailbox().await;
+                    check_mailbox.reset(Duration::from_secs(60));
                 }
             }
         }
@@ -626,10 +622,9 @@ impl ConversationTask {
 
 struct ConversationInner {
     ipfs: Ipfs,
-    path: Option<PathBuf>,
     keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
-    conversation_task: HashMap<Uuid, JoinHandle<()>>,
+    conversation_task: HashMap<Uuid, DropGuard>,
     root: RootDocumentMap,
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
@@ -648,37 +643,6 @@ struct ConversationInner {
 
 impl ConversationInner {
     async fn migrate(&mut self) -> Result<(), Error> {
-        if let Some(path) = self.path.as_ref() {
-            let mid_file = path.join(".message_id");
-            if !mid_file.is_file() {
-                return Ok(());
-            }
-            let cid = fs::read(&mid_file)
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .and_then(|cid_str| {
-                    Cid::from_str(&cid_str)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                })?;
-
-            let list: BTreeMap<String, Cid> = self.ipfs.get_dag(cid).local().deserialized().await?;
-
-            let mut stream = FuturesUnordered::from_iter(list.values().copied().map(|cid| {
-                self.ipfs
-                    .get_dag(cid)
-                    .local()
-                    .deserialized::<ConversationDocument>()
-                    .into_future()
-            }))
-            .filter_map(|result| async move { result.ok() })
-            .boxed();
-
-            while let Some(document) = stream.next().await {
-                let _ = self.root.set_conversation_document(document).await;
-            }
-
-            _ = fs::remove_file(mid_file).await;
-        }
         Ok(())
     }
 
@@ -692,16 +656,35 @@ impl ConversationInner {
             }
         }
 
-        if let Some(path) = self.path.as_ref() {
-            if let Ok(data) = fs::read(path.join(".messaging_queue"))
-                .and_then(|data| async move {
-                    serde_json::from_slice(&data)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                })
+        let ipfs = &self.ipfs;
+        let key = ipfs.messaging_queue();
+
+        if let Ok(data) = futures::future::ready(
+            ipfs.repo()
+                .data_store()
+                .get(key.as_bytes())
                 .await
-            {
-                self.queue = data;
-            }
+                .unwrap_or_default()
+                .ok_or(Error::Other),
+        )
+        .and_then(|bytes| async move {
+            let cid_str = String::from_utf8_lossy(&bytes).to_string();
+
+            let cid = cid_str.parse::<Cid>().map_err(anyhow::Error::from)?;
+
+            Ok(cid)
+        })
+        .and_then(|cid| async move {
+            ipfs.get_dag(cid)
+                .local()
+                .deserialized::<HashMap<_, _>>()
+                .await
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from)
+        })
+        .await
+        {
+            self.queue = data;
         }
     }
 
@@ -732,7 +715,7 @@ impl ConversationInner {
                             })
                             .await;
 
-                        match tokio::time::timeout(SHUTTLE_TIMEOUT, rx).await {
+                        match rx.timeout(SHUTTLE_TIMEOUT).await {
                             Ok(Ok(Ok(list))) => {
                                 providers.push(peer_id);
                                 conversation_mailbox.extend(list);
@@ -803,7 +786,7 @@ impl ConversationInner {
                 };
 
 
-                tokio::spawn(async move {
+                crate::rt::spawn(async move {
                     let result = fut.await;
                     let _ = tx.send(result).await;
                 });
@@ -1225,17 +1208,45 @@ impl ConversationInner {
     }
 
     async fn save_queue(&self) {
-        if let Some(path) = self.path.as_ref() {
-            let bytes = match serde_json::to_vec(&self.queue) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Error serializing queue list into bytes: {e}");
-                    return;
-                }
-            };
+        let key = self.ipfs.messaging_queue();
+        let current_cid = self
+            .ipfs
+            .repo()
+            .data_store()
+            .get(key.as_bytes())
+            .await
+            .unwrap_or_default()
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| cid_str.parse::<Cid>().ok());
 
-            if let Err(e) = fs::write(path.join(".messaging_queue"), bytes).await {
-                error!("Error saving queue: {e}");
+        let cid = match self.ipfs.dag().put().serialize(&self.queue).pin(true).await {
+            Ok(cid) => cid,
+            Err(e) => {
+                tracing::error!(error = %e, "unable to save queue");
+                return;
+            }
+        };
+
+        let cid_str = cid.to_string();
+
+        if let Err(e) = self
+            .ipfs
+            .repo()
+            .data_store()
+            .put(key.as_bytes(), cid_str.as_bytes())
+            .await
+        {
+            tracing::error!(error = %e, "unable to save queue");
+            return;
+        }
+
+        tracing::info!("messaging queue saved");
+
+        let old_cid = current_cid;
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
             }
         }
     }
@@ -1510,13 +1521,17 @@ impl ConversationInner {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length == 0 || lines_value_length > 4096 {
-            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
-                minimum: Some(1),
-                maximum: Some(4096),
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
             });
         }
 
@@ -1595,13 +1610,17 @@ impl ConversationInner {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length == 0 || lines_value_length > 4096 {
-            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
-                minimum: Some(1),
-                maximum: Some(4096),
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
             });
         }
 
@@ -1623,7 +1642,7 @@ impl ConversationInner {
             return Err(Error::InvalidMessage);
         }
 
-        *message.lines_mut() = messages.clone();
+        message.lines_mut().clone_from(&messages);
         message.set_modified(Utc::now());
 
         message_document
@@ -1703,13 +1722,17 @@ impl ConversationInner {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length == 0 || lines_value_length > 4096 {
-            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
-                minimum: Some(1),
-                maximum: Some(4096),
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
             });
         }
 
@@ -2060,13 +2083,17 @@ impl ConversationInner {
                 .map(|s| s.chars().count())
                 .sum();
 
-            if lines_value_length > 4096 {
-                error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+            if lines_value_length > MAX_MESSAGE_SIZE {
+                tracing::error!(
+                    current_size = lines_value_length,
+                    max = MAX_MESSAGE_SIZE,
+                    "length of message is invalid"
+                );
                 return Err(Error::InvalidLength {
                     context: "message".into(),
                     current: lines_value_length,
                     minimum: None,
-                    maximum: Some(4096),
+                    maximum: Some(MAX_MESSAGE_SIZE),
                 });
             }
         }
@@ -3072,11 +3099,21 @@ impl ConversationInner {
 
         let (mut tx, rx) = mpsc::channel(256);
 
-        let handle = tokio::spawn(async move {
-            while let Some(stream_type) = stream.next().await {
-                if let Err(e) = tx.send(stream_type).await {
-                    if e.is_disconnected() {
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+
+        crate::rt::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => {
                         break;
+                    }
+                    Some(stream_data) = stream.next() => {
+                        if let Err(e) = tx.send(stream_data).await {
+                            if e.is_disconnected() {
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -3086,7 +3123,7 @@ impl ConversationInner {
             .command_tx
             .send(MessagingCommand::Receiver { ch: rx })
             .await;
-        self.conversation_task.insert(conversation_id, handle);
+        self.conversation_task.insert(conversation_id, drop_guard);
 
         tracing::info!(%conversation_id, "started conversation");
         Ok(())
@@ -3094,7 +3131,7 @@ impl ConversationInner {
 
     async fn destroy_conversation(&mut self, conversation_id: Uuid) {
         if let Some(handle) = self.conversation_task.remove(&conversation_id) {
-            handle.abort();
+            drop(handle);
             self.pending_key_exchange.remove(&conversation_id);
         }
     }
@@ -3373,7 +3410,7 @@ async fn message_event(
                 .map(|s| s.chars().count())
                 .sum();
 
-            if lines_value_length == 0 && lines_value_length > 4096 {
+            if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
                 tracing::error!(
                     message_length = lines_value_length,
                     "Length of message is invalid."
@@ -3381,8 +3418,8 @@ async fn message_event(
                 return Err(Error::InvalidLength {
                     context: "message".into(),
                     current: lines_value_length,
-                    minimum: Some(1),
-                    maximum: Some(4096),
+                    minimum: Some(MIN_MESSAGE_SIZE),
+                    maximum: Some(MAX_MESSAGE_SIZE),
                 });
             }
 
@@ -3424,13 +3461,17 @@ async fn message_event(
                 .map(|s| s.chars().count())
                 .sum();
 
-            if lines_value_length == 0 && lines_value_length > 4096 {
-                error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+            if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
+                tracing::error!(
+                    current_size = lines_value_length,
+                    max = MAX_MESSAGE_SIZE,
+                    "length of message is invalid"
+                );
                 return Err(Error::InvalidLength {
                     context: "message".into(),
                     current: lines_value_length,
-                    minimum: Some(1),
-                    maximum: Some(4096),
+                    minimum: Some(MIN_MESSAGE_SIZE),
+                    maximum: Some(MAX_MESSAGE_SIZE),
                 });
             }
 

@@ -1,29 +1,23 @@
+use std::path::Path;
+use std::str::FromStr;
+
 use anyhow::bail;
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::{channel::oneshot, StreamExt};
-
 use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+use warp::crypto::DID;
+use warp::multipass::identity::Identity;
+use warp::tesseract::Tesseract;
 use warp::{
     blink::{AudioTestEvent, Blink, BlinkEventKind, BlinkEventStream},
     multipass::{MultiPass, MultiPassEventKind, MultiPassEventStream},
 };
-
-use std::path::Path;
-
-use std::str::FromStr;
-
-use warp::crypto::DID;
-use warp::multipass::identity::Identity;
-
-use warp::tesseract::Tesseract;
-use warp_ipfs::{
-    config::{Config, UpdateEvents},
-    WarpIpfsBuilder,
-};
+use warp_ipfs::{config::Config, WarpIpfsBuilder};
 
 mod logger;
 
@@ -360,17 +354,15 @@ async fn main() -> anyhow::Result<()> {
     tesseract.unlock("abcdefghik".as_bytes())?;
 
     let mut config = Config::production(multipass_dir);
-    config.ipfs_setting.portmapping = true;
-    config.ipfs_setting.agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
-    config.store_setting.emit_online_event = true;
-    config.store_setting.share_platform = true;
-    config.store_setting.update_events = UpdateEvents::Enabled;
+    config.ipfs_setting_mut().portmapping = true;
+    config.ipfs_setting_mut().agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
+    config.store_setting_mut().share_platform = true;
 
     let (mut multipass, _, _) = WarpIpfsBuilder::default()
         .set_tesseract(tesseract.clone())
         .set_config(config)
         .finalize()
-        .await?;
+        .await;
 
     if new_account {
         let random_name: String = rand::thread_rng()
@@ -404,7 +396,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let multipass_event_stream = multipass.subscribe().await?;
+    let multipass_event_stream = multipass.multipass_subscribe().await?;
     let multipass2 = multipass.clone();
     let multipass_handle = tokio::spawn(async {
         if let Err(e) = handle_multipass_event_stream(multipass2, multipass_event_stream).await {

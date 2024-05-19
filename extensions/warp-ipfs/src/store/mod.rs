@@ -34,6 +34,19 @@ use warp::{
     tesseract::Tesseract,
 };
 
+pub const MAX_THUMBNAIL_SIZE: usize = 5_242_880;
+pub const MAX_IMAGE_SIZE: usize = 2_097_152;
+pub const MIN_USERNAME_LENGTH: usize = 4;
+pub const MAX_USERNAME_LENGTH: usize = 64;
+pub const MAX_STATUS_LENGTH: usize = 512;
+pub const MIN_MESSAGE_SIZE: usize = 1;
+pub const MAX_MESSAGE_SIZE: usize = 4_096;
+pub const MAX_ATTACHMENT: usize = 32;
+pub const MIN_ATTACHMENT: usize = 1;
+pub const MAX_CONVERSATIONS: usize = 1_000;
+pub const MAX_FRIENDS: usize = 1_000;
+pub const MAX_REQUEST: usize = 1_000;
+
 pub(super) mod topics {
     use std::fmt::Display;
 
@@ -56,6 +69,119 @@ pub(super) mod topics {
     }
 
     impl PeerTopic for DID {}
+}
+
+pub(super) mod ds_key {
+
+    use rust_ipfs::{Ipfs, Keypair, PeerId, PublicKey};
+
+    pub trait DataStoreKey {
+        fn base(&self) -> String;
+
+        fn root(&self) -> String {
+            self.base() + "/root"
+        }
+
+        fn cache(&self) -> String {
+            self.base() + "/cache"
+        }
+
+        fn messaging_queue(&self) -> String {
+            self.base() + "/messaging_queue"
+        }
+
+        fn request_queue(&self) -> String {
+            self.base() + "/request_queue"
+        }
+    }
+
+    impl DataStoreKey for Ipfs {
+        fn base(&self) -> String {
+            let peer_id = self.keypair().public().to_peer_id();
+            format!("/identity/{peer_id}")
+        }
+    }
+
+    impl DataStoreKey for PeerId {
+        fn base(&self) -> String {
+            format!("/identity/{self}")
+        }
+    }
+
+    impl DataStoreKey for Keypair {
+        fn base(&self) -> String {
+            let peer_id = self.public().to_peer_id();
+            format!("/identity/{peer_id}")
+        }
+    }
+
+    impl DataStoreKey for PublicKey {
+        fn base(&self) -> String {
+            let peer_id = self.to_peer_id();
+            format!("/identity/{peer_id}")
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
+    ipfs: &rust_ipfs::Ipfs,
+    path: P,
+) -> Result<(), Error> {
+    use ds_key::DataStoreKey;
+    use libipld::Cid;
+
+    let path = path.as_ref();
+    let ds = ipfs.repo().data_store();
+
+    // root id
+    if let Some(cid) = tokio::fs::read(path.join(".id"))
+        .await
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .ok()
+        .and_then(|cid_str| cid_str.parse::<Cid>().ok())
+    {
+        let key = ipfs.root();
+        let cid_str = cid.to_string();
+        ds.put(key.as_bytes(), cid_str.as_bytes()).await?;
+        _ = tokio::fs::remove_file(path.join(".id")).await;
+    }
+
+    // cache id
+    if let Some(cid) = tokio::fs::read(path.join(".cache_id_v0"))
+        .await
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .ok()
+        .and_then(|cid_str| cid_str.parse::<Cid>().ok())
+    {
+        let key = ipfs.cache();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join(".cache_id_v0")).await;
+        }
+    }
+
+    // request queue
+    if let Ok(data) = tokio::fs::read(path.join(".request_queue")).await {
+        let cid = ipfs.dag().put().serialize(&data).pin(true).await?;
+        let key = ipfs.request_queue();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join(".request_queue")).await;
+        }
+    }
+
+    // message queue
+    if let Ok(data) = tokio::fs::read(path.join("messages").join(".messaging_queue")).await {
+        let cid = ipfs.dag().put().serialize(&data).pin(true).await?;
+        let key = ipfs.messaging_queue();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join("messages").join(".messaging_queue")).await;
+        }
+    }
+
+    Ok(())
 }
 
 const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);

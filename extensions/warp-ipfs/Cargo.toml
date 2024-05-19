@@ -9,7 +9,8 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp.workspace = true
 
-rust-ipfs.workspace = true
+futures-timeout.workspace = true
+rust-ipfs = { workspace = true, features = ["webrtc_transport", "experimental_stream"] }
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 futures.workspace = true
@@ -43,11 +44,18 @@ fs = { path = "../../tools/fs", default-features = false }
 tokio-util = { workspace = true }
 tokio-stream = { workspace = true }
 
+web-time = "1.1.0"
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
+futures-timer = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-tokio = { version = "1", default-features = false, features = ["sync"]}
+tokio = { version = "1", default-features = false, features = ["sync"] }
+futures-timer = { workspace = true, features = ["wasm-bindgen"] }
+wasm-bindgen-futures = { version = "0.4" }
+wasm-bindgen.workspace = true
+js-sys.workspace = true
 
 [dev-dependencies]
 derive_more.workspace = true
