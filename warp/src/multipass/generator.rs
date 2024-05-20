@@ -38,7 +38,7 @@ fn capitalize_first_letter(word: &str) -> String {
     String::new()
 }
 
-const ADJ: &[&'static str] = &[
+const ADJ: &[&str] = &[
     "aback",
     "abaft",
     "abandoned",
@@ -1165,7 +1165,7 @@ const ADJ: &[&'static str] = &[
     "zonked",
 ];
 
-const NOUNS: &[&'static str] = &[
+const NOUNS: &[&str] = &[
     "able",
     "account",
     "achieve",
