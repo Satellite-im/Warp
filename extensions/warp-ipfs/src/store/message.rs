@@ -1412,11 +1412,6 @@ impl ConversationInner {
     ) -> Result<Messages, Error> {
         let conversation = self.get(conversation_id).await?;
 
-        // let keystore = match conversation.conversation_type {
-        //     ConversationType::Direct => None,
-        //     ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        // };
-
         let keypair = self.root.keypair();
 
         let keystore = pubkey_or_keystore(self, conversation_id, keypair).await?;

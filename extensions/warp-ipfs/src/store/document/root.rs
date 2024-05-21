@@ -909,7 +909,7 @@ impl RootDocumentInner {
 
     async fn export(&self) -> Result<ResolvedRootDocument, Error> {
         let document = self.get_root_document().await?;
-        document.resolve(&self.ipfs, None).await
+        document.resolve(&self.ipfs, self.keypair.as_ref()).await
     }
 
     async fn export_bytes(&self) -> Result<Vec<u8>, Error> {
