@@ -287,7 +287,7 @@ impl ConversationDocument {
                 None,
             );
 
-            let signature = did.sign(&construct);
+            let signature = keypair.sign(&construct).expect("not RSA");
             self.signature = Some(bs58::encode(signature).into_string());
         }
         Ok(())
