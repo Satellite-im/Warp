@@ -93,7 +93,12 @@ impl Keystore {
 
 #[allow(dead_code)]
 impl Keystore {
-    pub fn try_decrypt(&self, keypair: &Keypair, recipient: &DID, data: &[u8]) -> Result<Vec<u8>, Error> {
+    pub fn try_decrypt(
+        &self,
+        keypair: &Keypair,
+        recipient: &DID,
+        data: &[u8],
+    ) -> Result<Vec<u8>, Error> {
         let keys = self.get_all(keypair, recipient)?;
         for key in keys {
             if let Ok(data) = Cipher::direct_decrypt(data, &key) {

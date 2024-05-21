@@ -259,7 +259,10 @@ mod test {
         multipass::identity::SHORT_ID_SIZE,
     };
 
-    use crate::store::{document::{cache::IdentityCache, identity::IdentityDocument}, get_keypair_did};
+    use crate::store::{
+        document::{cache::IdentityCache, identity::IdentityDocument},
+        get_keypair_did,
+    };
 
     fn random_document() -> (Keypair, DID, IdentityDocument) {
         let keypair = Keypair::generate_ed25519();

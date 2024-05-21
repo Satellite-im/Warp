@@ -405,7 +405,11 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
     Ok(())
 }
 
-pub fn generate_shared_topic(keypair: &Keypair, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {
+pub fn generate_shared_topic(
+    keypair: &Keypair,
+    did_b: &DID,
+    seed: Option<&str>,
+) -> anyhow::Result<Uuid> {
     let did_a = get_keypair_did(keypair)?;
     let x25519_a = Ed25519KeyPair::from_secret_key(&did_a.private_key_bytes()).get_x25519();
     let x25519_b = Ed25519KeyPair::from_public_key(&did_b.public_key_bytes()).get_x25519();
@@ -438,7 +442,10 @@ fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::
     Ok(pk)
 }
 
-pub(crate) fn ecdh_shared_key(keypair: &Keypair, recipient: Option<&DID>) -> Result<Vec<u8>, Error> {
+pub(crate) fn ecdh_shared_key(
+    keypair: &Keypair,
+    recipient: Option<&DID>,
+) -> Result<Vec<u8>, Error> {
     assert!(keypair.key_type() != KeyType::RSA);
 
     let did = get_keypair_did(keypair)?;
