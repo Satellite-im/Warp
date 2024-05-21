@@ -17,12 +17,11 @@ use warp::{
         file::{File, FileType},
         Progression,
     },
-    crypto::did_key::CoreSign,
     error::Error,
     multipass::identity::{Identity, IdentityStatus},
 };
 
-use super::keystore::Keystore;
+use super::{keystore::Keystore, DidExt};
 
 use self::{
     files::{DirectoryDocument, FileDocument},
@@ -56,10 +55,12 @@ impl ResolvedRootDocument {
         let mut doc = self.clone();
         let signature = doc.signature.take().ok_or(Error::InvalidSignature)?;
         let bytes = serde_json::to_vec(&doc)?;
-        self.identity
-            .did_key()
-            .verify(&bytes, &signature)
-            .map_err(|_| Error::InvalidSignature)?;
+        let identity_public_key = self.identity.did_key().to_public_key()?;
+
+        if !identity_public_key.verify(&bytes, &signature) {
+            return Err(Error::InvalidSignature);
+        }
+
         Ok(())
     }
 }
@@ -126,16 +127,18 @@ impl RootDocument {
             .await
             .map_err(|_| Error::IdentityInvalid)?;
 
+        let identity_public_key = identity.did.to_public_key()?;
+
         let mut root_document = self.clone();
         let signature =
             std::mem::take(&mut root_document.signature).ok_or(Error::InvalidSignature)?;
         let bytes = serde_json::to_vec(&root_document)?;
         let sig = bs58::decode(&signature).into_vec()?;
 
-        identity
-            .did
-            .verify(&bytes, &sig)
-            .map_err(|_| Error::InvalidSignature)?;
+        if !identity_public_key.verify(&bytes, &sig) {
+            return Err(Error::InvalidSignature);
+        }
+
         Ok(())
     }
 

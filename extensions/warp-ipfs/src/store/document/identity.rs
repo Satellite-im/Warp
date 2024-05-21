@@ -4,12 +4,12 @@ use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use warp::{
-    crypto::{did_key::CoreSign, Fingerprint, DID},
+    crypto::{Fingerprint, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
 
-use crate::store::{MAX_STATUS_LENGTH, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+use crate::store::{DidExt, MAX_STATUS_LENGTH, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -274,9 +274,11 @@ impl IdentityDocument {
         let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
         let signature_bytes = bs58::decode(signature).into_vec()?;
         let bytes = serde_json::to_vec(&payload)?;
-        self.did
-            .verify(&bytes, &signature_bytes)
-            .map_err(|_| Error::InvalidSignature)?;
+        let pk = self.did.to_public_key()?;
+        if !pk.verify(&bytes, &signature_bytes) {
+            return Err(Error::InvalidSignature);
+        }
+
         Ok(())
     }
 }

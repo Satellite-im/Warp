@@ -15,10 +15,7 @@ use std::{
 };
 use uuid::Uuid;
 use warp::{
-    crypto::{
-        cipher::Cipher, did_key::CoreSign, hash::sha256_iter, DIDKey, Ed25519KeyPair, KeyMaterial,
-        DID,
-    },
+    crypto::{cipher::Cipher, hash::sha256_iter, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{
         Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
@@ -27,7 +24,7 @@ use warp::{
     },
 };
 
-use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce};
+use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
 
 use super::{
     document::FileAttachmentDocument, ecdh_decrypt, get_keypair_did, keystore::Keystore,
@@ -300,6 +297,8 @@ impl ConversationDocument {
                 return Err(Error::PublicKeyInvalid);
             };
 
+            let creator_pk = creator.to_public_key()?;
+
             let Some(signature) = &self.signature else {
                 return Err(Error::InvalidSignature);
             };
@@ -339,9 +338,9 @@ impl ConversationDocument {
                 ),
             };
 
-            creator
-                .verify(&construct, &signature)
-                .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            if !creator_pk.verify(&construct, &signature) {
+                return Err(Error::InvalidSignature);
+            }
         }
         Ok(())
     }
@@ -837,6 +836,11 @@ impl MessageDocument {
         };
 
         let sender = self.sender.to_did();
+        let Ok(sender_pk) = sender.to_public_key() else {
+            // Note: Although unlikely, we will return false instead of refactoring this function to return an error
+            //       since an invalid public key also signals a invalid message.
+            return false;
+        };
         let hash = sha256_iter(
             [
                 Some(self.conversation_id.as_bytes().to_vec()),
@@ -852,7 +856,7 @@ impl MessageDocument {
             None,
         );
 
-        sender.verify(&hash, signature.as_ref()).is_ok()
+        sender_pk.verify(&hash, signature.as_ref())
     }
 
     pub async fn raw_encrypted_message(&self, ipfs: &Ipfs) -> Result<Vec<u8>, Error> {

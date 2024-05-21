@@ -13,6 +13,7 @@ use futures::{
 };
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
+use ipfs::Keypair;
 use ipfs::{p2p::MultiaddrExt, Ipfs};
 use libipld::Cid;
 use rust_ipfs as ipfs;
@@ -24,7 +25,7 @@ use web_time::Instant;
 use shuttle::identity::{RequestEvent, RequestPayload};
 use warp::{
     constellation::file::FileType,
-    crypto::{did_key::CoreSign, zeroize::Zeroizing},
+    crypto::zeroize::Zeroizing,
     multipass::identity::{IdentityImage, Platform},
 };
 use warp::{
@@ -252,26 +253,30 @@ pub enum RequestResponsePayloadVersion {
 }
 
 impl RequestResponsePayload {
-    pub fn new(keypair: &DID, event: Event) -> Result<Self, Error> {
+    pub fn new(keypair: &Keypair, event: Event) -> Result<Self, Error> {
         let request = Self::new_unsigned(keypair, event);
         request.sign(keypair)
     }
 
-    pub fn new_unsigned(keypair: &DID, event: Event) -> Self {
+    pub fn new_unsigned(keypair: &Keypair, event: Event) -> Self {
+        // Note: We can expect here because:
+        //  - Any invalid keypair would have already triggered an error a head of time
+        //  - We dont accept any non-ed25519 keypairs at this time
+        let sender = libp2p_pub_to_did(&keypair.public()).expect("valid ed25519");
         Self {
             version: RequestResponsePayloadVersion::V1,
-            sender: keypair.clone(),
+            sender,
             event,
             created: None,
             signature: None,
         }
     }
 
-    pub fn sign(mut self, keypair: &DID) -> Result<Self, Error> {
+    pub fn sign(mut self, keypair: &Keypair) -> Result<Self, Error> {
         self.signature = None;
         self.created = Some(Utc::now());
         let bytes = serde_json::to_vec(&self)?;
-        let signature = keypair.sign(&bytes);
+        let signature = keypair.sign(&bytes).expect("not RSA");
         self.signature = Some(signature);
         Ok(self)
     }
@@ -280,9 +285,13 @@ impl RequestResponsePayload {
         let mut doc = self.clone();
         let signature = doc.signature.take().ok_or(Error::InvalidSignature)?;
         let bytes = serde_json::to_vec(&doc)?;
-        doc.sender
-            .verify(&bytes, &signature)
-            .map_err(|_| Error::InvalidSignature)
+        let sender_pk = doc.sender.to_public_key()?;
+
+        if !sender_pk.verify(&bytes, &signature) {
+            return Err(Error::InvalidSignature);
+        }
+
+        Ok(())
     }
 }
 
@@ -685,7 +694,8 @@ impl IdentityStore {
         // If it is, skip the request so we dont wait resources storing it.
         if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
             tracing::warn!("Received event from a blocked identity.");
-            let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
+            let payload =
+                RequestResponsePayload::new(self.root_document().keypair(), Event::Block)?;
 
             return self
                 .broadcast_request(&data.sender, &payload, false, true)
@@ -719,7 +729,8 @@ impl IdentityStore {
                 if self.is_friend(&data.sender).await? {
                     tracing::debug!("Friend already exist. Remitting event");
 
-                    let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
+                    let payload =
+                        RequestResponsePayload::new(self.root_document().keypair(), Event::Accept)?;
 
                     return self
                         .broadcast_request(&data.sender, &payload, false, false)
@@ -760,7 +771,8 @@ impl IdentityStore {
                         .await;
                 }
 
-                let payload = RequestResponsePayload::new(&self.did_key, Event::Response)?;
+                let payload =
+                    RequestResponsePayload::new(self.root_document().keypair(), Event::Response)?;
 
                 self.broadcast_request(&data.sender, &payload, false, false)
                     .await?;
@@ -2334,7 +2346,7 @@ impl IdentityStore {
             return Err(Error::FriendRequestExist);
         }
 
-        let payload = RequestResponsePayload::new(&self.did_key, Event::Request)?;
+        let payload = RequestResponsePayload::new(self.root_document().keypair(), Event::Request)?;
 
         self.broadcast_request(pubkey, &payload, true, true).await
     }
@@ -2368,7 +2380,7 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let payload = RequestResponsePayload::new(&self.did_key, Event::Accept)?;
+        let payload = RequestResponsePayload::new(self.root_document().keypair(), Event::Accept)?;
 
         self.root_document.remove_request(internal_request).await?;
         self.add_friend(pubkey).await?;
@@ -2396,7 +2408,7 @@ impl IdentityStore {
             .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        let payload = RequestResponsePayload::new(&self.did_key, Event::Reject)?;
+        let payload = RequestResponsePayload::new(self.root_document().keypair(), Event::Reject)?;
 
         self.root_document.remove_request(internal_request).await?;
 
@@ -2414,7 +2426,7 @@ impl IdentityStore {
             .find(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        let payload = RequestResponsePayload::new(&self.did_key, Event::Retract)?;
+        let payload = RequestResponsePayload::new(self.root_document().keypair(), Event::Retract)?;
 
         self.root_document.remove_request(internal_request).await?;
 
@@ -2494,7 +2506,7 @@ impl IdentityStore {
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
-        let payload = RequestResponsePayload::new(&self.did_key, Event::Block)?;
+        let payload = RequestResponsePayload::new(self.root_document().keypair(), Event::Block)?;
 
         self.broadcast_request(pubkey, &payload, false, true).await
     }
@@ -2518,7 +2530,7 @@ impl IdentityStore {
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
 
-        let payload = RequestResponsePayload::new(&self.did_key, Event::Unblock)?;
+        let payload = RequestResponsePayload::new(self.root_document().keypair(), Event::Unblock)?;
 
         self.broadcast_request(pubkey, &payload, false, true).await
     }
@@ -2589,7 +2601,8 @@ impl IdentityStore {
         }
 
         if broadcast {
-            let payload = RequestResponsePayload::new(&self.did_key, Event::Remove)?;
+            let payload =
+                RequestResponsePayload::new(self.root_document().keypair(), Event::Remove)?;
 
             self.broadcast_request(pubkey, &payload, false, true)
                 .await?;

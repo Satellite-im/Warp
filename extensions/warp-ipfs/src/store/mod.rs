@@ -21,7 +21,7 @@ use ipfs::{libp2p::identity::KeyType, Keypair, PeerId, PublicKey};
 use warp::{
     crypto::{
         cipher::Cipher,
-        did_key::{CoreSign, Generate, ECDH},
+        did_key::{Generate, ECDH},
         hash::sha256_hash,
         zeroize::Zeroizing,
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
@@ -213,13 +213,18 @@ impl PeerIdExt for PeerId {
 }
 
 pub trait DidExt {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
     fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
     fn to_keypair(&self) -> Result<Keypair, anyhow::Error>;
 }
 
 impl DidExt for DID {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error> {
+        did_to_libp2p_pub(self)
+    }
+
     fn to_peer_id(&self) -> Result<PeerId, anyhow::Error> {
-        did_to_libp2p_pub(self).map(|p| p.to_peer_id())
+        self.to_public_key().map(|p| p.to_peer_id())
     }
 
     fn to_keypair(&self) -> Result<Keypair, anyhow::Error> {
@@ -399,9 +404,11 @@ fn sign_serde<D: Serialize>(keypair: &Keypair, data: &D) -> anyhow::Result<Vec<u
 // Note that this are temporary
 fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec(data)?;
-    pk.as_ref()
-        .verify(&bytes, signature)
-        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    let pk = pk.to_public_key()?;
+    if !pk.verify(&bytes, signature) {
+        return Err(Error::InvalidSignature.into());
+    }
+
     Ok(())
 }
 
