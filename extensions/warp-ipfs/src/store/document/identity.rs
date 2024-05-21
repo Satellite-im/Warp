@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use libipld::Cid;
+use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use warp::{
@@ -208,7 +209,7 @@ impl IdentityDocument {
         Ok(self.into())
     }
 
-    pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
+    pub fn sign(mut self, keypair: &Keypair) -> Result<Self, Error> {
         let metadata = self.metadata;
 
         //We blank out the metadata since it will not be used as apart of the
@@ -219,7 +220,7 @@ impl IdentityDocument {
         self.modified = Utc::now();
 
         let bytes = serde_json::to_vec(&self)?;
-        let signature = bs58::encode(did.sign(&bytes)).into_string();
+        let signature = bs58::encode(keypair.sign(&bytes).expect("not RSA")).into_string();
         self.metadata = metadata;
         self.signature = Some(signature);
         Ok(self)

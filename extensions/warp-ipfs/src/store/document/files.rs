@@ -302,7 +302,6 @@ impl FileDocument {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
 
     use rust_ipfs::{Ipfs, UninitializedIpfsNoop};
     use tracing::Span;
@@ -313,16 +312,13 @@ mod test {
     use super::DirectoryDocument;
     use crate::config::Config;
     use crate::store::document::root::RootDocumentMap;
-    use crate::store::get_keypair_did;
     use crate::store::{event_subscription::EventSubscription, files::FileStore};
 
     async fn file_store(
         ipfs: &Ipfs,
         event: &EventSubscription<ConstellationEventKind>,
     ) -> Result<FileStore, Error> {
-        let key = get_keypair_did(ipfs.keypair())?;
-
-        let root_document = RootDocumentMap::new(ipfs, Arc::new(key)).await;
+        let root_document = RootDocumentMap::new(ipfs, None).await;
         let store = FileStore::new(
             ipfs.clone(),
             root_document,

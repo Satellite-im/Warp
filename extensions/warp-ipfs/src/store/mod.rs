@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
-use ipfs::{Keypair, PeerId, PublicKey};
+use ipfs::{libp2p::identity::KeyType, Keypair, PeerId, PublicKey};
 use warp::{
     crypto::{
         cipher::Cipher,
@@ -31,7 +31,6 @@ use warp::{
     raygun::{
         ConversationSettings, DirectConversationSettings, MessageEvent, PinState, ReactionState,
     },
-    tesseract::Tesseract,
 };
 
 pub const MAX_THUMBNAIL_SIZE: usize = 5_242_880;
@@ -392,9 +391,9 @@ pub enum ConversationUpdateKind {
 }
 
 // Note that this are temporary
-fn sign_serde<D: Serialize>(did: &DID, data: &D) -> anyhow::Result<Vec<u8>> {
+fn sign_serde<D: Serialize>(keypair: &Keypair, data: &D) -> anyhow::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(data)?;
-    Ok(did.as_ref().sign(&bytes))
+    Ok(keypair.sign(&bytes).expect("not RSA"))
 }
 
 // Note that this are temporary
@@ -406,7 +405,8 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
     Ok(())
 }
 
-pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {
+pub fn generate_shared_topic(keypair: &Keypair, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {
+    let did_a = get_keypair_did(keypair)?;
     let x25519_a = Ed25519KeyPair::from_secret_key(&did_a.private_key_bytes()).get_x25519();
     let x25519_b = Ed25519KeyPair::from_public_key(&did_b.public_key_bytes()).get_x25519();
     let shared_key = x25519_a.key_exchange(&x25519_b);
@@ -438,15 +438,11 @@ fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::
     Ok(pk)
 }
 
-fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
-    let kp = tesseract.retrieve("keypair")?;
-    let kp = bs58::decode(kp).into_vec()?;
-    let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes()));
-    Ok(did.into())
-}
+pub(crate) fn ecdh_shared_key(keypair: &Keypair, recipient: Option<&DID>) -> Result<Vec<u8>, Error> {
+    assert!(keypair.key_type() != KeyType::RSA);
 
-pub(crate) fn ecdh_shared_key(did: &DID, recipient: Option<&DID>) -> Result<Vec<u8>, Error> {
+    let did = get_keypair_did(keypair)?;
+
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
@@ -460,7 +456,7 @@ pub(crate) fn ecdh_shared_key(did: &DID, recipient: Option<&DID>) -> Result<Vec<
 }
 
 pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
-    did: &DID,
+    did: &Keypair,
     recipient: Option<&DID>,
     data: K,
 ) -> Result<Vec<u8>, Error> {
@@ -471,11 +467,14 @@ pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
 }
 
 pub(crate) fn ecdh_encrypt_with_nonce<K: AsRef<[u8]>>(
-    did: &DID,
+    keypair: &Keypair,
     recipient: Option<&DID>,
     data: K,
     nonce: &[u8],
 ) -> Result<Vec<u8>, Error> {
+    assert!(keypair.key_type() != KeyType::RSA);
+
+    let did = get_keypair_did(keypair)?;
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
@@ -490,11 +489,11 @@ pub(crate) fn ecdh_encrypt_with_nonce<K: AsRef<[u8]>>(
 }
 
 pub(crate) fn ecdh_decrypt<K: AsRef<[u8]>>(
-    did: &DID,
+    keypair: &Keypair,
     recipient: Option<&DID>,
     data: K,
 ) -> Result<Vec<u8>, Error> {
-    let prik = Zeroizing::new(ecdh_shared_key(did, recipient)?);
+    let prik = Zeroizing::new(ecdh_shared_key(keypair, recipient)?);
     let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
 
     Ok(data)

@@ -1,9 +1,3 @@
-pub mod cache;
-pub mod files;
-pub mod identity;
-pub mod image_dag;
-pub mod root;
-
 use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 
 use chrono::{DateTime, Utc};
@@ -23,12 +17,10 @@ use warp::{
         file::{File, FileType},
         Progression,
     },
-    crypto::{did_key::CoreSign, DID},
+    crypto::did_key::CoreSign,
     error::Error,
     multipass::identity::{Identity, IdentityStatus},
 };
-
-use crate::store::get_keypair_did;
 
 use super::keystore::Keystore;
 
@@ -37,6 +29,12 @@ use self::{
     identity::IdentityDocument,
     image_dag::ImageDag,
 };
+
+pub mod cache;
+pub mod files;
+pub mod identity;
+pub mod image_dag;
+pub mod root;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ResolvedRootDocument {
@@ -106,15 +104,15 @@ pub struct RootDocument {
 }
 
 impl RootDocument {
-    #[tracing::instrument(skip(self, did))]
-    pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
+    #[tracing::instrument(skip(self, keypair))]
+    pub fn sign(mut self, keypair: &Keypair) -> Result<Self, Error> {
         //In case there is a signature already exist
         self.signature = None;
 
         self.modified = Utc::now();
 
         let bytes = serde_json::to_vec(&self)?;
-        let signature = did.sign(&bytes);
+        let signature = keypair.sign(&bytes).expect("not RSA");
         self.signature = Some(bs58::encode(signature).into_string());
         Ok(self)
     }
@@ -249,7 +247,7 @@ impl RootDocument {
 
         let bytes = serde_json::to_vec(&exported)?;
         let kp = keypair.unwrap_or_else(|| ipfs.keypair());
-        let signature = kp.sign(&bytes).map_err(anyhow::Error::from)?;
+        let signature = kp.sign(&bytes).expect("not RSA key");
 
         exported.signature = Some(signature);
         Ok(exported)
@@ -320,15 +318,15 @@ impl RootDocument {
         self.verify(ipfs).await
     }
 
+    // TODO: Include optional keypair to represent the actual keypair
     pub async fn import(ipfs: &Ipfs, data: ResolvedRootDocument) -> Result<Self, Error> {
         data.verify()?;
 
         let keypair = ipfs.keypair();
-        let did_kp = get_keypair_did(keypair)?;
 
         let document: IdentityDocument = data.identity.into();
 
-        let document = document.sign(&did_kp)?;
+        let document = document.sign(keypair)?;
 
         let identity = ipfs.dag().put().serialize(document).await?;
 
@@ -392,7 +390,7 @@ impl RootDocument {
             root_document.file_index = cid;
         }
 
-        let root_document = root_document.sign(&did_kp)?;
+        let root_document = root_document.sign(keypair)?;
 
         Ok(root_document)
     }

@@ -13,7 +13,7 @@ use futures::{
 };
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
-use ipfs::{p2p::MultiaddrExt, Ipfs, Keypair};
+use ipfs::{p2p::MultiaddrExt, Ipfs};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
@@ -37,13 +37,14 @@ use warp::{
     tesseract::Tesseract,
 };
 
+use crate::store::libp2p_pub_to_did;
 use crate::{
     config::{self, Discovery as DiscoveryConfig},
     store::{did_to_libp2p_pub, discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 
 use super::{
-    connected_to_peer, did_keypair,
+    connected_to_peer,
     document::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
         root::RootDocumentMap, ResolvedRootDocument, RootDocument,
@@ -68,8 +69,8 @@ pub struct IdentityStore {
 
     identity_cache: IdentityCache,
 
-    // keypair
-    did_key: Arc<DID>,
+    // public key representation in did format
+    did_key: DID,
 
     // Queue to handle sending friend request
     queue: Queue,
@@ -373,11 +374,12 @@ impl IdentityStore {
 
         let event = tx.clone();
 
-        let did_key = Arc::new(did_keypair(&tesseract)?);
+        let root_document = RootDocumentMap::new(&ipfs, None).await;
 
-        let root_document = RootDocumentMap::new(&ipfs, did_key.clone()).await;
+        let did_key =
+            libp2p_pub_to_did(&root_document.keypair().public()).expect("valid ed25519 keypair");
 
-        let queue = Queue::new(ipfs.clone(), did_key.clone(), discovery.clone());
+        let queue = Queue::new(ipfs.clone(), &root_document, discovery.clone());
 
         let signal = Default::default();
 
@@ -412,7 +414,7 @@ impl IdentityStore {
                         }
                         false => {
                             if let Err(e) = store.register().await {
-                                tracing::warn!(did = %store.did_key, error = %e, "Unable to register identity");
+                                tracing::warn!(did = %ident.did_key(), error = %e, "Unable to register identity");
                             }
                         }
                     }
@@ -549,7 +551,7 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {in_did}");
 
-                            let event = match ecdh_decrypt(&store.did_key, Some(&in_did), &message.data).and_then(|bytes| {
+                            let event = match ecdh_decrypt(store.root_document().keypair(), Some(&in_did), &message.data).and_then(|bytes| {
                                 serde_json::from_slice::<IdentityEvent>(&bytes).map_err(Error::from)
                             }) {
                                 Ok(e) => e,
@@ -586,7 +588,7 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {did}");
 
-                            let data = match ecdh_decrypt(&store.did_key, Some(&did), &event.data).and_then(|bytes| {
+                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), &event.data).and_then(|bytes| {
                                 serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
                             }) {
                                 Ok(pl) => pl,
@@ -637,8 +639,7 @@ impl IdentityStore {
         &self.phonebook
     }
 
-    /// did key with private key embedded
-    pub(crate) fn did_key(&self) -> Arc<DID> {
+    pub fn did_key(&self) -> DID {
         self.did_key.clone()
     }
 
@@ -916,7 +917,7 @@ impl IdentityStore {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let pk_did = &*self.did_key;
+        let pk_did = self.root_document().keypair();
 
         let event = IdentityEvent::Request { option };
 
@@ -950,7 +951,7 @@ impl IdentityStore {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let pk_did = &*self.did_key;
+        let pk_did = self.root_document().keypair();
 
         let mut identity = self.own_identity_document().await?;
 
@@ -989,9 +990,9 @@ impl IdentityStore {
             identity.metadata = metadata;
         }
 
-        let kp_did = self.did_key();
+        let kp_did = self.root_document().keypair();
 
-        let payload = identity.sign(&kp_did)?;
+        let payload = identity.sign(kp_did)?;
 
         let event = IdentityEvent::Receive {
             option: ResponseOption::Identity { identity: payload },
@@ -1027,7 +1028,7 @@ impl IdentityStore {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let pk_did = &*self.did_key;
+        let pk_did = self.root_document().keypair();
 
         let identity = self.own_identity_document().await?;
 
@@ -1082,7 +1083,7 @@ impl IdentityStore {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let pk_did = &*self.did_key;
+        let pk_did = self.root_document().keypair();
 
         let identity = self.own_identity_document().await?;
 
@@ -1583,8 +1584,7 @@ impl IdentityStore {
             signature: None,
         };
 
-        let did_kp = self.did_key();
-        let identity = identity.sign(&did_kp)?;
+        let identity = identity.sign(self.root_document.keypair())?;
 
         let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
 
@@ -2047,9 +2047,9 @@ impl IdentityStore {
     }
 
     pub async fn identity_update(&mut self, identity: IdentityDocument) -> Result<(), Error> {
-        let kp = self.did_key();
+        let kp = self.root_document().keypair();
 
-        let identity = identity.sign(&kp)?;
+        let identity = identity.sign(kp)?;
 
         tracing::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
@@ -2149,18 +2149,6 @@ impl IdentityStore {
             .ok_or(Error::IdentityDoesntExist)
     }
 
-    pub fn get_keypair(&self) -> anyhow::Result<Keypair> {
-        match self.tesseract.retrieve("keypair") {
-            Ok(keypair) => {
-                let kp = bs58::decode(keypair).into_vec()?;
-                let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let bytes = Zeroizing::new(id_kp.secret.to_bytes());
-                Ok(Keypair::ed25519_from_bytes(bytes)?)
-            }
-            Err(_) => anyhow::bail!(Error::PrivateKeyInvalid),
-        }
-    }
-
     pub fn get_keypair_did(&self) -> anyhow::Result<DID> {
         let kp = Zeroizing::new(self.get_raw_keypair()?.to_bytes());
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
@@ -2169,7 +2157,9 @@ impl IdentityStore {
     }
 
     pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
-        self.get_keypair()?
+        self.root_document
+            .keypair()
+            .clone()
             .try_into_ed25519()
             .map_err(anyhow::Error::from)
     }
@@ -2312,7 +2302,7 @@ impl IdentityStore {
 impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (*self.did_key).clone();
+        let local_public_key = self.did_key.clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotSendSelfFriendRequest);
@@ -2351,7 +2341,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (*self.did_key).clone();
+        let local_public_key = self.did_key.clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotAcceptSelfAsFriend);
@@ -2388,7 +2378,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (*self.did_key).clone();
+        let local_public_key = self.did_key.clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotDenySelfAsFriend);
@@ -2468,7 +2458,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (*self.did_key).clone();
+        let local_public_key = self.did_key.clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotBlockOwnKey);
@@ -2511,7 +2501,7 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let local_public_key = (*self.did_key).clone();
+        let local_public_key = self.did_key.clone();
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotUnblockOwnKey);
@@ -2697,7 +2687,7 @@ impl IdentityStore {
             }
         }
 
-        let kp = &*self.did_key;
+        let kp = self.root_document().keypair();
 
         let payload_bytes = serde_json::to_vec(&payload)?;
 

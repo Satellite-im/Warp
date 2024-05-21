@@ -1,54 +1,39 @@
 use futures::{channel::mpsc, StreamExt, TryFutureExt};
 
 use libipld::Cid;
-use rust_ipfs::Ipfs;
+use rust_ipfs::{Ipfs, Keypair};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::error;
-use warp::{
-    crypto::{
-        cipher::Cipher,
-        did_key::{Generate, ECDH},
-        zeroize::Zeroizing,
-        Ed25519KeyPair, KeyMaterial, DID,
-    },
-    error::Error,
-};
+use warp::{crypto::DID, error::Error};
 use web_time::Instant;
 
 use crate::store::{ds_key::DataStoreKey, ecdh_encrypt, topics::PeerTopic, PeerIdExt};
 
-use super::{connected_to_peer, discovery::Discovery, identity::RequestResponsePayload};
+use super::{
+    connected_to_peer, discovery::Discovery, document::root::RootDocumentMap, ecdh_decrypt,
+    identity::RequestResponsePayload,
+};
 
+#[derive(Clone)]
 pub struct Queue {
     ipfs: Ipfs,
     entries: Arc<RwLock<HashMap<DID, QueueEntry>>>,
     removal: mpsc::UnboundedSender<DID>,
-    did: Arc<DID>,
+    keypair: Keypair,
     discovery: Discovery,
 }
 
-impl Clone for Queue {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            entries: self.entries.clone(),
-            removal: self.removal.clone(),
-            did: self.did.clone(),
-            discovery: self.discovery.clone(),
-        }
-    }
-}
-
 impl Queue {
-    pub fn new(ipfs: Ipfs, did: Arc<DID>, discovery: Discovery) -> Queue {
+    pub fn new(ipfs: Ipfs, root: &RootDocumentMap, discovery: Discovery) -> Queue {
         let (tx, mut rx) = mpsc::unbounded();
+        let keypair = root.keypair().clone();
         let queue = Queue {
             ipfs,
             entries: Default::default(),
             removal: tx,
-            did,
+            keypair,
             discovery,
         };
 
@@ -83,7 +68,7 @@ impl Queue {
             self.ipfs.clone(),
             did.clone(),
             payload,
-            self.did.clone(),
+            &self.keypair,
             self.removal.clone(),
         )
         .await;
@@ -160,14 +145,7 @@ impl Queue {
             }
         };
 
-        let prikey = Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
-        let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
-
-        let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-            .map(Zeroizing::new)
-            .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
-
-        let data = Cipher::direct_decrypt(&data, &prik)?;
+        let data = ecdh_decrypt(&self.keypair, None, data)?;
 
         let map: HashMap<DID, RequestResponsePayload> = serde_json::from_slice(&data)?;
 
@@ -200,18 +178,7 @@ impl Queue {
             }
         };
 
-        let prikey = Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
-        let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
-
-        let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
-            Ok(pri) => Zeroizing::new(pri),
-            Err(e) => {
-                error!("Error generating key: {e:?}");
-                return;
-            }
-        };
-
-        let data = match Cipher::direct_encrypt(&bytes, &prik) {
+        let data = match ecdh_encrypt(&self.keypair, None, bytes) {
             Ok(d) => d,
             Err(e) => {
                 error!("Error encrypting queue: {e}");
@@ -256,7 +223,7 @@ impl Queue {
 pub struct QueueEntry {
     ipfs: Ipfs,
     recipient: DID,
-    did: Arc<DID>,
+    keypair: Keypair,
     item: RequestResponsePayload,
     drop_guard: Arc<RwLock<Option<DropGuard>>>,
 }
@@ -266,13 +233,13 @@ impl QueueEntry {
         ipfs: Ipfs,
         recipient: DID,
         item: RequestResponsePayload,
-        did: Arc<DID>,
+        keypair: &Keypair,
         tx: mpsc::UnboundedSender<DID>,
     ) -> QueueEntry {
         let entry = QueueEntry {
             ipfs,
             recipient,
-            did,
+            keypair: keypair.clone(),
             item,
             drop_guard: Default::default(),
         };
@@ -313,7 +280,7 @@ impl QueueEntry {
                             let recipient = entry.recipient.clone();
 
                             let res = async move {
-                                let kp = &*entry.did;
+                                let kp = &entry.keypair;
                                 let payload_bytes = serde_json::to_vec(&entry.item)?;
 
                                 let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;

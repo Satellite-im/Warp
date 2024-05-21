@@ -3,6 +3,7 @@ use std::{
     fmt::Debug,
 };
 
+use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
@@ -33,11 +34,11 @@ impl Keystore {
 
     pub fn insert<K: AsRef<[u8]>>(
         &mut self,
-        did: &DID,
+        keypair: &Keypair,
         recipient: &DID,
         key: K,
     ) -> Result<(), Error> {
-        let key = super::ecdh_encrypt(did, None, key)?;
+        let key = super::ecdh_encrypt(keypair, None, key)?;
 
         match self.recipient_key.entry(recipient.clone()) {
             Entry::Occupied(mut entry) => {
@@ -61,22 +62,22 @@ impl Keystore {
         self.recipient_key.contains_key(recipient)
     }
 
-    pub fn get_latest(&self, did: &DID, recipient: &DID) -> Result<Vec<u8>, Error> {
+    pub fn get_latest(&self, keypair: &Keypair, recipient: &DID) -> Result<Vec<u8>, Error> {
         self.recipient_key
             .get(recipient)
             .and_then(|list| {
                 list.last()
-                    .and_then(|entry| super::ecdh_decrypt(did, None, entry).ok())
+                    .and_then(|entry| super::ecdh_decrypt(keypair, None, entry).ok())
             })
             .ok_or(Error::PublicKeyDoesntExist)
     }
 
-    pub fn get_all(&self, did: &DID, recipient: &DID) -> Result<Vec<Vec<u8>>, Error> {
+    pub fn get_all(&self, keypair: &Keypair, recipient: &DID) -> Result<Vec<Vec<u8>>, Error> {
         self.recipient_key
             .get(recipient)
             .map(|list| {
                 list.iter()
-                    .filter_map(|entry| super::ecdh_decrypt(did, None, entry).ok())
+                    .filter_map(|entry| super::ecdh_decrypt(keypair, None, entry).ok())
                     .collect::<Vec<_>>()
             })
             .ok_or(Error::PublicKeyDoesntExist)
@@ -92,8 +93,8 @@ impl Keystore {
 
 #[allow(dead_code)]
 impl Keystore {
-    pub fn try_decrypt(&self, did: &DID, recipient: &DID, data: &[u8]) -> Result<Vec<u8>, Error> {
-        let keys = self.get_all(did, recipient)?;
+    pub fn try_decrypt(&self, keypair: &Keypair, recipient: &DID, data: &[u8]) -> Result<Vec<u8>, Error> {
+        let keys = self.get_all(keypair, recipient)?;
         for key in keys {
             if let Ok(data) = Cipher::direct_decrypt(data, &key) {
                 return Ok(data);
@@ -155,7 +156,10 @@ impl Eq for KeyEntry {}
 
 #[cfg(test)]
 mod test {
+    use crate::store::get_keypair_did;
+
     use super::Keystore;
+    use rust_ipfs::Keypair;
     use warp::crypto::{
         cipher::Cipher,
         generate,
@@ -167,10 +171,11 @@ mod test {
     fn keystore_test() -> anyhow::Result<()> {
         let mut keystore = Keystore::default();
 
-        let keypair = DID::default();
+        let keypair = Keypair::generate_ed25519();
+        let kp_did = get_keypair_did(&keypair)?;
         let recipient = DID::default();
 
-        assert_ne!(keypair, recipient);
+        assert_ne!(kp_did, recipient);
 
         let key = generate::<32>();
 
@@ -186,10 +191,11 @@ mod test {
     fn keystore_get_latest() -> anyhow::Result<()> {
         let mut keystore = Keystore::default();
 
-        let keypair = DID::default();
+        let keypair = Keypair::generate_ed25519();
+        let kp_did = get_keypair_did(&keypair)?;
         let recipient = DID::default();
 
-        assert_ne!(keypair, recipient);
+        assert_ne!(kp_did, recipient);
 
         let key_1 = generate::<32>();
         let key_2 = generate::<32>();
@@ -209,7 +215,7 @@ mod test {
         let mut rng = rand::thread_rng();
         let mut keystore = Keystore::default();
 
-        let keypair = DID::default();
+        let keypair = Keypair::generate_ed25519();
         let recipients = (0..10).map(|_| DID::default()).collect::<Vec<_>>();
 
         for recipient in recipients.iter() {

@@ -250,7 +250,7 @@ mod test {
 
     use chrono::Utc;
     use futures::StreamExt;
-    use rust_ipfs::UninitializedIpfsNoop;
+    use rust_ipfs::{Keypair, UninitializedIpfsNoop};
     use warp::{
         crypto::{
             rand::{self, seq::SliceRandom},
@@ -259,10 +259,11 @@ mod test {
         multipass::identity::SHORT_ID_SIZE,
     };
 
-    use crate::store::document::{cache::IdentityCache, identity::IdentityDocument};
+    use crate::store::{document::{cache::IdentityCache, identity::IdentityDocument}, get_keypair_did};
 
-    fn random_document() -> (DID, IdentityDocument) {
-        let did_key = DID::default();
+    fn random_document() -> (Keypair, DID, IdentityDocument) {
+        let keypair = Keypair::generate_ed25519();
+        let did_key = get_keypair_did(&keypair).expect("valid keypair");
         let fingerprint = did_key.fingerprint();
         let bytes = fingerprint.as_bytes();
         let time = Utc::now();
@@ -281,11 +282,11 @@ mod test {
             signature: None,
         };
 
-        let document = document.sign(&did_key).expect("valid");
+        let document = document.sign(&keypair).expect("valid");
 
         document.verify().expect("valid");
 
-        (did_key, document)
+        (keypair, did_key, document)
     }
 
     async fn pregenerated_cache<const N: usize>() -> IdentityCache {
@@ -297,7 +298,7 @@ mod test {
         let cache = IdentityCache::new(&ipfs).await;
 
         for _ in 0..N {
-            let (_, document) = random_document();
+            let (_, _, document) = random_document();
             cache.insert(&document).await.expect("inserted");
         }
 
@@ -308,7 +309,7 @@ mod test {
     async fn new_identity_cache() -> anyhow::Result<()> {
         let cache = pregenerated_cache::<0>().await;
 
-        let (_, document) = random_document();
+        let (_, _, document) = random_document();
 
         cache.insert(&document).await?;
 
@@ -323,7 +324,7 @@ mod test {
     async fn update_existing_identity_cache() -> anyhow::Result<()> {
         let cache = pregenerated_cache::<0>().await;
 
-        let (did_key, mut document) = random_document();
+        let (keypair, _, mut document) = random_document();
 
         let old_doc = document.clone();
 
@@ -331,7 +332,7 @@ mod test {
 
         document.username = String::from("NewName");
 
-        let document = document.sign(&did_key).expect("valid");
+        let document = document.sign(&keypair).expect("valid");
 
         let old_document = cache
             .insert(&document)

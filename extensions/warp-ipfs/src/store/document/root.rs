@@ -6,9 +6,10 @@ use futures::{
     StreamExt,
 };
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath};
+use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
 use warp::{
     constellation::directory::Directory, crypto::DID, error::Error,
     multipass::identity::IdentityStatus,
@@ -25,11 +26,13 @@ use super::{
 
 #[derive(Debug, Clone)]
 pub struct RootDocumentMap {
+    ipfs: Ipfs,
+    keypair: Option<Keypair>,
     inner: Arc<RwLock<RootDocumentInner>>,
 }
 
 impl RootDocumentMap {
-    pub async fn new(ipfs: &Ipfs, keypair: Arc<DID>) -> Self {
+    pub async fn new(ipfs: &Ipfs, keypair: Option<Keypair>) -> Self {
         let key = ipfs.root();
 
         let cid = ipfs
@@ -43,13 +46,15 @@ impl RootDocumentMap {
 
         let mut inner = RootDocumentInner {
             ipfs: ipfs.clone(),
-            keypair,
+            keypair: keypair.clone(),
             cid,
         };
 
         inner.migrate().await;
 
         Self {
+            ipfs: ipfs.clone(),
+            keypair,
             inner: Arc::new(RwLock::new(inner)),
         }
     }
@@ -209,16 +214,23 @@ impl RootDocumentMap {
         let inner = &mut *self.inner.write().await;
         inner.set_root_index(root).await
     }
+
+    pub fn keypair(&self) -> &Keypair {
+        self.keypair.as_ref().unwrap_or(self.ipfs.keypair())
+    }
 }
 
 #[derive(Debug)]
 struct RootDocumentInner {
-    keypair: Arc<DID>,
+    keypair: Option<Keypair>,
     ipfs: Ipfs,
     cid: Option<Cid>,
 }
 
 impl RootDocumentInner {
+    fn keypair(&self) -> &Keypair {
+        self.keypair.as_ref().unwrap_or(self.ipfs.keypair())
+    }
     async fn migrate(&mut self) {
         let mut root = match self.get_root_document().await {
             Ok(r) => r,
@@ -304,7 +316,7 @@ impl RootDocumentInner {
         document: RootDocument,
         local: bool,
     ) -> Result<(), Error> {
-        let document = document.sign(&self.keypair)?;
+        let document = document.sign(self.keypair())?;
 
         //Precautionary check
         document.verify(&self.ipfs).await?;
@@ -348,7 +360,7 @@ impl RootDocumentInner {
         let mut root = self.get_root_document().await?;
         let mut identity = self.identity().await?;
         identity.metadata.status = Some(status);
-        let identity = identity.sign(&self.keypair)?;
+        let identity = identity.sign(self.keypair())?;
         root.identity = self.ipfs.dag().put().serialize(identity).await?;
 
         self.set_root_document(root).await
@@ -367,7 +379,7 @@ impl RootDocumentInner {
             .deserialized::<Vec<u8>>()
             .await
             .and_then(|bytes| {
-                let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                 serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
             })
             .unwrap_or_default();
@@ -385,7 +397,7 @@ impl RootDocumentInner {
                 .deserialized::<Vec<u8>>()
                 .await
                 .and_then(|bytes| {
-                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                     serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
                 })
                 .unwrap_or_default(),
@@ -398,7 +410,7 @@ impl RootDocumentInner {
 
         document.request = match !list.is_empty() {
             true => {
-                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
                 Some(self.ipfs.dag().put().serialize(bytes).await?)
             }
             false => None,
@@ -419,7 +431,7 @@ impl RootDocumentInner {
                 .deserialized::<Vec<u8>>()
                 .await
                 .and_then(|bytes| {
-                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                     serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
                 })
                 .unwrap_or_default(),
@@ -432,7 +444,7 @@ impl RootDocumentInner {
 
         document.request = match !list.is_empty() {
             true => {
-                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
                 Some(self.ipfs.dag().put().serialize(bytes).await?)
             }
             false => None,
@@ -455,7 +467,7 @@ impl RootDocumentInner {
             .deserialized::<Vec<u8>>()
             .await
             .and_then(|bytes| {
-                let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                 serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
             })
             .unwrap_or_default();
@@ -473,7 +485,7 @@ impl RootDocumentInner {
                 .deserialized::<Vec<u8>>()
                 .await
                 .and_then(|bytes| {
-                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                     serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
                 })
                 .unwrap_or_default(),
@@ -486,7 +498,7 @@ impl RootDocumentInner {
 
         document.friends = match !list.is_empty() {
             true => {
-                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
                 Some(self.ipfs.dag().put().serialize(bytes).await?)
             }
             false => None,
@@ -538,7 +550,7 @@ impl RootDocumentInner {
                 .deserialized::<Vec<u8>>()
                 .await
                 .and_then(|bytes| {
-                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                     serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
                 })
                 .unwrap_or_default(),
@@ -551,7 +563,7 @@ impl RootDocumentInner {
 
         document.friends = match !list.is_empty() {
             true => {
-                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
                 Some(self.ipfs.dag().put().serialize(bytes).await?)
             }
             false => None,
@@ -575,7 +587,7 @@ impl RootDocumentInner {
             .deserialized::<Vec<u8>>()
             .await
             .and_then(|bytes| {
-                let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                 serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
             })
             .unwrap_or_default();
@@ -605,7 +617,7 @@ impl RootDocumentInner {
                 .deserialized::<Vec<u8>>()
                 .await
                 .and_then(|bytes| {
-                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                     serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
                 })
                 .unwrap_or_default(),
@@ -618,7 +630,7 @@ impl RootDocumentInner {
 
         document.blocks = match !list.is_empty() {
             true => {
-                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
                 Some(self.ipfs.dag().put().serialize(bytes).await?)
             }
             false => None,
@@ -640,7 +652,7 @@ impl RootDocumentInner {
                 .deserialized::<Vec<u8>>()
                 .await
                 .and_then(|bytes| {
-                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                     serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
                 })
                 .unwrap_or_default(),
@@ -653,7 +665,7 @@ impl RootDocumentInner {
 
         document.blocks = match !list.is_empty() {
             true => {
-                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
                 Some(self.ipfs.dag().put().serialize(bytes).await?)
             }
             false => None,
@@ -677,7 +689,7 @@ impl RootDocumentInner {
             .deserialized::<Vec<u8>>()
             .await
             .and_then(|bytes| {
-                let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                 serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
             })
             .unwrap_or_default();
@@ -695,7 +707,7 @@ impl RootDocumentInner {
                 .deserialized::<Vec<u8>>()
                 .await
                 .and_then(|bytes| {
-                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                     serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
                 })
                 .unwrap_or_default(),
@@ -708,7 +720,7 @@ impl RootDocumentInner {
 
         document.block_by = match !list.is_empty() {
             true => {
-                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
                 Some(self.ipfs.dag().put().serialize(bytes).await?)
             }
             false => None,
@@ -730,7 +742,7 @@ impl RootDocumentInner {
                 .deserialized::<Vec<u8>>()
                 .await
                 .and_then(|bytes| {
-                    let bytes = ecdh_decrypt(&self.keypair, None, bytes)?;
+                    let bytes = ecdh_decrypt(self.keypair(), None, bytes)?;
                     serde_json::from_slice(&bytes).map_err(anyhow::Error::from)
                 })
                 .unwrap_or_default(),
@@ -743,7 +755,7 @@ impl RootDocumentInner {
 
         document.block_by = match !list.is_empty() {
             true => {
-                let bytes = ecdh_encrypt(&self.keypair, None, serde_json::to_vec(&list)?)?;
+                let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
                 Some(self.ipfs.dag().put().serialize(bytes).await?)
             }
             false => None,
@@ -904,7 +916,8 @@ impl RootDocumentInner {
         let export = self.export().await?;
 
         let bytes = serde_json::to_vec(&export)?;
-        ecdh_encrypt(&self.keypair, None, bytes)
+
+        ecdh_encrypt(self.keypair(), None, bytes)
     }
 
     async fn set_root_cid(&mut self, cid: Cid) -> Result<(), Error> {
