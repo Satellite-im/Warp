@@ -1614,7 +1614,7 @@ impl ConversationInner {
 
         let keypair = self.root.keypair();
 
-        let keystore = pubkey_or_keystore(&*self, conversation.id(), keypair).await?;
+        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
 
         let mut message_document = conversation
             .get_message_document(&self.ipfs, message_id)
