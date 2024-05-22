@@ -1,0 +1,28 @@
+name: Wasm-Pack build
+on:
+  push:
+    paths:
+      - 'extensions/warp-ipfs/**'
+  pull_request:
+    paths: 
+      - 'extensions/warp-ipfs/**'
+
+jobs:
+  push_wasm_pack:
+    runs-on: ubuntu-latest
+    name: Building and publishing Wasm-Pack
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build wasm-pack
+        id: wasm-pack
+        uses: ./.github/actions/wasm-pack
+      - name: Push Remote
+        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        with:
+          source-directory: 'extensions/warp-ipfs/pkg'
+          destination-github-username: 'Satellite-im'
+          destination-repository-name: 'Warp'
+          # user-email: ""
+          target-directory: "pkg"

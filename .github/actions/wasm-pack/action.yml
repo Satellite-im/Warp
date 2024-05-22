@@ -1,0 +1,6 @@
+# action.yml
+name: 'Build Wasm-Pack'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile.wasm-build'
