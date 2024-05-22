@@ -16,7 +16,7 @@ use uuid::Uuid;
 use warp::constellation::{Constellation, Progression};
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
-use warp::multipass::identity::{Identifier, IdentityProfile};
+use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus};
 use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
 use warp::raygun::{
     AttachmentKind, ConversationSettings, GroupSettings, Location, Message, MessageEvent,
@@ -63,6 +63,8 @@ struct Opt {
     shuttle_point: Option<Multiaddr>,
     #[clap(long)]
     import: Option<PathBuf>,
+    #[clap(long)]
+    autoaccept_friend: bool,
 }
 
 async fn setup<P: AsRef<Path>>(
@@ -191,7 +193,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Creating or obtaining account...");
-    let ((new_account, mut chat, _), profile) =
+    let ((mut new_account, mut chat, _), profile) =
         setup(opt.path.clone(), Zeroizing::new(password), &opt).await?;
 
     println!("Obtaining identity....");
@@ -262,10 +264,158 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mut event_stream = chat.raygun_subscribe().await?;
+    let mut account_stream = new_account.multipass_subscribe().await?;
 
     loop {
         tokio::select! {
             biased;
+            Some(event) = account_stream.next() => {
+                match event {
+                    warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+                        if !opt.autoaccept_friend {
+                            writeln!(stdout, "> Pending request from {username}. Do \"/accept-request {did}\" to accept.")?;
+                        } else {
+                            new_account.accept_request(&did).await?;
+                        }
+                    },
+                    warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> A request has been sent to {username}. Do \"/close-request {did}\" to if you wish to close the request")?;
+                    }
+                    warp::multipass::MultiPassEventKind::IncomingFriendRequestRejected { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> You've rejected {username} request")?;
+                    },
+                    warp::multipass::MultiPassEventKind::OutgoingFriendRequestRejected { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> {username} rejected your request")?;
+                    },
+                    warp::multipass::MultiPassEventKind::IncomingFriendRequestClosed { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> {username} has retracted their request")?;
+                    },
+                    warp::multipass::MultiPassEventKind::OutgoingFriendRequestClosed { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> Request for {username} has been retracted")?;
+                    },
+                    warp::multipass::MultiPassEventKind::FriendAdded { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> You are now friends with {username}")?;
+                    },
+                    warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> {username} has been removed from friends list")?;
+                    },
+                    warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> {username} has came online")?;
+                    },
+                    warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> {username} went offline")?;
+                    },
+                    warp::multipass::MultiPassEventKind::Blocked { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> {username} was blocked")?;
+                    },
+                    warp::multipass::MultiPassEventKind::Unblocked { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+                        writeln!(stdout, "> {username} was unblocked")?;
+                    },
+                    warp::multipass::MultiPassEventKind::UnblockedBy { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> {username} unblocked you")?;
+                    },
+                    warp::multipass::MultiPassEventKind::BlockedBy { did } => {
+                        let username = new_account
+                            .get_identity(Identifier::did_key(did.clone())).await
+                            .ok()
+                            .and_then(|list| list.first().cloned())
+                            .map(|ident| ident.username())
+                            .unwrap_or_else(|| did.to_string());
+
+                        writeln!(stdout, "> {username} blocked you")?;
+                    },
+                    _ => {}
+                }
+            }
             event = event_stream.next() => {
                 if let Some(event) = event {
                     match event {
@@ -778,6 +928,74 @@ async fn main() -> anyhow::Result<()> {
                             let amount = chat.get_message_count(topic).await?;
                             writeln!(stdout, "Conversation contains {amount} messages")?;
                         }
+                        Block(did) => {
+                            if let Err(e) = new_account.block(&did).await {
+                                writeln!(stdout, "error blocking {did}: {e}")?;
+                                continue;
+                            }
+                        },
+                        Unblock(did) => {
+                            if let Err(e) = new_account.unblock(&did).await {
+                                writeln!(stdout, "error unblocking {did}: {e}")?;
+                                continue;
+                            }
+                        }
+                        SendRequest(did) => {
+                            if let Err(e) = new_account.send_request(&did).await {
+                                writeln!(stdout, "error sending request to {did}: {e}")?;
+                                continue;
+                            }
+                        },
+                        DenyRequest(did) => {
+                            if let Err(e) = new_account.deny_request(&did).await {
+                                writeln!(stdout, "error denying request to {did}: {e}")?;
+                                continue;
+                            }
+                        },
+                        CloseRequest(did) => {
+                            if let Err(e) = new_account.close_request(&did).await {
+                                writeln!(stdout, "error close request to {did}: {e}")?;
+                                continue;
+                            }
+                        },
+                        AcceptRequest(did) => {
+                            if let Err(e) = new_account.accept_request(&did).await {
+                                writeln!(stdout, "error accepting request to {did}: {e}")?;
+                                continue;
+                            }
+                        },
+                        Lookup(id) => {
+                            let identities = match new_account.get_identity(id).await {
+                                Ok(identity) => identity,
+                                Err(e) => {
+                                    writeln!(stdout, "Error obtaining own identity: {e}")?;
+                                    continue;
+                                }
+                            };
+                            let mut table = Table::new();
+                            table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status"]);
+                            for identity in identities {
+                                let status = new_account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
+                                let platform = new_account.identity_platform(&identity.did_key()).await.unwrap_or_default();
+                                let profile_picture = new_account.identity_picture(&identity.did_key()).await.unwrap_or_default();
+                                let profile_banner = new_account.identity_banner(&identity.did_key()).await.unwrap_or_default();
+                                let created = identity.created();
+                                let modified = identity.modified();
+
+                                table.add_row(vec![
+                                    identity.username(),
+                                    identity.did_key().to_string(),
+                                    created.to_string(),
+                                    modified.to_string(),
+                                    identity.status_message().unwrap_or_default(),
+                                    (!profile_banner.data().is_empty()).to_string(),
+                                    (!profile_picture.data().is_empty()).to_string(),
+                                    platform.to_string(),
+                                    format!("{status:?}"),
+                                ]);
+                            }
+                            writeln!(stdout, "{table}")?;
+                        }
                     }
                 },
                 Ok(rustyline_async::ReadlineEvent::Eof) | Ok(rustyline_async::ReadlineEvent::Interrupted) => break,
@@ -1045,6 +1263,22 @@ enum Command {
     Unpin(PinTarget),
     #[display(fmt = "/count-messages - count messages in the conversation")]
     CountMessages,
+    #[display(fmt = "/block <did> - block a user")]
+    Block(DID),
+    #[display(fmt = "/unblock <did> - unblock a user")]
+    Unblock(DID),
+    #[display(fmt = "/send-request <did> - send a friend request to a user")]
+    SendRequest(DID),
+    #[display(fmt = "/close-request <did> - close a friend request")]
+    CloseRequest(DID),
+    #[display(fmt = "/accept-request <did> - accept friend request")]
+    AcceptRequest(DID),
+    #[display(fmt = "/deny-request <did> - deny friend request")]
+    DenyRequest(DID),
+    #[display(
+        fmt = "/lookup <username | publickey> <username | publickey [publickey2 ...]> - look up identities "
+    )]
+    Lookup(Identifier),
 }
 
 fn list_commands_and_help() -> String {
@@ -1462,6 +1696,130 @@ impl FromStr for Command {
                 Ok(Command::RemoveMessage(message_id))
             }
             Some("/count-messages") => Ok(Command::CountMessages),
+            Some("/block") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/block <DID>"));
+                    }
+                };
+
+                Ok(Command::Block(did))
+            }
+            Some("/unblock") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/unblock <DID>"));
+                    }
+                };
+
+                Ok(Command::Unblock(did))
+            }
+            Some("/send-request") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/send-request <DID>"));
+                    }
+                };
+
+                Ok(Command::SendRequest(did))
+            }
+            Some("/close-request") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/close-request <DID>"));
+                    }
+                };
+
+                Ok(Command::CloseRequest(did))
+            }
+            Some("/accept-request") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/accept-request <DID>"));
+                    }
+                };
+
+                Ok(Command::AcceptRequest(did))
+            }
+            Some("/deny-request") => {
+                let did: DID = match cmd_line.next() {
+                    Some(did) => match DID::try_from(did.to_string()) {
+                        Ok(did) => did,
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                        }
+                    },
+                    None => {
+                        return Err(anyhow::anyhow!("/deny-request <DID>"));
+                    }
+                };
+
+                Ok(Command::DenyRequest(did))
+            }
+            Some("/lookup") => {
+                let identifier = match cmd_line.next() {
+                    Some("username") => {
+                        let username = match cmd_line.next() {
+                            Some(username) => username,
+                            None => {
+                                return Err(anyhow::anyhow!("username is required"));
+                            }
+                        };
+                        Identifier::Username(username.into())
+                    }
+                    Some("publickey") | Some("public-key") | Some("didkey") | Some("did-key")
+                    | Some("did") => {
+                        let mut keys = vec![];
+                        for item in cmd_line.by_ref() {
+                            let pk = match DID::from_str(item) {
+                                Ok(did) => did,
+                                Err(e) => {
+                                    return Err(anyhow::anyhow!("Error parsing DID Key: {e}"));
+                                }
+                            };
+                            keys.push(pk);
+                        }
+                        Identifier::did_keys(keys)
+                    }
+                    Some("own") | None => Identifier::own(),
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "/lookup <username | publickey> [username | publickey ...]"
+                        ));
+                    }
+                };
+                Ok(Command::Lookup(identifier))
+            }
             _ => Err(anyhow::anyhow!("Unknown command")),
         }
     }

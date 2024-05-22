@@ -322,12 +322,13 @@ impl Identity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum Identifier {
     DID(DID),
     DIDList(Vec<DID>),
     Username(String),
+    #[default]
     Own,
 }
 
