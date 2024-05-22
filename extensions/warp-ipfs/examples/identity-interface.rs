@@ -760,7 +760,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 _ => {
-                                    writeln!(stdout, "/lookup <username | publickey> [username | publickey]")?;
+                                    writeln!(stdout, "/lookup <username | publickey> [username | publickey ...]")?;
                                     continue
                                 }
                             };
