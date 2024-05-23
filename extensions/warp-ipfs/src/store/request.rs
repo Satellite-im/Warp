@@ -1,11 +1,11 @@
 use super::PeerIdExt;
 use chrono::{DateTime, Utc};
-use rust_ipfs::{libp2p::identity::KeyType, Keypair, PeerId};
+use rust_ipfs::{libp2p::identity::KeyType, Keypair, Multiaddr, PeerId, Protocol};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use warp::error::Error;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PayloadRequest<M> {
+pub struct PayloadMessage<M> {
     /// Sender of the payload
     sender: PeerId,
 
@@ -19,6 +19,10 @@ pub struct PayloadRequest<M> {
     /// serde compatible message
     message: M,
 
+    /// address(es) of the sender
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    addresses: Vec<Multiaddr>,
+
     /// signature of the sender
     signature: Vec<u8>,
 
@@ -27,16 +31,86 @@ pub struct PayloadRequest<M> {
     co_signature: Option<Vec<u8>>,
 }
 
-impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
-    pub fn new(keypair: &Keypair, cosigner: Option<&Keypair>, message: M) -> Result<Self, Error> {
-        assert_ne!(keypair.key_type(), KeyType::RSA);
+pub struct PayloadBuilder<'a, M> {
+    sender: PeerId,
+    keypair: &'a Keypair,
+    cosigner_keypair: Option<&'a Keypair>,
+    message: M,
+    addresses: Vec<Multiaddr>,
+}
 
+impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
+    pub fn new(keypair: &'a Keypair, message: M) -> Self {
+        let sender = keypair.public().to_peer_id();
+        Self {
+            sender,
+            keypair,
+            cosigner_keypair: None,
+            message,
+            addresses: vec![],
+        }
+    }
+
+    pub fn cosign(mut self, keypair: &'a Keypair) -> Self {
+        self.cosigner_keypair = Some(keypair);
+        self
+    }
+
+    pub fn add_address(mut self, mut address: Multiaddr) -> Self {
+        if address.is_empty() || self.addresses.len() > 32 {
+            // we will only permit 32 address slot for content discovery
+            return self;
+        }
+
+        match address.iter().last() {
+            Some(Protocol::P2p(peer_id)) if peer_id == self.sender => {
+                address.pop();
+            }
+            Some(Protocol::P2p(_)) => return self,
+            _ => {}
+        }
+
+        if !self.addresses.contains(&address) {
+            self.addresses.push(address);
+        }
+
+        self
+    }
+
+    pub fn add_addresses(mut self, addresses: Vec<Multiaddr>) -> Self {
+        for address in addresses {
+            self = self.add_address(address);
+        }
+
+        self
+    }
+
+    pub fn build(self) -> Result<PayloadMessage<M>, Error> {
+        PayloadMessage::new(
+            self.keypair,
+            self.cosigner_keypair,
+            self.message,
+            self.addresses,
+        )
+    }
+}
+
+impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
+    pub fn new(
+        keypair: &Keypair,
+        cosigner: Option<&Keypair>,
+        message: M,
+        addresses: Vec<Multiaddr>,
+    ) -> Result<Self, Error> {
+        assert_ne!(keypair.key_type(), KeyType::RSA);
+        debug_assert!(addresses.len() < 32);
         let sender = keypair.public().to_peer_id();
 
-        let mut payload = PayloadRequest {
+        let mut payload = PayloadMessage {
             sender,
             on_behalf: None,
             message,
+            addresses,
             date: Utc::now(),
             signature: Vec::new(),
             co_signature: None,
@@ -49,8 +123,8 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
         payload.signature = signature;
 
         let payload = match cosigner {
-            Some(kp) => payload.co_sign(kp)?,
-            None => payload,
+            Some(kp) if keypair.public() != kp.public() => payload.co_sign(kp)?,
+            _ => payload,
         };
 
         Ok(payload)
@@ -144,7 +218,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadRequest<M> {
     }
 }
 
-impl<M> PayloadRequest<M> {
+impl<M> PayloadMessage<M> {
     #[inline]
     pub fn sender(&self) -> &PeerId {
         self.on_behalf.as_ref().unwrap_or(&self.sender)
@@ -169,6 +243,11 @@ impl<M> PayloadRequest<M> {
     pub fn date(&self) -> DateTime<Utc> {
         self.date
     }
+
+    #[inline]
+    pub fn addresses(&self) -> &[Multiaddr] {
+        &self.addresses
+    }
 }
 
 #[cfg(test)]
@@ -176,14 +255,16 @@ mod test {
 
     use rust_ipfs::Keypair;
 
-    use super::PayloadRequest;
+    use crate::store::request::PayloadBuilder;
+
+    use super::PayloadMessage;
 
     #[test]
     fn payload_validation() -> anyhow::Result<()> {
         let data = String::from("Request");
         let keypair = Keypair::generate_ed25519();
 
-        let payload = PayloadRequest::new(&keypair, None, data)?;
+        let payload = PayloadBuilder::new(&keypair, data).build()?;
         assert_eq!(payload.sender(), &keypair.public().to_peer_id());
         payload.verify()?;
         assert_eq!(payload.message(), "Request");
@@ -197,7 +278,9 @@ mod test {
         let keypair = Keypair::generate_ed25519();
         let cosigner_keypair = Keypair::generate_ed25519();
 
-        let payload = PayloadRequest::new(&keypair, Some(&cosigner_keypair), data)?;
+        let payload = PayloadBuilder::new(&keypair, data)
+            .cosign(&cosigner_keypair)
+            .build()?;
 
         assert_ne!(payload.sender(), &keypair.public().to_peer_id());
         assert_eq!(payload.sender(), &cosigner_keypair.public().to_peer_id());
@@ -212,12 +295,12 @@ mod test {
         let data = String::from("Request");
         let keypair = Keypair::generate_ed25519();
 
-        let payload = PayloadRequest::new(&keypair, None, data)?;
+        let payload = PayloadBuilder::new(&keypair, data).build()?;
         assert_eq!(payload.sender(), &keypair.public().to_peer_id());
         payload.verify()?;
 
         let bytes = payload.to_bytes()?;
-        let de_payload: PayloadRequest<String> = PayloadRequest::from_bytes(&bytes)?;
+        let de_payload: PayloadMessage<String> = PayloadMessage::from_bytes(&bytes)?;
         assert_eq!(de_payload.message(), "Request");
 
         Ok(())

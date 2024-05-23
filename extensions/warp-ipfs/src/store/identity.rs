@@ -42,6 +42,7 @@ use crate::{
     store::{discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 
+use super::request::PayloadBuilder;
 use super::{
     connected_to_peer,
     document::{
@@ -52,7 +53,7 @@ use super::{
     event_subscription::EventSubscription,
     phonebook::PhoneBook,
     queue::Queue,
-    request::PayloadRequest,
+    request::PayloadMessage,
     topics::IDENTITY_ANNOUNCEMENT,
     MAX_IMAGE_SIZE, SHUTTLE_TIMEOUT,
 };
@@ -504,7 +505,7 @@ impl IdentityStore {
                     tokio::select! {
                         biased;
                         Some(message) = identity_announce_stream.next() => {
-                            let payload: PayloadRequest<IdentityDocument> = match serde_json::from_slice(&message.data) {
+                            let payload: PayloadMessage<IdentityDocument> = match serde_json::from_slice(&message.data) {
                                 Ok(p) => p,
                                 Err(e) => {
                                     tracing::error!(from = ?message.source, "Unable to decode payload: {e}");
@@ -912,7 +913,7 @@ impl IdentityStore {
         if self.config.store_setting().announce_to_mesh {
             let kp = self.ipfs.keypair();
             let document = self.own_identity_document().await?;
-            let payload = PayloadRequest::new(kp, None, document)?;
+            let payload = PayloadBuilder::new(kp, document).build()?;
             let bytes = serde_json::to_vec(&payload)?;
             _ = self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await;
         }
