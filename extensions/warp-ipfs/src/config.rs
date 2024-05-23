@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use ipfs::{Multiaddr, Protocol};
 use rust_ipfs as ipfs;
@@ -177,6 +177,7 @@ impl Default for StoreSetting {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Config {
     path: Option<PathBuf>,
+    persist: bool,
     bootstrap: Bootstrap,
     listen_on: Vec<Multiaddr>,
     ipfs_setting: IpfsSetting,
@@ -190,6 +191,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn persist(&self) -> bool {
+        self.persist
+    }
+
     pub fn path(&self) -> Option<&PathBuf> {
         self.path.as_ref()
     }
@@ -240,6 +245,10 @@ impl Config {
         &mut self.path
     }
 
+    pub fn persist_mut(&mut self) -> &mut bool {
+        &mut self.persist
+    }
+
     pub fn bootstrap_mut(&mut self) -> &mut Bootstrap {
         &mut self.bootstrap
     }
@@ -283,8 +292,11 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        use std::str::FromStr;
         Config {
             path: None,
+            persist: false,
             bootstrap: Bootstrap::Ipfs,
             #[cfg(not(target_arch = "wasm32"))]
             listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"]
@@ -366,6 +378,27 @@ impl Config {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+    pub fn minimal_basic() -> Config {
+        Config {
+            persist: true,
+            bootstrap: Bootstrap::None,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
+            ipfs_setting: IpfsSetting {
+                relay_client: RelayClient {
+                    ..Default::default()
+                },
+                memory_transport: true,
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: Discovery::None,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     /// Minimal production configuration
     #[cfg(not(target_arch = "wasm32"))]
     pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> Config {
@@ -391,6 +424,7 @@ impl Config {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn production<P: AsRef<std::path::Path>>(path: P) -> Config {
         Config {
+            persist: true,
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
