@@ -347,24 +347,43 @@ impl WarpIpfs {
             });
 
         // TODO: Uncomment for persistence on wasm once config option is added
-        // #[cfg(target_arch = "wasm32")]
-        // {
-        //     // Namespace will used the public key to prevent conflicts between multiple instances during testing.
-        //     uninitialized = uninitialized.set_storage_type(rust_ipfs::StorageType::IndexedDb {
-        //         namespace: Some(keypair.public().to_peer_id().to_string()),
-        //     });
-        // }
+        #[cfg(target_arch = "wasm32")]
+        {
+            if self.inner.config.persist() {
+                // Namespace will used the public key to prevent conflicts between multiple instances during testing.
+                uninitialized = uninitialized.set_storage_type(rust_ipfs::StorageType::IndexedDb {
+                    namespace: Some(keypair.public().to_peer_id().to_string()),
+                });
+            }
+        }
 
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(path) = self.inner.config.path() {
-            info!("Instance will be persistent");
-            info!("Path set: {}", path.display());
+        {
+            // TODO: Determine if we want to store in temp directory if path isnt set for any reason
+            // if let (path, true) = (self.inner.config.path(), self.inner.config.persist()) {
+            //     info!("Instance will be persistent");
+            //     let path = match path {
+            //         Some(path) => path.clone(),
+            //         None => std::env::temp_dir().join(did.to_string() + "_temp")
+            //     };
+            //     info!("Path set: {}", path.display());
+                
+            //     if !path.is_dir() {
+            //         warn!("Path doesnt exist... creating");
+            //         fs::create_dir_all(path).await?;
+            //     }
+            //     uninitialized = uninitialized.set_path(path);
+            // }
+            if let Some(path) = self.inner.config.path() {
+                info!("Instance will be persistent");
+                info!("Path set: {}", path.display());
 
-            if !path.is_dir() {
-                warn!("Path doesnt exist... creating");
-                fs::create_dir_all(path).await?;
+                if !path.is_dir() {
+                    warn!("Path doesnt exist... creating");
+                    fs::create_dir_all(path).await?;
+                }
+                uninitialized = uninitialized.set_path(path);
             }
-            uninitialized = uninitialized.set_path(path);
         }
 
         if matches!(
