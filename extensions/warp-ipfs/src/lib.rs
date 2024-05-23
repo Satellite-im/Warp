@@ -367,7 +367,6 @@ impl WarpIpfs {
             //         None => std::env::temp_dir().join(did.to_string() + "_temp")
             //     };
             //     info!("Path set: {}", path.display());
-                
             //     if !path.is_dir() {
             //         warn!("Path doesnt exist... creating");
             //         fs::create_dir_all(path).await?;
