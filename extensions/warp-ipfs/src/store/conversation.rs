@@ -6,19 +6,16 @@ use futures::{
     StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::{Ipfs, IpfsPath};
+use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use std::{
     collections::{BTreeSet, HashMap},
     time::Duration,
 };
 use uuid::Uuid;
 use warp::{
-    crypto::{
-        cipher::Cipher, did_key::CoreSign, hash::sha256_iter, DIDKey, Ed25519KeyPair, KeyMaterial,
-        DID,
-    },
+    crypto::{cipher::Cipher, hash::sha256_iter, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{
         Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
@@ -27,11 +24,11 @@ use warp::{
     },
 };
 
-use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce};
+use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
 
 use super::{
     document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, verify_serde_sig,
-    MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
+    PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
 };
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -138,7 +135,7 @@ impl ConversationDocument {
 impl ConversationDocument {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        did: &DID,
+        keypair: &Keypair,
         name: Option<String>,
         mut recipients: Vec<DID>,
         restrict: Vec<DID>,
@@ -149,9 +146,10 @@ impl ConversationDocument {
         creator: Option<DID>,
         signature: Option<String>,
     ) -> Result<Self, Error> {
+        let did = keypair.to_did()?;
         let id = id.unwrap_or_else(Uuid::new_v4);
 
-        if !recipients.contains(did) {
+        if !recipients.contains(&did) {
             recipients.push(did.clone());
         }
 
@@ -186,8 +184,8 @@ impl ConversationDocument {
         }
 
         if let Some(creator) = document.creator.as_ref() {
-            if creator.eq(did) {
-                document.sign(did)?;
+            if creator.eq(&did) {
+                document.sign(keypair)?;
             }
         }
 
@@ -195,12 +193,13 @@ impl ConversationDocument {
     }
 
     pub fn new_direct(
-        did: &DID,
+        keypair: &Keypair,
         recipients: [DID; 2],
         settings: DirectConversationSettings,
     ) -> Result<Self, Error> {
+        let did = keypair.to_did()?;
         let conversation_id = Some(super::generate_shared_topic(
-            did,
+            keypair,
             recipients
                 .iter()
                 .filter(|peer| did.ne(peer))
@@ -211,7 +210,7 @@ impl ConversationDocument {
         )?);
 
         Self::new(
-            did,
+            keypair,
             None,
             recipients.to_vec(),
             vec![],
@@ -225,15 +224,16 @@ impl ConversationDocument {
     }
 
     pub fn new_group(
-        did: &DID,
+        keypair: &Keypair,
         name: Option<String>,
         recipients: impl IntoIterator<Item = DID>,
         restrict: &[DID],
         settings: GroupSettings,
     ) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
+        let creator = Some(keypair.to_did()?);
         Self::new(
-            did,
+            keypair,
             name,
             recipients.into_iter().collect(),
             restrict.to_vec(),
@@ -241,21 +241,22 @@ impl ConversationDocument {
             ConversationSettings::Group(settings),
             None,
             None,
-            Some(did.clone()),
+            creator,
             None,
         )
     }
 }
 
 impl ConversationDocument {
-    pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
+    pub fn sign(&mut self, keypair: &Keypair) -> Result<(), Error> {
         if let ConversationSettings::Group(settings) = self.settings {
             assert_eq!(self.conversation_type(), ConversationType::Group);
+            let did = keypair.to_did()?;
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
 
-            if !settings.members_can_add_participants() && !creator.eq(did) {
+            if !settings.members_can_add_participants() && !creator.eq(&did) {
                 return Err(Error::PublicKeyInvalid);
             }
 
@@ -283,7 +284,7 @@ impl ConversationDocument {
                 None,
             );
 
-            let signature = did.sign(&construct);
+            let signature = keypair.sign(&construct).expect("not RSA");
             self.signature = Some(bs58::encode(signature).into_string());
         }
         Ok(())
@@ -295,6 +296,8 @@ impl ConversationDocument {
             let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid);
             };
+
+            let creator_pk = creator.to_public_key()?;
 
             let Some(signature) = &self.signature else {
                 return Err(Error::InvalidSignature);
@@ -335,9 +338,9 @@ impl ConversationDocument {
                 ),
             };
 
-            creator
-                .verify(&construct, &signature)
-                .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            if !creator_pk.verify(&construct, &signature) {
+                return Err(Error::InvalidSignature);
+            }
         }
         Ok(())
     }
@@ -408,12 +411,12 @@ impl ConversationDocument {
     pub async fn get_messages(
         &self,
         ipfs: &Ipfs,
-        did: Arc<DID>,
+        keypair: &Keypair,
         option: MessageOptions,
         keystore: Either<DID, Keystore>,
     ) -> Result<Vec<Message>, Error> {
         let list = self
-            .get_messages_stream(ipfs, did, option, keystore)
+            .get_messages_stream(ipfs, keypair, option, keystore)
             .await?
             .collect::<Vec<_>>()
             .await;
@@ -482,7 +485,7 @@ impl ConversationDocument {
     pub async fn get_messages_stream<'a>(
         &self,
         ipfs: &Ipfs,
-        did: Arc<DID>,
+        keypair: &Keypair,
         option: MessageOptions,
         keystore: Either<DID, Keystore>,
     ) -> Result<BoxStream<'a, Message>, Error> {
@@ -502,7 +505,7 @@ impl ConversationDocument {
             let message = messages
                 .first()
                 .ok_or(Error::MessageNotFound)?
-                .resolve(ipfs, &did, true, keystore.as_ref())
+                .resolve(ipfs, keypair, true, keystore.as_ref())
                 .await?;
             return Ok(stream::once(async { message }).boxed());
         }
@@ -511,12 +514,13 @@ impl ConversationDocument {
             let message = messages
                 .last()
                 .ok_or(Error::MessageNotFound)?
-                .resolve(ipfs, &did, true, keystore.as_ref())
+                .resolve(ipfs, keypair, true, keystore.as_ref())
                 .await?;
             return Ok(stream::once(async { message }).boxed());
         }
         let keystore = keystore.clone();
         let ipfs = ipfs.clone();
+        let keypair = keypair.clone();
         let stream = async_stream::stream! {
             let mut remaining = option.limit();
             for (index, document) in messages.iter().enumerate() {
@@ -538,7 +542,7 @@ impl ConversationDocument {
                     continue;
                 }
 
-                if let Ok(message) = document.resolve(&ipfs, &did, true, keystore.as_ref()).await {
+                if let Ok(message) = document.resolve(&ipfs, &keypair, true, keystore.as_ref()).await {
                     let should_yield = if let Some(keyword) = option.keyword() {
                          message
                             .lines()
@@ -563,7 +567,7 @@ impl ConversationDocument {
     pub async fn get_messages_pages(
         &self,
         ipfs: &Ipfs,
-        did: &DID,
+        did: &Keypair,
         option: MessageOptions,
         keystore: Either<&DID, &Keystore>,
     ) -> Result<Messages, Error> {
@@ -647,12 +651,12 @@ impl ConversationDocument {
     pub async fn get_message(
         &self,
         ipfs: &Ipfs,
-        did: &DID,
+        keypair: &Keypair,
         message_id: Uuid,
         keystore: Either<&DID, &Keystore>,
     ) -> Result<Message, Error> {
         self.get_message_document(ipfs, message_id)
-            .and_then(|doc| async move { doc.resolve(ipfs, did, true, keystore).await })
+            .and_then(|doc| async move { doc.resolve(ipfs, keypair, true, keystore).await })
             .await
     }
 
@@ -744,7 +748,7 @@ impl Ord for MessageDocument {
 impl MessageDocument {
     pub async fn new(
         ipfs: &Ipfs,
-        keypair: &DID,
+        keypair: &Keypair,
         message: Message,
         key: Either<&DID, &Keystore>,
     ) -> Result<Self, Error> {
@@ -832,6 +836,11 @@ impl MessageDocument {
         };
 
         let sender = self.sender.to_did();
+        let Ok(sender_pk) = sender.to_public_key() else {
+            // Note: Although unlikely, we will return false instead of refactoring this function to return an error
+            //       since an invalid public key also signals a invalid message.
+            return false;
+        };
         let hash = sha256_iter(
             [
                 Some(self.conversation_id.as_bytes().to_vec()),
@@ -847,7 +856,7 @@ impl MessageDocument {
             None,
         );
 
-        sender.verify(&hash, signature.as_ref()).is_ok()
+        sender_pk.verify(&hash, signature.as_ref())
     }
 
     pub async fn raw_encrypted_message(&self, ipfs: &Ipfs) -> Result<Vec<u8>, Error> {
@@ -881,14 +890,15 @@ impl MessageDocument {
     pub async fn update(
         &mut self,
         ipfs: &Ipfs,
-        did: &DID,
+        keypair: &Keypair,
         message: Message,
         signature: Option<Vec<u8>>,
         key: Either<&DID, &Keystore>,
         nonce: Option<&[u8]>,
     ) -> Result<(), Error> {
+        let did = &keypair.to_did()?;
         tracing::info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
-        let old_message = self.resolve(ipfs, did, true, key).await?;
+        let old_message = self.resolve(ipfs, keypair, true, key).await?;
 
         let sender = self.sender.to_did();
 
@@ -943,17 +953,17 @@ impl MessageDocument {
 
             let data = match (key, nonce) {
                 (Either::Right(keystore), Some(nonce)) => {
-                    let key = keystore.get_latest(did, &sender)?;
+                    let key = keystore.get_latest(keypair, &sender)?;
                     Cipher::direct_encrypt_with_nonce(&bytes, &key, nonce)?
                 }
                 (Either::Left(key), Some(nonce)) => {
-                    ecdh_encrypt_with_nonce(did, Some(key), &bytes, nonce)?
+                    ecdh_encrypt_with_nonce(keypair, Some(key), &bytes, nonce)?
                 }
                 (Either::Right(keystore), None) => {
-                    let key = keystore.get_latest(did, &sender)?;
+                    let key = keystore.get_latest(keypair, &sender)?;
                     Cipher::direct_encrypt(&bytes, &key)?
                 }
-                (Either::Left(key), None) => ecdh_encrypt(did, Some(key), &bytes)?,
+                (Either::Left(key), None) => ecdh_encrypt(keypair, Some(key), &bytes)?,
             };
 
             let message = ipfs.dag().put().serialize(data).await?;
@@ -962,7 +972,7 @@ impl MessageDocument {
 
             match (sender.eq(did), signature) {
                 (true, None) => {
-                    *self = self.sign(did)?;
+                    *self = self.sign(keypair)?;
                 }
                 (false, None) | (true, Some(_)) => return Err(Error::InvalidMessage),
                 (false, Some(sig)) => {
@@ -982,7 +992,7 @@ impl MessageDocument {
     pub async fn resolve(
         &self,
         ipfs: &Ipfs,
-        did: &DID,
+        keypair: &Keypair,
         local: bool,
         key: Either<&DID, &Keystore>,
     ) -> Result<Message, Error> {
@@ -1054,8 +1064,8 @@ impl MessageDocument {
         let sender = self.sender.to_did();
 
         let data = match key {
-            Either::Left(exchange) => ecdh_decrypt(did, Some(exchange), &bytes)?,
-            Either::Right(keystore) => keystore.try_decrypt(did, &sender, &bytes)?,
+            Either::Left(exchange) => ecdh_decrypt(keypair, Some(exchange), &bytes)?,
+            Either::Right(keystore) => keystore.try_decrypt(keypair, &sender, &bytes)?,
         };
 
         let lines: Vec<String> = serde_json::from_slice(&data)?;
@@ -1081,9 +1091,10 @@ impl MessageDocument {
         Ok(message)
     }
 
-    fn sign(mut self, keypair: &DID) -> Result<MessageDocument, Error> {
+    fn sign(mut self, keypair: &Keypair) -> Result<MessageDocument, Error> {
+        let did = &keypair.to_did()?;
         let sender = self.sender.to_did();
-        if !sender.eq(keypair) {
+        if !sender.eq(did) {
             return Err(Error::PublicKeyInvalid);
         }
 
@@ -1102,7 +1113,7 @@ impl MessageDocument {
             None,
         );
 
-        let signature = keypair.sign(&hash);
+        let signature = keypair.sign(&hash).expect("not RSA");
 
         self.signature = Some(MessageSignature::try_from(signature)?);
         Ok(self)

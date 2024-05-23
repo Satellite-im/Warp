@@ -17,7 +17,7 @@ use warp::{crypto::DID, error::Error};
 
 use crate::config::{Discovery as DiscoveryConfig, DiscoveryType};
 
-use super::{did_to_libp2p_pub, DidExt, PeerIdExt, PeerType};
+use super::{DidExt, PeerIdExt, PeerType};
 
 //TODO: Deprecate for separate discovery service
 #[derive(Clone)]
@@ -271,7 +271,7 @@ impl Discovery {
     pub async fn get<P: Into<PeerType>>(&self, peer_type: P) -> Result<DiscoveryEntry, Error> {
         let peer_id = match &peer_type.into() {
             PeerType::PeerId(peer_id) => *peer_id,
-            PeerType::DID(did_key) => did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())?,
+            PeerType::DID(did_key) => did_key.to_peer_id()?,
         };
 
         if !self.contains(peer_id).await {

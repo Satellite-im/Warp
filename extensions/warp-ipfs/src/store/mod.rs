@@ -17,21 +17,20 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
-use ipfs::{Keypair, PeerId, PublicKey};
+use ipfs::{libp2p::identity::KeyType, Keypair, PeerId, PublicKey};
 use warp::{
     crypto::{
         cipher::Cipher,
-        did_key::{CoreSign, Generate, ECDH},
+        did_key::{Generate, ECDH},
         hash::sha256_hash,
         zeroize::Zeroizing,
-        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+        Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
     multipass::identity::IdentityStatus,
     raygun::{
         ConversationSettings, DirectConversationSettings, MessageEvent, PinState, ReactionState,
     },
-    tesseract::Tesseract,
 };
 
 pub const MAX_THUMBNAIL_SIZE: usize = 5_242_880;
@@ -209,18 +208,43 @@ impl PeerIdExt for PeerId {
             anyhow::bail!("PeerId does not contain inline public key");
         }
         let public_key = PublicKey::try_decode_protobuf(multihash.digest())?;
-        libp2p_pub_to_did(&public_key)
+        sealed::libp2p_pub_to_did(&public_key)
+    }
+}
+
+impl PeerIdExt for PublicKey {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error> {
+        Ok(self.clone())
+    }
+
+    fn to_did(&self) -> Result<DID, anyhow::Error> {
+        sealed::libp2p_pub_to_did(self)
+    }
+}
+
+impl PeerIdExt for Keypair {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error> {
+        Ok(self.public())
+    }
+
+    fn to_did(&self) -> Result<DID, anyhow::Error> {
+        sealed::libp2p_pub_to_did(&self.public())
     }
 }
 
 pub trait DidExt {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
     fn to_peer_id(&self) -> Result<PeerId, anyhow::Error>;
     fn to_keypair(&self) -> Result<Keypair, anyhow::Error>;
 }
 
 impl DidExt for DID {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error> {
+        sealed::did_to_libp2p_pub(self)
+    }
+
     fn to_peer_id(&self) -> Result<PeerId, anyhow::Error> {
-        did_to_libp2p_pub(self).map(|p| p.to_peer_id())
+        self.to_public_key().map(|p| p.to_peer_id())
     }
 
     fn to_keypair(&self) -> Result<Keypair, anyhow::Error> {
@@ -392,21 +416,28 @@ pub enum ConversationUpdateKind {
 }
 
 // Note that this are temporary
-fn sign_serde<D: Serialize>(did: &DID, data: &D) -> anyhow::Result<Vec<u8>> {
+fn sign_serde<D: Serialize>(keypair: &Keypair, data: &D) -> anyhow::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(data)?;
-    Ok(did.as_ref().sign(&bytes))
+    Ok(keypair.sign(&bytes).expect("not RSA"))
 }
 
 // Note that this are temporary
 fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec(data)?;
-    pk.as_ref()
-        .verify(&bytes, signature)
-        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    let pk = pk.to_public_key()?;
+    if !pk.verify(&bytes, signature) {
+        return Err(Error::InvalidSignature.into());
+    }
+
     Ok(())
 }
 
-pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {
+pub fn generate_shared_topic(
+    keypair: &Keypair,
+    did_b: &DID,
+    seed: Option<&str>,
+) -> anyhow::Result<Uuid> {
+    let did_a = sealed::get_keypair_did(keypair)?;
     let x25519_a = Ed25519KeyPair::from_secret_key(&did_a.private_key_bytes()).get_x25519();
     let x25519_b = Ed25519KeyPair::from_public_key(&did_b.public_key_bytes()).get_x25519();
     let shared_key = x25519_a.key_exchange(&x25519_b);
@@ -414,39 +445,45 @@ pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> an
     Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).map_err(anyhow::Error::from)
 }
 
-pub fn get_keypair_did(keypair: &ipfs::Keypair) -> anyhow::Result<DID> {
-    let kp = Zeroizing::new(keypair.clone().try_into_ed25519()?.to_bytes());
-    let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
-    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
-    Ok(did.into())
+mod sealed {
+    use rust_ipfs::{Keypair, PublicKey};
+    use warp::crypto::KeyMaterial;
+    use warp::crypto::{zeroize::Zeroizing, DIDKey, Ed25519KeyPair, DID};
+    use warp::{crypto::did_key::Generate, error::Error};
+    pub fn get_keypair_did(keypair: &Keypair) -> anyhow::Result<DID> {
+        let kp = Zeroizing::new(keypair.clone().try_into_ed25519()?.to_bytes());
+        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
+        let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+        Ok(did.into())
+    }
+
+    pub fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<PublicKey> {
+        let pub_key = rust_ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(
+            &public_key.public_key_bytes(),
+        )?;
+        Ok(PublicKey::from(pub_key))
+    }
+
+    pub fn libp2p_pub_to_did(public_key: &PublicKey) -> anyhow::Result<DID> {
+        let pk = match public_key.clone().try_into_ed25519() {
+            Ok(pk) => {
+                let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
+                did.into()
+            }
+            _ => anyhow::bail!(Error::PublicKeyInvalid),
+        };
+        Ok(pk)
+    }
 }
 
-fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
-    let pub_key =
-        ipfs::libp2p::identity::ed25519::PublicKey::try_from_bytes(&public_key.public_key_bytes())?;
-    Ok(ipfs::libp2p::identity::PublicKey::from(pub_key))
-}
+pub(crate) fn ecdh_shared_key(
+    keypair: &Keypair,
+    recipient: Option<&DID>,
+) -> Result<Vec<u8>, Error> {
+    assert!(keypair.key_type() != KeyType::RSA);
 
-fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
-    let pk = match public_key.clone().try_into_ed25519() {
-        Ok(pk) => {
-            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
-            did.into()
-        }
-        _ => anyhow::bail!(Error::PublicKeyInvalid),
-    };
-    Ok(pk)
-}
+    let did = sealed::get_keypair_did(keypair)?;
 
-fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
-    let kp = tesseract.retrieve("keypair")?;
-    let kp = bs58::decode(kp).into_vec()?;
-    let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes()));
-    Ok(did.into())
-}
-
-pub(crate) fn ecdh_shared_key(did: &DID, recipient: Option<&DID>) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
@@ -460,7 +497,7 @@ pub(crate) fn ecdh_shared_key(did: &DID, recipient: Option<&DID>) -> Result<Vec<
 }
 
 pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
-    did: &DID,
+    did: &Keypair,
     recipient: Option<&DID>,
     data: K,
 ) -> Result<Vec<u8>, Error> {
@@ -471,11 +508,14 @@ pub(crate) fn ecdh_encrypt<K: AsRef<[u8]>>(
 }
 
 pub(crate) fn ecdh_encrypt_with_nonce<K: AsRef<[u8]>>(
-    did: &DID,
+    keypair: &Keypair,
     recipient: Option<&DID>,
     data: K,
     nonce: &[u8],
 ) -> Result<Vec<u8>, Error> {
+    assert!(keypair.key_type() != KeyType::RSA);
+
+    let did = sealed::get_keypair_did(keypair)?;
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
@@ -490,11 +530,11 @@ pub(crate) fn ecdh_encrypt_with_nonce<K: AsRef<[u8]>>(
 }
 
 pub(crate) fn ecdh_decrypt<K: AsRef<[u8]>>(
-    did: &DID,
+    keypair: &Keypair,
     recipient: Option<&DID>,
     data: K,
 ) -> Result<Vec<u8>, Error> {
-    let prik = Zeroizing::new(ecdh_shared_key(did, recipient)?);
+    let prik = Zeroizing::new(ecdh_shared_key(keypair, recipient)?);
     let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
 
     Ok(data)
@@ -574,7 +614,7 @@ mod test {
     use rust_ipfs::Keypair;
     use warp::crypto::DID;
 
-    use crate::store::did_to_libp2p_pub;
+    use crate::store::DidExt;
 
     use super::PeerIdExt;
 
@@ -584,7 +624,7 @@ mod test {
         assert!(peer_id.to_did().is_ok());
 
         let random_did = DID::default();
-        let public_key = did_to_libp2p_pub(&random_did)?;
+        let public_key = random_did.to_public_key()?;
 
         let peer_id = public_key.to_peer_id();
 
