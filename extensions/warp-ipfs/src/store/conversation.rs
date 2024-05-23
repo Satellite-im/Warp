@@ -27,8 +27,8 @@ use warp::{
 use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
 
 use super::{
-    document::FileAttachmentDocument, ecdh_decrypt, get_keypair_did, keystore::Keystore,
-    verify_serde_sig, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
+    document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, verify_serde_sig,
+    PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
 };
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -146,7 +146,7 @@ impl ConversationDocument {
         creator: Option<DID>,
         signature: Option<String>,
     ) -> Result<Self, Error> {
-        let did = get_keypair_did(keypair)?;
+        let did = keypair.to_did()?;
         let id = id.unwrap_or_else(Uuid::new_v4);
 
         if !recipients.contains(&did) {
@@ -197,7 +197,7 @@ impl ConversationDocument {
         recipients: [DID; 2],
         settings: DirectConversationSettings,
     ) -> Result<Self, Error> {
-        let did = get_keypair_did(keypair)?;
+        let did = keypair.to_did()?;
         let conversation_id = Some(super::generate_shared_topic(
             keypair,
             recipients
@@ -231,7 +231,7 @@ impl ConversationDocument {
         settings: GroupSettings,
     ) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
-        let creator = Some(get_keypair_did(keypair)?);
+        let creator = Some(keypair.to_did()?);
         Self::new(
             keypair,
             name,
@@ -251,7 +251,7 @@ impl ConversationDocument {
     pub fn sign(&mut self, keypair: &Keypair) -> Result<(), Error> {
         if let ConversationSettings::Group(settings) = self.settings {
             assert_eq!(self.conversation_type(), ConversationType::Group);
-            let did = get_keypair_did(keypair)?;
+            let did = keypair.to_did()?;
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
@@ -896,7 +896,7 @@ impl MessageDocument {
         key: Either<&DID, &Keystore>,
         nonce: Option<&[u8]>,
     ) -> Result<(), Error> {
-        let did = &get_keypair_did(keypair)?;
+        let did = &keypair.to_did()?;
         tracing::info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
         let old_message = self.resolve(ipfs, keypair, true, key).await?;
 
@@ -1092,7 +1092,7 @@ impl MessageDocument {
     }
 
     fn sign(mut self, keypair: &Keypair) -> Result<MessageDocument, Error> {
-        let did = &get_keypair_did(keypair)?;
+        let did = &keypair.to_did()?;
         let sender = self.sender.to_did();
         if !sender.eq(did) {
             return Err(Error::PublicKeyInvalid);

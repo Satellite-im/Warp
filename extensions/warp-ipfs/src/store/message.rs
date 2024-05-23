@@ -67,7 +67,7 @@ use crate::{
 };
 
 use super::{
-    document::root::RootDocumentMap, ds_key::DataStoreKey, get_keypair_did, MAX_MESSAGE_SIZE,
+    document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt, MAX_MESSAGE_SIZE,
     SHUTTLE_TIMEOUT,
 };
 
@@ -1153,7 +1153,7 @@ impl ConversationInner {
     pub async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
         let keypair = self.root.keypair();
         if let Some(creator) = document.creator.as_ref() {
-            let did = get_keypair_did(keypair)?;
+            let did = keypair.to_did()?;
             if creator.eq(&did) && matches!(document.conversation_type(), ConversationType::Group) {
                 document.sign(keypair)?;
             }
@@ -1239,7 +1239,7 @@ impl ConversationInner {
 
         let keypair = self.root.keypair();
 
-        let own_did = get_keypair_did(keypair)?;
+        let own_did = keypair.to_did()?;
 
         let conversation = self.get(id).await?;
 
@@ -1321,7 +1321,7 @@ impl ConversationInner {
 
         let keypair = self.root.keypair();
 
-        let own_did = get_keypair_did(keypair)?;
+        let own_did = keypair.to_did()?;
 
         let bytes = ecdh_encrypt(keypair, Some(did), serde_json::to_vec(&request)?)?;
         let signature = sign_serde(keypair, &bytes)?;
@@ -4220,7 +4220,7 @@ async fn pubkey_or_keystore(
         ConversationType::Direct => {
             let list = document.recipients();
 
-            let own_did = get_keypair_did(keypair)?;
+            let own_did = keypair.to_did()?;
 
             let recipients = list
                 .into_iter()

@@ -161,7 +161,7 @@ impl Eq for KeyEntry {}
 
 #[cfg(test)]
 mod test {
-    use crate::store::get_keypair_did;
+    use crate::store::PeerIdExt;
 
     use super::Keystore;
     use rust_ipfs::Keypair;
@@ -177,7 +177,7 @@ mod test {
         let mut keystore = Keystore::default();
 
         let keypair = Keypair::generate_ed25519();
-        let kp_did = get_keypair_did(&keypair)?;
+        let kp_did = keypair.to_did()?;
         let recipient = DID::default();
 
         assert_ne!(kp_did, recipient);
@@ -197,7 +197,7 @@ mod test {
         let mut keystore = Keystore::default();
 
         let keypair = Keypair::generate_ed25519();
-        let kp_did = get_keypair_did(&keypair)?;
+        let kp_did = keypair.to_did()?;
         let recipient = DID::default();
 
         assert_ne!(kp_did, recipient);

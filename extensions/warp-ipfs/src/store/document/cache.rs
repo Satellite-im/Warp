@@ -261,12 +261,12 @@ mod test {
 
     use crate::store::{
         document::{cache::IdentityCache, identity::IdentityDocument},
-        get_keypair_did,
+        PeerIdExt,
     };
 
     fn random_document() -> (Keypair, DID, IdentityDocument) {
         let keypair = Keypair::generate_ed25519();
-        let did_key = get_keypair_did(&keypair).expect("valid keypair");
+        let did_key = keypair.to_did().expect("valid keypair");
         let fingerprint = did_key.fingerprint();
         let bytes = fingerprint.as_bytes();
         let time = Utc::now();
