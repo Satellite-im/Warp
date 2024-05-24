@@ -505,7 +505,7 @@ impl IdentityStore {
                     tokio::select! {
                         biased;
                         Some(message) = identity_announce_stream.next() => {
-                            let payload: PayloadMessage<IdentityDocument> = match serde_json::from_slice(&message.data) {
+                            let payload: PayloadMessage<IdentityDocument> = match PayloadMessage::from_bytes(&message.data) {
                                 Ok(p) => p,
                                 Err(e) => {
                                     tracing::error!(from = ?message.source, "Unable to decode payload: {e}");
