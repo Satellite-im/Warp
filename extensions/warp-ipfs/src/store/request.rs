@@ -119,7 +119,7 @@ where
                 None => vec![],
             };
 
-            self.addresses.extend(addresses);
+            self = self.add_addresses(addresses);
 
             PayloadMessage::new(
                 self.keypair,
