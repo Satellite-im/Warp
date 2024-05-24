@@ -1,6 +1,9 @@
+use std::future::IntoFuture;
+
 use super::PeerIdExt;
 use chrono::{DateTime, Utc};
-use rust_ipfs::{libp2p::identity::KeyType, Keypair, Multiaddr, PeerId, Protocol};
+use futures::{future::BoxFuture, FutureExt};
+use rust_ipfs::{libp2p::identity::KeyType, Ipfs, Keypair, Multiaddr, PeerId, Protocol};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use warp::error::Error;
 
@@ -36,6 +39,7 @@ pub struct PayloadBuilder<'a, M> {
     keypair: &'a Keypair,
     cosigner_keypair: Option<&'a Keypair>,
     message: M,
+    ipfs: Option<&'a Ipfs>,
     addresses: Vec<Multiaddr>,
 }
 
@@ -47,6 +51,7 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
             keypair,
             cosigner_keypair: None,
             message,
+            ipfs: None,
             addresses: vec![],
         }
     }
@@ -85,6 +90,11 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
         self
     }
 
+    pub fn from_ipfs(mut self, ipfs: &'a Ipfs) -> Self {
+        self.ipfs.replace(ipfs);
+        self
+    }
+
     pub fn build(self) -> Result<PayloadMessage<M>, Error> {
         PayloadMessage::new(
             self.keypair,
@@ -92,6 +102,33 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
             self.message,
             self.addresses,
         )
+    }
+}
+
+impl<'a, M: Serialize + DeserializeOwned + Clone> IntoFuture for PayloadBuilder<'a, M>
+where
+    M: Send + 'a,
+{
+    type IntoFuture = BoxFuture<'a, Self::Output>;
+    type Output = Result<PayloadMessage<M>, Error>;
+
+    fn into_future(mut self) -> Self::IntoFuture {
+        async move {
+            let addresses = match self.ipfs {
+                Some(ipfs) => ipfs.external_addresses().await.unwrap_or_default(),
+                None => vec![],
+            };
+
+            self.addresses.extend(addresses);
+
+            PayloadMessage::new(
+                self.keypair,
+                self.cosigner_keypair,
+                self.message,
+                self.addresses,
+            )
+        }
+        .boxed()
     }
 }
 
