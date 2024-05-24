@@ -320,7 +320,31 @@ mod test {
             .build()?;
 
         assert_ne!(payload.sender(), &keypair.public().to_peer_id());
+        assert_eq!(payload.original_sender(), &keypair.public().to_peer_id());
         assert_eq!(payload.sender(), &cosigner_keypair.public().to_peer_id());
+        payload.verify()?;
+        assert_eq!(payload.message(), "Request");
+
+        Ok(())
+    }
+
+    // If the sender and cosigner keypair are the same, we will not cosign the payload.
+    #[test]
+    fn payload_cosign_ignore() -> anyhow::Result<()> {
+        let data = String::from("Request");
+        let keypair = Keypair::generate_ed25519();
+        let cosigner_keypair = keypair.clone();
+
+        let payload = PayloadBuilder::new(&keypair, data)
+            .cosign(&cosigner_keypair)
+            .build()?;
+
+        assert_eq!(payload.sender(), &keypair.public().to_peer_id());
+        assert_eq!(payload.cosigner(), None);
+        assert_eq!(
+            payload.original_sender(),
+            &cosigner_keypair.public().to_peer_id()
+        );
         payload.verify()?;
         assert_eq!(payload.message(), "Request");
 
