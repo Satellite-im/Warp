@@ -917,7 +917,9 @@ impl ConversationInner {
 
         let bytes = ecdh_encrypt(self.root.keypair(), Some(did), serde_json::to_vec(&event)?)?;
 
-        let payload = PayloadBuilder::new(self.root.keypair(), bytes).build()?;
+        let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+            .from_ipfs(&self.ipfs)
+            .await?;
 
         let peers = self.ipfs.pubsub_peers(Some(did.messaging())).await?;
 
@@ -1042,7 +1044,9 @@ impl ConversationInner {
         for (did, peer_id) in peer_id_list {
             let bytes = ecdh_encrypt(self.root.keypair(), Some(&did), &event)?;
 
-            let payload = PayloadBuilder::new(self.root.keypair(), bytes).build()?;
+            let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+                .from_ipfs(&self.ipfs)
+                .await?;
 
             let peers = self.ipfs.pubsub_peers(Some(did.messaging())).await?;
             if !peers.contains(&peer_id)
@@ -1328,7 +1332,9 @@ impl ConversationInner {
 
         let bytes = ecdh_encrypt(keypair, Some(did), serde_json::to_vec(&request)?)?;
 
-        let payload = PayloadBuilder::new(keypair, bytes).build()?;
+        let payload = PayloadBuilder::new(keypair, bytes)
+            .from_ipfs(&self.ipfs)
+            .await?;
 
         let topic = conversation.reqres_topic(did);
 
@@ -2727,7 +2733,9 @@ impl ConversationInner {
                     let keypair = self.root.keypair();
                     let bytes = ecdh_encrypt(keypair, Some(&recipient), &event)?;
 
-                    let payload = PayloadBuilder::new(keypair, bytes).build()?;
+                    let payload = PayloadBuilder::new(keypair, bytes)
+                        .from_ipfs(&self.ipfs)
+                        .await?;
 
                     let peers = self.ipfs.pubsub_peers(Some(recipient.messaging())).await?;
                     let timer = Instant::now();
@@ -2861,7 +2869,9 @@ impl ConversationInner {
 
         let bytes = Cipher::direct_encrypt(&event, &key)?;
 
-        let payload = PayloadBuilder::new(self.root.keypair(), bytes).build()?;
+        let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+            .from_ipfs(&self.ipfs)
+            .await?;
 
         let peers = self
             .ipfs
@@ -2932,7 +2942,9 @@ impl ConversationInner {
 
         let bytes = Cipher::direct_encrypt(&event, &key)?;
 
-        let payload = PayloadBuilder::new(keypair, bytes).build()?;
+        let payload = PayloadBuilder::new(keypair, bytes)
+            .from_ipfs(&self.ipfs)
+            .await?;
 
         let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
 
@@ -2998,7 +3010,9 @@ impl ConversationInner {
 
         let bytes = ecdh_encrypt(keypair, Some(did_key), &event)?;
 
-        let payload = PayloadBuilder::new(keypair, bytes).build()?;
+        let payload = PayloadBuilder::new(keypair, bytes)
+            .from_ipfs(&self.ipfs)
+            .await?;
 
         let peer_id = did_key.to_peer_id()?;
         let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
@@ -3937,7 +3951,9 @@ async fn process_request_response_event(
 
                 let bytes = ecdh_encrypt(keypair, Some(&sender), serde_json::to_vec(&response)?)?;
 
-                let payload = PayloadBuilder::new(keypair, bytes).build()?;
+                let payload = PayloadBuilder::new(keypair, bytes)
+                    .from_ipfs(&this.ipfs)
+                    .await?;
 
                 let peers = this.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
@@ -4170,7 +4186,10 @@ async fn process_queue(this: &mut ConversationInner) {
                 continue;
             }
 
-            let payload = match PayloadBuilder::<_>::new(keypair, data.clone()).build() {
+            let payload = match PayloadBuilder::<_>::new(keypair, data.clone())
+                .from_ipfs(&this.ipfs)
+                .await
+            {
                 Ok(p) => p,
                 Err(_e) => {
                     // tracing::warn!(error = %_e, "unable to build payload")
