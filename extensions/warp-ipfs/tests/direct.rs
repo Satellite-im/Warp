@@ -74,8 +74,8 @@ mod test {
         let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
         let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.subscribe().await?;
-        let mut chat_subscribe_b = chat_b.subscribe().await?;
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
 
         chat_a.create_conversation(&did_b).await?;
 
