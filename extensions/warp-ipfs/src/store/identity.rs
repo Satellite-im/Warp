@@ -928,7 +928,9 @@ impl IdentityStore {
         if self.config.store_setting().announce_to_mesh {
             let kp = self.ipfs.keypair();
             let document = self.own_identity_document().await?;
-            let payload = PayloadBuilder::new(kp, document).build()?;
+            let payload = PayloadBuilder::new(kp, document)
+                .from_ipfs(&self.ipfs)
+                .await?;
             let bytes = serde_json::to_vec(&payload)?;
             _ = self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await;
         }
