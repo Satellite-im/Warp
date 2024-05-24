@@ -513,8 +513,10 @@ impl IdentityStore {
                                 }
                             };
 
+                            let peer_id = payload.sender();
+
                             //TODO: Validate the date to be sure it doesnt fall out of range (or that we received a old message)
-                            let from_did = match payload.sender().to_did() {
+                            let from_did = match peer_id.to_did() {
                                 Ok(did) => did,
                                 Err(_e) => {
                                     continue;
@@ -537,6 +539,19 @@ impl IdentityStore {
                             let event = IdentityEvent::Receive {
                                 option: ResponseOption::Identity { identity },
                             };
+
+                            // We will add the addresses supplied, appending it to the address book
+                            // however if the address already exist, it will be noop
+                            // Note: we should probably do a test probe on the addresses provided to ensure we are able to
+                            //       connect to the peer, however this would not be needed for now since this is assuming
+                            //       that the addresses are from a valid peer and that the peer is reachable through one of
+                            //       addresses provided.
+                            // TODO: Uncomment in the future
+                            // for addr in payload.addresses() {
+                            //     if let Err(e) = store.ipfs.add_peer(*peer_id, addr.clone()).await {
+                            //         error!("Failed to add peer {peer_id} address {addr}: {e}");
+                            //     }
+                            // }
 
                             //Ignore requesting images if there is a change for now.
                             if let Err(e) = store.process_message(&from_did, event, false).await {
