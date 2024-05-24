@@ -6,7 +6,6 @@ pub mod files;
 pub mod identity;
 pub mod keystore;
 pub mod message;
-pub mod payload;
 pub mod phonebook;
 pub mod queue;
 pub mod request;

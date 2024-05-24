@@ -57,7 +57,7 @@ use crate::{
         generate_shared_topic,
         identity::IdentityStore,
         keystore::Keystore,
-        payload::Payload,
+        request::{PayloadBuilder, PayloadMessage},
         sign_serde,
         topics::PeerTopic,
         verify_serde_sig, ConversationEvents, ConversationRequestKind, ConversationRequestResponse,
@@ -505,7 +505,7 @@ impl ConversationTask {
                     }
                 }
                 Some(message) = stream.next() => {
-                    let payload = match Payload::from_bytes(&message.data) {
+                    let payload = match PayloadMessage::<Vec<u8>>::from_bytes(&message.data) {
                         Ok(payload) => payload,
                         Err(e) => {
                             tracing::warn!("Failed to parse payload data: {e}");
@@ -513,9 +513,15 @@ impl ConversationTask {
                         }
                     };
 
-                    let sender = payload.sender();
+                    let sender = match payload.sender().to_did() {
+                        Ok(did) => did,
+                        Err(e) => {
+                            tracing::warn!(sender = %payload.sender(), error = %e, "unable to convert to did");
+                            continue;
+                        }
+                    };
 
-                    let data = match ecdh_decrypt(self.identity.root_document().keypair(), Some(&sender), payload.data()) {
+                    let data = match ecdh_decrypt(self.identity.root_document().keypair(), Some(&sender), payload.message()) {
                         Ok(d) => d,
                         Err(e) => {
                             tracing::warn!(%sender, error = %e, "failed to decrypt message");
@@ -910,9 +916,8 @@ impl ConversationInner {
         };
 
         let bytes = ecdh_encrypt(self.root.keypair(), Some(did), serde_json::to_vec(&event)?)?;
-        let signature = sign_serde(self.root.keypair(), &bytes)?;
 
-        let payload = Payload::new(&own_did, &bytes, &signature);
+        let payload = PayloadBuilder::new(self.root.keypair(), bytes).build()?;
 
         let peers = self.ipfs.pubsub_peers(Some(did.messaging())).await?;
 
@@ -932,7 +937,7 @@ impl ConversationInner {
                     None,
                     peer_id,
                     did.messaging(),
-                    payload.data().to_vec(),
+                    payload.message().to_vec(),
                 ),
             )
             .await;
@@ -1036,9 +1041,8 @@ impl ConversationInner {
 
         for (did, peer_id) in peer_id_list {
             let bytes = ecdh_encrypt(self.root.keypair(), Some(&did), &event)?;
-            let signature = sign_serde(self.root.keypair(), &bytes)?;
 
-            let payload = Payload::new(own_did, &bytes, &signature);
+            let payload = PayloadBuilder::new(self.root.keypair(), bytes).build()?;
 
             let peers = self.ipfs.pubsub_peers(Some(did.messaging())).await?;
             if !peers.contains(&peer_id)
@@ -1057,7 +1061,7 @@ impl ConversationInner {
                         None,
                         peer_id,
                         did.messaging(),
-                        payload.data().to_vec(),
+                        payload.message().to_vec(),
                     ),
                 )
                 .await;
@@ -1235,7 +1239,8 @@ impl ConversationInner {
     }
 
     async fn process_msg_event(&mut self, id: Uuid, msg: Message) -> Result<(), Error> {
-        let data = Payload::from_bytes(&msg.data)?;
+        let data = PayloadMessage::<Vec<u8>>::from_bytes(&msg.data)?;
+        let sender = data.sender().to_did()?;
 
         let keypair = self.root.keypair();
 
@@ -1257,12 +1262,12 @@ impl ConversationInner {
                     return Err(Error::IdentityDoesntExist);
                 };
 
-                ecdh_decrypt(keypair, Some(member), data.data())?
+                ecdh_decrypt(keypair, Some(member), data.message())?
             }
             ConversationType::Group => {
                 let store = self.get_keystore(id).await?;
 
-                let key = match store.get_latest(keypair, &data.sender()) {
+                let key = match store.get_latest(keypair, &sender) {
                     Ok(key) => key,
                     Err(Error::PublicKeyDoesntExist) => {
                         // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
@@ -1274,8 +1279,8 @@ impl ConversationInner {
                         //       while waiting for the response.
 
                         self.pending_key_exchange.entry(id).or_default().push((
-                            data.sender(),
-                            data.data().to_vec(),
+                            sender.clone(),
+                            data.message().to_vec(),
                             false,
                         ));
 
@@ -1292,7 +1297,7 @@ impl ConversationInner {
                     }
                 };
 
-                Cipher::direct_decrypt(data.data(), &key)?
+                Cipher::direct_decrypt(data.message(), &key)?
             }
         };
 
@@ -1321,12 +1326,9 @@ impl ConversationInner {
 
         let keypair = self.root.keypair();
 
-        let own_did = keypair.to_did()?;
-
         let bytes = ecdh_encrypt(keypair, Some(did), serde_json::to_vec(&request)?)?;
-        let signature = sign_serde(keypair, &bytes)?;
 
-        let payload = Payload::new(&own_did, &bytes, &signature);
+        let payload = PayloadBuilder::new(keypair, bytes).build()?;
 
         let topic = conversation.reqres_topic(did);
 
@@ -1348,7 +1350,7 @@ impl ConversationInner {
                     None,
                     peer_id,
                     topic.clone(),
-                    payload.data().into(),
+                    payload.message().to_vec(),
                 ),
             )
             .await;
@@ -2724,9 +2726,8 @@ impl ConversationInner {
                 for (recipient, peer_id) in peer_id_list {
                     let keypair = self.root.keypair();
                     let bytes = ecdh_encrypt(keypair, Some(&recipient), &event)?;
-                    let signature = sign_serde(keypair, &bytes)?;
 
-                    let payload = Payload::new(own_did, &bytes, &signature);
+                    let payload = PayloadBuilder::new(keypair, bytes).build()?;
 
                     let peers = self.ipfs.pubsub_peers(Some(recipient.messaging())).await?;
                     let timer = Instant::now();
@@ -2751,7 +2752,7 @@ impl ConversationInner {
                                 None,
                                 peer_id,
                                 recipient.messaging(),
-                                payload.data().to_vec(),
+                                payload.message().to_vec(),
                             ),
                         )
                         .await;
@@ -2854,16 +2855,13 @@ impl ConversationInner {
     ) -> Result<(), Error> {
         let conversation = self.get(conversation_id).await?;
 
-        let own_did = self.identity.did_key();
-
         let event = serde_json::to_vec(&event)?;
 
         let key = self.conversation_key(conversation_id, None).await?;
 
         let bytes = Cipher::direct_encrypt(&event, &key)?;
 
-        let signature = sign_serde(self.root.keypair(), &bytes)?;
-        let payload = Payload::new(&own_did, &bytes, &signature);
+        let payload = PayloadBuilder::new(self.root.keypair(), bytes).build()?;
 
         let peers = self
             .ipfs
@@ -2934,9 +2932,7 @@ impl ConversationInner {
 
         let bytes = Cipher::direct_encrypt(&event, &key)?;
 
-        let signature = sign_serde(keypair, &bytes)?;
-
-        let payload = Payload::new(&own_did, &bytes, &signature);
+        let payload = PayloadBuilder::new(keypair, bytes).build()?;
 
         let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
 
@@ -2963,7 +2959,7 @@ impl ConversationInner {
                                 message_id,
                                 peer_id,
                                 conversation.topic(),
-                                payload.data().to_vec(),
+                                payload.message().to_vec(),
                             ),
                         )
                         .await;
@@ -2999,12 +2995,10 @@ impl ConversationInner {
         let event = serde_json::to_vec(&event)?;
 
         let keypair = self.root.keypair();
-        let own_did = self.identity.did_key();
 
         let bytes = ecdh_encrypt(keypair, Some(did_key), &event)?;
-        let signature = sign_serde(keypair, &bytes)?;
 
-        let payload = Payload::new(&own_did, &bytes, &signature);
+        let payload = PayloadBuilder::new(keypair, bytes).build()?;
 
         let peer_id = did_key.to_peer_id()?;
         let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
@@ -3027,7 +3021,7 @@ impl ConversationInner {
                     None,
                     peer_id,
                     did_key.messaging(),
-                    payload.data().to_vec(),
+                    payload.message().to_vec(),
                 ),
             )
             .await;
@@ -3150,7 +3144,7 @@ enum ConversationStreamData {
 
 async fn process_conversation(
     this: &mut ConversationInner,
-    data: Payload<'_>,
+    data: PayloadMessage<Vec<u8>>,
     event: ConversationEvents,
 ) -> Result<(), Error> {
     match event {
@@ -3323,7 +3317,7 @@ async fn process_conversation(
                 return Err(anyhow::anyhow!("Conversation {conversation_id} doesnt exist").into());
             }
 
-            let sender = data.sender();
+            let sender = data.sender().to_did()?;
 
             match this.get(conversation_id).await {
                 Ok(conversation)
@@ -3890,11 +3884,11 @@ async fn process_request_response_event(
 
     let conversation = this.get(conversation_id).await?;
 
-    let payload = Payload::from_bytes(&req.data)?;
+    let payload = PayloadMessage::<Vec<u8>>::from_bytes(&req.data)?;
 
-    let sender = payload.sender();
+    let sender = payload.sender().to_did()?;
 
-    let data = ecdh_decrypt(keypair, Some(&sender), payload.data())?;
+    let data = ecdh_decrypt(keypair, Some(&sender), payload.message())?;
 
     let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
 
@@ -3942,9 +3936,8 @@ async fn process_request_response_event(
                 let topic = conversation.reqres_topic(&sender);
 
                 let bytes = ecdh_encrypt(keypair, Some(&sender), serde_json::to_vec(&response)?)?;
-                let signature = sign_serde(keypair, &bytes)?;
 
-                let payload = Payload::new(&own_did, &bytes, &signature);
+                let payload = PayloadBuilder::new(keypair, bytes).build()?;
 
                 let peers = this.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
@@ -3972,7 +3965,7 @@ async fn process_request_response_event(
                             None,
                             peer_id,
                             topic.clone(),
-                            payload.data().into(),
+                            payload.message().to_vec(),
                         ),
                     )
                     .await;
@@ -4070,14 +4063,14 @@ async fn process_conversation_event(
 ) -> Result<(), Error> {
     let tx = this.subscribe(conversation_id).await?;
 
-    let payload = Payload::from_bytes(&message.data)?;
-    let sender = payload.sender();
+    let payload = PayloadMessage::<Vec<u8>>::from_bytes(&message.data)?;
+    let sender = payload.sender().to_did()?;
 
     let key = this
         .conversation_key(conversation_id, Some(&sender))
         .await?;
 
-    let data = Cipher::direct_decrypt(payload.data(), &key)?;
+    let data = Cipher::direct_decrypt(payload.message(), &key)?;
 
     let event = match serde_json::from_slice::<MessagingEvents>(&data)? {
         event @ MessagingEvents::Event { .. } => event,
@@ -4145,8 +4138,6 @@ impl Queue {
 async fn process_queue(this: &mut ConversationInner) {
     let mut changed = false;
     let keypair = &this.root.keypair().clone();
-    let own_did = this.identity.did_key();
-
     for (did, items) in this.queue.iter_mut() {
         let Ok(peer_id) = did.to_peer_id() else {
             continue;
@@ -4179,11 +4170,13 @@ async fn process_queue(this: &mut ConversationInner) {
                 continue;
             }
 
-            let Ok(signature) = sign_serde(keypair, &data) else {
-                continue;
+            let payload = match PayloadBuilder::<_>::new(keypair, data.clone()).build() {
+                Ok(p) => p,
+                Err(_e) => {
+                    // tracing::warn!(error = %_e, "unable to build payload")
+                    continue;
+                }
             };
-
-            let payload = Payload::new(&own_did, data, &signature);
 
             let Ok(bytes) = payload.to_bytes() else {
                 continue;
