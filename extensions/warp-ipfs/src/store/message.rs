@@ -25,7 +25,7 @@ use futures::{
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, PeerId};
+use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, Keypair, PeerId};
 
 use serde::{Deserialize, Serialize};
 use tokio::select;
@@ -67,7 +67,8 @@ use crate::{
 };
 
 use super::{
-    document::root::RootDocumentMap, ds_key::DataStoreKey, MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+    document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt, MAX_MESSAGE_SIZE,
+    SHUTTLE_TIMEOUT,
 };
 
 const CHAT_DIRECTORY: &str = "chat_media";
@@ -97,8 +98,6 @@ impl MessageStore {
     ) -> Self {
         info!("Initializing MessageStore");
 
-        let keypair = identity.did_key();
-
         let (tx, rx) = futures::channel::mpsc::channel(1024);
 
         let token = CancellationToken::new();
@@ -111,7 +110,6 @@ impl MessageStore {
         let mut inner = ConversationInner {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
-            keypair: keypair.clone(),
             conversation_task: HashMap::new(),
             command_tx: tx,
             identity: identity.clone(),
@@ -528,7 +526,7 @@ impl ConversationTask {
 
                     let sender = payload.sender();
 
-                    let data = match ecdh_decrypt(&self.identity.did_key(), Some(&sender), payload.data()) {
+                    let data = match ecdh_decrypt(self.identity.root_document().keypair(), Some(&sender), payload.data()) {
                         Ok(d) => d,
                         Err(e) => {
                             tracing::warn!(%sender, error = %e, "failed to decrypt message");
@@ -622,7 +620,6 @@ impl ConversationTask {
 
 struct ConversationInner {
     ipfs: Ipfs,
-    keypair: Arc<DID>,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
     conversation_task: HashMap<Uuid, DropGuard>,
     root: RootDocumentMap,
@@ -874,7 +871,9 @@ impl ConversationInner {
             return Err(Error::PublicKeyIsBlocked);
         }
 
-        if did == &*self.keypair {
+        let own_did = self.identity.did_key();
+
+        if did == &own_did {
             return Err(Error::CannotCreateConversation);
         }
 
@@ -885,7 +884,7 @@ impl ConversationInner {
             .find(|conversation| {
                 conversation.conversation_type() == ConversationType::Direct
                     && conversation.recipients().contains(did)
-                    && conversation.recipients().contains(&self.keypair)
+                    && conversation.recipients().contains(&own_did)
             })
             .map(Conversation::from)
         {
@@ -903,8 +902,8 @@ impl ConversationInner {
 
         let settings = DirectConversationSettings::default();
         let conversation = ConversationDocument::new_direct(
-            &self.keypair,
-            [(*self.keypair).clone(), did.clone()],
+            self.root.keypair(),
+            [own_did.clone(), did.clone()],
             settings,
         )?;
 
@@ -917,14 +916,14 @@ impl ConversationInner {
         let peer_id = did.to_peer_id()?;
 
         let event = ConversationEvents::NewConversation {
-            recipient: (*self.keypair).clone(),
+            recipient: own_did.clone(),
             settings,
         };
 
-        let bytes = ecdh_encrypt(&self.keypair, Some(did), serde_json::to_vec(&event)?)?;
-        let signature = sign_serde(&self.keypair, &bytes)?;
+        let bytes = ecdh_encrypt(self.root.keypair(), Some(did), serde_json::to_vec(&event)?)?;
+        let signature = sign_serde(self.root.keypair(), &bytes)?;
 
-        let payload = Payload::new(&self.keypair, &bytes, &signature);
+        let payload = Payload::new(&own_did, &bytes, &signature);
 
         let peers = self.ipfs.pubsub_peers(Some(did.messaging())).await?;
 
@@ -965,7 +964,7 @@ impl ConversationInner {
         mut recipients: HashSet<DID>,
         settings: GroupSettings,
     ) -> Result<Conversation, Error> {
-        let own_did = &*(self.keypair.clone());
+        let own_did = &self.identity.did_key();
 
         if recipients.contains(own_did) {
             return Err(Error::CannotCreateConversation);
@@ -1012,8 +1011,13 @@ impl ConversationInner {
 
         let restricted = self.root.get_blocks().await.unwrap_or_default();
 
-        let conversation =
-            ConversationDocument::new_group(own_did, name, recipients, &restricted, settings)?;
+        let conversation = ConversationDocument::new_group(
+            self.root.keypair(),
+            name,
+            recipients,
+            &restricted,
+            settings,
+        )?;
 
         let recipient = conversation.recipients();
 
@@ -1022,7 +1026,7 @@ impl ConversationInner {
         self.set_document(conversation).await?;
 
         let mut keystore = Keystore::new(conversation_id);
-        keystore.insert(own_did, own_did, warp::crypto::generate::<64>())?;
+        keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
 
         self.set_keystore(conversation_id, keystore).await?;
 
@@ -1042,8 +1046,8 @@ impl ConversationInner {
         })?;
 
         for (did, peer_id) in peer_id_list {
-            let bytes = ecdh_encrypt(own_did, Some(&did), &event)?;
-            let signature = sign_serde(own_did, &bytes)?;
+            let bytes = ecdh_encrypt(self.root.keypair(), Some(&did), &event)?;
+            let signature = sign_serde(self.root.keypair(), &bytes)?;
 
             let payload = Payload::new(own_did, &bytes, &signature);
 
@@ -1168,11 +1172,11 @@ impl ConversationInner {
     }
 
     pub async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
+        let keypair = self.root.keypair();
         if let Some(creator) = document.creator.as_ref() {
-            if creator.eq(&self.keypair)
-                && matches!(document.conversation_type(), ConversationType::Group)
-            {
-                document.sign(&self.keypair)?;
+            let did = keypair.to_did()?;
+            if creator.eq(&did) && matches!(document.conversation_type(), ConversationType::Group) {
+                document.sign(keypair)?;
             }
         }
 
@@ -1254,7 +1258,9 @@ impl ConversationInner {
     async fn process_msg_event(&mut self, id: Uuid, msg: Message) -> Result<(), Error> {
         let data = Payload::from_bytes(&msg.data)?;
 
-        let own_did = &*self.keypair;
+        let keypair = self.root.keypair();
+
+        let own_did = keypair.to_did()?;
 
         let conversation = self.get(id).await?;
 
@@ -1264,7 +1270,7 @@ impl ConversationInner {
 
                 let recipients = list
                     .iter()
-                    .filter(|did| (*self.keypair).ne(did))
+                    .filter(|did| own_did.ne(did))
                     .collect::<Vec<_>>();
 
                 let Some(member) = recipients.first() else {
@@ -1272,12 +1278,12 @@ impl ConversationInner {
                     return Err(Error::IdentityDoesntExist);
                 };
 
-                ecdh_decrypt(own_did, Some(member), data.data())?
+                ecdh_decrypt(keypair, Some(member), data.data())?
             }
             ConversationType::Group => {
                 let store = self.get_keystore(id).await?;
 
-                let key = match store.get_latest(own_did, &data.sender()) {
+                let key = match store.get_latest(keypair, &data.sender()) {
                     Ok(key) => key,
                     Err(Error::PublicKeyDoesntExist) => {
                         // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
@@ -1334,12 +1340,14 @@ impl ConversationInner {
             return Err(Error::PublicKeyInvalid);
         }
 
-        let own_did = &self.keypair;
+        let keypair = self.root.keypair();
 
-        let bytes = ecdh_encrypt(own_did, Some(did), serde_json::to_vec(&request)?)?;
-        let signature = sign_serde(own_did, &bytes)?;
+        let own_did = keypair.to_did()?;
 
-        let payload = Payload::new(own_did, &bytes, &signature);
+        let bytes = ecdh_encrypt(keypair, Some(did), serde_json::to_vec(&request)?)?;
+        let signature = sign_serde(keypair, &bytes)?;
+
+        let payload = Payload::new(&own_did, &bytes, &signature);
 
         let topic = conversation.reqres_topic(did);
 
@@ -1386,10 +1394,12 @@ impl ConversationInner {
     ) -> Result<warp::raygun::Message, Error> {
         let conversation = self.get(conversation_id).await?;
 
-        let keystore = pubkey_or_keystore(self, conversation_id, &self.keypair).await?;
+        let keypair = self.root.keypair();
+
+        let keystore = pubkey_or_keystore(self, conversation_id, keypair).await?;
 
         conversation
-            .get_message(&self.ipfs, &self.keypair, message_id, keystore.as_ref())
+            .get_message(&self.ipfs, keypair, message_id, keystore.as_ref())
             .await
     }
 
@@ -1423,30 +1433,27 @@ impl ConversationInner {
     ) -> Result<Messages, Error> {
         let conversation = self.get(conversation_id).await?;
 
-        // let keystore = match conversation.conversation_type {
-        //     ConversationType::Direct => None,
-        //     ConversationType::Group { .. } => self.get_keystore(conversation_id).await.ok(),
-        // };
+        let keypair = self.root.keypair();
 
-        let keystore = pubkey_or_keystore(self, conversation_id, &self.keypair).await?;
+        let keystore = pubkey_or_keystore(self, conversation_id, keypair).await?;
 
         let m_type = opt.messages_type();
         match m_type {
             MessagesType::Stream => {
                 let stream = conversation
-                    .get_messages_stream(&self.ipfs, self.keypair.clone(), opt, keystore)
+                    .get_messages_stream(&self.ipfs, keypair, opt, keystore)
                     .await?;
                 Ok(Messages::Stream(stream))
             }
             MessagesType::List => {
                 let list = conversation
-                    .get_messages(&self.ipfs, self.keypair.clone(), opt, keystore)
+                    .get_messages(&self.ipfs, keypair, opt, keystore)
                     .await?;
                 Ok(Messages::List(list))
             }
             MessagesType::Pages { .. } => {
                 conversation
-                    .get_messages_pages(&self.ipfs, &self.keypair, opt, keystore.as_ref())
+                    .get_messages_pages(&self.ipfs, keypair, opt, keystore.as_ref())
                     .await
             }
         }
@@ -1476,10 +1483,12 @@ impl ConversationInner {
             return Err(Error::MessageNotFound);
         }
 
+        let own_did = self.identity.did_key();
+
         let list = conversation
             .recipients()
             .iter()
-            .filter(|did| (*self.keypair).ne(did))
+            .filter(|did| own_did.ne(did))
             .cloned()
             .collect::<Vec<_>>();
 
@@ -1535,7 +1544,8 @@ impl ConversationInner {
             });
         }
 
-        let own_did = &*self.keypair;
+        let keypair = self.root.keypair();
+        let own_did = self.identity.did_key();
 
         let mut message = warp::raygun::Message::default();
         message.set_conversation_id(conversation.id());
@@ -1543,10 +1553,9 @@ impl ConversationInner {
         message.set_lines(messages.clone());
 
         let message_id = message.id();
-        let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
+        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
 
-        let message =
-            MessageDocument::new(&self.ipfs, &self.keypair, message, keystore.as_ref()).await?;
+        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
 
         let message_cid = conversation
             .insert_message_document(&self.ipfs, message)
@@ -1624,19 +1633,21 @@ impl ConversationInner {
             });
         }
 
-        let keystore = pubkey_or_keystore(&*self, conversation.id(), &self.keypair).await?;
+        let keypair = self.root.keypair();
+
+        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
 
         let mut message_document = conversation
             .get_message_document(&self.ipfs, message_id)
             .await?;
 
         let mut message = message_document
-            .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
+            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
             .await?;
 
         let sender = message.sender();
 
-        let own_did = &*self.keypair;
+        let own_did = &self.identity.did_key();
 
         if sender.ne(own_did) {
             return Err(Error::InvalidMessage);
@@ -1646,14 +1657,7 @@ impl ConversationInner {
         message.set_modified(Utc::now());
 
         message_document
-            .update(
-                &self.ipfs,
-                &self.keypair,
-                message,
-                None,
-                keystore.as_ref(),
-                None,
-            )
+            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
             .await?;
 
         let nonce = message_document.nonce_from_message(&self.ipfs).await?;
@@ -1736,7 +1740,9 @@ impl ConversationInner {
             });
         }
 
-        let own_did = &*self.keypair;
+        let keypair = self.root.keypair();
+
+        let own_did = self.identity.did_key();
 
         let mut message = warp::raygun::Message::default();
         message.set_conversation_id(conversation.id());
@@ -1744,10 +1750,9 @@ impl ConversationInner {
         message.set_lines(messages);
         message.set_replied(Some(message_id));
 
-        let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
+        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
 
-        let message =
-            MessageDocument::new(&self.ipfs, &self.keypair, message, keystore.as_ref()).await?;
+        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
 
         let message_id = message.id;
 
@@ -1846,14 +1851,17 @@ impl ConversationInner {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
-        let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
+        let keypair = self.root.keypair();
+        let own_did = self.identity.did_key();
+
+        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
 
         let mut message_document = conversation
             .get_message_document(&self.ipfs, message_id)
             .await?;
 
         let mut message = message_document
-            .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
+            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
             .await?;
 
         let event = match state {
@@ -1880,14 +1888,7 @@ impl ConversationInner {
         };
 
         message_document
-            .update(
-                &self.ipfs,
-                &self.keypair,
-                message,
-                None,
-                keystore.as_ref(),
-                None,
-            )
+            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
             .await?;
 
         let message_cid = conversation
@@ -1920,7 +1921,7 @@ impl ConversationInner {
 
         let event = MessagingEvents::Pin {
             conversation_id,
-            member: (*self.keypair).clone(),
+            member: own_did,
             message_id,
             state,
         };
@@ -1938,14 +1939,18 @@ impl ConversationInner {
         let mut conversation = self.get(conversation_id).await?;
         let tx = self.subscribe(conversation_id).await?;
 
-        let keystore = pubkey_or_keystore(self, conversation.id(), &self.keypair).await?;
+        let keypair = self.root.keypair();
+
+        let own_did = self.identity.did_key();
+
+        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
 
         let mut message_document = conversation
             .get_message_document(&self.ipfs, message_id)
             .await?;
 
         let mut message = message_document
-            .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
+            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
             .await?;
 
         let recipients = conversation.recipients();
@@ -1958,21 +1963,14 @@ impl ConversationInner {
             ReactionState::Add => {
                 let entry = reactions.entry(emoji.clone()).or_default();
 
-                if entry.contains(&self.keypair) {
+                if entry.contains(&own_did) {
                     return Err(Error::ReactionExist);
                 }
 
-                entry.push((*self.keypair).clone());
+                entry.push(own_did.clone());
 
                 message_document
-                    .update(
-                        &self.ipfs,
-                        &self.keypair,
-                        message,
-                        None,
-                        keystore.as_ref(),
-                        None,
-                    )
+                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
                     .await?;
 
                 message_cid = conversation
@@ -1983,7 +1981,7 @@ impl ConversationInner {
                 _ = tx.send(MessageEventKind::MessageReactionAdded {
                     conversation_id,
                     message_id,
-                    did_key: (*self.keypair).clone(),
+                    did_key: own_did.clone(),
                     reaction: emoji.clone(),
                 });
             }
@@ -1992,11 +1990,11 @@ impl ConversationInner {
                     BTreeEntry::Occupied(mut e) => {
                         let list = e.get_mut();
 
-                        if !list.contains(&self.keypair) {
+                        if !list.contains(&own_did) {
                             return Err(Error::ReactionDoesntExist);
                         }
 
-                        list.retain(|did| did != &(*self.keypair).clone());
+                        list.retain(|did| did != &own_did);
                         if list.is_empty() {
                             e.remove();
                         }
@@ -2005,14 +2003,7 @@ impl ConversationInner {
                 };
 
                 message_document
-                    .update(
-                        &self.ipfs,
-                        &self.keypair,
-                        message,
-                        None,
-                        keystore.as_ref(),
-                        None,
-                    )
+                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
                     .await?;
 
                 message_cid = conversation
@@ -2024,7 +2015,7 @@ impl ConversationInner {
                 _ = tx.send(MessageEventKind::MessageReactionRemoved {
                     conversation_id,
                     message_id,
-                    did_key: (*self.keypair).clone(),
+                    did_key: own_did.clone(),
                     reaction: emoji.clone(),
                 });
             }
@@ -2032,7 +2023,7 @@ impl ConversationInner {
 
         let event = MessagingEvents::React {
             conversation_id,
-            reactor: (*self.keypair).clone(),
+            reactor: own_did,
             message_id,
             state,
             emoji,
@@ -2099,6 +2090,8 @@ impl ConversationInner {
         }
         let conversation = self.get(conversation_id).await?;
 
+        let keypair = self.root.keypair();
+
         let mut constellation = self.file.clone();
 
         let files = locations
@@ -2135,9 +2128,11 @@ impl ConversationInner {
         assert_eq!(media_dir.name(), conversation_id.to_string());
 
         let mut atx = self.attachment_tx.clone();
-        let keystore = pubkey_or_keystore(self, conversation_id, &self.keypair).await?;
+        let keystore = pubkey_or_keystore(self, conversation_id, keypair).await?;
         let ipfs = self.ipfs.clone();
-        let keypair = self.keypair.clone();
+        let own_did = self.identity.did_key();
+
+        let keypair = keypair.clone();
 
         let message_id = Uuid::new_v4();
 
@@ -2264,12 +2259,11 @@ impl ConversationInner {
                         return Err(Error::NoAttachments);
                     }
 
-                    let own_did = &*keypair;
                     let mut message = warp::raygun::Message::default();
                     message.set_id(message_id);
                     message.set_message_type(MessageType::Attachment);
                     message.set_conversation_id(conversation.id());
-                    message.set_sender(own_did.clone());
+                    message.set_sender(own_did);
                     message.set_attachment(attachments);
                     message.set_lines(messages.clone());
                     message.set_replied(reply_id);
@@ -2428,7 +2422,7 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         };
 
-        let own_did = &*self.keypair;
+        let own_did = &self.identity.did_key();
 
         if creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
@@ -2476,7 +2470,7 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         };
 
-        let own_did = &*self.keypair;
+        let own_did = &self.identity.did_key();
 
         if creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
@@ -2540,7 +2534,7 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         };
 
-        let own_did = &*self.keypair;
+        let own_did = &self.identity.did_key();
 
         if !settings.members_can_change_name() && creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
@@ -2584,7 +2578,7 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         };
 
-        let own_did = &*self.keypair;
+        let own_did = &self.identity.did_key();
 
         if !settings.members_can_add_participants() && creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
@@ -2651,7 +2645,7 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         };
 
-        let own_did = &*self.keypair;
+        let own_did = &self.identity.did_key();
 
         if creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
@@ -2704,13 +2698,14 @@ impl ConversationInner {
 
         let document_type = self.delete(conversation_id).await?;
 
+        let own_did = &self.identity.did_key();
+
         if broadcast {
             let recipients = document_type.recipients();
 
             let mut can_broadcast = true;
 
             if matches!(document_type.conversation_type(), ConversationType::Group) {
-                let own_did = &*self.keypair;
                 let creator = document_type
                     .creator
                     .as_ref()
@@ -2733,9 +2728,6 @@ impl ConversationInner {
                 }
             }
 
-            let keypair = self.keypair.clone();
-            let own_did = &*keypair;
-
             if can_broadcast {
                 let peer_id_list = recipients
                     .clone()
@@ -2751,8 +2743,9 @@ impl ConversationInner {
 
                 let main_timer = Instant::now();
                 for (recipient, peer_id) in peer_id_list {
-                    let bytes = ecdh_encrypt(own_did, Some(&recipient), &event)?;
-                    let signature = sign_serde(own_did, &bytes)?;
+                    let keypair = self.root.keypair();
+                    let bytes = ecdh_encrypt(keypair, Some(&recipient), &event)?;
+                    let signature = sign_serde(keypair, &bytes)?;
 
                     let payload = Payload::new(own_did, &bytes, &signature);
 
@@ -2815,10 +2808,10 @@ impl ConversationInner {
         list: &[DID],
         conversation_id: Uuid,
     ) -> Result<(), Error> {
-        let own_did = &*self.keypair;
+        let own_did = self.identity.did_key();
 
         let context = format!("exclude {}", own_did);
-        let signature = sign_serde(own_did, &context)?;
+        let signature = sign_serde(self.root.keypair(), &context)?;
         let signature = bs58::encode(signature).into_string();
 
         let event = ConversationEvents::LeaveConversation {
@@ -2848,11 +2841,11 @@ impl ConversationInner {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let own_did = &*self.keypair;
+        let member = self.identity.did_key();
 
         let event = MessagingEvents::Event {
             conversation_id,
-            member: own_did.clone(),
+            member,
             event,
             cancelled: false,
         };
@@ -2864,11 +2857,11 @@ impl ConversationInner {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let own_did = &*self.keypair;
+        let member = self.identity.did_key();
 
         let event = MessagingEvents::Event {
             conversation_id,
-            member: own_did.clone(),
+            member,
             event,
             cancelled: true,
         };
@@ -2882,7 +2875,7 @@ impl ConversationInner {
     ) -> Result<(), Error> {
         let conversation = self.get(conversation_id).await?;
 
-        let own_did = &*self.keypair;
+        let own_did = self.identity.did_key();
 
         let event = serde_json::to_vec(&event)?;
 
@@ -2890,8 +2883,8 @@ impl ConversationInner {
 
         let bytes = Cipher::direct_encrypt(&event, &key)?;
 
-        let signature = sign_serde(own_did, &bytes)?;
-        let payload = Payload::new(own_did, &bytes, &signature);
+        let signature = sign_serde(self.root.keypair(), &bytes)?;
+        let payload = Payload::new(&own_did, &bytes, &signature);
 
         let peers = self
             .ipfs
@@ -2916,12 +2909,12 @@ impl ConversationInner {
         settings: ConversationSettings,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
-        let own_did = &*self.keypair;
+        let own_did = self.identity.did_key();
         let Some(creator) = &conversation.creator else {
             return Err(Error::InvalidConversation);
         };
 
-        if creator != own_did {
+        if creator != &own_did {
             return Err(Error::PublicKeyInvalid);
         }
 
@@ -2955,15 +2948,16 @@ impl ConversationInner {
         let conversation = self.get(conversation_id).await?;
 
         let event = serde_json::to_vec(&event)?;
-        let keypair = self.keypair.clone();
+        let keypair = self.root.keypair();
+        let own_did = self.identity.did_key();
 
         let key = self.conversation_key(conversation_id, None).await?;
 
         let bytes = Cipher::direct_encrypt(&event, &key)?;
 
-        let signature = sign_serde(&keypair, &bytes)?;
+        let signature = sign_serde(keypair, &bytes)?;
 
-        let payload = Payload::new(&keypair, &bytes, &signature);
+        let payload = Payload::new(&own_did, &bytes, &signature);
 
         let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
 
@@ -2972,7 +2966,7 @@ impl ConversationInner {
         for recipient in conversation
             .recipients()
             .iter()
-            .filter(|did| (*keypair).ne(did))
+            .filter(|did| own_did.ne(did))
         {
             let peer_id = recipient.to_peer_id()?;
 
@@ -3025,10 +3019,13 @@ impl ConversationInner {
     ) -> Result<(), Error> {
         let event = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&self.keypair, Some(did_key), &event)?;
-        let signature = sign_serde(&self.keypair, &bytes)?;
+        let keypair = self.root.keypair();
+        let own_did = self.identity.did_key();
 
-        let payload = Payload::new(&self.keypair, &bytes, &signature);
+        let bytes = ecdh_encrypt(keypair, Some(did_key), &event)?;
+        let signature = sign_serde(keypair, &bytes)?;
+
+        let payload = Payload::new(&own_did, &bytes, &signature);
 
         let peer_id = did_key.to_peer_id()?;
         let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
@@ -3071,7 +3068,7 @@ impl ConversationInner {
 
         let main_topic = conversation.topic();
         let event_topic = conversation.event_topic();
-        let request_topic = conversation.reqres_topic(&self.keypair);
+        let request_topic = conversation.reqres_topic(&self.identity.did_key());
 
         let messaging_stream = self
             .ipfs
@@ -3142,22 +3139,25 @@ impl ConversationInner {
         member: Option<&DID>,
     ) -> Result<Vec<u8>, Error> {
         let conversation = self.get(conversation_id).await?;
+        let keypair = self.root.keypair();
+        let own_did = self.identity.did_key();
+
         match conversation.conversation_type() {
             ConversationType::Direct => {
                 let list = conversation.recipients();
 
                 let recipients = list
                     .iter()
-                    .filter(|did| (*self.keypair).ne(did))
+                    .filter(|did| own_did.ne(did))
                     .collect::<Vec<_>>();
 
                 let member = recipients.first().ok_or(Error::InvalidConversation)?;
-                ecdh_shared_key(&self.keypair, Some(member))
+                ecdh_shared_key(keypair, Some(member))
             }
             ConversationType::Group => {
-                let recipient = member.unwrap_or(&*self.keypair);
+                let recipient = member.unwrap_or(&own_did);
                 let keystore = self.get_keystore(conversation.id()).await?;
-                keystore.get_latest(&self.keypair, recipient)
+                keystore.get_latest(keypair, recipient)
             }
         }
     }
@@ -3179,10 +3179,11 @@ async fn process_conversation(
             recipient,
             settings,
         } => {
-            let did = &*this.keypair;
+            let keypair = this.root.keypair();
+            let did = this.identity.did_key();
             tracing::info!("New conversation event received from {recipient}");
             let conversation_id =
-                generate_shared_topic(did, &recipient, Some("direct-conversation"))?;
+                generate_shared_topic(keypair, &recipient, Some("direct-conversation"))?;
 
             if this.contains(conversation_id).await {
                 tracing::warn!(%conversation_id, "Conversation exist");
@@ -3200,7 +3201,7 @@ async fn process_conversation(
             let list = [did.clone(), recipient];
             tracing::info!(%conversation_id, "Creating conversation");
 
-            let convo = ConversationDocument::new_direct(did, list, settings)?;
+            let convo = ConversationDocument::new_direct(keypair, list, settings)?;
             let conversation_type = convo.conversation_type();
 
             this.set_document(convo).await?;
@@ -3214,6 +3215,9 @@ async fn process_conversation(
                 .await;
         }
         ConversationEvents::NewGroupConversation { mut conversation } => {
+            let keypair = this.root.keypair();
+            let did = this.identity.did_key();
+
             let conversation_id = conversation.id;
             tracing::info!(%conversation_id, "New group conversation event received");
 
@@ -3222,7 +3226,7 @@ async fn process_conversation(
                 return Ok(());
             }
 
-            if !conversation.recipients.contains(&this.keypair) {
+            if !conversation.recipients.contains(&did) {
                 warn!(%conversation_id, "was added to conversation but never was apart of the conversation.");
                 return Ok(());
             }
@@ -3238,7 +3242,7 @@ async fn process_conversation(
             let conversation_type = conversation.conversation_type();
 
             let mut keystore = Keystore::new(conversation_id);
-            keystore.insert(&this.keypair, &this.keypair, warp::crypto::generate::<64>())?;
+            keystore.insert(keypair, &did, warp::crypto::generate::<64>())?;
 
             conversation.verify()?;
 
@@ -3255,9 +3259,8 @@ async fn process_conversation(
             let conversation = this.get(conversation_id).await?;
 
             tracing::info!(%conversation_id, "{} conversation created", conversation_type);
-            let keypair = this.keypair.clone();
 
-            for recipient in conversation.recipients.iter().filter(|d| (*keypair).ne(d)) {
+            for recipient in conversation.recipients.iter().filter(|d| did.ne(d)) {
                 if let Err(e) = this.request_key(conversation_id, recipient).await {
                     tracing::warn!(%conversation_id, error = %e, %recipient, "Failed to send exchange request");
                 }
@@ -3282,7 +3285,7 @@ async fn process_conversation(
                 return Err(anyhow::anyhow!("Group conversation requires a creator").into());
             };
 
-            let own_did = &*this.keypair;
+            let own_did = this.identity.did_key();
 
             // Precaution
             if recipient.eq(creator) {
@@ -3297,7 +3300,7 @@ async fn process_conversation(
 
             tracing::info!("{recipient} is leaving group conversation {conversation_id}");
 
-            if creator.eq(own_did) {
+            if creator.eq(&own_did) {
                 this.remove_recipient(conversation_id, &recipient, false)
                     .await?;
             } else {
@@ -3376,7 +3379,10 @@ async fn message_event(
     let mut document = this.get(conversation_id).await?;
     let tx = this.subscribe(conversation_id).await?;
 
-    let keystore = pubkey_or_keystore(this, conversation_id, &this.keypair).await?;
+    let keypair = this.root.keypair();
+    let own_did = this.identity.did_key();
+
+    let keystore = pubkey_or_keystore(this, conversation_id, keypair).await?;
 
     match events {
         MessagingEvents::New { message } => {
@@ -3399,7 +3405,7 @@ async fn message_event(
             }
 
             let resolved_message = message
-                .resolve(&this.ipfs, &this.keypair, false, keystore.as_ref())
+                .resolve(&this.ipfs, keypair, false, keystore.as_ref())
                 .await?;
 
             let lines_value_length: usize = resolved_message
@@ -3451,7 +3457,7 @@ async fn message_event(
                 .await?;
 
             let mut message = message_document
-                .resolve(&this.ipfs, &this.keypair, true, keystore.as_ref())
+                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
                 .await?;
 
             let lines_value_length: usize = lines
@@ -3483,9 +3489,9 @@ async fn message_event(
             message_document
                 .update(
                     &this.ipfs,
-                    &this.keypair,
+                    keypair,
                     message,
-                    (!signature.is_empty() && sender.ne(&this.keypair)).then_some(signature),
+                    (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
                     keystore.as_ref(),
                     Some(nonce.as_slice()),
                 )
@@ -3544,7 +3550,7 @@ async fn message_event(
                 .await?;
 
             let mut message = message_document
-                .resolve(&this.ipfs, &this.keypair, true, keystore.as_ref())
+                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
                 .await?;
 
             let event = match state {
@@ -3571,14 +3577,7 @@ async fn message_event(
             };
 
             message_document
-                .update(
-                    &this.ipfs,
-                    &this.keypair,
-                    message,
-                    None,
-                    keystore.as_ref(),
-                    None,
-                )
+                .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
                 .await?;
 
             document
@@ -3603,7 +3602,7 @@ async fn message_event(
                 .await?;
 
             let mut message = message_document
-                .resolve(&this.ipfs, &this.keypair, true, keystore.as_ref())
+                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
                 .await?;
 
             let reactions = message.reactions_mut();
@@ -3619,14 +3618,7 @@ async fn message_event(
                     entry.push(reactor.clone());
 
                     message_document
-                        .update(
-                            &this.ipfs,
-                            &this.keypair,
-                            message,
-                            None,
-                            keystore.as_ref(),
-                            None,
-                        )
+                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
                         .await?;
 
                     document
@@ -3662,14 +3654,7 @@ async fn message_event(
                     };
 
                     message_document
-                        .update(
-                            &this.ipfs,
-                            &this.keypair,
-                            message,
-                            None,
-                            keystore.as_ref(),
-                            None,
-                        )
+                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
                         .await?;
 
                     document
@@ -3825,6 +3810,8 @@ async fn process_identity_events(
     //TODO: Tie this into a configuration
     let with_friends = false;
 
+    let own_did = this.identity.did_key();
+
     match event {
         MultiPassEventKind::FriendAdded { did } => {
             if !with_friends {
@@ -3850,7 +3837,7 @@ async fn process_identity_events(
                         }
                     }
                     ConversationType::Group => {
-                        if conversation.creator != Some((*this.keypair).clone()) {
+                        if conversation.creator != Some(own_did.clone()) {
                             continue;
                         }
 
@@ -3867,7 +3854,6 @@ async fn process_identity_events(
             }
         }
         MultiPassEventKind::Unblocked { did } => {
-            let own_did = (*this.keypair).clone();
             let list = this.list().await;
 
             for conversation in list
@@ -3902,7 +3888,7 @@ async fn process_identity_events(
                         }
                     }
                     ConversationType::Group => {
-                        if conversation.creator != Some((*this.keypair).clone()) {
+                        if conversation.creator != Some(own_did.clone()) {
                             continue;
                         }
 
@@ -3927,13 +3913,16 @@ async fn process_request_response_event(
     conversation_id: Uuid,
     req: Message,
 ) -> Result<(), Error> {
+    let keypair = &this.root.keypair().clone();
+    let own_did = this.identity.did_key();
+
     let conversation = this.get(conversation_id).await?;
 
     let payload = Payload::from_bytes(&req.data)?;
 
     let sender = payload.sender();
 
-    let data = ecdh_decrypt(&this.keypair, Some(&sender), payload.data())?;
+    let data = ecdh_decrypt(keypair, Some(&sender), payload.data())?;
 
     let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
 
@@ -3956,11 +3945,11 @@ async fn process_request_response_event(
 
                 let mut keystore = this.get_keystore(conversation_id).await?;
 
-                let raw_key = match keystore.get_latest(&this.keypair, &this.keypair) {
+                let raw_key = match keystore.get_latest(keypair, &own_did) {
                     Ok(key) => key,
                     Err(Error::PublicKeyDoesntExist) => {
                         let key = generate::<64>().into();
-                        keystore.insert(&this.keypair, &this.keypair, &key)?;
+                        keystore.insert(keypair, &own_did, &key)?;
 
                         this.set_keystore(conversation_id, keystore).await?;
                         key
@@ -3971,7 +3960,7 @@ async fn process_request_response_event(
                     }
                 };
 
-                let key = ecdh_encrypt(&this.keypair, Some(&sender), raw_key)?;
+                let key = ecdh_encrypt(keypair, Some(&sender), raw_key)?;
 
                 let response = ConversationRequestResponse::Response {
                     conversation_id,
@@ -3980,11 +3969,10 @@ async fn process_request_response_event(
 
                 let topic = conversation.reqres_topic(&sender);
 
-                let bytes =
-                    ecdh_encrypt(&this.keypair, Some(&sender), serde_json::to_vec(&response)?)?;
-                let signature = sign_serde(&this.keypair, &bytes)?;
+                let bytes = ecdh_encrypt(keypair, Some(&sender), serde_json::to_vec(&response)?)?;
+                let signature = sign_serde(keypair, &bytes)?;
 
-                let payload = Payload::new(&this.keypair, &bytes, &signature);
+                let payload = Payload::new(&own_did, &bytes, &signature);
 
                 let peers = this.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
@@ -4038,9 +4026,9 @@ async fn process_request_response_event(
                 }
                 let mut keystore = this.get_keystore(conversation_id).await?;
 
-                let raw_key = ecdh_decrypt(&this.keypair, Some(&sender), key)?;
+                let raw_key = ecdh_decrypt(keypair, Some(&sender), key)?;
 
-                keystore.insert(&this.keypair, &sender, raw_key)?;
+                keystore.insert(keypair, &sender, raw_key)?;
 
                 this.set_keystore(conversation_id, keystore).await?;
 
@@ -4086,9 +4074,11 @@ async fn process_pending_payload(this: &mut ConversationInner) {
             continue;
         };
 
+        let keypair = &this.root.keypair().clone();
+
         for (sender, data) in list {
             let fut = async {
-                let key = store.get_latest(&this.keypair, &sender)?;
+                let key = store.get_latest(keypair, &sender)?;
                 let data = Cipher::direct_decrypt(&data, &key)?;
                 let event = serde_json::from_slice(&data)?;
                 message_event(this, conversation_id, event).await
@@ -4182,6 +4172,8 @@ impl Queue {
 //TODO: Replace
 async fn process_queue(this: &mut ConversationInner) {
     let mut changed = false;
+    let keypair = &this.root.keypair().clone();
+    let own_did = this.identity.did_key();
 
     for (did, items) in this.queue.iter_mut() {
         let Ok(peer_id) = did.to_peer_id() else {
@@ -4215,11 +4207,11 @@ async fn process_queue(this: &mut ConversationInner) {
                 continue;
             }
 
-            let Ok(signature) = sign_serde(&this.keypair, &data) else {
+            let Ok(signature) = sign_serde(keypair, &data) else {
                 continue;
             };
 
-            let payload = Payload::new(&this.keypair, data, &signature);
+            let payload = Payload::new(&own_did, data, &signature);
 
             let Ok(bytes) = payload.to_bytes() else {
                 continue;
@@ -4249,16 +4241,18 @@ async fn process_queue(this: &mut ConversationInner) {
 async fn pubkey_or_keystore(
     conversation: &ConversationInner,
     conversation_id: Uuid,
-    keypair: &DID,
+    keypair: &Keypair,
 ) -> Result<Either<DID, Keystore>, Error> {
     let document = conversation.get(conversation_id).await?;
     let keystore = match document.conversation_type() {
         ConversationType::Direct => {
             let list = document.recipients();
 
+            let own_did = keypair.to_did()?;
+
             let recipients = list
                 .into_iter()
-                .filter(|did| keypair.ne(did))
+                .filter(|did| own_did.ne(did))
                 .collect::<Vec<_>>();
 
             let member = recipients

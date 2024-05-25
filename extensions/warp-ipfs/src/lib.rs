@@ -1166,14 +1166,17 @@ impl MultiPassImportExport for WarpIpfs {
             } => {
                 let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
 
+                let bytes = Zeroizing::new(keypair.private_key_bytes());
+                let internal_keypair = rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                    .map_err(|_| Error::PrivateKeyInvalid)?;
+
                 let bytes = fs::read(path).await?;
-                let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
+
+                let decrypted_bundle = ecdh_decrypt(&internal_keypair, None, bytes)?;
                 let exported_document =
                     serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
-
-                let bytes = Zeroizing::new(keypair.private_key_bytes());
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
                     &mut self.tesseract,
@@ -1183,11 +1186,7 @@ impl MultiPassImportExport for WarpIpfs {
                     false,
                 )?;
 
-                self.init_ipfs(
-                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
-                        .map_err(|_| Error::PrivateKeyInvalid)?,
-                )
-                .await?;
+                self.init_ipfs(internal_keypair).await?;
 
                 let mut store = self.identity_store(false).await?;
 
@@ -1199,15 +1198,18 @@ impl MultiPassImportExport for WarpIpfs {
             } => {
                 let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
 
+                let bytes = Zeroizing::new(keypair.private_key_bytes());
+                let internal_keypair = rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                    .map_err(|_| Error::PrivateKeyInvalid)?;
+
                 let bytes = std::mem::take(buffer);
 
-                let decrypted_bundle = ecdh_decrypt(&keypair, None, bytes)?;
+                let decrypted_bundle = ecdh_decrypt(&internal_keypair, None, bytes)?;
+
                 let exported_document =
                     serde_json::from_slice::<ResolvedRootDocument>(&decrypted_bundle)?;
 
                 exported_document.verify()?;
-
-                let bytes = Zeroizing::new(keypair.private_key_bytes());
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
                     &mut self.tesseract,
@@ -1217,11 +1219,7 @@ impl MultiPassImportExport for WarpIpfs {
                     false,
                 )?;
 
-                self.init_ipfs(
-                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
-                        .map_err(|_| Error::PrivateKeyInvalid)?,
-                )
-                .await?;
+                self.init_ipfs(internal_keypair).await?;
 
                 let mut store = self.identity_store(false).await?;
 
@@ -1233,6 +1231,9 @@ impl MultiPassImportExport for WarpIpfs {
             } => {
                 let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
                 let bytes = Zeroizing::new(keypair.private_key_bytes());
+                let internal_keypair = rust_ipfs::Keypair::ed25519_from_bytes(bytes)
+                    .map_err(|_| Error::PrivateKeyInvalid)?;
+
                 warp::crypto::keypair::mnemonic_into_tesseract(
                     &mut self.tesseract,
                     &passphrase,
@@ -1241,11 +1242,7 @@ impl MultiPassImportExport for WarpIpfs {
                     false,
                 )?;
 
-                self.init_ipfs(
-                    rust_ipfs::Keypair::ed25519_from_bytes(bytes)
-                        .map_err(|_| Error::PrivateKeyInvalid)?,
-                )
-                .await?;
+                self.init_ipfs(internal_keypair).await?;
 
                 let mut store = self.identity_store(false).await?;
 
