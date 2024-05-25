@@ -49,6 +49,7 @@ rand = { version = "0.8" }
 multihash = { version = "0.18" }
 did-key = { git = "https://github.com/Satellite-im/did-key.rs", branch = "backport-patch-v0" }
 tiny-bip39 = "1.0"
+pbkdf2 = { version = "0.12.2", features = ["simple"] }
 
 # Error handling crates
 anyhow = { version = "1" }

@@ -1,23 +1,25 @@
 #![allow(clippy::result_large_err)]
+
+use std::io::ErrorKind;
 #[allow(unused)]
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Write};
-
-use std::io::ErrorKind;
-
-use crate::crypto::hash::sha256_hash;
-use futures::{stream, AsyncRead, AsyncReadExt, Stream, StreamExt, TryStreamExt};
-use zeroize::Zeroize;
-
-use crate::error::Error;
 
 use aes_gcm::aead::stream::{DecryptorBE32, EncryptorBE32};
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm,
 };
+use futures::{stream, AsyncRead, AsyncReadExt, Stream, StreamExt, TryStreamExt};
+use pbkdf2::pbkdf2_hmac_array;
+use zeroize::Zeroize;
+
+use crate::error::Error;
 
 type Result<T> = std::result::Result<T, Error>;
+
+// const PBKDF2_BASE_ROUNDS: u32 = 100_000;
+const PBKDF2_MAX_ROUNDS: u32 = 10_000;
 
 const AES256_GCM_TAG_SIZE: usize = 16;
 const AES256_GCM_ENCRYPTION_BUF_SIZE: usize = 512;
@@ -112,10 +114,7 @@ impl Cipher {
             None => crate::crypto::generate::<12>(),
         };
 
-        let key = zeroize::Zeroizing::new(match self.private_key.len() {
-            32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(&nonce)),
-        });
+        let key = zeroize::Zeroizing::new(pbkdf2_utils::<32>(&self.private_key, &nonce));
 
         let cipher = Aes256Gcm::new(key.as_slice().into());
         let mut cipher_data = cipher
@@ -131,10 +130,7 @@ impl Cipher {
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
         let (nonce, payload) = extract_data_slice::<12>(data);
 
-        let key = zeroize::Zeroizing::new(match self.private_key.len() {
-            32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(nonce)),
-        });
+        let key = zeroize::Zeroizing::new(pbkdf2_utils::<32>(&self.private_key, nonce));
 
         let cipher = Aes256Gcm::new(key.as_slice().into());
         cipher
@@ -200,10 +196,7 @@ impl Cipher {
 
         let nonce = crate::crypto::generate::<7>();
 
-        let key = zeroize::Zeroizing::new(match self.private_key.len() {
-            32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(&nonce)),
-        });
+        let key = zeroize::Zeroizing::new(pbkdf2_utils::<32>(&self.private_key, &nonce));
 
         let stream = async_stream::stream! {
             let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
@@ -248,10 +241,7 @@ impl Cipher {
 
         reader.read_exact(&mut nonce).await?;
 
-        let key = zeroize::Zeroizing::new(match self.private_key.len() {
-            32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(&nonce)),
-        });
+        let key = zeroize::Zeroizing::new(pbkdf2_utils::<32>(&self.private_key, &nonce));
 
         let stream = async_stream::stream! {
             let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
@@ -301,10 +291,8 @@ impl Cipher {
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let nonce = crate::crypto::generate::<7>();
 
-        let key = zeroize::Zeroizing::new(match self.private_key.len() {
-            32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(&nonce)),
-        });
+        let key = zeroize::Zeroizing::new(pbkdf2_utils::<32>(&self.private_key, &nonce));
+
         let stream = async_stream::stream! {
             let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
             let cipher = Aes256Gcm::new(key.as_slice().into());
@@ -346,10 +334,7 @@ impl Cipher {
 
         reader.read_exact(&mut nonce).await?;
 
-        let key = zeroize::Zeroizing::new(match self.private_key.len() {
-            32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(&nonce)),
-        });
+        let key = zeroize::Zeroizing::new(pbkdf2_utils::<32>(&self.private_key, &nonce));
 
         let stream = async_stream::stream! {
             let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
@@ -416,10 +401,7 @@ impl Cipher {
     pub fn encrypt_stream(&self, reader: &mut impl Read, writer: &mut impl Write) -> Result<()> {
         let nonce = crate::crypto::generate::<7>();
 
-        let key = zeroize::Zeroizing::new(match self.private_key.len() {
-            32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(&nonce)),
-        });
+        let key = zeroize::Zeroizing::new(pbkdf2_utils::<32>(&self.private_key, &nonce));
 
         let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
 
@@ -458,10 +440,7 @@ impl Cipher {
 
         reader.read_exact(&mut nonce)?;
 
-        let key = zeroize::Zeroizing::new(match self.private_key.len() {
-            32 => self.private_key.clone(),
-            _ => sha256_hash(&self.private_key, Some(&nonce)),
-        });
+        let key = zeroize::Zeroizing::new(pbkdf2_utils::<32>(&self.private_key, &nonce));
 
         let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
 
@@ -499,6 +478,14 @@ fn extract_data_slice<const N: usize>(data: &[u8]) -> (&[u8], &[u8]) {
     let extracted = &data[data.len() - N..];
     let payload = &data[..data.len() - N];
     (extracted, payload)
+}
+
+fn pbkdf2_utils<const LEN: usize>(key: &[u8], salt: &[u8]) -> [u8; LEN] {
+    // TODO: Maybe compute the number of rounds base on key and salt lengths, not to exceed the max rounds
+    match key.len() {
+        length if length == LEN => key.try_into().expect("valid length"),
+        _ => pbkdf2_hmac_array::<sha2::Sha256, LEN>(key, salt, PBKDF2_MAX_ROUNDS),
+    }
 }
 
 #[cfg(test)]
