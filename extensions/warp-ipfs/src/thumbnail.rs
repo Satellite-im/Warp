@@ -172,7 +172,7 @@ impl ThumbnailGenerator {
         let ipfs = self.ipfs.clone();
 
         let (tx, rx) = oneshot::channel();
-        tokio::spawn(async move {
+        crate::rt::spawn(async move {
             let res = async move {
                 let instance = Instant::now();
 
