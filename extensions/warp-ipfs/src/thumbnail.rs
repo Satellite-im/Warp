@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use image::io::Reader as ImageReader;
 use image::ImageFormat;
 use rust_ipfs::{Ipfs, IpfsPath};
@@ -44,7 +45,7 @@ impl Default for ThumbnailId {
     }
 }
 
-type TaskMap = BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, IpfsPath, Vec<u8>), Error>>>;
+type TaskMap = BTreeMap<ThumbnailId, JoinHandle<Result<(ExtensionType, IpfsPath, Bytes), Error>>>;
 
 #[derive(Clone)]
 pub struct ThumbnailGenerator {
@@ -109,7 +110,7 @@ impl ThumbnailGenerator {
                             .map_err(anyhow::Error::from)?;
                         Ok::<_, Error>((
                             ExtensionType::try_from(output_format)?,
-                            t_buffer.into_inner(),
+                            Bytes::from(t_buffer.into_inner()),
                         ))
                     })
                     .await
@@ -173,7 +174,7 @@ impl ThumbnailGenerator {
 
             let result = match extension.into() {
                 FileType::Mime(media) => match media.ty().as_str() {
-                    "image" => tokio::task::spawn_blocking(move || {
+                    "image" => {
                         let format: ImageFormat = extension.try_into()?;
                         let image = ImageReader::new(buffer)
                             .with_guessed_format()?
@@ -197,11 +198,9 @@ impl ThumbnailGenerator {
                             .map_err(anyhow::Error::from)?;
                         Ok::<_, Error>((
                             ExtensionType::try_from(output_format)?,
-                            t_buffer.into_inner(),
+                            Bytes::from(t_buffer.into_inner()),
                         ))
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)?,
+                    }
                     _ => Err(Error::Unimplemented),
                 },
                 _ => Err(Error::Other),
@@ -209,9 +208,9 @@ impl ThumbnailGenerator {
 
             let stop = instance.elapsed();
 
-            tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
-
             let (ty, data) = result?;
+
+            tracing::trace!("Took: {}ms to complete for {}", stop.as_millis(), id);
 
             let path = ipfs.add_unixfs(data.clone()).await?;
 
@@ -241,7 +240,7 @@ impl ThumbnailGenerator {
         }
     }
 
-    pub async fn get(&self, id: ThumbnailId) -> Result<(ExtensionType, IpfsPath, Vec<u8>), Error> {
+    pub async fn get(&self, id: ThumbnailId) -> Result<(ExtensionType, IpfsPath, Bytes), Error> {
         let task = self.tasks.lock().await.remove(&id);
         let task = task.ok_or(Error::Other)?;
         task.await.map_err(anyhow::Error::from)?
