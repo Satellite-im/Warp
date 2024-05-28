@@ -23,6 +23,8 @@ pub async fn run() -> Result<(), JsError> {
 
     instance.put_buffer("image.png", IMAGE).await?;
 
+    let data = instance.get_buffer("image.png").await?;
+
     let file = instance
         .root_directory()
         .get_item("image.png")
@@ -34,7 +36,10 @@ pub async fn run() -> Result<(), JsError> {
     let thumbnail_data = file.thumbnail();
 
     let body = Body::from_current_window()?;
+    body.append_p("thumbnail:")?;
     body.append_image(thumbnail_type.to_string(), thumbnail_data)?;
+    body.append_p("image:")?;
+    body.append_image(thumbnail_type.to_string(), data)?;
 
     Ok(())
 }
@@ -58,6 +63,19 @@ impl Body {
             .ok_or(js_error("document should have a body"))?;
 
         Ok(Self { body, document })
+    }
+
+    fn append_p(&self, msg: &str) -> Result<(), JsError> {
+        let val = self
+            .document
+            .create_element("p")
+            .map_err(|_| js_error("failed to create <p>"))?;
+        val.set_text_content(Some(msg));
+        self.body
+            .append_child(&val)
+            .map_err(|_| js_error("failed to append <p>"))?;
+
+        Ok(())
     }
 
     fn append_image(&self, mime: String, image: Vec<u8>) -> Result<(), JsError> {
