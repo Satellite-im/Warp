@@ -399,6 +399,32 @@ impl Config {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen::prelude::wasm_bindgen]
+    pub fn minimal_with_relay(addresses: Vec<String>) -> Config {
+        Config {
+            persist: true,
+            bootstrap: Bootstrap::None,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
+            ipfs_setting: IpfsSetting {
+                relay_client: RelayClient {
+                    relay_address: addresses
+                        .into_iter()
+                        .filter_map(|addr| addr.parse().ok())
+                        .collect::<Vec<_>>(),
+                    ..Default::default()
+                },
+                memory_transport: true,
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: Discovery::None,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     /// Minimal production configuration
     #[cfg(not(target_arch = "wasm32"))]
     pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> Config {
