@@ -86,12 +86,12 @@ impl Body {
         let val = self
             .document
             .create_element("img")
-            .map_err(|_| js_error("failed to create <image>"))?;
+            .map_err(|_| js_error("failed to create <img>"))?;
         val.set_attribute("src", &encoded_image)
-            .map_err(|_| js_error("failed to create <image>"))?;
+            .map_err(|_| js_error("failed to create <img>"))?;
         self.body
             .append_child(&val)
-            .map_err(|_| js_error("failed to append <image>"))?;
+            .map_err(|_| js_error("failed to append <img>"))?;
 
         Ok(())
     }
