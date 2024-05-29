@@ -153,11 +153,13 @@ pub trait Constellation:
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Used to upload file to the filesystem
     async fn put(&mut self, _: &str, _: &str) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Used to download a file from the filesystem
     async fn get(&self, _: &str, _: &str) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)

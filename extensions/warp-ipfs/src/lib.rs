@@ -1691,10 +1691,12 @@ impl Constellation for WarpIpfs {
             .unwrap_or_default()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?.put(name, path).await
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?.get(name, path).await
     }
