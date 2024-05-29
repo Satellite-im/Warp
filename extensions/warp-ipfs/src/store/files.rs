@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, ffi::OsStr, path::PathBuf, sync::Arc};
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 use futures::{
@@ -184,7 +185,7 @@ impl FileStore {
     pub async fn put_buffer(
         &mut self,
         name: impl Into<String>,
-        buffer: impl Into<Vec<u8>>,
+        buffer: impl Into<Bytes>,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -199,7 +200,7 @@ impl FileStore {
         rx.await.map_err(anyhow::Error::from)??.await
     }
 
-    pub async fn get_buffer(&self, name: impl Into<String>) -> Result<Vec<u8>, Error> {
+    pub async fn get_buffer(&self, name: impl Into<String>) -> Result<Bytes, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_sender
@@ -316,7 +317,7 @@ impl FileStore {
 }
 
 type GetStream = BoxStream<'static, Result<Vec<u8>, Error>>;
-type GetBufferFutResult = BoxFuture<'static, Result<Vec<u8>, Error>>;
+type GetBufferFutResult = BoxFuture<'static, Result<Bytes, Error>>;
 enum FileTaskCommand {
     Put {
         name: String,
@@ -325,7 +326,7 @@ enum FileTaskCommand {
     },
     PutBuffer {
         name: String,
-        buffer: Vec<u8>,
+        buffer: Bytes,
         response: oneshot::Sender<Result<BoxFuture<'static, Result<(), Error>>, Error>>,
     },
     PutStream {
@@ -719,7 +720,7 @@ impl FileTask {
     fn put_buffer(
         &self,
         name: String,
-        buffer: Vec<u8>,
+        buffer: Bytes,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let ipfs = self.ipfs.clone();
         let thumbnail_store = self.thumbnail_store.clone();
@@ -808,7 +809,7 @@ impl FileTask {
     fn get_buffer(
         &self,
         name: impl Into<String>,
-    ) -> Result<BoxFuture<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxFuture<'static, Result<Bytes, Error>>, Error> {
         let name = name.into();
         let ipfs = self.ipfs.clone();
         let current_directory = self.current_directory()?;
@@ -831,7 +832,7 @@ impl FileTask {
             })
             .await;
 
-            Ok(buffer.into())
+            Ok(buffer)
         }
         .boxed())
     }
