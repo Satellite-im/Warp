@@ -52,6 +52,8 @@ pub struct ConversationDocument {
     pub modified: DateTime<Utc>,
     pub settings: ConversationSettings,
     pub recipients: Vec<DID>,
+    #[serde(default)]
+    pub favorite: bool,
     pub excluded: HashMap<DID, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restrict: Vec<DID>,
@@ -171,6 +173,7 @@ impl ConversationDocument {
             creator,
             created,
             modified,
+            favorite: false,
             settings,
             excluded,
             messages,
@@ -684,6 +687,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_created(document.created);
         conversation.set_settings(document.settings);
         conversation.set_modified(document.modified);
+        conversation.set_favorite(document.favorite);
         conversation
     }
 }
