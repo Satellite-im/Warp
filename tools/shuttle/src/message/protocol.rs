@@ -8,15 +8,19 @@ use warp::crypto::DID;
 
 pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/message/0.0.1");
 
-use crate::PayloadRequest;
+use crate::payload::{PayloadBuilder, PayloadMessage};
 
 pub fn payload_message_construct(
     keypair: &Keypair,
     cosigner: Option<&Keypair>,
     message: impl Into<Message>,
-) -> Result<PayloadRequest<Message>, anyhow::Error> {
+) -> Result<PayloadMessage<Message>, anyhow::Error> {
     let message = message.into();
-    let payload = PayloadRequest::new(keypair, cosigner, message)?;
+    let mut payload = PayloadBuilder::new(keypair, message);
+    if let Some(cosigner) = cosigner {
+        payload = payload.cosign(cosigner);
+    }
+    let payload = payload.build()?;
     Ok(payload)
 }
 

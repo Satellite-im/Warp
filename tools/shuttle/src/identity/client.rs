@@ -22,7 +22,7 @@ use rust_ipfs::{
 use rust_ipfs::libp2p::request_response;
 use warp::crypto::DID;
 
-use crate::{identity::protocol::payload_message_construct, PayloadRequest, PeerIdExt};
+use crate::{identity::protocol::payload_message_construct, payload::PayloadMessage, PeerIdExt};
 
 use super::document::IdentityDocument;
 use super::{
@@ -30,7 +30,7 @@ use super::{
     RequestPayload,
 };
 
-type Payload = PayloadRequest<Message>;
+type Payload = PayloadMessage<Message>;
 
 // Note: primary_keypair to be used for `Payload`
 #[allow(dead_code)]

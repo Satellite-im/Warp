@@ -19,14 +19,11 @@ use rust_ipfs::{
 
 use rust_ipfs::libp2p::request_response;
 
-use crate::{
-    identity::protocol::{payload_message_construct, Request, Synchronized},
-    PayloadRequest,
-};
+use crate::identity::protocol::{payload_message_construct, Request, Synchronized};
 
 use super::protocol::{self, Message, Response};
 
-type Payload = PayloadRequest<Message>;
+type Payload = crate::payload::PayloadMessage<Message>;
 
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
@@ -276,7 +273,7 @@ impl NetworkBehaviour for Behaviour {
         self.waiting_on_request
             .retain(|id, receiver| match receiver.poll_unpin(cx) {
                 Poll::Ready(Ok((ch, res))) => {
-                    let sender = res.sender();
+                    let sender = *res.sender();
                     tracing::info!(id = ?id, from = %sender, "Sending payload response");
                     let sent = self.inner.send_response(ch, res).is_ok();
                     match sent {
