@@ -42,7 +42,7 @@ use crate::{
     store::{discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 
-use super::request::PayloadBuilder;
+use super::payload::PayloadBuilder;
 use super::{
     connected_to_peer,
     document::{
@@ -51,9 +51,9 @@ use super::{
     },
     ecdh_decrypt, ecdh_encrypt,
     event_subscription::EventSubscription,
+    payload::PayloadMessage,
     phonebook::PhoneBook,
     queue::Queue,
-    request::PayloadMessage,
     topics::IDENTITY_ANNOUNCEMENT,
     MAX_IMAGE_SIZE, SHUTTLE_TIMEOUT,
 };

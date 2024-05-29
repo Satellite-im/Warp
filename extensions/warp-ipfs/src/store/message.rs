@@ -57,7 +57,7 @@ use crate::{
         generate_shared_topic,
         identity::IdentityStore,
         keystore::Keystore,
-        request::{PayloadBuilder, PayloadMessage},
+        payload::{PayloadBuilder, PayloadMessage},
         sign_serde,
         topics::PeerTopic,
         verify_serde_sig, ConversationEvents, ConversationRequestKind, ConversationRequestResponse,

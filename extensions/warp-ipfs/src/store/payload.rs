@@ -292,7 +292,7 @@ mod test {
 
     use rust_ipfs::Keypair;
 
-    use crate::store::request::PayloadBuilder;
+    use crate::store::payload::PayloadBuilder;
 
     use super::PayloadMessage;
 
