@@ -19,14 +19,14 @@ pub mod subscription_stream;
 
 pub trait PeerTopic: Display {
     fn inbox(&self) -> String {
-        format!("/peer/{self}/inbox")
+        format!("/id/{self}/inbox")
     }
 
     fn events(&self) -> String {
-        format!("/peer/{self}/events")
+        format!("/id/{self}/events")
     }
     fn messaging(&self) -> String {
-        format!("{self}/messaging")
+        format!("/id/{self}/messaging")
     }
 }
 
