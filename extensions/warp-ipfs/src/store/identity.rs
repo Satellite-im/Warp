@@ -595,13 +595,14 @@ impl IdentityStore {
 
                         }
                         Some(event) = friend_stream.next() => {
-                            let Some(peer_id) = event.source else {
-                                //Note: Due to configuration, we should ALWAYS have a peer set in its source
-                                //      thus we can ignore the request if no peer is provided
-                                continue;
+                            let payload = match PayloadMessage::<Vec<u8>>::from_bytes(&event.data) {
+                                Ok(p) => p,
+                                Err(_e) => {
+                                    continue;
+                                }
                             };
 
-                            let Ok(did) = peer_id.to_did() else {
+                            let Ok(did) = payload.sender().to_did() else {
                                 //Note: The peer id is embedded with ed25519 public key, therefore we can decode it into a did key
                                 //      otherwise we can ignore
                                 continue;
@@ -613,7 +614,7 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {did}");
 
-                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), &event.data).and_then(|bytes| {
+                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), payload.message()).and_then(|bytes| {
                                 serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
                             }) {
                                 Ok(pl) => pl,
@@ -627,7 +628,7 @@ impl IdentityStore {
 
                             tracing::debug!("Event from {did}: {:?}", data.event);
 
-                            let result = store.check_request_message(&did, data, &mut signal).await.map_err(|e| {
+                            let result = store.check_request_message(data, &mut signal).await.map_err(|e| {
                                 error!("Error processing message: {e}");
                                 e
                             });
@@ -672,7 +673,6 @@ impl IdentityStore {
     #[tracing::instrument(skip(self, data, signal))]
     async fn check_request_message(
         &mut self,
-        _: &DID,
         data: RequestResponsePayload,
         signal: &mut Option<oneshot::Sender<Result<(), Error>>>,
     ) -> Result<(), Error> {
@@ -1829,8 +1829,7 @@ impl IdentityStore {
 
                         for req in list {
                             let from = req.sender.clone();
-                            if let Err(e) = self.check_request_message(&from, req, &mut None).await
-                            {
+                            if let Err(e) = self.check_request_message(req, &mut None).await {
                                 tracing::warn!(
                                     "Error processing request from {from}: {e}. Skipping"
                                 );
@@ -2714,8 +2713,11 @@ impl IdentityStore {
         let payload_bytes = serde_json::to_vec(&payload)?;
 
         let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
+        let message = PayloadBuilder::new(kp, bytes).build()?;
 
-        tracing::trace!("Request Payload size: {} bytes", bytes.len());
+        let message_bytes = message.to_bytes()?;
+
+        tracing::trace!("Request Payload size: {} bytes", message_bytes.len());
 
         tracing::info!("Sending event to {recipient}");
 
@@ -2740,7 +2742,7 @@ impl IdentityStore {
             || (peers.contains(&remote_peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(recipient.inbox(), bytes)
+                    .pubsub_publish(recipient.inbox(), message_bytes)
                     .await
                     .is_err())
                 && queue_broadcast
