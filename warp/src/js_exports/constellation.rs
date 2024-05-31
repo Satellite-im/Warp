@@ -1,8 +1,8 @@
 use crate::constellation::{self, file::Hash, Constellation};
-use uuid::Uuid;
-use wasm_bindgen::prelude::*;
 use crate::js_exports::stream::AsyncIterator;
 use futures::StreamExt;
+use uuid::Uuid;
+use wasm_bindgen::prelude::*;
 
 #[derive(Clone)]
 #[wasm_bindgen]
@@ -53,16 +53,17 @@ impl ConstellationBox {
     //     self.inner.put_stream(name, total_size, stream).await.map_err(|e| e.into())
     // }
 
-    pub async fn get_stream(
-        &self,
-        name: &str,
-    ) -> Result<AsyncIterator, JsError> {
-        self.inner.get_stream(name).await.map_err(|e| e.into())
-        .map(|s| AsyncIterator::new(Box::pin(
-            s.map(|t| {
-                serde_wasm_bindgen::to_value(&t.map_err(|e| String::from(e.to_string()))).unwrap()
+    pub async fn get_stream(&self, name: &str) -> Result<AsyncIterator, JsError> {
+        self.inner
+            .get_stream(name)
+            .await
+            .map_err(|e| e.into())
+            .map(|s| {
+                AsyncIterator::new(Box::pin(s.map(|t| {
+                    serde_wasm_bindgen::to_value(&t.map_err(|e| String::from(e.to_string())))
+                        .unwrap()
+                })))
             })
-        )))
     }
 
     pub async fn remove(&mut self, name: &str, recursive: bool) -> Result<(), JsError> {
