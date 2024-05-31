@@ -1,6 +1,7 @@
 use std::future::IntoFuture;
 
 use super::PeerIdExt;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, FutureExt};
 use rust_ipfs::{libp2p::identity::KeyType, Ipfs, Keypair, Multiaddr, PeerId, Protocol};
@@ -169,13 +170,16 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
-        let payload: Self = serde_json::from_slice(data)?;
+        let payload: Self = cbor4ii::serde::from_slice(data).map_err(std::io::Error::other)?;
         payload.verify()?;
         Ok(payload)
     }
 
-    pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-        serde_json::to_vec(self).map_err(Error::from)
+    pub fn to_bytes(&self) -> Result<Bytes, Error> {
+        cbor4ii::serde::to_vec(Vec::new(), self)
+            .map_err(std::io::Error::other)
+            .map_err(Error::from)
+            .map(Bytes::from)
     }
 
     #[inline]
