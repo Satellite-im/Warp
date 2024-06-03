@@ -2,8 +2,8 @@ use crate::{
     crypto::DID,
     js_exports::stream::AsyncIterator,
     raygun::{
-        self, EmbedState, GroupSettings, MessageEvent, MessageStatus, MessageType, PinState,
-        RayGun, ReactionState,
+        self, EmbedState, GroupSettings, MessageEvent, MessageStatus, PinState, RayGun,
+        ReactionState,
     },
 };
 
