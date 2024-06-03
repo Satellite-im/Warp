@@ -72,7 +72,6 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
             Some(Protocol::P2p(peer_id)) if peer_id == self.sender => {
                 address.pop();
             }
-            // an address that contains a peerid that is different from the sender will be ignored
             Some(Protocol::P2p(_)) => return self,
             _ => {}
         }
@@ -297,7 +296,7 @@ mod test {
 
     use rust_ipfs::Keypair;
 
-    use crate::store::payload::PayloadBuilder;
+    use super::PayloadBuilder;
 
     use super::PayloadMessage;
 

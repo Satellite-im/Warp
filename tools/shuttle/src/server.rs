@@ -31,16 +31,17 @@ use crate::{
         self,
         protocol::{RegisterConversation, Response as MessageResponse},
     },
+    payload::{PayloadBuilder, PayloadMessage},
     subscription_stream::Subscriptions,
-    PayloadRequest, PeerIdExt, PeerTopic,
+    PeerIdExt, PeerTopic,
 };
 
 type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
 type IdentityMessage = identity::protocol::Message;
-type IdentityPayload = PayloadRequest<IdentityMessage>;
+type IdentityPayload = PayloadMessage<IdentityMessage>;
 
 type MessageProtocol = message::protocol::Message;
-type MessagePayload = PayloadRequest<MessageProtocol>;
+type MessagePayload = PayloadMessage<MessageProtocol>;
 
 type IdentityReceiver = (
     InboundRequestId,
@@ -52,7 +53,7 @@ type IdentityReceiver = (
 type MessageReceiver = (
     InboundRequestId,
     Option<ResponseChannel<MessagePayload>>,
-    PayloadRequest<MessageProtocol>,
+    PayloadMessage<MessageProtocol>,
     Option<OntshotSender<(ResponseChannel<MessagePayload>, MessagePayload)>>,
 );
 
@@ -390,7 +391,8 @@ impl ShuttleTask {
                             // Although we arent able to subscribe, we can still process the request while leaving this as a warning
                         }
 
-                        let payload = PayloadRequest::new(keypair, None, document.clone())
+                        let payload = PayloadBuilder::new(keypair, document.clone())
+                            .build()
                             .expect("Valid payload construction");
 
                         let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
@@ -654,7 +656,8 @@ impl ShuttleTask {
 
                             tracing::info!(%did, "Announcing to mesh");
 
-                            let payload = PayloadRequest::new(keypair, None, document.clone())
+                            let payload = PayloadBuilder::new(keypair, document.clone())
+                                .build()
                                 .expect("Valid payload construction");
 
                             let bytes = serde_json::to_vec(&payload).expect("Valid serialization");

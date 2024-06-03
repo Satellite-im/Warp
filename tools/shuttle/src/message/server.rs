@@ -19,25 +19,19 @@ use rust_ipfs::{
 
 use rust_ipfs::libp2p::request_response;
 
-use crate::{message::protocol::MessageUpdate, PayloadRequest};
-
 use super::protocol::{payload_message_construct, Request};
+use crate::message::protocol::MessageUpdate;
 
 use super::protocol::{self, Message, Response};
 
-type Payload = PayloadRequest<Message>;
+type Payload = crate::payload::PayloadMessage<Message>;
 type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
 
 type MessageReceiver = (
     InboundRequestId,
-    Option<ResponseChannel<PayloadRequest<Message>>>,
-    PayloadRequest<Message>,
-    Option<
-        OntshotSender<(
-            ResponseChannel<PayloadRequest<Message>>,
-            PayloadRequest<Message>,
-        )>,
-    >,
+    Option<ResponseChannel<Payload>>,
+    Payload,
+    Option<OntshotSender<(ResponseChannel<Payload>, Payload)>>,
 );
 
 #[allow(clippy::type_complexity)]
@@ -269,7 +263,7 @@ impl NetworkBehaviour for Behaviour {
         self.waiting_on_request
             .retain(|id, receiver| match receiver.poll_unpin(cx) {
                 Poll::Ready(Ok((ch, res))) => {
-                    let sender = res.sender();
+                    let sender = *res.sender();
                     tracing::info!(id = ?id, from = %sender, "Sending payload response");
                     let sent = self.inner.send_response(ch, res).is_ok();
                     match sent {

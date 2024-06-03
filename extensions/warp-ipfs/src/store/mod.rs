@@ -9,7 +9,6 @@ pub mod message;
 pub mod payload;
 pub mod phonebook;
 pub mod queue;
-pub mod request;
 
 use chrono::{DateTime, Utc};
 use rust_ipfs as ipfs;
@@ -56,14 +55,14 @@ pub(super) mod topics {
 
     pub trait PeerTopic: Display {
         fn inbox(&self) -> String {
-            format!("/peer/{self}/inbox")
+            format!("/id/{self}/inbox")
         }
 
         fn events(&self) -> String {
-            format!("/peer/{self}/events")
+            format!("/id/{self}/events")
         }
         fn messaging(&self) -> String {
-            format!("{self}/messaging")
+            format!("/id/{self}/messaging")
         }
     }
 

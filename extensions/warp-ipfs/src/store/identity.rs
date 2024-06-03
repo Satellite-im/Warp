@@ -42,6 +42,7 @@ use crate::{
     store::{discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 
+use super::payload::PayloadBuilder;
 use super::{
     connected_to_peer,
     document::{
@@ -50,9 +51,9 @@ use super::{
     },
     ecdh_decrypt, ecdh_encrypt,
     event_subscription::EventSubscription,
+    payload::PayloadMessage,
     phonebook::PhoneBook,
     queue::Queue,
-    request::PayloadRequest,
     topics::IDENTITY_ANNOUNCEMENT,
     MAX_IMAGE_SIZE, SHUTTLE_TIMEOUT,
 };
@@ -504,7 +505,7 @@ impl IdentityStore {
                     tokio::select! {
                         biased;
                         Some(message) = identity_announce_stream.next() => {
-                            let payload: PayloadRequest<IdentityDocument> = match serde_json::from_slice(&message.data) {
+                            let payload: PayloadMessage<IdentityDocument> = match PayloadMessage::from_bytes(&message.data) {
                                 Ok(p) => p,
                                 Err(e) => {
                                     tracing::error!(from = ?message.source, "Unable to decode payload: {e}");
@@ -512,8 +513,10 @@ impl IdentityStore {
                                 }
                             };
 
+                            let peer_id = payload.sender();
+
                             //TODO: Validate the date to be sure it doesnt fall out of range (or that we received a old message)
-                            let from_did = match payload.sender().to_did() {
+                            let from_did = match peer_id.to_did() {
                                 Ok(did) => did,
                                 Err(_e) => {
                                     continue;
@@ -536,6 +539,19 @@ impl IdentityStore {
                             let event = IdentityEvent::Receive {
                                 option: ResponseOption::Identity { identity },
                             };
+
+                            // We will add the addresses supplied, appending it to the address book
+                            // however if the address already exist, it will be noop
+                            // Note: we should probably do a test probe on the addresses provided to ensure we are able to
+                            //       connect to the peer, however this would not be needed for now since this is assuming
+                            //       that the addresses are from a valid peer and that the peer is reachable through one of
+                            //       addresses provided.
+                            // TODO: Uncomment in the future
+                            // for addr in payload.addresses() {
+                            //     if let Err(e) = store.ipfs.add_peer(*peer_id, addr.clone()).await {
+                            //         error!("Failed to add peer {peer_id} address {addr}: {e}");
+                            //     }
+                            // }
 
                             //Ignore requesting images if there is a change for now.
                             if let Err(e) = store.process_message(&from_did, event, false).await {
@@ -579,13 +595,14 @@ impl IdentityStore {
 
                         }
                         Some(event) = friend_stream.next() => {
-                            let Some(peer_id) = event.source else {
-                                //Note: Due to configuration, we should ALWAYS have a peer set in its source
-                                //      thus we can ignore the request if no peer is provided
-                                continue;
+                            let payload = match PayloadMessage::<Vec<u8>>::from_bytes(&event.data) {
+                                Ok(p) => p,
+                                Err(_e) => {
+                                    continue;
+                                }
                             };
 
-                            let Ok(did) = peer_id.to_did() else {
+                            let Ok(did) = payload.sender().to_did() else {
                                 //Note: The peer id is embedded with ed25519 public key, therefore we can decode it into a did key
                                 //      otherwise we can ignore
                                 continue;
@@ -597,7 +614,7 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {did}");
 
-                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), &event.data).and_then(|bytes| {
+                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), payload.message()).and_then(|bytes| {
                                 serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
                             }) {
                                 Ok(pl) => pl,
@@ -611,7 +628,7 @@ impl IdentityStore {
 
                             tracing::debug!("Event from {did}: {:?}", data.event);
 
-                            let result = store.check_request_message(&did, data, &mut signal).await.map_err(|e| {
+                            let result = store.check_request_message(data, &mut signal).await.map_err(|e| {
                                 error!("Error processing message: {e}");
                                 e
                             });
@@ -656,7 +673,6 @@ impl IdentityStore {
     #[tracing::instrument(skip(self, data, signal))]
     async fn check_request_message(
         &mut self,
-        _: &DID,
         data: RequestResponsePayload,
         signal: &mut Option<oneshot::Sender<Result<(), Error>>>,
     ) -> Result<(), Error> {
@@ -912,7 +928,9 @@ impl IdentityStore {
         if self.config.store_setting().announce_to_mesh {
             let kp = self.ipfs.keypair();
             let document = self.own_identity_document().await?;
-            let payload = PayloadRequest::new(kp, None, document)?;
+            let payload = PayloadBuilder::new(kp, document)
+                .from_ipfs(&self.ipfs)
+                .await?;
             let bytes = serde_json::to_vec(&payload)?;
             _ = self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await;
         }
@@ -1811,8 +1829,7 @@ impl IdentityStore {
 
                         for req in list {
                             let from = req.sender.clone();
-                            if let Err(e) = self.check_request_message(&from, req, &mut None).await
-                            {
+                            if let Err(e) = self.check_request_message(req, &mut None).await {
                                 tracing::warn!(
                                     "Error processing request from {from}: {e}. Skipping"
                                 );
@@ -2696,8 +2713,11 @@ impl IdentityStore {
         let payload_bytes = serde_json::to_vec(&payload)?;
 
         let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
+        let message = PayloadBuilder::new(kp, bytes).build()?;
 
-        tracing::trace!("Request Payload size: {} bytes", bytes.len());
+        let message_bytes = message.to_bytes()?;
+
+        tracing::trace!("Request Payload size: {} bytes", message_bytes.len());
 
         tracing::info!("Sending event to {recipient}");
 
@@ -2722,7 +2742,7 @@ impl IdentityStore {
             || (peers.contains(&remote_peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(recipient.inbox(), bytes)
+                    .pubsub_publish(recipient.inbox(), message_bytes)
                     .await
                     .is_err())
                 && queue_broadcast

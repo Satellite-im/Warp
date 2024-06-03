@@ -15,7 +15,10 @@ use tokio::{
 use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::{crypto::DID, error::Error};
 
-use crate::config::{Discovery as DiscoveryConfig, DiscoveryType};
+use crate::{
+    config::{Discovery as DiscoveryConfig, DiscoveryType},
+    store::topics::PeerTopic,
+};
 
 use super::{DidExt, PeerIdExt, PeerType};
 
@@ -379,7 +382,7 @@ impl DiscoveryEntry {
                             if let Ok(did) = peer_id.to_did() {
                                 futures_timer::Delay::new(Duration::from_millis(500)).await;
                                 tracing::info!("Connected to {did}. Emitting initial event");
-                                let topic = format!("/peer/{did}/events");
+                                let topic = did.events();
                                 let subscribed = ipfs
                                     .pubsub_peers(Some(topic))
                                     .await
