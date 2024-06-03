@@ -358,40 +358,32 @@ impl File {
 #[wasm_bindgen]
 #[derive(Clone)]
 pub struct Item {
-    file: Option<File>,
-    directory: Option<Directory>,
+    inner: constellation::item::Item,
 }
 #[wasm_bindgen]
 impl Item {
     pub fn file(&self) -> Option<File> {
-        self.file.clone()
+        match &self.inner {
+            constellation::item::Item::File(file) => Some(File {
+                inner: file.clone(),
+            }),
+            constellation::item::Item::Directory(_) => None,
+        }
     }
     pub fn directory(&self) -> Option<Directory> {
-        self.directory.clone()
+        match &self.inner {
+            constellation::item::Item::File(_) => None,
+            constellation::item::Item::Directory(dir) => Some(Directory { inner: dir.clone() }),
+        }
     }
 }
 impl From<constellation::item::Item> for Item {
     fn from(value: constellation::item::Item) -> Self {
-        match value {
-            constellation::item::Item::File(file) => Item {
-                file: Some(File { inner: file }),
-                directory: None,
-            },
-            constellation::item::Item::Directory(directory) => Item {
-                file: None,
-                directory: Some(Directory { inner: directory }),
-            },
-        }
+        Self { inner: value }
     }
 }
 impl From<Item> for constellation::item::Item {
     fn from(value: Item) -> Self {
-        if value.file.is_some() && value.directory.is_none() {
-            constellation::item::Item::File(value.file.unwrap().inner)
-        } else if value.file.is_none() && value.directory.is_some() {
-            constellation::item::Item::Directory(value.directory.unwrap().inner)
-        } else {
-            panic!("Item can only be either File or Directory")
-        }
+        value.inner
     }
 }
