@@ -49,9 +49,31 @@ impl ConstellationBox {
             .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
     }
 
-    // pub async fn put_stream(&mut self, name: &str, total_size: Option<usize>, stream: BoxStream<'static, Vec<u8>>) -> Result<ConstellationProgressStream, JsError> {
-    //     self.inner.put_stream(name, total_size, stream).await.map_err(|e| e.into())
-    // }
+    pub async fn put_stream(
+        &mut self,
+        name: &str,
+        total_size: Option<usize>,
+        stream:  web_sys::ReadableStream,
+    ) -> Result<AsyncIterator, JsError> {
+        let stream = wasm_streams::ReadableStream::from_raw(stream).into_stream();
+        let stream = stream.map(|s| {
+            match s {
+                Err(e) => Vec::<u8>::new(),
+                Ok(ok) => serde_wasm_bindgen::from_value::<Vec<u8>>(ok).unwrap(),
+            }
+        });
+        let stream = Box::pin(stream);
+        self.inner
+            .put_stream(name, total_size, stream)
+            .await
+            .map_err(|e| e.into())
+            .map(|s| {
+                AsyncIterator::new(Box::pin(s.map(|t| {
+                    serde_wasm_bindgen::to_value(&t)
+                        .unwrap()
+                })))
+            })
+    }
 
     pub async fn get_stream(&self, name: &str) -> Result<AsyncIterator, JsError> {
         self.inner
