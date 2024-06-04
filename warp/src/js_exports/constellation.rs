@@ -63,7 +63,7 @@ impl ConstellationBox {
             .map_err(|e| e.into())
             .map(|s| {
                 AsyncIterator::new(Box::pin(
-                    s.map(|t| serde_wasm_bindgen::to_value(&t).unwrap()),
+                    s.map(|t| serde_wasm_bindgen::to_value(&Progression::from(t)).unwrap()),
                 ))
             })
     }
@@ -400,5 +400,64 @@ impl From<constellation::item::Item> for Item {
 impl From<Item> for constellation::item::Item {
     fn from(value: Item) -> Self {
         value.inner
+    }
+}
+
+#[derive(serde::Serialize)]
+pub enum Progression {
+    CurrentProgress {
+        /// name of the file
+        name: String,
+
+        /// size of the progression
+        current: usize,
+
+        /// total size of the file, if any is supplied
+        total: Option<usize>,
+    },
+    ProgressComplete {
+        /// name of the file
+        name: String,
+
+        /// total size of the file, if any is supplied
+        total: Option<usize>,
+    },
+    ProgressFailed {
+        /// name of the file that failed
+        name: String,
+
+        /// last known size, if any, of where it failed
+        last_size: Option<usize>,
+
+        /// error of why it failed, if any
+        error: String,
+    },
+}
+
+impl From<constellation::Progression> for Progression {
+    fn from(value: constellation::Progression) -> Self {
+        match value {
+            constellation::Progression::CurrentProgress {
+                name,
+                current,
+                total,
+            } => Self::CurrentProgress {
+                name,
+                current,
+                total,
+            },
+            constellation::Progression::ProgressComplete { name, total } => {
+                Self::ProgressComplete { name, total }
+            }
+            constellation::Progression::ProgressFailed {
+                name,
+                last_size,
+                error,
+            } => Self::ProgressFailed {
+                name,
+                last_size,
+                error: error.to_string(),
+            },
+        }
     }
 }

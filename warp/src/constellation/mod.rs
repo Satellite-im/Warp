@@ -47,7 +47,7 @@ impl Stream for ConstellationEventStream {
     }
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
 pub enum Progression {
     CurrentProgress {
         /// name of the file
@@ -74,7 +74,6 @@ pub enum Progression {
         last_size: Option<usize>,
 
         /// error of why it failed, if any
-        #[serde(skip)]
         error: Error,
     },
 }
