@@ -16,7 +16,7 @@
 
       let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), tesseract)
       let profile = await ipfs.multipass.create_identity(null, null)
-
+      
       await ipfs.constellation.put_buffer("image.png", IMAGE)
       let data = await ipfs.constellation.get_buffer("image.png")
 
@@ -36,6 +36,31 @@
       append_img(data_type, thumbnail_data)
       append_p("image:")
       append_img(data_type, data)
+
+      // stream a circle image into constellation and get it back out via stream
+
+      const response = await fetch("circle.png");
+      let async_iterator = await ipfs.constellation.put_stream("circle.png", null, response.body)
+      let put_stream_status = { [Symbol.asyncIterator]() { return async_iterator } }
+      for await (const value of put_stream_status) {
+        console.log(value)
+        if (value.ProgressComplete != null ) {
+          break
+        }
+      }
+
+      let get_stream_async_iterator = await ipfs.constellation.get_stream("circle.png")
+      let get_stream = { [Symbol.asyncIterator]() { return get_stream_async_iterator } }
+      let circle_data = []; 
+      for await (const value of get_stream) {
+        console.log(value)
+        if (value.Ok != null) {
+          circle_data = value.Ok
+          break
+        }
+      }
+      append_p("stream result:")
+      append_img(data_type, circle_data)
 
     });
 

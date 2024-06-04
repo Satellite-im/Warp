@@ -1,5 +1,5 @@
 use crate::constellation::{self, file::Hash, Constellation};
-use crate::js_exports::stream::AsyncIterator;
+use crate::js_exports::stream::{AsyncIterator, InnerStream};
 use futures::StreamExt;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -53,25 +53,18 @@ impl ConstellationBox {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream:  web_sys::ReadableStream,
+        stream: web_sys::ReadableStream,
     ) -> Result<AsyncIterator, JsError> {
-        let stream = wasm_streams::ReadableStream::from_raw(stream).into_stream();
-        let stream = stream.map(|s| {
-            match s {
-                Err(e) => Vec::<u8>::new(),
-                Ok(ok) => serde_wasm_bindgen::from_value::<Vec<u8>>(ok).unwrap(),
-            }
-        });
+        let stream = InnerStream::from(wasm_streams::ReadableStream::from_raw(stream));
         let stream = Box::pin(stream);
         self.inner
             .put_stream(name, total_size, stream)
             .await
             .map_err(|e| e.into())
             .map(|s| {
-                AsyncIterator::new(Box::pin(s.map(|t| {
-                    serde_wasm_bindgen::to_value(&t)
-                        .unwrap()
-                })))
+                AsyncIterator::new(Box::pin(
+                    s.map(|t| serde_wasm_bindgen::to_value(&t).unwrap()),
+                ))
             })
     }
 
