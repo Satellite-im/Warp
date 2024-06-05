@@ -1,18 +1,19 @@
 use std::process::Command;
 use tiny_file_server::FileServer;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 const ADDR: &str = "127.0.0.1:9080";
 const PATH: &str = "extensions/warp-ipfs/examples/from-js";
 
 fn main() {
     //set up logger so we can get an output from tiny_file_server
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info");
-    }
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .with(tracing_subscriber::fmt::Layer::default().compact())
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
         .init();
 
     println!("\nInstalling wasm-pack ...");
