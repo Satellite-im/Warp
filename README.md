@@ -53,9 +53,9 @@ outside of localhost.
 | Rust | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | CMake | `brew install cmake` |
 
-## Building to WASM and using it within the browser
+## Usage
 
-[See wasm docs](./tools/wasm-example/README.md)
+[See warp-ipfs examples](./extensions/warp-ipfs/examples/README.md)
 
 ## Docs
 

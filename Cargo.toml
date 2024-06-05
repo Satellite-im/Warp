@@ -92,7 +92,7 @@ tracing = { version = "0.1" }
 either = "1"
 void = "1"
 
-#ipfs dependency
+# ipfs dependency
 rust-ipfs = "0.11.18"
 
 # wasm crates
