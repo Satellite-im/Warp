@@ -1,4 +1,4 @@
-# wasm-ipfs-identity
+# wasm-ipfs-friends
 
 To build do the following:
 
