@@ -1,6 +1,5 @@
 use std::process::Command;
 use tiny_file_server::FileServer;
-use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 const ADDR: &str = "127.0.0.1:9080";
