@@ -5,7 +5,7 @@
     <title>Warp Wasm Test</title>
   </head>
   <script type="module">
-    import init, * as wasm from './wasm/warp-ipfs/warp_ipfs.js';
+    import init, * as wasm from './built-wasm/warp-ipfs/warp_ipfs.js';
     init().then((_exports) => {
       console.log(wasm)
 
