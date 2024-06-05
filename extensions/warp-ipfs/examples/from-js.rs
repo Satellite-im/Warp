@@ -1,4 +1,4 @@
-use env_logger::{Builder, Env};
+use tracing_subscriber::prelude::*;
 use std::process::Command;
 use tiny_file_server::FileServer;
 
@@ -6,6 +6,15 @@ const ADDR: &str = "127.0.0.1:9080";
 const PATH: &str = "extensions/warp-ipfs/examples/from-js";
 
 fn main() {
+    //set up logger so we can get an output from tiny_file_server
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(tracing_subscriber::fmt::Layer::default().compact())
+        .init();
+
     println!("\nInstalling wasm-pack ...");
     let cmd = get_cmd("cargo install wasm-pack");
     spawn_and_wait(cmd);
@@ -15,7 +24,6 @@ fn main() {
     spawn_and_wait(cmd);
 
     println!("\nStarting file server ...");
-    Builder::from_env(Env::default().default_filter_or("info")).init();
     FileServer::http(ADDR)
         .expect("Server should be created")
         .run(PATH)
