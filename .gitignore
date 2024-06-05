@@ -25,5 +25,5 @@ Cargo.lock
 
 *.csv
 
-# Compiled wasm
-www/wasm
+# Built wasm files
+built-wasm/

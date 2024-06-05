@@ -72,6 +72,8 @@ clap = { version = "4.0", features = ["derive"] }
 
 rpassword = "7.3"
 
+# crates for examples
+tiny_file_server = "0.1.5"
 
 [features]
 default = []
