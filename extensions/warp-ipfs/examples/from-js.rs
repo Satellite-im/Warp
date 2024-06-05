@@ -1,6 +1,6 @@
-use tracing_subscriber::prelude::*;
 use std::process::Command;
 use tiny_file_server::FileServer;
+use tracing_subscriber::prelude::*;
 
 const ADDR: &str = "127.0.0.1:9080";
 const PATH: &str = "extensions/warp-ipfs/examples/from-js";
