@@ -27,8 +27,7 @@ use warp::{
 use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
 
 use super::{
-    document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, verify_serde_sig,
-    PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
+    document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, topics::ConversationTopic, verify_serde_sig, PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE
 };
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,23 +86,15 @@ impl ConversationDocument {
     }
 
     pub fn topic(&self) -> String {
-        format!("{}/{}", self.conversation_type(), self.id())
+        self.id.base()
     }
 
     pub fn event_topic(&self) -> String {
-        format!("{}/events", self.topic())
+        self.id.event_topic()
     }
 
-    pub fn files_topic(&self) -> String {
-        format!("{}/files", self.topic())
-    }
-
-    pub fn reqres_topic(&self, did: &DID) -> String {
-        format!("{}/reqres/{}", self.topic(), did)
-    }
-
-    pub fn files_transfer(&self, id: Uuid) -> String {
-        format!("{}/{id}", self.files_topic())
+    pub fn exchange_topic(&self, did: &DID) -> String {
+        self.id.exchange_topic(did)
     }
 
     pub fn recipients(&self) -> Vec<DID> {
