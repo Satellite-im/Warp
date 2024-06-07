@@ -5,7 +5,7 @@ use rust_ipfs::libp2p::gossipsub::Message;
 use rust_ipfs::Ipfs;
 use tokio_stream::StreamMap;
 
-use crate::store::identity::IdentityStorage;
+use crate::store::{identity::IdentityStorage, messages::MessageStorage};
 use crate::PeerTopic;
 
 #[derive(Clone)]
@@ -14,7 +14,7 @@ pub struct Subscriptions {
 }
 
 impl Subscriptions {
-    pub fn new(ipfs: &Ipfs, identity: &IdentityStorage) -> Self {
+    pub fn new(ipfs: &Ipfs, identity: &IdentityStorage, _: &MessageStorage) -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(1);
 
         let mut task = SubscriptionTask {
