@@ -62,6 +62,17 @@ impl RayGunBox {
             .map(|ok| Conversation::new(ok))
     }
 
+    pub async fn set_favorite_conversation(
+        &mut self,
+        conversation_id: String,
+        favorite: bool,
+    ) -> Result<(), JsError> {
+        self.inner
+            .set_favorite_conversation(Uuid::from_str(&conversation_id).unwrap(), favorite)
+            .await
+            .map_err(|e| e.into())
+    }
+
     /// List all active conversations
     pub async fn list_conversations(&self) -> Result<JsValue, JsError> {
         self.inner

@@ -30,8 +30,42 @@ impl ConstellationBox {
         }
     }
 
+    pub fn current_size(&self) -> usize {
+        self.inner.current_size()
+    }
+
     pub fn max_size(&self) -> usize {
         self.inner.max_size()
+    }
+
+    pub fn select(&mut self, path: &str) -> Result<(), JsError> {
+        self.inner.select(path).map_err(|e| e.into())
+    }
+
+    pub fn set_path(&mut self, path: String) {
+        self.inner.set_path(path.into())
+    }
+
+    pub fn get_path(&self) -> String {
+        self.inner.get_path().to_str().unwrap().into()
+    }
+
+    pub fn go_back(&mut self) -> Result<(), JsError> {
+        self.inner.go_back().map_err(|e| e.into())
+    }
+
+    pub fn current_directory(&self) -> Result<Directory, JsError> {
+        self.inner
+            .current_directory()
+            .map_err(|e| e.into())
+            .map(|ok| Directory { inner: ok })
+    }
+
+    pub fn open_directory(&self, path: &str) -> Result<Directory, JsError> {
+        self.inner
+            .open_directory(path)
+            .map_err(|e| e.into())
+            .map(|ok| Directory { inner: ok })
     }
 
     pub async fn put_buffer(&mut self, name: &str, buffer: &[u8]) -> Result<(), JsError> {
@@ -81,6 +115,10 @@ impl ConstellationBox {
             })
     }
 
+    pub async fn rename(&mut self, current: &str, new: &str) -> Result<(), JsError> {
+        self.inner.rename(current, new).await.map_err(|e| e.into())
+    }
+
     pub async fn remove(&mut self, name: &str, recursive: bool) -> Result<(), JsError> {
         self.inner
             .remove(name, recursive)
@@ -88,8 +126,8 @@ impl ConstellationBox {
             .map_err(|e| e.into())
     }
 
-    pub async fn rename(&mut self, current: &str, new: &str) -> Result<(), JsError> {
-        self.inner.rename(current, new).await.map_err(|e| e.into())
+    pub async fn move_item(&mut self, from: &str, to: &str) -> Result<(), JsError> {
+        self.inner.move_item(from, to).await.map_err(|e| e.into())
     }
 
     pub async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<(), JsError> {
@@ -101,14 +139,6 @@ impl ConstellationBox {
 
     pub async fn sync_ref(&mut self, path: &str) -> Result<(), JsError> {
         self.inner.sync_ref(path).await.map_err(|e| e.into())
-    }
-
-    pub fn set_path(&mut self, path: String) {
-        self.inner.set_path(path.into())
-    }
-
-    pub fn get_path(&self) -> String {
-        self.inner.get_path().to_str().unwrap().into()
     }
 }
 
