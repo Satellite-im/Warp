@@ -940,12 +940,6 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
-        let out_peer_id = out_did.to_peer_id()?;
-
-        if !self.ipfs.is_connected(out_peer_id).await? {
-            return Err(Error::IdentityDoesntExist);
-        }
-
         let pk_did = self.root_document.keypair();
 
         let event = IdentityEvent::Request { option };
@@ -956,30 +950,17 @@ impl IdentityStore {
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
-        if self
-            .ipfs
-            .pubsub_peers(Some(out_did.events()))
-            .await?
-            .contains(&out_peer_id)
-        {
-            let timer = Instant::now();
-            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
-            let end = timer.elapsed();
-            tracing::info!(to = %out_did, event = ?event, "Event sent");
-            tracing::trace!("Took {}ms to send event", end.as_millis());
-        }
+        let timer = Instant::now();
+        self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
+        let end = timer.elapsed();
+        tracing::info!(to = %out_did, event = ?event, "Event sent");
+        tracing::trace!("Took {}ms to send event", end.as_millis());
 
         Ok(())
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
-        let out_peer_id = out_did.to_peer_id()?;
-
-        if !self.ipfs.is_connected(out_peer_id).await? {
-            return Err(Error::IdentityDoesntExist);
-        }
-
         let pk_did = self.root_document.keypair();
 
         let mut identity = self.own_identity_document().await?;
@@ -1033,30 +1014,17 @@ impl IdentityStore {
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
-        if self
-            .ipfs
-            .pubsub_peers(Some(out_did.events()))
-            .await?
-            .contains(&out_peer_id)
-        {
-            let timer = Instant::now();
-            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
-            let end = timer.elapsed();
-            tracing::info!(to = %out_did, event = ?event, "Event sent");
-            tracing::info!("Took {}ms to send event", end.as_millis());
-        }
+        let timer = Instant::now();
+        self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
+        let end = timer.elapsed();
+        tracing::info!(to = %out_did, event = ?event, "Event sent");
+        tracing::info!("Took {}ms to send event", end.as_millis());
 
         Ok(())
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn push_profile_picture(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
-        let out_peer_id = out_did.to_peer_id()?;
-
-        if !self.ipfs.is_connected(out_peer_id).await? {
-            return Err(Error::IdentityDoesntExist);
-        }
-
         let pk_did = self.root_document.keypair();
 
         let identity = self.own_identity_document().await?;
@@ -1088,30 +1056,17 @@ impl IdentityStore {
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
-        if self
-            .ipfs
-            .pubsub_peers(Some(out_did.events()))
-            .await?
-            .contains(&out_peer_id)
-        {
-            let timer = Instant::now();
-            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
-            let end = timer.elapsed();
-            tracing::info!(to = %out_did, event = ?event, "Event sent");
-            tracing::trace!("Took {}ms to send event", end.as_millis());
-        }
+        let timer = Instant::now();
+        self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
+        let end = timer.elapsed();
+        tracing::info!(to = %out_did, event = ?event, "Event sent");
+        tracing::trace!("Took {}ms to send event", end.as_millis());
 
         Ok(())
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
-        let out_peer_id = out_did.to_peer_id()?;
-
-        if !self.ipfs.is_connected(out_peer_id).await? {
-            return Err(Error::IdentityDoesntExist);
-        }
-
         let pk_did = self.root_document.keypair();
 
         let identity = self.own_identity_document().await?;
@@ -1144,18 +1099,11 @@ impl IdentityStore {
 
         tracing::info!("Sending event to {out_did}");
 
-        if self
-            .ipfs
-            .pubsub_peers(Some(out_did.events()))
-            .await?
-            .contains(&out_peer_id)
-        {
-            let timer = Instant::now();
-            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
-            let end = timer.elapsed();
-            tracing::info!("Event sent to {out_did}");
-            tracing::trace!("Took {}ms to send event", end.as_millis());
-        }
+        let timer = Instant::now();
+        self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
+        let end = timer.elapsed();
+        tracing::info!("Event sent to {out_did}");
+        tracing::trace!("Took {}ms to send event", end.as_millis());
 
         Ok(())
     }
@@ -2689,8 +2637,6 @@ impl IdentityStore {
         store_request: bool,
         queue_broadcast: bool,
     ) -> Result<(), Error> {
-        let remote_peer_id = recipient.to_peer_id()?;
-
         if !self.discovery.contains(recipient).await {
             self.discovery.insert(recipient).await?;
         }
@@ -2721,8 +2667,6 @@ impl IdentityStore {
 
         tracing::info!("Sending event to {recipient}");
 
-        let peers = self.ipfs.pubsub_peers(Some(recipient.inbox())).await?;
-
         let mut queued = false;
 
         let wait = self
@@ -2738,14 +2682,12 @@ impl IdentityStore {
         });
 
         let start = Instant::now();
-        if !peers.contains(&remote_peer_id)
-            || (peers.contains(&remote_peer_id)
-                && self
-                    .ipfs
-                    .pubsub_publish(recipient.inbox(), message_bytes)
-                    .await
-                    .is_err())
-                && queue_broadcast
+        if self
+            .ipfs
+            .pubsub_publish(recipient.inbox(), message_bytes)
+            .await
+            .is_err()
+            && queue_broadcast
         {
             self.queue.insert(recipient, payload.clone()).await;
             queued = true;
