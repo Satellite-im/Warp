@@ -47,7 +47,7 @@ impl ConstellationBox {
     }
 
     pub fn get_path(&self) -> String {
-        self.inner.get_path().to_str().unwrap().into()
+        self.inner.get_path().to_string_lossy().into()
     }
 
     pub fn go_back(&mut self) -> Result<(), JsError> {
