@@ -361,13 +361,14 @@ impl Config {
     pub fn minimal_testing() -> Config {
         Config {
             bootstrap: Bootstrap::None,
-            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
+            listen_on: vec![],
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
+                    background: false,
                     ..Default::default()
                 },
-                memory_transport: true,
+                memory_transport: false,
                 ..Default::default()
             },
             store_setting: StoreSetting {
@@ -383,12 +384,13 @@ impl Config {
         Config {
             persist: true,
             bootstrap: Bootstrap::None,
-            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
+            listen_on: vec![],
             ipfs_setting: IpfsSetting {
                 relay_client: RelayClient {
+                    background: false,
                     ..Default::default()
                 },
-                memory_transport: true,
+                memory_transport: false,
                 ..Default::default()
             },
             store_setting: StoreSetting {
