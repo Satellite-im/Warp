@@ -9,7 +9,7 @@ use tracing::error;
 use warp::{crypto::DID, error::Error};
 use web_time::Instant;
 
-use crate::store::{ds_key::DataStoreKey, ecdh_encrypt, topics::PeerTopic, PeerIdExt};
+use crate::store::{ds_key::DataStoreKey, ecdh_encrypt, payload::PayloadBuilder, topics::PeerTopic, PeerIdExt};
 
 use super::{
     connected_to_peer, discovery::Discovery, document::root::RootDocumentMap, ecdh_decrypt,
@@ -285,13 +285,17 @@ impl QueueEntry {
 
                                 let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
 
-                                tracing::trace!("Payload size: {} bytes", bytes.len());
+                                let message = PayloadBuilder::new(kp, bytes).build()?;
+
+                                let message_bytes = message.to_bytes()?;
+
+                                tracing::trace!("Payload size: {} bytes", message_bytes.len());
 
                                 tracing::info!("Sending request to {}", recipient);
 
                                 let time = Instant::now();
 
-                                entry.ipfs.pubsub_publish(recipient.inbox(), bytes).await?;
+                                entry.ipfs.pubsub_publish(recipient.inbox(), message_bytes).await?;
 
                                 let elapsed = time.elapsed();
 
