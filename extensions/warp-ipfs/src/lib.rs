@@ -331,7 +331,7 @@ impl WarpIpfs {
                 max_transmit_size: PUBSUB_MAX_BUF,
                 ..Default::default()
             })
-            .with_relay(true)
+            .with_relay(!cfg!(target_arch = "wasm32"))
             .set_listening_addrs(self.inner.config.listen_on().to_vec())
             .with_custom_behaviour(behaviour)
             .set_keypair(&keypair)
