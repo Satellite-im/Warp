@@ -342,7 +342,7 @@ impl WarpIpfs {
                 // as such connections would be established through the relay
                 enable_websocket: cfg!(target_arch = "wasm32"),
                 enable_secure_websocket: cfg!(target_arch = "wasm32"),
-                enable_webrtc: cfg!(target_arch = "wasm32"),
+                // enable_webrtc: cfg!(target_arch = "wasm32"),
                 ..Default::default()
             });
 
