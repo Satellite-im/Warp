@@ -1,4 +1,4 @@
-use crate::constellation::{self, file::Hash, Constellation};
+use crate::constellation::{self, file::Hash, item::ItemType, Constellation};
 use crate::js_exports::stream::{AsyncIterator, InnerStream};
 use futures::StreamExt;
 use uuid::Uuid;
@@ -407,6 +407,17 @@ pub struct Item {
 }
 #[wasm_bindgen]
 impl Item {
+    pub fn new_file(file: File) -> Self {
+        Self {
+            inner: constellation::item::Item::new_file(file.inner),
+        }
+    }
+    pub fn new_directory(directory: Directory) -> Self {
+        Self {
+            inner: constellation::item::Item::new_directory(directory.inner),
+        }
+    }
+
     pub fn file(&self) -> Option<File> {
         match &self.inner {
             constellation::item::Item::File(file) => Some(File {
@@ -420,6 +431,80 @@ impl Item {
             constellation::item::Item::File(_) => None,
             constellation::item::Item::Directory(dir) => Some(Directory { inner: dir.clone() }),
         }
+    }
+    pub fn id(&self) -> String {
+        self.inner.id().to_string()
+    }
+    pub fn creation(&self) -> js_sys::Date {
+        self.inner.creation().into()
+    }
+    pub fn modified(&self) -> js_sys::Date {
+        self.inner.modified().into()
+    }
+    pub fn name(&self) -> String {
+        self.inner.name()
+    }
+
+    pub fn description(&self) -> String {
+        self.inner.description()
+    }
+    pub fn size(&self) -> usize {
+        self.inner.size()
+    }
+    pub fn thumbnail_format(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap()
+    }
+    pub fn thumbnail(&self) -> Vec<u8> {
+        self.inner.thumbnail()
+    }
+    pub fn favorite(&self) -> bool {
+        self.inner.favorite()
+    }
+    pub fn set_favorite(&self, fav: bool) {
+        self.inner.set_favorite(fav)
+    }
+    pub fn rename(&self, name: &str) -> Result<(), JsError> {
+        self.inner.rename(name).map_err(|e| e.into())
+    }
+    pub fn is_directory(&self) -> bool {
+        self.inner.is_directory()
+    }
+    pub fn is_file(&self) -> bool {
+        self.inner.is_file()
+    }
+    pub fn item_type(&self) -> ItemType {
+        self.inner.item_type()
+    }
+    pub fn set_description(&self, desc: &str) {
+        self.inner.set_description(desc)
+    }
+    pub fn set_thumbnail(&self, data: &[u8]) {
+        self.inner.set_thumbnail(data)
+    }
+    pub fn set_thumbnail_format(&self, format: JsValue) {
+        self.inner
+            .set_thumbnail_format(serde_wasm_bindgen::from_value(format).unwrap())
+    }
+    pub fn set_size(&self, size: usize) -> Result<(), JsError> {
+        self.inner.set_size(size).map_err(|e| e.into())
+    }
+    pub fn path(&self) -> String {
+        self.inner.path().to_string()
+    }
+    pub fn set_path(&mut self, new_path: &str) {
+        self.inner.set_path(new_path)
+    }
+    pub fn get_directory(&self) -> Result<Directory, JsError> {
+        self.inner
+            .get_directory()
+            .map_err(|e| e.into())
+            .map(|ok| Directory { inner: ok })
+    }
+    pub fn get_file(&self) -> Result<File, JsError> {
+        self.inner
+            .get_file()
+            .map_err(|e| e.into())
+            .map(|ok| File { inner: ok })
     }
 }
 impl From<constellation::item::Item> for Item {
