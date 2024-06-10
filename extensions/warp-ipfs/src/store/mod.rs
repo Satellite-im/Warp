@@ -52,6 +52,12 @@ pub(super) mod topics {
 
     /// Topic to announce identity updates to the network
     pub const IDENTITY_ANNOUNCEMENT: &str = "/identity/announce/v0";
+    /// Topic to announce requests (new, deny, closing, etc) to the network for intended recipients
+    /// Note: Requests in this case will be encrypted, only to be decrypted the intended recipient of the request
+    pub const FRIENDS_ANNOUNCEMENT: &str = "/friends/announce/v0";
+    /// Topic to announce conversations to the network
+    /// TODO: TBD
+    pub const CONVERSATION_ANNOUNCEMENT: &str = "/conversation/announce/v0";
 
     pub trait PeerTopic: Display {
         fn inbox(&self) -> String {
