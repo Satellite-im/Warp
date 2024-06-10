@@ -27,7 +27,8 @@ use warp::{
 use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
 
 use super::{
-    document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, topics::ConversationTopic, verify_serde_sig, PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE
+    document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, topics::ConversationTopic,
+    verify_serde_sig, PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
 };
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
