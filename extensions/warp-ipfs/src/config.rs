@@ -405,16 +405,17 @@ impl Config {
         Config {
             persist: true,
             bootstrap: Bootstrap::None,
-            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
+            listen_on: vec![],
             ipfs_setting: IpfsSetting {
                 relay_client: RelayClient {
                     relay_address: addresses
                         .into_iter()
                         .filter_map(|addr| addr.parse().ok())
                         .collect::<Vec<_>>(),
+                    background: false,
                     ..Default::default()
                 },
-                memory_transport: true,
+                memory_transport: false,
                 ..Default::default()
             },
             store_setting: StoreSetting {
