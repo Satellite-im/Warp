@@ -9,7 +9,9 @@ use tracing::error;
 use warp::{crypto::DID, error::Error};
 use web_time::Instant;
 
-use crate::store::{ds_key::DataStoreKey, ecdh_encrypt, payload::PayloadBuilder, topics::PeerTopic, PeerIdExt};
+use crate::store::{
+    ds_key::DataStoreKey, ecdh_encrypt, payload::PayloadBuilder, topics::PeerTopic, PeerIdExt,
+};
 
 use super::{
     connected_to_peer, discovery::Discovery, document::root::RootDocumentMap, ecdh_decrypt,
@@ -295,7 +297,10 @@ impl QueueEntry {
 
                                 let time = Instant::now();
 
-                                entry.ipfs.pubsub_publish(recipient.inbox(), message_bytes).await?;
+                                entry
+                                    .ipfs
+                                    .pubsub_publish(recipient.inbox(), message_bytes)
+                                    .await?;
 
                                 let elapsed = time.elapsed();
 
