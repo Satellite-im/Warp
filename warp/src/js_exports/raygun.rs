@@ -328,7 +328,7 @@ impl RayGunBox {
         self.inner
             .add_recipient(
                 Uuid::from_str(&conversation_id).unwrap(),
-                &DID::from_str(&recipient).unwrap_or_default(),
+                &DID::from_str(&recipient).unwrap(),
             )
             .await
             .map_err(|e| e.into())
@@ -343,7 +343,7 @@ impl RayGunBox {
         self.inner
             .remove_recipient(
                 Uuid::from_str(&conversation_id).unwrap(),
-                &DID::from_str(&recipient).unwrap_or_default(),
+                &DID::from_str(&recipient).unwrap(),
             )
             .await
             .map_err(|e| e.into())
