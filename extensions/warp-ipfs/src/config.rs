@@ -405,16 +405,12 @@ impl Config {
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen::prelude::wasm_bindgen]
     pub fn minimal_with_relay(addresses: Vec<String>) -> Config {
-        Config {
+        let mut config = Config {
             persist: true,
             bootstrap: Bootstrap::None,
             listen_on: vec![],
             ipfs_setting: IpfsSetting {
                 relay_client: RelayClient {
-                    relay_address: addresses
-                        .into_iter()
-                        .filter_map(|addr| addr.parse().ok())
-                        .collect::<Vec<_>>(),
                     background: false,
                     ..Default::default()
                 },
@@ -426,7 +422,15 @@ impl Config {
                 ..Default::default()
             },
             ..Default::default()
+        };
+        let addrs = addresses
+            .into_iter()
+            .filter_map(|addr| addr.parse().ok())
+            .collect::<Vec<_>>();
+        if !addrs.is_empty() {
+            config.ipfs_setting.relay_client.relay_address = addrs;
         }
+        config
     }
 
     /// Minimal production configuration
