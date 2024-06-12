@@ -50,10 +50,7 @@ use warp::multipass::{
     MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
-    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location, LocationStream, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
@@ -1585,6 +1582,18 @@ impl RayGunAttachment for WarpIpfs {
     ) -> Result<(Uuid, AttachmentEventStream), Error> {
         self.messaging_store()?
             .attach(conversation_id, message_id, locations, message)
+            .await
+    }
+
+    async fn attach_stream(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        files: Vec<LocationStream>,
+        message: Vec<String>,
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        self.messaging_store()?
+            .attach_stream(conversation_id, message_id, files, message)
             .await
     }
 

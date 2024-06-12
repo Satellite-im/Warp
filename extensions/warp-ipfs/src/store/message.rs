@@ -40,9 +40,9 @@ use warp::{
     multipass::MultiPassEventKind,
     raygun::{
         AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
-        ConversationType, DirectConversationSettings, GroupSettings, Location, MessageEvent,
-        MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
-        MessagesType, PinState, RayGunEventKind, ReactionState,
+        ConversationType, DirectConversationSettings, GroupSettings, Location, LocationStream,
+        MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
+        MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
     },
 };
 
@@ -417,6 +417,19 @@ impl MessageStore {
         let inner = &mut *self.inner.write().await;
         inner
             .attach(conversation_id, message_id, locations, messages)
+            .await
+    }
+
+    pub async fn attach_stream(
+        &self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        files: Vec<LocationStream>,
+        messages: Vec<String>,
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .attach_stream(conversation_id, message_id, files, messages)
             .await
     }
 
@@ -2251,6 +2264,197 @@ impl ConversationInner {
                         streams.insert(file, stream.boxed());
                     }
                 };
+            }
+
+            for await (location, (progress, file)) in streams {
+                yield AttachmentKind::AttachedProgress(location, progress);
+                if let Some(file) = file {
+                    attachments.push(file);
+                }
+            }
+
+            let final_results = {
+                async move {
+
+                    if attachments.is_empty() {
+                        return Err(Error::NoAttachments);
+                    }
+
+                    let mut message = warp::raygun::Message::default();
+                    message.set_id(message_id);
+                    message.set_message_type(MessageType::Attachment);
+                    message.set_conversation_id(conversation.id());
+                    message.set_sender(own_did);
+                    message.set_attachment(attachments);
+                    message.set_lines(messages.clone());
+                    message.set_replied(reply_id);
+
+                    let message =
+                        MessageDocument::new(&ipfs, &keypair, message, keystore.as_ref()).await?;
+
+                    let (tx, rx) = oneshot::channel();
+                    _ = atx.send((conversation_id, message, tx)).await;
+
+                    rx.await.expect("shouldnt drop")
+                }
+            };
+
+            yield AttachmentKind::Pending(final_results.await)
+        };
+
+        Ok((message_id, stream.boxed()))
+    }
+
+    pub async fn attach_stream(
+        &mut self,
+        conversation_id: Uuid,
+        reply_id: Option<Uuid>,
+        files: Vec<LocationStream>,
+        messages: Vec<String>,
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        if files.len() > 32 {
+            return Err(Error::InvalidLength {
+                context: "files".into(),
+                current: files.len(),
+                minimum: Some(1),
+                maximum: Some(32),
+            });
+        }
+
+        if !messages.is_empty() {
+            let lines_value_length: usize = messages
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length > MAX_MESSAGE_SIZE {
+                tracing::error!(
+                    current_size = lines_value_length,
+                    max = MAX_MESSAGE_SIZE,
+                    "length of message is invalid"
+                );
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: None,
+                    maximum: Some(MAX_MESSAGE_SIZE),
+                });
+            }
+        }
+        let conversation = self.get(conversation_id).await?;
+
+        let keypair = self.root.keypair();
+
+        let mut constellation = self.file.clone();
+
+        let root_directory = constellation.root_directory();
+
+        if !root_directory.has_item(CHAT_DIRECTORY) {
+            let new_dir = Directory::new(CHAT_DIRECTORY);
+            root_directory.add_directory(new_dir)?;
+        }
+
+        let mut media_dir = root_directory
+            .get_last_directory_from_path(&format!("/{CHAT_DIRECTORY}/{conversation_id}"))?;
+
+        // if the directory that returned is the chat directory, this means we should create
+        // the directory specific to the conversation
+        if media_dir.name() == CHAT_DIRECTORY {
+            let new_dir = Directory::new(&conversation_id.to_string());
+            media_dir.add_directory(new_dir)?;
+            media_dir = media_dir.get_last_directory_from_path(&conversation_id.to_string())?;
+        }
+
+        assert_eq!(media_dir.name(), conversation_id.to_string());
+
+        let mut atx = self.attachment_tx.clone();
+        let keystore = pubkey_or_keystore(self, conversation_id, keypair).await?;
+        let ipfs = self.ipfs.clone();
+        let own_did = self.identity.did_key();
+
+        let keypair = keypair.clone();
+
+        let message_id = Uuid::new_v4();
+
+        let stream = async_stream::stream! {
+            let mut in_stack = vec![];
+
+            let mut attachments = vec![];
+
+            let mut streams = StreamMap::new();
+
+            for file in files {
+                let mut filename = file.name;
+                let original = filename.clone();
+
+                let current_directory = media_dir.clone();
+
+                let mut interval = 0;
+                let skip;
+                loop {
+                    if in_stack.contains(&filename) || current_directory.has_item(&filename) {
+                        if interval > 2000 {
+                            skip = true;
+                            break;
+                        }
+                        interval += 1;
+                        let file = PathBuf::from(&original);
+                        let file_stem =
+                            file.file_stem().and_then(OsStr::to_str).map(str::to_string);
+                        let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
+
+                        filename = match (file_stem, ext) {
+                            (Some(filename), Some(ext)) => {
+                                format!("{filename} ({interval}).{ext}")
+                            }
+                            _ => format!("{original} ({interval})"),
+                        };
+                        continue;
+                    }
+                    skip = false;
+                    break;
+                }
+                let file_path = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
+                if skip {
+                    streams.insert(Location::Constellation { path: file_path }, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
+                    continue;
+                }
+                in_stack.push(filename.clone());
+
+                let mut progress = match constellation.put_stream(&file_path, file.size, file.stream).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        error!(%conversation_id, "Error uploading {filename}: {e}");
+                        streams.insert(Location::Constellation { path: file_path }, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
+                        continue;
+                    }
+                };
+
+                let directory = root_directory.clone();
+                let filename = filename.to_string();
+
+                let stream = async_stream::stream! {
+                    while let Some(item) = progress.next().await {
+                        match item {
+                            item @ Progression::CurrentProgress { .. } => {
+                                yield (item, None);
+                            },
+                            item @ Progression::ProgressComplete { .. } => {
+                                let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
+                                yield (item, file_name);
+                                break;
+                            },
+                            item @ Progression::ProgressFailed { .. } => {
+                                yield (item, None);
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                streams.insert(Location::Constellation { path: file_path }, stream.boxed());
             }
 
             for await (location, (progress, file)) in streams {

@@ -920,6 +920,12 @@ pub enum Location {
     Disk { path: PathBuf },
 }
 
+pub struct LocationStream {
+    pub size: Option<usize>,
+    pub name: String,
+    pub stream: BoxStream<'static, Vec<u8>>,
+}
+
 #[async_trait::async_trait]
 pub trait RayGun:
     RayGunStream
@@ -1085,6 +1091,16 @@ pub trait RayGunAttachment: Sync + Send {
         _: Uuid,
         _: Option<Uuid>,
         _: Vec<Location>,
+        _: Vec<String>,
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn attach_stream(
+        &mut self,
+        _: Uuid,
+        _: Option<Uuid>,
+        _: Vec<LocationStream>,
         _: Vec<String>,
     ) -> Result<(Uuid, AttachmentEventStream), Error> {
         Err(Error::Unimplemented)

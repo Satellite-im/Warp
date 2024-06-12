@@ -1,16 +1,15 @@
 use crate::{
     crypto::DID,
-    js_exports::stream::AsyncIterator,
+    js_exports::stream::{AsyncIterator, InnerStream},
     raygun::{
-        self, EmbedState, GroupSettings, Location, MessageEvent, MessageStatus, PinState, RayGun,
-        ReactionState,
+        self, EmbedState, GroupSettings, Location, LocationStream, MessageEvent, MessageStatus,
+        PinState, RayGun, ReactionState,
     },
 };
-
 use futures::StreamExt;
 use js_sys::Promise;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, str::FromStr};
+use std::str::FromStr;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
@@ -359,17 +358,14 @@ impl RayGunBox {
         &mut self,
         conversation_id: String,
         message_id: Option<String>,
-        locations: Vec<JsValue>,
+        files: Vec<AttachmentFile>,
         message: Vec<String>,
     ) -> Result<AttachmentResult, JsError> {
         self.inner
-            .attach(
+            .attach_stream(
                 Uuid::from_str(&conversation_id).unwrap(),
                 message_id.map(|s| Uuid::from_str(&s).unwrap()),
-                locations
-                    .iter()
-                    .map(|v| serde_wasm_bindgen::from_value(v.clone()).unwrap())
-                    .collect(),
+                files.iter().map(|f| f.clone().into()).collect(),
                 message,
             )
             .await
@@ -379,31 +375,6 @@ impl RayGunBox {
                 stream: AsyncIterator::new(Box::pin(
                     ok.map(|s| serde_wasm_bindgen::to_value(&AttachmentKind::from(s)).unwrap()),
                 )),
-            })
-    }
-
-    /// Downloads a file that been attached to a message
-    /// Note: Must use the filename associated when downloading
-    pub async fn download(
-        &self,
-        conversation_id: String,
-        message_id: String,
-        file: String,
-        path: String,
-    ) -> Result<AsyncIterator, JsError> {
-        self.inner
-            .download(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
-                file,
-                PathBuf::from(path),
-            )
-            .await
-            .map_err(|e| e.into())
-            .map(|ok| {
-                AsyncIterator::new(Box::pin(
-                    ok.map(|s| serde_wasm_bindgen::to_value(&Progression::from(s)).unwrap()),
-                ))
             })
     }
 
@@ -775,6 +746,35 @@ impl Message {
 
     pub fn replied(&self) -> Option<String> {
         self.inner.replied().map(|uuid| uuid.to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[wasm_bindgen]
+pub struct AttachmentFile {
+    size: Option<usize>,
+    name: String,
+    stream: web_sys::ReadableStream,
+}
+
+#[wasm_bindgen]
+impl AttachmentFile {
+    #[wasm_bindgen(constructor)]
+    pub fn new(stream: web_sys::ReadableStream, name: String, size: Option<usize>) -> Self {
+        Self { size, name, stream }
+    }
+}
+
+impl Into<raygun::LocationStream> for AttachmentFile {
+    fn into(self) -> raygun::LocationStream {
+        LocationStream {
+            size: self.size,
+            name: self.name,
+            stream: {
+                let stream = InnerStream::from(wasm_streams::ReadableStream::from_raw(self.stream));
+                Box::pin(stream)
+            },
+        }
     }
 }
 
