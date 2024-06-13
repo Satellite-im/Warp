@@ -39,7 +39,10 @@ use warp::{
     error::Error,
     multipass::MultiPassEventKind,
     raygun::{
-        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType, DirectConversationSettings, GroupSettings, Location, LocationKind, MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState
+        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
+        ConversationType, DirectConversationSettings, GroupSettings, Location, LocationKind,
+        MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
+        MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
     },
 };
 
