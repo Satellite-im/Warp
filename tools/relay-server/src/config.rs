@@ -36,6 +36,7 @@ impl Identity {
         let engine = GeneralPurpose::new(&STANDARD, PAD);
         let keypair_bytes = Zeroizing::new(engine.decode(self.priv_key.as_bytes())?);
         let keypair = Keypair::from_protobuf_encoding(&keypair_bytes)?;
+        assert_eq!(self.peer_id, keypair.public().to_peer_id());
         Ok(keypair)
     }
 }
