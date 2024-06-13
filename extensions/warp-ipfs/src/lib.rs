@@ -368,8 +368,6 @@ impl WarpIpfs {
                 // We check the target arch since it doesnt really make much sense to have each native peer to use websocket or webrtc transport
                 // as such connections would be established through the relay
                 enable_websocket: cfg!(target_arch = "wasm32"),
-                enable_secure_websocket: cfg!(target_arch = "wasm32"),
-                enable_webrtc: cfg!(target_arch = "wasm32"),
                 ..Default::default()
             });
 
