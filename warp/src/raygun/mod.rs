@@ -108,7 +108,7 @@ pub enum MessageEvent {
 }
 
 pub enum AttachmentKind {
-    AttachedProgress(Location, Progression),
+    AttachedProgress(LocationKind, Progression),
     Pending(Result<(), Error>),
 }
 
@@ -924,6 +924,40 @@ pub enum Location {
     },
 }
 
+#[derive(Serialize, Hash, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum LocationKind {
+    /// Use [`Constellation`] to send a file from constellation
+    Constellation { path: String },
+
+    /// Use file from disk
+    Disk { path: PathBuf },
+
+    /// Stream of bytes
+    Stream { name: String },
+}
+
+impl From<&Location> for LocationKind {
+    fn from(location: &Location) -> Self {
+        match location {
+            Location::Constellation { path } => LocationKind::Constellation { path: path.clone() },
+            Location::Disk { path } => LocationKind::Disk { path: path.clone() },
+            Location::Stream { name, .. } => LocationKind::Stream { name: name.clone() },
+        }
+    }
+}
+
+impl Debug for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ty = match self {
+            Location::Constellation { path } => format!("Location::Constellation ( path: {path} )"),
+            Location::Disk { path } => format!("Location::Disk ( path: {} )", path.display()),
+            Location::Stream { name, .. } => format!("Location::Stream ( name: {name} )"),
+        };
+
+        write!(f, "{ty}")
+    }
+}
+
 impl core::hash::Hash for Location {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         match self {
@@ -948,6 +982,8 @@ impl PartialEq for Location {
         }
     }
 }
+
+impl Eq for Location {}
 
 #[async_trait::async_trait]
 pub trait RayGun:

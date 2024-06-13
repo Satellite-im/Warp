@@ -39,10 +39,7 @@ use warp::{
     error::Error,
     multipass::MultiPassEventKind,
     raygun::{
-        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
-        ConversationType, DirectConversationSettings, GroupSettings, Location, MessageEvent,
-        MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages,
-        MessagesType, PinState, RayGunEventKind, ReactionState,
+        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings, ConversationType, DirectConversationSettings, GroupSettings, Location, LocationKind, MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState
     },
 };
 
@@ -2102,14 +2099,15 @@ impl ConversationInner {
 
         let mut constellation = self.file.clone();
 
-        let files = locations
-            .iter()
-            .filter(|location| match location {
-                Location::Disk { path } => path.is_file(),
-                _ => true,
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut files = Vec::with_capacity(locations.len());
+
+        for location in locations {
+            if !matches!(&location, Location::Disk { path } if path.is_file()) {
+                continue;
+            }
+
+            files.push(location);
+        }
 
         if files.is_empty() {
             return Err(Error::NoAttachments);
@@ -2152,6 +2150,7 @@ impl ConversationInner {
             let mut streams = StreamMap::new();
 
             for file in files {
+                let kind = LocationKind::from(&file);
                 match file {
                     Location::Constellation { path } => {
                         match constellation
@@ -2160,17 +2159,17 @@ impl ConversationInner {
                             .and_then(|item| item.get_file())
                         {
                             Ok(f) => {
-                                streams.insert(file, stream::once(async { (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f)) }).boxed());
+                                streams.insert(kind, stream::once(async { (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f)) }).boxed());
                             },
                             Err(e) => {
                                 let constellation_path = PathBuf::from(&path);
                                 let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path.to_string());
-                                streams.insert(file, stream::once(async { (Progression::ProgressFailed { name, last_size: None, error: e }, None) }).boxed());
+                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name, last_size: None, error: e }, None) }).boxed());
                             },
                         }
                     }
                     Location::Stream { name, stream } => {
-                        let mut filename = PathBuf::from(name);
+                        let mut filename = name;
 
                         let original = filename.clone();
 
@@ -2203,11 +2202,9 @@ impl ConversationInner {
                         }
 
                         if skip {
-                            streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
+                            streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
                             continue;
                         }
-
-                        let file_path = path.display().to_string();
 
                         in_stack.push(filename.clone());
 
@@ -2217,7 +2214,7 @@ impl ConversationInner {
                             Ok(stream) => stream,
                             Err(e) => {
                                 error!(%conversation_id, "Error uploading {filename}: {e}");
-                                streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
+                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
                                 continue;
                             }
                         };
@@ -2245,7 +2242,7 @@ impl ConversationInner {
                             }
                         };
 
-                        streams.insert(file, stream.boxed());
+                        streams.insert(kind, stream.boxed());
                     }
                     Location::Disk { path } => {
                         let mut filename = match path.file_name() {
@@ -2284,7 +2281,7 @@ impl ConversationInner {
                         }
 
                         if skip {
-                            streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
+                            streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
                             continue;
                         }
 
@@ -2298,7 +2295,7 @@ impl ConversationInner {
                             Ok(stream) => stream,
                             Err(e) => {
                                 error!(%conversation_id, "Error uploading {filename}: {e}");
-                                streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
+                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
                                 continue;
                             }
                         };
@@ -2326,7 +2323,7 @@ impl ConversationInner {
                             }
                         };
 
-                        streams.insert(file, stream.boxed());
+                        streams.insert(kind, stream.boxed());
                     }
                 };
             }
