@@ -33,6 +33,10 @@ async fn main() -> anyhow::Result<()> {
         .finalize()
         .await;
 
+    identity
+        .tesseract()
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
+
     let profile = identity.create_identity(None, None).await?;
 
     let ident = profile.identity();

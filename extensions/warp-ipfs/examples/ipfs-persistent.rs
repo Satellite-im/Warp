@@ -1,15 +1,15 @@
+use std::path::PathBuf;
 use std::{io::ErrorKind, path::Path};
 
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
 use futures::{StreamExt, TryStreamExt};
-use std::path::PathBuf;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
+
 use warp::{
     constellation::{Constellation, Progression},
     multipass::MultiPass,
-    tesseract::Tesseract,
 };
 use warp_ipfs::{config::Config, WarpIpfsBuilder};
 
@@ -62,20 +62,18 @@ async fn setup_persistent<P: AsRef<Path>>(
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn Constellation>)> {
     let path = path.as_ref();
 
-    let tesseract = Tesseract::open_or_create(path, "tdatastore")?;
-
-    tesseract
-        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
-
     let mut config = Config::production(path);
 
     config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
     let (mut account, _, filesystem) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
+
+    account
+        .tesseract()
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     if account.get_own_identity().await.is_err() {
         account.create_identity(username, None).await?;

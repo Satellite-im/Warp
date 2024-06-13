@@ -1,17 +1,18 @@
+use std::io::Write;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::Duration;
+
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rust_ipfs::Multiaddr;
 use rustyline_async::Readline;
-use std::io::Write;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::time::Duration;
 use tracing_subscriber::EnvFilter;
+
 use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus, IdentityUpdate};
 use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
-use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Bootstrap, Config, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
@@ -57,14 +58,6 @@ async fn account(
     username: Option<&str>,
     opt: &Opt,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Option<IdentityProfile>)> {
-    let tesseract = match path.as_ref() {
-        Some(path) => Tesseract::open_or_create(path, "tdatastore")?,
-        None => Tesseract::default(),
-    };
-
-    tesseract
-        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
-
     let mut config = match path.as_ref() {
         Some(path) => Config::production(path),
         None => Config::testing(),
@@ -114,10 +107,13 @@ async fn account(
     config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
     let (mut account, _, _) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
+
+    account
+        .tesseract()
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let mut profile = None;
 
