@@ -910,14 +910,43 @@ pub enum EmbedState {
     Disable,
 }
 
-#[derive(Serialize, Hash, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
     Constellation { path: String },
 
     /// Use file from disk
     Disk { path: PathBuf },
+
+    /// Stream of bytes
+    Stream {
+        name: String,
+        stream: BoxStream<'static, Vec<u8>>,
+    },
+}
+
+impl core::hash::Hash for Location {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Location::Constellation { path } => path.hash(state),
+            Location::Disk { path } => path.hash(state),
+            Location::Stream { name, .. } => name.hash(state),
+        }
+    }
+}
+
+impl PartialEq for Location {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Location::Constellation { path: left }, Location::Constellation { path: right }) => {
+                left.eq(right)
+            }
+            (Location::Disk { path: left }, Location::Disk { path: right }) => left.eq(right),
+            (Location::Stream { name: left, .. }, Location::Stream { name: right, .. }) => {
+                left.eq(right)
+            }
+            _ => false,
+        }
+    }
 }
 
 #[async_trait::async_trait]

@@ -2152,11 +2152,11 @@ impl ConversationInner {
             let mut streams = StreamMap::new();
 
             for file in files {
-                match &file {
+                match file {
                     Location::Constellation { path } => {
                         match constellation
                             .root_directory()
-                            .get_item_by_path(path)
+                            .get_item_by_path(&path)
                             .and_then(|item| item.get_file())
                         {
                             Ok(f) => {
@@ -2168,6 +2168,84 @@ impl ConversationInner {
                                 streams.insert(file, stream::once(async { (Progression::ProgressFailed { name, last_size: None, error: e }, None) }).boxed());
                             },
                         }
+                    }
+                    Location::Stream { name, stream } => {
+                        let mut filename = PathBuf::from(name);
+
+                        let original = filename.clone();
+
+                        let current_directory = media_dir.clone();
+
+                        let mut interval = 0;
+                        let skip;
+                        loop {
+                            if in_stack.contains(&filename) || current_directory.has_item(&filename) {
+                                if interval > 2000 {
+                                    skip = true;
+                                    break;
+                                }
+                                interval += 1;
+                                let file = PathBuf::from(&original);
+                                let file_stem =
+                                    file.file_stem().and_then(OsStr::to_str).map(str::to_string);
+                                let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
+
+                                filename = match (file_stem, ext) {
+                                    (Some(filename), Some(ext)) => {
+                                        format!("{filename} ({interval}).{ext}")
+                                    }
+                                    _ => format!("{original} ({interval})"),
+                                };
+                                continue;
+                            }
+                            skip = false;
+                            break;
+                        }
+
+                        if skip {
+                            streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
+                            continue;
+                        }
+
+                        let file_path = path.display().to_string();
+
+                        in_stack.push(filename.clone());
+
+                        let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
+
+                        let mut progress = match constellation.put_stream(&filename, None, stream).await {
+                            Ok(stream) => stream,
+                            Err(e) => {
+                                error!(%conversation_id, "Error uploading {filename}: {e}");
+                                streams.insert(file, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
+                                continue;
+                            }
+                        };
+
+
+                        let directory = root_directory.clone();
+                        let filename = filename.to_string();
+
+                        let stream = async_stream::stream! {
+                            while let Some(item) = progress.next().await {
+                                match item {
+                                    item @ Progression::CurrentProgress { .. } => {
+                                        yield (item, None);
+                                    },
+                                    item @ Progression::ProgressComplete { .. } => {
+                                        let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
+                                        yield (item, file_name);
+                                        break;
+                                    },
+                                    item @ Progression::ProgressFailed { .. } => {
+                                        yield (item, None);
+                                        break;
+                                    }
+                                }
+                            }
+                        };
+
+                        streams.insert(file, stream.boxed());
                     }
                     Location::Disk { path } => {
                         let mut filename = match path.file_name() {
