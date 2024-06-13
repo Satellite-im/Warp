@@ -188,7 +188,7 @@ impl WarpIpfs {
             None => {
                 #[cfg(target_arch = "wasm32")]
                 {
-                    let mut tesseract = Tesseract::default();
+                    let tesseract = Tesseract::default();
                     _ = tesseract.load_from_storage();
                     tesseract
                 }
