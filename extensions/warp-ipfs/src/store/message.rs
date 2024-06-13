@@ -2102,15 +2102,13 @@ impl ConversationInner {
 
         let mut constellation = self.file.clone();
 
-        let mut files = Vec::with_capacity(locations.len());
-
-        for location in locations {
-            if !matches!(&location, Location::Disk { path } if path.is_file()) {
-                continue;
-            }
-
-            files.push(location);
-        }
+        let files = locations
+            .into_iter()
+            .filter(|location| match location {
+                Location::Disk { path } => path.is_file(),
+                _ => true,
+            })
+            .collect::<Vec<_>>();
 
         if files.is_empty() {
             return Err(Error::NoAttachments);
