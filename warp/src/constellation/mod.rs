@@ -188,10 +188,7 @@ pub trait Constellation:
     }
 
     /// Used to download data from the filesystem using a stream
-    async fn get_stream(
-        &self,
-        _: &str,
-    ) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
+    async fn get_stream(&self, _: &str) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
         Err(Error::Unimplemented)
     }
 
