@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 use crate::{Extension, SingleHandle};
 use anyhow::anyhow;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 use directory::Directory;
@@ -190,7 +191,7 @@ pub trait Constellation:
     async fn get_stream(
         &self,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
         Err(Error::Unimplemented)
     }
 

@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, ffi::OsStr, path::PathBuf, sync::Arc};
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 use futures::{
@@ -237,7 +238,7 @@ impl FileStore {
     pub async fn get_stream(
         &self,
         name: impl Into<String>,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_sender
@@ -315,7 +316,7 @@ impl FileStore {
     }
 }
 
-type GetStream = BoxStream<'static, Result<Vec<u8>, Error>>;
+type GetStream = BoxStream<'static, Result<Bytes, Error>>;
 type GetBufferFutResult = BoxFuture<'static, Result<Vec<u8>, Error>>;
 enum FileTaskCommand {
     Put {
@@ -965,7 +966,7 @@ impl FileTask {
     }
 
     /// Used to download data from the filesystem using a stream
-    fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
@@ -981,8 +982,8 @@ impl FileTask {
 
             for await data in cat_stream {
                 match data {
-                    Ok(data) => yield Ok(data.into()),
-                    Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
+                    Ok(data) => yield Ok(data),
+                    Err(e) => yield Err(Error::from(anyhow::Error::from(e))),
                 }
             }
 

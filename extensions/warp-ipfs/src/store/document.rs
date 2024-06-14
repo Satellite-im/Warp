@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{
     stream::{self, BoxStream},
@@ -533,7 +534,7 @@ impl FileAttachmentDocument {
         ipfs: &Ipfs,
         members: &[PeerId],
         timeout: Option<Duration>,
-    ) -> BoxStream<'static, Result<Vec<u8>, Error>> {
+    ) -> BoxStream<'static, Result<Bytes, Error>> {
         let link = match Cid::from_str(&self.data) {
             Ok(link) => link,
             Err(e) => return stream::once(async { Err(anyhow::Error::from(e).into()) }).boxed(),
@@ -544,12 +545,7 @@ impl FileAttachmentDocument {
             .cat(link)
             .providers(members)
             .timeout(timeout.unwrap_or(Duration::from_secs(60)))
-            .map(|result| {
-                result
-                    .map(|b| b.into())
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
-            });
+            .map(|result| result.map_err(anyhow::Error::from).map_err(Error::from));
 
         stream.boxed()
     }

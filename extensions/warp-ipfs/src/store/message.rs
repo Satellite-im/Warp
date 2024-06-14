@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use chrono::Utc;
 use either::Either;
 use futures_timeout::TimeoutExt;
@@ -73,7 +74,7 @@ use super::{
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
-pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
+pub type DownloadStream = BoxStream<'static, Result<Bytes, Error>>;
 
 enum MessagingCommand {
     Receiver {
@@ -2385,7 +2386,7 @@ impl ConversationInner {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
         let conversation = self.get(conversation_id).await?;
 
         let members = conversation

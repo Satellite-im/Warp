@@ -51,6 +51,7 @@ bs58.workspace = true
 hex.workspace = true
 
 # Misc
+bytes.workspace = true
 dyn-clone.workspace = true
 uuid.workspace = true
 derive_more.workspace = true

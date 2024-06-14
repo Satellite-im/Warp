@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc::channel;
 use futures::future::BoxFuture;
@@ -1603,7 +1604,7 @@ impl RayGunAttachment for WarpIpfs {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
         self.messaging_store()?
             .download_stream(conversation_id, message_id, file)
             .await
@@ -1733,7 +1734,7 @@ impl Constellation for WarpIpfs {
     async fn get_stream(
         &self,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
         self.file_store()?.get_stream(name).await
     }
 

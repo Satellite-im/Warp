@@ -6,6 +6,7 @@ use crate::crypto::DID;
 use crate::error::Error;
 use crate::{Extension, SingleHandle};
 
+use bytes::Bytes;
 use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
@@ -1109,7 +1110,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Uuid,
         _: Uuid,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, Error>>, Error> {
         Err(Error::Unimplemented)
     }
 }
