@@ -2196,6 +2196,53 @@ impl IdentityStore {
         Ok(identity.into())
     }
 
+    pub async fn profile_picture(&self) -> Result<IdentityImage, Error> {
+        if self.config.store_setting().disable_images {
+            return Err(Error::InvalidIdentityPicture);
+        }
+
+        let document = self.own_identity_document().await?;
+
+        if let Some(cid) = document.metadata.profile_picture {
+            return get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
+                .await
+                .map_err(|_| Error::InvalidIdentityPicture);
+        }
+
+        if let Some(cb) = self
+            .config
+            .store_setting()
+            .default_profile_picture
+            .as_deref()
+        {
+            let identity = document.resolve()?;
+            let (picture, ty) = cb(&identity)?;
+            let mut image = IdentityImage::default();
+            image.set_data(picture);
+            image.set_image_type(ty);
+
+            return Ok(image);
+        }
+
+        Err(Error::InvalidIdentityPicture)
+    }
+
+    pub async fn profile_banner(&self) -> Result<IdentityImage, Error> {
+        if self.config.store_setting().disable_images {
+            return Err(Error::InvalidIdentityPicture);
+        }
+
+        let document = self.own_identity_document().await?;
+
+        if let Some(cid) = document.metadata.profile_picture {
+            return get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
+                .await
+                .map_err(|_| Error::InvalidIdentityBanner);
+        }
+
+        Err(Error::InvalidIdentityPicture)
+    }
+
     #[tracing::instrument(skip(self))]
     pub async fn identity_picture(&self, did: &DID) -> Result<IdentityImage, Error> {
         if self.config.store_setting().disable_images {

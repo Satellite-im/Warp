@@ -70,6 +70,7 @@ pub trait MultiPass:
     + IdentityInformation
     + MultiPassImportExport
     + Friends
+    + LocalIdentity
     + MultiPassEvent
     + Sync
     + Send
@@ -85,19 +86,24 @@ pub trait MultiPass:
 
     /// Obtain an [`Identity`] using [`Identifier`]
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error>;
+}
 
-    /// Obtain your own [`Identity`]
-    async fn get_own_identity(&self) -> Result<Identity, Error> {
-        self.get_identity(Identifier::own())
-            .await
-            .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))
-    }
+dyn_clone::clone_trait_object!(MultiPass);
+
+#[async_trait::async_trait]
+pub trait LocalIdentity: Sync + Send {
+    /// Reference to the local [`Identity`]
+    async fn identity(&self) -> Result<Identity, Error>;
+
+    /// Reference to the profile picture
+    async fn profile_picture(&self) -> Result<IdentityImage, Error>;
+
+    /// Reference to the profile picture
+    async fn profile_banner(&self) -> Result<IdentityImage, Error>;
 
     /// Update your own [`Identity`] using [`IdentityUpdate`]
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
 }
-
-dyn_clone::clone_trait_object!(MultiPass);
 
 #[async_trait::async_trait]
 pub trait MultiPassImportExport: Sync + Send {
