@@ -490,13 +490,6 @@ impl IdentityStore {
                     .config
                     .store_setting()
                     .auto_push
-                    .map(|i| {
-                        if i.as_millis() < 300000 {
-                            Duration::from_millis(300000)
-                        } else {
-                            i
-                        }
-                    })
                     .unwrap_or(Duration::from_millis(300000));
 
                 let mut tick = Delay::new(interval);
@@ -928,11 +921,15 @@ impl IdentityStore {
         if self.config.store_setting().announce_to_mesh {
             let kp = self.ipfs.keypair();
             let document = self.own_identity_document().await?;
+            tracing::debug!("announcing identity to mesh");
             let payload = PayloadBuilder::new(kp, document)
                 .from_ipfs(&self.ipfs)
                 .await?;
-            let bytes = serde_json::to_vec(&payload)?;
-            _ = self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await;
+            let bytes = payload.to_bytes()?;
+            match self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await {
+                Ok(_) => tracing::debug!("identity announced to mesh"),
+                Err(_) => tracing::warn!("unable to announce identity to mesh"),
+            }
         }
 
         Ok(())
