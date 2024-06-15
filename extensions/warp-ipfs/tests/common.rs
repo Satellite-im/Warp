@@ -52,19 +52,19 @@ pub async fn mesh_connect(nodes: Vec<Ipfs>) -> anyhow::Result<()> {
 pub async fn create_account(
     username: Option<&str>,
     passphrase: Option<&str>,
-    context: Option<String>,
+    _: Option<String>,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn Constellation>, DID, Identity)> {
     let tesseract = Tesseract::default();
     tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
     *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
     config.ipfs_setting_mut().memory_transport = true;
-    config.store_setting_mut().discovery = Discovery::Namespace {
-        namespace: context,
-        discovery_type: Default::default(),
-    };
+    config.store_setting_mut().discovery = Discovery::None;
     config.store_setting_mut().share_platform = true;
     config.ipfs_setting_mut().relay_client.relay_address = vec![];
+    config.store_setting_mut().announce_to_mesh = true;
+    config.store_setting_mut().auto_push = Some(Duration::from_secs(1));
+
     *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, _, fs) = WarpIpfsBuilder::default()
