@@ -16,7 +16,7 @@ async fn update_name(account: &mut dyn MultiPass, name: &str) -> Result<(), Erro
     account
         .update_identity(IdentityUpdate::Username(name.to_string()))
         .await?;
-    let ident = account.get_own_identity().await?;
+    let ident = account.identity().await?;
     web_log!("Updated Identity: {}", serde_json::to_string(&ident)?);
     Ok(())
 }
@@ -25,7 +25,7 @@ async fn update_status(account: &mut dyn MultiPass, status: &str) -> Result<(), 
     account
         .update_identity(IdentityUpdate::StatusMessage(Some(status.to_string())))
         .await?;
-    let ident = account.get_own_identity().await?;
+    let ident = account.identity().await?;
     web_log!("Updated Identity: {}", serde_json::to_string(&ident)?);
     Ok(())
 }
