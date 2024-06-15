@@ -108,7 +108,7 @@ pub enum MessageEvent {
 }
 
 pub enum AttachmentKind {
-    AttachedProgress(Location, Progression),
+    AttachedProgress(LocationKind, Progression),
     Pending(Result<(), Error>),
 }
 
@@ -910,15 +910,80 @@ pub enum EmbedState {
     Disable,
 }
 
-#[derive(Serialize, Hash, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
     Constellation { path: String },
 
     /// Use file from disk
     Disk { path: PathBuf },
+
+    /// Stream of bytes
+    Stream {
+        name: String,
+        stream: BoxStream<'static, Vec<u8>>,
+    },
 }
+
+#[derive(Serialize, Hash, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum LocationKind {
+    /// Use [`Constellation`] to send a file from constellation
+    Constellation { path: String },
+
+    /// Use file from disk
+    Disk { path: PathBuf },
+
+    /// Stream of bytes
+    Stream { name: String },
+}
+
+impl From<&Location> for LocationKind {
+    fn from(location: &Location) -> Self {
+        match location {
+            Location::Constellation { path } => LocationKind::Constellation { path: path.clone() },
+            Location::Disk { path } => LocationKind::Disk { path: path.clone() },
+            Location::Stream { name, .. } => LocationKind::Stream { name: name.clone() },
+        }
+    }
+}
+
+impl Debug for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ty = match self {
+            Location::Constellation { path } => format!("Location::Constellation ( path: {path} )"),
+            Location::Disk { path } => format!("Location::Disk ( path: {} )", path.display()),
+            Location::Stream { name, .. } => format!("Location::Stream ( name: {name} )"),
+        };
+
+        write!(f, "{ty}")
+    }
+}
+
+impl core::hash::Hash for Location {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Location::Constellation { path } => path.hash(state),
+            Location::Disk { path } => path.hash(state),
+            Location::Stream { name, .. } => name.hash(state),
+        }
+    }
+}
+
+impl PartialEq for Location {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Location::Constellation { path: left }, Location::Constellation { path: right }) => {
+                left.eq(right)
+            }
+            (Location::Disk { path: left }, Location::Disk { path: right }) => left.eq(right),
+            (Location::Stream { name: left, .. }, Location::Stream { name: right, .. }) => {
+                left.eq(right)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Location {}
 
 #[async_trait::async_trait]
 pub trait RayGun:
