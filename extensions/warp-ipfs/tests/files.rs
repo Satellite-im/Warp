@@ -7,7 +7,16 @@ mod test {
 
     use crate::common::{create_account, PROFILE_IMAGE};
 
-    #[tokio::test]
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test as async_test;
+    
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    use tokio::test as async_test;
+
+    #[async_test]
     async fn create_directory() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -17,7 +26,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn upload_file() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -27,7 +36,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn upload_file_stream() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -49,7 +58,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn get_file() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -63,7 +72,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn get_file_stream() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -77,7 +86,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn upload_file_to_directory() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -91,7 +100,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn rename_file_via_constellation() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -105,7 +114,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn rename_directory_via_constellation() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -119,7 +128,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn rename_file_in_directory() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -136,7 +145,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn remove_file() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
@@ -150,7 +159,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn check_thumbnail_of_file() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();

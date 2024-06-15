@@ -13,7 +13,16 @@ mod test {
         },
     };
 
-    #[tokio::test]
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test as async_test;
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use tokio::test as async_test;
+
+    #[async_test]
     async fn create_empty_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![(
             None,
@@ -52,7 +61,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn update_group_conversation_name() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![(
             None,
@@ -120,7 +129,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn create_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::create_group_conversation".into())),
@@ -193,7 +202,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn destroy_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::destroy_group_conversation".into())),
@@ -270,7 +279,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn member_change_name_to_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -437,7 +446,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn add_recipient_to_conversation_to_open_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -601,7 +610,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn add_recipient_to_conversation_to_close_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -754,7 +763,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn attempt_to_add_blocked_recipient() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -862,7 +871,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn remove_recipient_from_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -1077,7 +1086,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn send_message_in_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -1234,7 +1243,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn remove_recipient_from_conversation_when_blocked() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -1392,7 +1401,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn delete_group_conversation_when_blocking_creator() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
