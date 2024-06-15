@@ -32,10 +32,10 @@ fn main() {
 
 // assumes all spaces are argument separators. args containing spaces will yield unexpected results (such as strings)
 fn get_cmd(cmd_str: &str) -> Command {
-    let mut split = cmd_str.split(" ");
+    let mut split = cmd_str.split(' ');
 
     // first item is the program, then the rest of the items are the args
-    let mut cmd = Command::new(split.nth(0).unwrap());
+    let mut cmd = Command::new(split.next().unwrap());
     for arg in split {
         cmd.arg(arg);
     }

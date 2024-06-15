@@ -24,11 +24,11 @@
       }
 
       let warp_a = await account()
-      let identity_a = await warp_a.multipass.get_own_identity()
+      let identity_a = await warp_a.multipass.identity()
       console.log(identity_a)
 
       let warp_b = await account()
-      let identity_b = await warp_b.multipass.get_own_identity()
+      let identity_b = await warp_b.multipass.identity()
       console.log(identity_b)
 
       
