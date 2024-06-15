@@ -6,6 +6,7 @@ use crate::{
         identity::{self, Identity, IdentityProfile},
         MultiPass,
     },
+    tesseract::Tesseract,
 };
 use futures::StreamExt;
 use js_sys::Uint8Array;
@@ -51,6 +52,10 @@ impl MultiPassBox {
 
     pub async fn identity(&self) -> Result<Identity, JsError> {
         self.inner.identity().await.map_err(|e| e.into())
+    }
+
+    pub fn tesseract(&self) -> Tesseract {
+        self.inner.tesseract()
     }
 
     pub async fn update_identity(
