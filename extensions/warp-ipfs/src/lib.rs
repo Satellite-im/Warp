@@ -190,6 +190,7 @@ impl WarpIpfs {
                 {
                     let tesseract = Tesseract::default();
                     _ = tesseract.load_from_storage();
+                    tesseract.set_autosave();
                     tesseract
                 }
                 #[cfg(not(target_arch = "wasm32"))]
