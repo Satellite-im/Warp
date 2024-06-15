@@ -38,8 +38,8 @@
       let asynciterator_b = await account_b.multipass_subscribe()
       let subscribe_b = { [Symbol.asyncIterator]() { return asynciterator_b } }
 
-      let identity_a = await account_a.get_own_identity()
-      let identity_b = await account_b.get_own_identity()
+      let identity_a = await account_a.identity()
+      let identity_b = await account_b.identity()
 
       console.log(`${username(identity_a)} with ${identity_a.did_key()}` )
       console.log(`${username(identity_b)} with ${identity_b.did_key()}` )
