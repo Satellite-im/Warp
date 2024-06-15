@@ -1,4 +1,5 @@
-use futures::{stream, StreamExt};
+use futures::{stream, Future, StreamExt};
+use futures_timeout::TimeoutExt;
 use rust_ipfs::{Ipfs, Multiaddr, PeerId, Protocol};
 use warp::{
     constellation::Constellation,
@@ -12,6 +13,7 @@ use warp_ipfs::{
     WarpIpfsBuilder,
 };
 
+use std::time::Duration;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 pub async fn node_info(nodes: Vec<Ipfs>) -> Vec<(Ipfs, PeerId, Vec<Multiaddr>)> {
@@ -177,6 +179,14 @@ pub async fn create_accounts_and_chat(
     mesh_connect(nodes).await?;
 
     Ok(accounts)
+}
+
+#[allow(dead_code)]
+pub async fn timeout<F>(duration: Duration, future: F) -> Result<F::Output, std::io::Error>
+where
+    F: Future,
+{
+    future.timeout(duration).await
 }
 
 #[allow(dead_code)]
