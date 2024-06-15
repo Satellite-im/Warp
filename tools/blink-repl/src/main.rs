@@ -374,7 +374,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let own_identity = loop {
-        match multipass.get_own_identity().await {
+        match multipass.identity().await {
             Ok(ident) => break ident,
             Err(e) => match e {
                 warp::error::Error::MultiPassExtensionUnavailable => {

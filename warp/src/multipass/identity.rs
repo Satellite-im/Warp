@@ -1,4 +1,7 @@
-use std::fmt::{Debug, Display};
+use std::{
+    fmt::{Debug, Display},
+    vec,
+};
 
 use crate::{constellation::file::FileType, crypto::DID, error::Error};
 
@@ -322,14 +325,18 @@ impl Identity {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum Identifier {
     DID(DID),
     DIDList(Vec<DID>),
     Username(String),
-    #[default]
-    Own,
+}
+
+impl Default for Identifier {
+    fn default() -> Self {
+        Identifier::DIDList(vec![])
+    }
 }
 
 impl Identifier {
@@ -343,10 +350,6 @@ impl Identifier {
 
     pub fn did_keys(keys: Vec<DID>) -> Self {
         Self::DIDList(keys)
-    }
-
-    pub fn own() -> Self {
-        Self::Own
     }
 }
 

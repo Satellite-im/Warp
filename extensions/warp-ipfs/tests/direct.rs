@@ -421,6 +421,135 @@ mod test {
     }
 
     #[async_test]
+    async fn send_attachment_stream_and_download_attachment_in_conversation() -> anyhow::Result<()>
+    {
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::send_attachment_stream_and_download_attachment_in_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::send_attachment_stream_and_download_attachment_in_conversation".into()),
+            ),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+
+        chat_a.create_conversation(&did_b).await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
+        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+
+        let (_, mut stream) = chat_a
+            .attach(
+                id_a,
+                None,
+                vec![Location::Stream {
+                    name: "image.png".into(),
+                    stream: futures::stream::once(async { PROFILE_IMAGE.to_vec() }).boxed(),
+                }],
+                vec![],
+            )
+            .await?;
+
+        while let Some(event) = stream.next().await {
+            match event {
+                AttachmentKind::AttachedProgress(
+                    _location,
+                    Progression::CurrentProgress { .. },
+                ) => {}
+                AttachmentKind::AttachedProgress(
+                    _location,
+                    Progression::ProgressComplete { name, total },
+                ) => {
+                    assert_eq!(name, "image.png");
+                    assert_eq!(total, Some(PROFILE_IMAGE.len()));
+                }
+                AttachmentKind::AttachedProgress(_location, Progression::ProgressFailed { .. }) => {
+                    unreachable!("should not fail")
+                }
+                AttachmentKind::Pending(result) => {
+                    result?;
+                }
+            }
+        }
+
+        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::MessageSent {
+                    conversation_id,
+                    message_id,
+                }) = conversation_a.next().await
+                {
+                    break chat_a.get_message(conversation_id, message_id).await;
+                }
+            }
+        })
+        .await??;
+
+        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::MessageReceived {
+                    conversation_id,
+                    message_id,
+                }) = conversation_b.next().await
+                {
+                    break chat_b.get_message(conversation_id, message_id).await;
+                }
+            }
+        })
+        .await??;
+
+        assert_eq!(message_a, message_b);
+        assert_eq!(message_a.message_type(), MessageType::Attachment);
+        let attachments = message_a.attachments();
+        assert!(!attachments.is_empty());
+
+        let file = attachments.first().expect("attachment exist");
+
+        assert_eq!(file.name(), "image.png");
+
+        let stream = chat_b
+            .download_stream(id_a, message_a.id(), "image.png")
+            .await?;
+
+        let data = stream.try_collect::<Vec<_>>().await?.concat();
+
+        assert_eq!(data, PROFILE_IMAGE);
+        Ok(())
+    }
+
+    #[async_test]
     async fn delete_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
