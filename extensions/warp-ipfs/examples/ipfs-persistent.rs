@@ -77,7 +77,7 @@ async fn setup_persistent<P: AsRef<Path>>(
         .finalize()
         .await;
 
-    if account.get_own_identity().await.is_err() {
+    if account.identity().await.is_err() {
         account.create_identity(username, None).await?;
     }
     Ok((account, filesystem))

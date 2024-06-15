@@ -46,8 +46,8 @@ pub async fn run() -> Result<(), JsError> {
     let mut account_b = account(None).await?;
     let mut subscribe_b = account_b.multipass_subscribe().await?;
 
-    let ident_a = account_a.get_own_identity().await?;
-    let ident_b = account_b.get_own_identity().await?;
+    let ident_a = account_a.identity().await?;
+    let ident_b = account_b.identity().await?;
 
     body.append_p(&format!(
         "{} with {}",

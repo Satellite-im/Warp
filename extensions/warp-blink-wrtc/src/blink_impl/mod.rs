@@ -96,7 +96,7 @@ impl BlinkImpl {
         tokio::spawn(async move {
             let f = async move {
                 let identity = loop {
-                    if let Ok(identity) = account.get_own_identity().await {
+                    if let Ok(identity) = account.identity().await {
                         break identity;
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await
