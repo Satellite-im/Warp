@@ -135,13 +135,13 @@ mod test {
             )
             .await?;
 
-        let old_identity = account.get_own_identity().await?;
+        let old_identity = account.identity().await?;
 
         account
             .update_identity(IdentityUpdate::Username("JohnDoe2.0".into()))
             .await?;
 
-        let updated_identity = account.get_own_identity().await?;
+        let updated_identity = account.identity().await?;
 
         assert_ne!(old_identity.username(), updated_identity.username());
 
@@ -165,13 +165,13 @@ mod test {
             )
             .await?;
 
-        let old_identity = account.get_own_identity().await?;
+        let old_identity = account.identity().await?;
 
         account
             .update_identity(IdentityUpdate::StatusMessage(Some("Blast off".into())))
             .await?;
 
-        let updated_identity = account.get_own_identity().await?;
+        let updated_identity = account.identity().await?;
 
         assert_eq!(old_identity.status_message(), None);
 
