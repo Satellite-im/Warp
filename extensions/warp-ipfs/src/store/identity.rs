@@ -928,11 +928,15 @@ impl IdentityStore {
         if self.config.store_setting().announce_to_mesh {
             let kp = self.ipfs.keypair();
             let document = self.own_identity_document().await?;
+            tracing::debug!("announcing identity to mesh");
             let payload = PayloadBuilder::new(kp, document)
                 .from_ipfs(&self.ipfs)
                 .await?;
-            let bytes = serde_json::to_vec(&payload)?;
-            _ = self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await;
+            let bytes = payload.to_bytes()?;
+            match self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await {
+                Ok(_) => tracing::debug!("identity announced to mesh"),
+                Err(_) => tracing::warn!("unable to announce identity to mesh"),
+            }
         }
 
         Ok(())
@@ -2194,6 +2198,53 @@ impl IdentityStore {
     pub async fn own_identity(&self) -> Result<Identity, Error> {
         let identity = self.own_identity_document().await?;
         Ok(identity.into())
+    }
+
+    pub async fn profile_picture(&self) -> Result<IdentityImage, Error> {
+        if self.config.store_setting().disable_images {
+            return Err(Error::InvalidIdentityPicture);
+        }
+
+        let document = self.own_identity_document().await?;
+
+        if let Some(cid) = document.metadata.profile_picture {
+            return get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
+                .await
+                .map_err(|_| Error::InvalidIdentityPicture);
+        }
+
+        if let Some(cb) = self
+            .config
+            .store_setting()
+            .default_profile_picture
+            .as_deref()
+        {
+            let identity = document.resolve()?;
+            let (picture, ty) = cb(&identity)?;
+            let mut image = IdentityImage::default();
+            image.set_data(picture);
+            image.set_image_type(ty);
+
+            return Ok(image);
+        }
+
+        Err(Error::InvalidIdentityPicture)
+    }
+
+    pub async fn profile_banner(&self) -> Result<IdentityImage, Error> {
+        if self.config.store_setting().disable_images {
+            return Err(Error::InvalidIdentityPicture);
+        }
+
+        let document = self.own_identity_document().await?;
+
+        if let Some(cid) = document.metadata.profile_picture {
+            return get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
+                .await
+                .map_err(|_| Error::InvalidIdentityBanner);
+        }
+
+        Err(Error::InvalidIdentityPicture)
     }
 
     #[tracing::instrument(skip(self))]
