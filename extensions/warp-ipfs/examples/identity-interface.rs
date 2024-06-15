@@ -117,7 +117,7 @@ async fn account(
 
     let mut profile = None;
 
-    if account.get_own_identity().await.is_err() {
+    if account.identity().await.is_err() {
         match (opt.import.clone(), opt.phrase.clone()) {
             (Some(path), Some(passphrase)) => {
                 account
@@ -175,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
         }
         None => {
             println!("Obtained identity....");
-            account.get_own_identity().await?
+            account.identity().await?
         }
     };
 
@@ -747,8 +747,8 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 Some("own") | None => {
-                                    match account.get_identity(Identifier::own()).await {
-                                        Ok(identity) => identity,
+                                    match account.identity().await {
+                                        Ok(identity) => vec![identity],
                                         Err(e) => {
                                             writeln!(stdout, "Error obtaining own identity: {e}")?;
                                             continue;

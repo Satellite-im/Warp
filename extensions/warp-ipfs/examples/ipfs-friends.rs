@@ -38,8 +38,8 @@ async fn main() -> anyhow::Result<()> {
     let mut account_b = account(None).await?;
     let mut subscribe_b = account_b.multipass_subscribe().await?;
 
-    let ident_a = account_a.get_own_identity().await?;
-    let ident_b = account_b.get_own_identity().await?;
+    let ident_a = account_a.identity().await?;
+    let ident_b = account_b.identity().await?;
 
     println!("{} with {}", username(&ident_a), ident_a.did_key());
 

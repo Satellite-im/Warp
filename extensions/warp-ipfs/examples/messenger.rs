@@ -131,7 +131,7 @@ async fn setup<P: AsRef<Path>>(
 
     let mut profile = None;
 
-    if account.get_own_identity().await.is_err() {
+    if account.identity().await.is_err() {
         match (opt.import.clone(), opt.phrase.clone()) {
             (Some(path), Some(passphrase)) => {
                 account
@@ -196,7 +196,7 @@ async fn main() -> anyhow::Result<()> {
         }
         None => {
             println!("Obtained identity....");
-            new_account.get_own_identity().await?
+            new_account.identity().await?
         }
     };
 
@@ -1800,7 +1800,6 @@ impl FromStr for Command {
                         }
                         Identifier::did_keys(keys)
                     }
-                    Some("own") | None => Identifier::own(),
                     _ => {
                         return Err(anyhow::anyhow!(
                             "/lookup <username | publickey> [username | publickey ...]"

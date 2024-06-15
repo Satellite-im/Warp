@@ -46,8 +46,8 @@ use warp::multipass::identity::{
     Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, MultiPass,
-    MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
+    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity,
+    MultiPass, MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
@@ -855,10 +855,27 @@ impl MultiPass for WarpIpfs {
             Identifier::DID(pk) => LookupBy::DidKey(pk),
             Identifier::Username(username) => LookupBy::Username(username),
             Identifier::DIDList(list) => LookupBy::DidKeys(list),
-            Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
         };
 
         store.lookup(kind).await
+    }
+}
+
+#[async_trait::async_trait]
+impl LocalIdentity for WarpIpfs {
+    async fn identity(&self) -> Result<Identity, Error> {
+        let store = self.identity_store(true).await?;
+        store.own_identity().await
+    }
+
+    async fn profile_picture(&self) -> Result<IdentityImage, Error> {
+        let store = self.identity_store(true).await?;
+        store.profile_picture().await
+    }
+
+    async fn profile_banner(&self) -> Result<IdentityImage, Error> {
+        let store = self.identity_store(true).await?;
+        store.profile_banner().await
     }
 
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {

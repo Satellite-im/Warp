@@ -45,7 +45,7 @@
       await multipass.update_identity(wasm.IdentityUpdate.Username, wasm.generate_name())
       await multipass.update_identity(wasm.IdentityUpdate.StatusMessage, "New status message")
 
-      let updated_identity = await multipass.get_own_identity()
+      let updated_identity = await multipass.identity()
       console.log(`Done updating identity:`)
       log_identity(updated_identity)
 
