@@ -1,18 +1,20 @@
+use std::env::temp_dir;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use futures::stream::BoxStream;
 use rust_ipfs::Multiaddr;
 use rustyline_async::{Readline, SharedWriter};
-use std::env::temp_dir;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::time::Duration;
 use strum::IntoEnumIterator;
 use tokio_stream::StreamMap;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
+
 use warp::constellation::{Constellation, Progression};
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
@@ -23,7 +25,6 @@ use warp::raygun::{
     MessageEventKind, MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState,
     RayGun, ReactionState,
 };
-use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
@@ -75,19 +76,6 @@ async fn setup<P: AsRef<Path>>(
     (Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>),
     Option<IdentityProfile>,
 )> {
-    let tesseract = match path.as_ref() {
-        Some(path) => {
-            let path = path.as_ref();
-            let tesseract = Tesseract::from_file(path.join("tesseract_store")).unwrap_or_default();
-            tesseract.set_file(path.join("tesseract_store"));
-            tesseract.set_autosave();
-            tesseract
-        }
-        None => Tesseract::default(),
-    };
-
-    tesseract.unlock(passphrase.as_bytes())?;
-
     let mut config = match path.as_ref() {
         Some(path) => warp_ipfs::config::Config::production(path),
         None => warp_ipfs::config::Config::testing(),
@@ -135,10 +123,11 @@ async fn setup<P: AsRef<Path>>(
     config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
     let (mut account, raygun, filesystem) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
+
+    account.tesseract().unlock(passphrase.as_bytes())?;
 
     let mut profile = None;
 

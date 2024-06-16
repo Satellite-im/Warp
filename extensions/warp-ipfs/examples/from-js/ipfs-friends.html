@@ -10,16 +10,15 @@
       console.log(wasm)
 
       async function account(username) {
-        let tesseract = new wasm.Tesseract()
-        tesseract.load_from_storage()
-
-        const passphrase = new Uint8Array([1,2,3,4,5,6,7,8,9,0]);
-        tesseract.unlock(passphrase)
-        
-        let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), tesseract)
+        let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), null)
         
         let multipass = ipfs.multipass
         
+        let tesseract = multipass.tesseract()
+
+        const passphrase = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+        tesseract.unlock(passphrase)
+
         let profile = await multipass.create_identity(username, null)
 
         return multipass

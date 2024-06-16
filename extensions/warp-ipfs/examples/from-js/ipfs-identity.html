@@ -9,19 +9,17 @@
     init().then(async (_exports) => {
       console.log(wasm)
 
-      let tesseract = new wasm.Tesseract()
-      tesseract.load_from_storage()
-      console.log(`loaded data`)
-
-      const passphrase = new Uint8Array([1,2,3,4,5,6,7,8,9,0]);
-      tesseract.unlock(passphrase)
-      console.log(`unlocked`)
-
-      let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), tesseract)
+      let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), null)
       console.log(ipfs)
       
       let multipass = ipfs.multipass
       console.log(multipass)
+
+      let tesseract = multipass.tesseract()
+
+      const passphrase = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+      tesseract.unlock(passphrase)
+      console.log(`unlocked`)
 
       //let identity = await multipass.create_identity("username", "crop cash unable insane eight faith inflict route frame loud box vibrant")
       let profile = await multipass.create_identity(null, null)
