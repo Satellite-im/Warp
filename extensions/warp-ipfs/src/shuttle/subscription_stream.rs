@@ -5,8 +5,9 @@ use rust_ipfs::libp2p::gossipsub::Message;
 use rust_ipfs::Ipfs;
 use tokio_stream::StreamMap;
 
-use crate::store::identity::IdentityStorage;
-use crate::PeerTopic;
+use crate::store::topics::PeerTopic;
+
+use super::store::identity::IdentityStorage;
 
 #[derive(Clone)]
 pub struct Subscriptions {

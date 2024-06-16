@@ -3,10 +3,9 @@ use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use warp::crypto::{did_key::CoreSign, DID};
 
-use self::document::IdentityDocument;
+use crate::store::document::identity::IdentityDocument;
 
 pub mod client;
-pub mod document;
 pub mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;

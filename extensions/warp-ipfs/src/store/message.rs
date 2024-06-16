@@ -48,6 +48,7 @@ use warp::{
 
 use crate::{
     config,
+    shuttle::message::client::MessageCommand,
     store::{
         conversation::{ConversationDocument, MessageDocument},
         discovery::Discovery,
@@ -94,7 +95,7 @@ impl MessageStore {
         file: FileStore,
         event: EventSubscription<RayGunEventKind>,
         identity: IdentityStore,
-        message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
+        message_command: mpsc::Sender<MessageCommand>,
     ) -> Self {
         info!("Initializing MessageStore");
 
@@ -639,7 +640,7 @@ struct ConversationInner {
     conversation_mailbox_task_tx: mpsc::Sender<Result<(Uuid, Vec<MessageDocument>), Error>>,
     pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
 
-    message_command: mpsc::Sender<shuttle::message::client::MessageCommand>,
+    message_command: mpsc::Sender<MessageCommand>,
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
 }
@@ -711,7 +712,7 @@ impl ConversationInner {
                         let (tx, rx) = futures::channel::oneshot::channel();
                         let _ = message_command
                             .clone()
-                            .send(shuttle::message::client::MessageCommand::FetchMailbox {
+                            .send(MessageCommand::FetchMailbox {
                                 peer_id,
                                 conversation_id,
                                 response: tx,
@@ -772,7 +773,7 @@ impl ConversationInner {
                                 for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
                                     let _ = message_command
                                         .clone()
-                                        .send(shuttle::message::client::MessageCommand::MessageDelivered {
+                                        .send(MessageCommand::MessageDelivered {
                                             peer_id,
                                             conversation_id,
                                             message_id: message_document.id,
@@ -1590,7 +1591,7 @@ impl ConversationInner {
                     let _ = self
                         .message_command
                         .clone()
-                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                        .send(MessageCommand::InsertMessage {
                             peer_id,
                             conversation_id,
                             recipients: recipients.clone(),
@@ -1699,7 +1700,7 @@ impl ConversationInner {
                     let _ = self
                         .message_command
                         .clone()
-                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                        .send(MessageCommand::InsertMessage {
                             peer_id,
                             conversation_id,
                             recipients: recipients.clone(),
@@ -1789,7 +1790,7 @@ impl ConversationInner {
                     let _ = self
                         .message_command
                         .clone()
-                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                        .send(MessageCommand::InsertMessage {
                             peer_id,
                             conversation_id,
                             recipients: recipients.clone(),
@@ -1829,7 +1830,7 @@ impl ConversationInner {
                 let _ = self
                     .message_command
                     .clone()
-                    .send(shuttle::message::client::MessageCommand::RemoveMessage {
+                    .send(MessageCommand::RemoveMessage {
                         peer_id,
                         conversation_id,
                         message_id,
@@ -1915,7 +1916,7 @@ impl ConversationInner {
                     let _ = self
                         .message_command
                         .clone()
-                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                        .send(MessageCommand::InsertMessage {
                             peer_id,
                             conversation_id,
                             recipients: recipients.clone(),
@@ -2043,7 +2044,7 @@ impl ConversationInner {
                     let _ = self
                         .message_command
                         .clone()
-                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                        .send(MessageCommand::InsertMessage {
                             peer_id,
                             conversation_id,
                             recipients: recipients.clone(),
@@ -2246,85 +2247,93 @@ impl ConversationInner {
                         streams.insert(kind, stream.boxed());
                     }
                     Location::Disk { path } => {
-                        let mut filename = match path.file_name() {
-                            Some(file) => file.to_string_lossy().to_string(),
-                            None => continue,
-                        };
-
-                        let original = filename.clone();
-
-                        let current_directory = media_dir.clone();
-
-                        let mut interval = 0;
-                        let skip;
-                        loop {
-                            if in_stack.contains(&filename) || current_directory.has_item(&filename) {
-                                if interval > 2000 {
-                                    skip = true;
-                                    break;
-                                }
-                                interval += 1;
-                                let file = PathBuf::from(&original);
-                                let file_stem =
-                                    file.file_stem().and_then(OsStr::to_str).map(str::to_string);
-                                let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
-
-                                filename = match (file_stem, ext) {
-                                    (Some(filename), Some(ext)) => {
-                                        format!("{filename} ({interval}).{ext}")
-                                    }
-                                    _ => format!("{original} ({interval})"),
-                                };
-                                continue;
-                            }
-                            skip = false;
-                            break;
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            _ = path;
+                            unreachable!()
                         }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            let mut filename = match path.file_name() {
+                                Some(file) => file.to_string_lossy().to_string(),
+                                None => continue,
+                            };
 
-                        if skip {
-                            streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
-                            continue;
-                        }
+                            let original = filename.clone();
 
-                        let file_path = path.display().to_string();
+                            let current_directory = media_dir.clone();
 
-                        in_stack.push(filename.clone());
-
-                        let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
-
-                        let mut progress = match constellation.put(&filename, &file_path).await {
-                            Ok(stream) => stream,
-                            Err(e) => {
-                                error!(%conversation_id, "Error uploading {filename}: {e}");
-                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
-                                continue;
-                            }
-                        };
-
-
-                        let directory = root_directory.clone();
-                        let filename = filename.to_string();
-
-                        let stream = async_stream::stream! {
-                            while let Some(item) = progress.next().await {
-                                match item {
-                                    item @ Progression::CurrentProgress { .. } => {
-                                        yield (item, None);
-                                    },
-                                    item @ Progression::ProgressComplete { .. } => {
-                                        let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
-                                        yield (item, file_name);
-                                        break;
-                                    },
-                                    item @ Progression::ProgressFailed { .. } => {
-                                        yield (item, None);
+                            let mut interval = 0;
+                            let skip;
+                            loop {
+                                if in_stack.contains(&filename) || current_directory.has_item(&filename) {
+                                    if interval > 2000 {
+                                        skip = true;
                                         break;
                                     }
-                                }
-                            }
-                        };
+                                    interval += 1;
+                                    let file = PathBuf::from(&original);
+                                    let file_stem =
+                                        file.file_stem().and_then(OsStr::to_str).map(str::to_string);
+                                    let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
 
-                        streams.insert(kind, stream.boxed());
+                                    filename = match (file_stem, ext) {
+                                        (Some(filename), Some(ext)) => {
+                                            format!("{filename} ({interval}).{ext}")
+                                        }
+                                        _ => format!("{original} ({interval})"),
+                                    };
+                                    continue;
+                                }
+                                skip = false;
+                                break;
+                            }
+
+                            if skip {
+                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
+                                continue;
+                            }
+
+                            let file_path = path.display().to_string();
+
+                            in_stack.push(filename.clone());
+
+                            let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
+
+                            let mut progress = match constellation.put(&filename, &file_path).await {
+                                Ok(stream) => stream,
+                                Err(e) => {
+                                    error!(%conversation_id, "Error uploading {filename}: {e}");
+                                    streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
+                                    continue;
+                                }
+                            };
+
+
+                            let directory = root_directory.clone();
+                            let filename = filename.to_string();
+
+                            let stream = async_stream::stream! {
+                                while let Some(item) = progress.next().await {
+                                    match item {
+                                        item @ Progression::CurrentProgress { .. } => {
+                                            yield (item, None);
+                                        },
+                                        item @ Progression::ProgressComplete { .. } => {
+                                            let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
+                                            yield (item, file_name);
+                                            break;
+                                        },
+                                        item @ Progression::ProgressFailed { .. } => {
+                                            yield (item, None);
+                                            break;
+                                        }
+                                    }
+                                }
+                            };
+
+                            streams.insert(kind, stream.boxed());
+                        }
                     }
                 };
             }
@@ -2404,7 +2413,7 @@ impl ConversationInner {
                     let _ = self
                         .message_command
                         .clone()
-                        .send(shuttle::message::client::MessageCommand::InsertMessage {
+                        .send(MessageCommand::InsertMessage {
                             peer_id,
                             conversation_id,
                             recipients: recipients.clone(),

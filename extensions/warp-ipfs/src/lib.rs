@@ -67,6 +67,7 @@ use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 mod behaviour;
 pub mod config;
 pub(crate) mod rt;
+pub mod shuttle;
 pub mod store;
 mod thumbnail;
 mod utils;
