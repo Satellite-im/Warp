@@ -39,7 +39,7 @@ use warp::{
 
 use crate::{
     config::{self, Discovery as DiscoveryConfig},
-    store::{MAX_STATUS_LENGTH, discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
+    store::{discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 
 use super::payload::PayloadBuilder;
@@ -2307,59 +2307,6 @@ impl IdentityStore {
         let ipfs = &self.ipfs;
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid).recursive().await?;
-        }
-        Ok(())
-    }
-
-    pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {
-        {
-            let len = identity.username().chars().count();
-            if !(4..=64).contains(&len) {
-                return Err(Error::InvalidLength {
-                    context: "username".into(),
-                    current: len,
-                    minimum: Some(4),
-                    maximum: Some(64),
-                });
-            }
-        }
-        {
-            //Note: The only reason why this would ever error is if the short id is different. Likely from an update to `SHORT_ID_SIZE`
-            //      but other possibility would be through alteration to the `Identity` being sent in some way
-            let len = identity.short_id().len();
-            if len != SHORT_ID_SIZE {
-                return Err(Error::InvalidLength {
-                    context: "short id".into(),
-                    current: len,
-                    minimum: Some(SHORT_ID_SIZE),
-                    maximum: Some(SHORT_ID_SIZE),
-                });
-            }
-        }
-        {
-            let fingerprint = identity.did_key().fingerprint();
-            let bytes = fingerprint.as_bytes();
-
-            let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
-                .try_into()
-                .map_err(anyhow::Error::from)?;
-
-            if identity.short_id() != short_id.into() {
-                return Err(Error::PublicKeyInvalid);
-            }
-        }
-        {
-            if let Some(status) = identity.status_message() {
-                let len = status.chars().count();
-                if len >= MAX_STATUS_LENGTH {
-                    return Err(Error::InvalidLength {
-                        context: "status".into(),
-                        current: len,
-                        minimum: None,
-                        maximum: Some(MAX_STATUS_LENGTH),
-                    });
-                }
-            }
         }
         Ok(())
     }
