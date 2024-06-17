@@ -39,7 +39,7 @@ use warp::{
 
 use crate::{
     config::{self, Discovery as DiscoveryConfig},
-    store::{discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
+    store::{MAX_STATUS_LENGTH, discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 
 use super::payload::PayloadBuilder;
