@@ -1858,7 +1858,7 @@ impl IdentityStore {
             let request: RequestPayload = request.try_into()?;
 
             let request = request
-                .sign(&self.did_key)
+                .sign(self.root_document().keypair())
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {

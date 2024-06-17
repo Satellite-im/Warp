@@ -1,7 +1,9 @@
+use crate::store::DidExt;
 use chrono::{DateTime, Utc};
 use libipld::Cid;
+use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
-use warp::crypto::{did_key::CoreSign, DID};
+use warp::crypto::DID;
 
 use crate::store::document::identity::IdentityDocument;
 
@@ -68,24 +70,25 @@ impl Ord for RequestPayload {
 }
 
 impl RequestPayload {
-    pub fn sign(mut self, keypair: &DID) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn sign(mut self, keypair: &Keypair) -> Result<Self, Box<dyn std::error::Error>> {
         if !self.signature.is_empty() {
             return Err(Box::new(warp::error::Error::InvalidSignature));
         }
 
         let bytes = serde_json::to_vec(&self)?;
-        let signature = keypair.sign(&bytes);
+        let signature = keypair.sign(&bytes)?;
         self.signature = signature;
         Ok(self)
     }
 
     pub fn verify(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let pk = self.sender.to_public_key()?;
         let mut doc = self.clone();
         let signature = std::mem::take(&mut doc.signature);
         let bytes = serde_json::to_vec(&doc)?;
-        doc.sender
-            .verify(&bytes, &signature)
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        if !pk.verify(&bytes, &signature) {
+            return Err(Box::new(warp::error::Error::InvalidSignature));
+        }
         Ok(())
     }
 }
