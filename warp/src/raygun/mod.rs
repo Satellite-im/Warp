@@ -1155,16 +1155,6 @@ pub trait RayGunAttachment: Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    async fn attach_stream(
-        &mut self,
-        _: Uuid,
-        _: Option<Uuid>,
-        _: Vec<LocationStream>,
-        _: Vec<String>,
-    ) -> Result<(Uuid, AttachmentEventStream), Error> {
-        Err(Error::Unimplemented)
-    }
-
     /// Downloads a file that been attached to a message
     /// Note: Must use the filename associated when downloading
     async fn download(
