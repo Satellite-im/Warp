@@ -72,101 +72,89 @@ impl ThumbnailGenerator {
         height: u32,
         output_exact: bool,
     ) -> Result<ThumbnailId, Error> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let path = path.as_ref();
-            if !path.is_file() {
-                return Err(io::Error::from(ErrorKind::NotFound).into());
-            }
+        let path = path.as_ref();
+        if !path.is_file() {
+            return Err(io::Error::from(ErrorKind::NotFound).into());
+        }
 
-            let id = ThumbnailId::default();
-            let own_path = path.to_path_buf();
+        let id = ThumbnailId::default();
+        let own_path = path.to_path_buf();
 
-            let ipfs = self.ipfs.clone();
+        let ipfs = self.ipfs.clone();
 
-            let (tx, rx) = oneshot::channel();
-            crate::rt::spawn(async move {
-                let res = async move {
-                    let instance = Instant::now();
-                    //TODO: Read file header to determine real file type for anything like images, videos and documents.
-                    let extension = own_path
-                        .extension()
-                        .and_then(OsStr::to_str)
-                        .map(ExtensionType::from)
-                        .unwrap_or(ExtensionType::Other);
+        let (tx, rx) = oneshot::channel();
+        crate::rt::spawn(async move {
+            let res = async move {
+                let instance = Instant::now();
+                //TODO: Read file header to determine real file type for anything like images, videos and documents.
+                let extension = own_path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
 
-                    let result = match extension.into() {
-                        FileType::Mime(media) => match media.ty().as_str() {
-                            "image" => tokio::task::spawn_blocking(move || {
-                                let format: ImageFormat = extension.try_into()?;
-                                let image = image::open(own_path).map_err(anyhow::Error::from)?;
-                                let width = width.min(image.width());
-                                let height = height.min(image.height());
+                let result = match extension.into() {
+                    FileType::Mime(media) => match media.ty().as_str() {
+                        "image" => tokio::task::spawn_blocking(move || {
+                            let format: ImageFormat = extension.try_into()?;
+                            let image = image::open(own_path).map_err(anyhow::Error::from)?;
+                            let width = width.min(image.width());
+                            let height = height.min(image.height());
 
-                                let thumbnail = image.thumbnail(width, height);
+                            let thumbnail = image.thumbnail(width, height);
 
-                                let mut t_buffer = std::io::Cursor::new(vec![]);
-                                let output_format = match (output_exact, format) {
-                                    (false, _) => ImageFormat::Jpeg,
-                                    (true, ImageFormat::WebP) if cfg!(not(feature = "webp")) => {
-                                        ImageFormat::Jpeg
-                                    }
-                                    (true, format) => format,
-                                };
+                            let mut t_buffer = std::io::Cursor::new(vec![]);
+                            let output_format = match (output_exact, format) {
+                                (false, _) => ImageFormat::Jpeg,
+                                (true, ImageFormat::WebP) if cfg!(not(feature = "webp")) => {
+                                    ImageFormat::Jpeg
+                                }
+                                (true, format) => format,
+                            };
 
-                                thumbnail
-                                    .write_to(&mut t_buffer, output_format)
-                                    .map_err(anyhow::Error::from)?;
-                                Ok::<_, Error>((
-                                    ExtensionType::try_from(output_format)?,
-                                    Bytes::from(t_buffer.into_inner()),
-                                ))
-                            })
-                            .await
-                            .map_err(anyhow::Error::from)?,
-                            _ => Err(Error::Unimplemented),
-                        },
-                        _ => Err(Error::Other),
-                    };
-
-                    let stop = instance.elapsed();
-
-                    tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
-
-                    let (ty, data) = result?;
-
-                    let size = data.len();
-
-                    let path = ipfs.add_unixfs(data.clone()).await?;
-
-                    let link = *path.root().cid().expect("valid cid");
-
-                    let image_dag = ImageDag {
-                        link,
-                        size: size as _,
-                        mime: ty.into(),
-                    };
-
-                    let cid = ipfs.dag().put().serialize(image_dag).await?;
-                    Ok((ty, IpfsPath::from(cid), data))
+                            thumbnail
+                                .write_to(&mut t_buffer, output_format)
+                                .map_err(anyhow::Error::from)?;
+                            Ok::<_, Error>((
+                                ExtensionType::try_from(output_format)?,
+                                Bytes::from(t_buffer.into_inner()),
+                            ))
+                        })
+                        .await
+                        .map_err(anyhow::Error::from)?,
+                        _ => Err(Error::Unimplemented),
+                    },
+                    _ => Err(Error::Other),
                 };
 
-                _ = tx.send(res.await)
-            });
+                let stop = instance.elapsed();
 
-            self.tasks.lock().await.insert(id, rx);
+                tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
 
-            Ok(id)
-        }
+                let (ty, data) = result?;
 
-        #[cfg(target_arch = "wasm32")]
-        {
-            _ = path;
-            _ = width;
-            _ = height;
-            _ = output_exact;
-            unreachable!("wasm target is not supported under this function")
-        }
+                let size = data.len();
+
+                let path = ipfs.add_unixfs(data.clone()).await?;
+
+                let link = *path.root().cid().expect("valid cid");
+
+                let image_dag = ImageDag {
+                    link,
+                    size: size as _,
+                    mime: ty.into(),
+                };
+
+                let cid = ipfs.dag().put().serialize(image_dag).await?;
+                Ok((ty, IpfsPath::from(cid), data))
+            };
+
+            _ = tx.send(res.await)
+        });
+
+        self.tasks.lock().await.insert(id, rx);
+
+        Ok(id)
     }
 
     pub async fn insert_buffer<S: AsRef<str>>(
