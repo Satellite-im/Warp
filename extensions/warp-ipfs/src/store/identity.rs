@@ -2351,12 +2351,12 @@ impl IdentityStore {
         {
             if let Some(status) = identity.status_message() {
                 let len = status.chars().count();
-                if len >= 512 {
+                if len >= MAX_STATUS_LENGTH {
                     return Err(Error::InvalidLength {
                         context: "status".into(),
                         current: len,
                         minimum: None,
-                        maximum: Some(512),
+                        maximum: Some(MAX_STATUS_LENGTH),
                     });
                 }
             }
