@@ -10,16 +10,6 @@ pub mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct RootDocument {
-    /// Own Identity
-    pub identity: Cid,
-
-    pub created: DateTime<Utc>,
-
-    pub modified: DateTime<Utc>,
-}
-
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IdentityDag {
     pub identity: IdentityDocument,
