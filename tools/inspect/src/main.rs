@@ -52,7 +52,7 @@ async fn setup<P: AsRef<Path>>(
         .await;
 
     //validating that account exist
-    let _ = identity.get_own_identity().await?;
+    let _ = identity.identity().await?;
     Ok((identity, raygun, constellation))
 }
 
@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let start_time = Instant::now();
-    let identity = account.get_own_identity().await?;
+    let identity = account.identity().await?;
     let end_time = start_time.elapsed();
     println!("Took {}ms to load the own identity", end_time.as_millis());
 

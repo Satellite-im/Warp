@@ -46,8 +46,8 @@ use warp::multipass::identity::{
     Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, MultiPass,
-    MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
+    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity,
+    MultiPass, MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
 };
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location, LocationStream, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState
@@ -103,7 +103,7 @@ pub struct WarpIpfsBuilder {
     // use_multipass: bool,
     // use_raygun: bool,
     // use_constellation: bool,
-    tesseract: Tesseract,
+    tesseract: Option<Tesseract>,
 }
 
 impl WarpIpfsBuilder {
@@ -113,7 +113,7 @@ impl WarpIpfsBuilder {
     }
 
     pub fn set_tesseract(mut self, tesseract: Tesseract) -> Self {
-        self.tesseract = tesseract;
+        self.tesseract = Some(tesseract);
         self
     }
 
@@ -160,7 +160,10 @@ impl WarpIpfs {
         target_arch = "wasm32",
         wasm_bindgen::prelude::wasm_bindgen(constructor)
     )]
-    pub async fn new_wasm(config: Config, tesseract: Tesseract) -> warp::js_exports::WarpInstance {
+    pub async fn new_wasm(
+        config: Config,
+        tesseract: Option<Tesseract>,
+    ) -> warp::js_exports::WarpInstance {
         let warp_ipfs = WarpIpfs::new(config, tesseract).await;
         let mp = Box::new(warp_ipfs.clone()) as Box<_>;
         let rg = Box::new(warp_ipfs.clone()) as Box<_>;
@@ -170,11 +173,36 @@ impl WarpIpfs {
 }
 
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: Tesseract) -> WarpIpfs {
+    pub async fn new(config: Config, tesseract: impl Into<Option<Tesseract>>) -> WarpIpfs {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
         let span = RwLock::new(Span::current());
+
+        let tesseract = match tesseract.into() {
+            Some(tesseract) => tesseract,
+            None if !config.persist() => Tesseract::default(),
+            None => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let tesseract = Tesseract::default();
+                    _ = tesseract.load_from_storage();
+                    tesseract.set_autosave();
+                    tesseract
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // Note: We could probably assert here since a path should be supplied when is it persist,
+                    //       but for now we will create a default tesseract if Config::path is `None`
+                    match config.path() {
+                        Some(path) => {
+                            Tesseract::open_or_create(path, "tesseract.bin").unwrap_or_default()
+                        }
+                        None => Tesseract::default(),
+                    }
+                }
+            }
+        };
 
         let inner = Arc::new(Inner {
             config,
@@ -338,8 +366,6 @@ impl WarpIpfs {
                 // We check the target arch since it doesnt really make much sense to have each native peer to use websocket or webrtc transport
                 // as such connections would be established through the relay
                 enable_websocket: cfg!(target_arch = "wasm32"),
-                enable_secure_websocket: cfg!(target_arch = "wasm32"),
-                enable_webrtc: cfg!(target_arch = "wasm32"),
                 ..Default::default()
             });
 
@@ -827,10 +853,27 @@ impl MultiPass for WarpIpfs {
             Identifier::DID(pk) => LookupBy::DidKey(pk),
             Identifier::Username(username) => LookupBy::Username(username),
             Identifier::DIDList(list) => LookupBy::DidKeys(list),
-            Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
         };
 
         store.lookup(kind).await
+    }
+}
+
+#[async_trait::async_trait]
+impl LocalIdentity for WarpIpfs {
+    async fn identity(&self) -> Result<Identity, Error> {
+        let store = self.identity_store(true).await?;
+        store.own_identity().await
+    }
+
+    async fn profile_picture(&self) -> Result<IdentityImage, Error> {
+        let store = self.identity_store(true).await?;
+        store.profile_picture().await
+    }
+
+    async fn profile_banner(&self) -> Result<IdentityImage, Error> {
+        let store = self.identity_store(true).await?;
+        store.profile_banner().await
     }
 
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
@@ -1140,6 +1183,10 @@ impl MultiPass for WarpIpfs {
         }
 
         store.identity_update(identity).await
+    }
+
+    fn tesseract(&self) -> Tesseract {
+        self.tesseract.clone()
     }
 }
 

@@ -7,7 +7,7 @@ async fn update_name(account: &mut Box<dyn MultiPass>, name: &str) -> anyhow::Re
     account
         .update_identity(IdentityUpdate::Username(name.to_string()))
         .await?;
-    let ident = account.get_own_identity().await?;
+    let ident = account.identity().await?;
     println!();
     println!("Updated Identity: {}", serde_json::to_string(&ident)?);
     Ok(())
@@ -17,7 +17,7 @@ async fn update_status(account: &mut Box<dyn MultiPass>, status: &str) -> anyhow
     account
         .update_identity(IdentityUpdate::StatusMessage(Some(status.to_string())))
         .await?;
-    let ident = account.get_own_identity().await?;
+    let ident = account.identity().await?;
     println!();
     println!("Updated Identity: {}", serde_json::to_string(&ident)?);
     Ok(())
@@ -32,6 +32,10 @@ async fn main() -> anyhow::Result<()> {
         .set_tesseract(tesseract)
         .finalize()
         .await;
+
+    identity
+        .tesseract()
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let profile = identity.create_identity(None, None).await?;
 

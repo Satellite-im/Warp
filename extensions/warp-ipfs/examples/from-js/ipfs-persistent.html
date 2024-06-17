@@ -8,13 +8,13 @@
     import init, * as wasm from './built-wasm/warp-ipfs/warp_ipfs.js';
     init().then(async (_exports) => {
       console.log(wasm)
+      let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), null)
+      
+      let tesseract = multipass.tesseract()
 
-      let tesseract = new wasm.Tesseract()
-      tesseract.load_from_storage()
-      const passphrase = new Uint8Array([1,2,3,4,5,6,7,8,9,0]);
+      const passphrase = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
       tesseract.unlock(passphrase)
 
-      let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), tesseract)
       let profile = await ipfs.multipass.create_identity(null, null)
       
       await ipfs.constellation.put_buffer("image.png", IMAGE)
