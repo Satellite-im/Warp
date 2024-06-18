@@ -752,26 +752,30 @@ impl Message {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[wasm_bindgen]
 pub struct AttachmentFile {
-    name: String,
-    stream: web_sys::ReadableStream,
+    file: String,
+    stream: Option<web_sys::ReadableStream>,
 }
 
 #[wasm_bindgen]
 impl AttachmentFile {
     #[wasm_bindgen(constructor)]
-    pub fn new(stream: web_sys::ReadableStream, name: String) -> Self {
-        Self { name, stream }
+    pub fn new(file: String, stream: Option<web_sys::ReadableStream>) -> Self {
+        Self { file, stream }
     }
 }
 
 impl Into<raygun::Location> for AttachmentFile {
     fn into(self) -> raygun::Location {
-        Location::Stream {
-            name: self.name,
-            stream: {
-                let stream = InnerStream::from(wasm_streams::ReadableStream::from_raw(self.stream));
-                Box::pin(stream)
-            },
+        if let Some(stream) = self.stream {
+            Location::Stream {
+                name: self.file,
+                stream: {
+                    let stream = InnerStream::from(wasm_streams::ReadableStream::from_raw(stream));
+                    Box::pin(stream)
+                },
+            }
+        } else {
+            Location::Constellation { path: self.file }
         }
     }
 }
