@@ -137,7 +137,7 @@ async fn account(
                     .await?;
             }
             _ => {
-                profile = match account.create_identity(None, None).await {
+                profile = match account.create_identity(username, None).await {
                     Ok(profile) => Some(profile),
                     Err(Error::IdentityExist) => {
                         let identity = account.identity().await?;
