@@ -292,7 +292,7 @@ impl WarpIpfs {
         // - creating the account was previously successful
         // - importing the account was successful (assuming the formers were not successful)
         if self.inner.components.read().is_some() {
-            return Err(Error::IdentityExist);
+            return Ok(());
         }
 
         let tesseract = self.tesseract.clone();
