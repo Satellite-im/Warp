@@ -1,25 +1,24 @@
 use std::time::Duration;
 
 use futures::StreamExt;
+
 use warp::crypto::rand::{self, prelude::*};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::{MultiPass, MultiPassEventKind};
-use warp::tesseract::Tesseract;
 use warp_ipfs::config::Config;
 use warp_ipfs::WarpIpfsBuilder;
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
-    let tesseract = Tesseract::default();
-    tesseract
-        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
-
     let config = Config::development();
     let (mut account, _, _) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
+
+    account
+        .tesseract()
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     account.create_identity(username, None).await?;
     Ok(account)

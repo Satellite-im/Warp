@@ -1,12 +1,13 @@
 use futures::{stream, Future, StreamExt};
 use futures_timeout::TimeoutExt;
 use rust_ipfs::{Ipfs, Multiaddr, PeerId, Protocol};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
 use warp::{
     constellation::Constellation,
     crypto::DID,
     multipass::{identity::Identity, MultiPass},
     raygun::RayGun,
-    tesseract::Tesseract,
 };
 use warp_ipfs::{
     config::{Bootstrap, Discovery},
@@ -14,7 +15,6 @@ use warp_ipfs::{
 };
 
 use std::time::Duration;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 pub async fn node_info(nodes: Vec<Ipfs>) -> Vec<(Ipfs, PeerId, Vec<Multiaddr>)> {
     stream::iter(nodes)
@@ -54,8 +54,6 @@ pub async fn create_account(
     passphrase: Option<&str>,
     _: Option<String>,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn Constellation>, DID, Identity)> {
-    let tesseract = Tesseract::default();
-    tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
     *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
     config.ipfs_setting_mut().memory_transport = true;
@@ -68,10 +66,12 @@ pub async fn create_account(
     *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, _, fs) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
+
+    account.tesseract().unlock(b"internal pass").unwrap();
+
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 
@@ -119,8 +119,6 @@ pub async fn create_account_and_chat(
     DID,
     Identity,
 )> {
-    let tesseract = Tesseract::default();
-    tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
     *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
     config.ipfs_setting_mut().memory_transport = true;
@@ -133,10 +131,11 @@ pub async fn create_account_and_chat(
     *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, raygun, fs) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
+
+    account.tesseract().unlock(b"internal pass").unwrap();
 
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();

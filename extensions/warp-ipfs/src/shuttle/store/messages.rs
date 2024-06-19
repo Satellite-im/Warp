@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
 
-use crate::DidExt;
+use crate::store::DidExt;
 
 use super::{identity::IdentityStorage, root::RootStorage};
 

@@ -1,6 +1,4 @@
 #![allow(clippy::result_large_err)]
-pub mod generator;
-pub mod identity;
 
 use std::path::PathBuf;
 
@@ -8,15 +6,18 @@ use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
-use crate::error::Error;
-
-use crate::{Extension, SingleHandle};
 use identity::Identity;
 
 use crate::crypto::DID;
+use crate::error::Error;
 use crate::multipass::identity::{Identifier, IdentityUpdate};
+use crate::tesseract::Tesseract;
+use crate::{Extension, SingleHandle};
 
 use self::identity::{IdentityImage, IdentityProfile, IdentityStatus, Platform, Relationship};
+
+pub mod generator;
+pub mod identity;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +104,8 @@ pub trait LocalIdentity: Sync + Send {
 
     /// Update your own [`Identity`] using [`IdentityUpdate`]
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
+
+    fn tesseract(&self) -> Tesseract;
 }
 
 #[async_trait::async_trait]

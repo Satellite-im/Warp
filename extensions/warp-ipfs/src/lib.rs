@@ -67,6 +67,7 @@ use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 mod behaviour;
 pub mod config;
 pub(crate) mod rt;
+pub mod shuttle;
 pub mod store;
 mod thumbnail;
 mod utils;
@@ -106,7 +107,7 @@ pub struct WarpIpfsBuilder {
     // use_multipass: bool,
     // use_raygun: bool,
     // use_constellation: bool,
-    tesseract: Tesseract,
+    tesseract: Option<Tesseract>,
 }
 
 impl WarpIpfsBuilder {
@@ -116,7 +117,7 @@ impl WarpIpfsBuilder {
     }
 
     pub fn set_tesseract(mut self, tesseract: Tesseract) -> Self {
-        self.tesseract = tesseract;
+        self.tesseract = Some(tesseract);
         self
     }
 
@@ -163,7 +164,10 @@ impl WarpIpfs {
         target_arch = "wasm32",
         wasm_bindgen::prelude::wasm_bindgen(constructor)
     )]
-    pub async fn new_wasm(config: Config, tesseract: Tesseract) -> warp::js_exports::WarpInstance {
+    pub async fn new_wasm(
+        config: Config,
+        tesseract: Option<Tesseract>,
+    ) -> warp::js_exports::WarpInstance {
         let warp_ipfs = WarpIpfs::new(config, tesseract).await;
         let mp = Box::new(warp_ipfs.clone()) as Box<_>;
         let rg = Box::new(warp_ipfs.clone()) as Box<_>;
@@ -173,11 +177,36 @@ impl WarpIpfs {
 }
 
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: Tesseract) -> WarpIpfs {
+    pub async fn new(config: Config, tesseract: impl Into<Option<Tesseract>>) -> WarpIpfs {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
         let span = RwLock::new(Span::current());
+
+        let tesseract = match tesseract.into() {
+            Some(tesseract) => tesseract,
+            None if !config.persist() => Tesseract::default(),
+            None => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let tesseract = Tesseract::default();
+                    _ = tesseract.load_from_storage();
+                    tesseract.set_autosave();
+                    tesseract
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // Note: We could probably assert here since a path should be supplied when is it persist,
+                    //       but for now we will create a default tesseract if Config::path is `None`
+                    match config.path() {
+                        Some(path) => {
+                            Tesseract::open_or_create(path, "tesseract.bin").unwrap_or_default()
+                        }
+                        None => Tesseract::default(),
+                    }
+                }
+            }
+        };
 
         let inner = Arc::new(Inner {
             config,
@@ -1158,6 +1187,10 @@ impl LocalIdentity for WarpIpfs {
         }
 
         store.identity_update(identity).await
+    }
+
+    fn tesseract(&self) -> Tesseract {
+        self.tesseract.clone()
     }
 }
 
