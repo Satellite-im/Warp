@@ -1,14 +1,15 @@
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    fmt::Debug,
-    hash::Hash,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashSet, fmt::Debug, hash::Hash, sync::Arc, time::Duration};
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::{hash_map::Entry, HashMap};
+
+#[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
-use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, p2p::MultiaddrExt, Ipfs, Multiaddr, PeerId};
+use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, Ipfs, Multiaddr, PeerId};
 use tokio::sync::{broadcast, RwLock};
+
+#[cfg(not(target_arch = "wasm32"))]
+use rust_ipfs::p2p::MultiaddrExt;
 
 use crate::rt::JoinHandle;
 
@@ -23,6 +24,8 @@ use crate::{
 use super::{DidExt, PeerIdExt, PeerType};
 
 //TODO: Deprecate for separate discovery service
+
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct Discovery {
     ipfs: Ipfs,

@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, ffi::OsStr, path::PathBuf, sync::Arc};
+#[cfg(not(target_arch = "wasm32"))]
+use std::ffi::OsStr;
+
+use std::{collections::VecDeque, path::PathBuf, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
