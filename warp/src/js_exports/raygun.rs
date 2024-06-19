@@ -371,7 +371,7 @@ impl RayGunBox {
             .await
             .map_err(|e| e.into())
             .map(|(id, ok)| AttachmentResult {
-                file: id.to_string(),
+                message_id: id.to_string(),
                 stream: AsyncIterator::new(Box::pin(
                     ok.map(|s| serde_wasm_bindgen::to_value(&AttachmentKind::from(s)).unwrap()),
                 )),
