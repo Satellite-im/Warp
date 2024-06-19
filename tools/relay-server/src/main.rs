@@ -150,6 +150,10 @@ struct Opt {
     /// Path to a configuration file to adjust relay setting
     #[clap(long)]
     relay_config: Option<PathBuf>,
+    
+    /// Enables secured websockets
+    #[clap(long)]
+    enable_wss: bool,
 
     /// Use unbounded configuration with higher limits
     #[clap(long)]
@@ -270,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_transport_configuration(TransportConfig {
             enable_webrtc: true,
             enable_websocket: true,
-            enable_secure_websocket: true,
+            enable_secure_websocket: opts.enable_wss,
             websocket_pem: (ws_cert.is_some() && ws_pk.is_some()).then(|| {
                 let cert = ws_cert.expect("certificate exist");
                 let pk = ws_pk.expect("pk exist");
