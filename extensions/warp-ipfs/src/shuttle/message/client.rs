@@ -23,11 +23,13 @@ use rust_ipfs::libp2p::request_response;
 use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
 
-use crate::message::protocol::{payload_message_construct, MessageUpdate, RegisterConversation};
+use crate::store::payload::PayloadMessage;
+
+use super::protocol::{payload_message_construct, MessageUpdate, RegisterConversation};
 
 use super::protocol::{ConversationType, Message, Request, Response};
 
-type Payload = crate::payload::PayloadMessage<Message>;
+type Payload = PayloadMessage<Message>;
 
 #[allow(dead_code)]
 pub struct Behaviour {

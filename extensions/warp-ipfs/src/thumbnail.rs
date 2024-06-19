@@ -64,6 +64,7 @@ impl ThumbnailGenerator {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn insert<P: AsRef<Path>>(
         &self,
         path: P,
@@ -76,8 +77,9 @@ impl ThumbnailGenerator {
             return Err(io::Error::from(ErrorKind::NotFound).into());
         }
 
-        let own_path = path.to_path_buf();
         let id = ThumbnailId::default();
+        let own_path = path.to_path_buf();
+
         let ipfs = self.ipfs.clone();
 
         let (tx, rx) = oneshot::channel();

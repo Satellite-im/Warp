@@ -59,6 +59,8 @@ struct Opt {
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use warp_ipfs::shuttle;
+
     dotenv::dotenv().ok();
     let opts = Opt::parse();
 

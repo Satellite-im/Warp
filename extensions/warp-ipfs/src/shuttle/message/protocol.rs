@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::crypto::DID;
 
-pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/message/0.0.1");
+use crate::store::payload::{PayloadBuilder, PayloadMessage};
 
-use crate::payload::{PayloadBuilder, PayloadMessage};
+pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/message/0.0.1");
 
 pub fn payload_message_construct(
     keypair: &Keypair,
@@ -24,6 +24,7 @@ pub fn payload_message_construct(
     Ok(payload)
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Message {

@@ -11,6 +11,7 @@ members = [
     "extensions/*",
     "warp",
     "tools/*",
+    "extensions/warp-ipfs/shuttle",
     "extensions/warp-ipfs/examples/wasm-ipfs-identity",
     "extensions/warp-ipfs/examples/wasm-ipfs-friends",
     "extensions/warp-ipfs/examples/wasm-ipfs-storage",

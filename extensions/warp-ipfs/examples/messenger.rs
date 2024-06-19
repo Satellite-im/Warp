@@ -18,6 +18,7 @@ use uuid::Uuid;
 use warp::constellation::{Constellation, Progression};
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
+use warp::error::Error;
 use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus};
 use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
 use warp::raygun::{
@@ -150,7 +151,14 @@ async fn setup<P: AsRef<Path>>(
                     .await?;
             }
             _ => {
-                profile = Some(account.create_identity(None, None).await?);
+                profile = match account.create_identity(None, None).await {
+                    Ok(profile) => Some(profile),
+                    Err(Error::IdentityExist) => {
+                        let identity = account.identity().await?;
+                        Some(IdentityProfile::new(identity, None))
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
         };
     }
