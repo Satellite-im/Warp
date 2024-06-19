@@ -782,14 +782,14 @@ impl Into<raygun::Location> for AttachmentFile {
 
 #[wasm_bindgen]
 pub struct AttachmentResult {
-    file: String,
+    message_id: String,
     stream: AsyncIterator,
 }
 
 #[wasm_bindgen]
 impl AttachmentResult {
-    pub fn get_file(&self) -> String {
-        self.file.clone()
+    pub fn get_message_id(&self) -> String {
+        self.message_id.clone()
     }
 
     pub async fn next(&mut self) -> std::result::Result<Promise, JsError> {
