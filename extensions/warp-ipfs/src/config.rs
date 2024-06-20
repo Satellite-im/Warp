@@ -90,14 +90,7 @@ impl Default for RelayClient {
             #[cfg(target_arch="wasm32")]
             relay_address: vec![
                 //NYC-1
-                "/ip4/146.190.184.59/tcp/4001/wss/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
-                "/ip4/146.190.184.59/udp/4002/webrtc-direct/certhash/uEiC7m8m2pxf_DHr488akg-wSAxsa-f2agH5zc2nE70vx_g/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
-                //SF-1
-                "/ip4/64.225.88.100/tcp/4001/wss/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
-                "/ip4/64.225.88.100/udp/4002/webrtc-direct/certhash/uEiD25LqH8FlAgimcIY4XB1QiHHROlCYn7WJIukuRMe3tfQ/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
-                //NYC-1-EXP
-                "/ip4/24.199.86.91/tcp/46315/wss/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
-                "/ip4/24.199.86.91/udp/4002/webrtc-direct/certhash/uEiCZ8YAx_IZ7_x5dKltFESWHe4TUg8_gYpla6tmWR9jlfw/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
+                "/ip4/167.71.93.202/tcp/4445/ws/p2p/12D3KooWSsn13GxHchpG6dtr7o6ARqSkcMtsBuojgL9XU9t1M1uE".parse().unwrap(),
             ],
             background: true,
             quorum: Default::default()
@@ -367,7 +360,6 @@ impl Config {
                 relay_client: RelayClient {
                     ..Default::default()
                 },
-                memory_transport: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {
