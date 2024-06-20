@@ -152,6 +152,14 @@ struct Opt {
     #[clap(long)]
     relay_config: Option<PathBuf>,
 
+    /// Enables secured websockets
+    #[clap(long)]
+    enable_wss: bool,
+
+    /// Enables webrtc
+    #[clap(long)]
+    enable_webrtc: bool,
+
     /// Use unbounded configuration with higher limits
     #[clap(long)]
     unbounded: bool,
@@ -269,9 +277,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_keypair(&keypair)
         .set_idle_connection_timeout(30)
         .set_transport_configuration(TransportConfig {
-            enable_webrtc: true,
+            enable_webrtc: opts.enable_webrtc,
             enable_websocket: true,
-            enable_secure_websocket: true,
+            enable_secure_websocket: opts.enable_wss,
             websocket_pem: (ws_cert.is_some() && ws_pk.is_some()).then(|| {
                 let cert = ws_cert.expect("certificate exist");
                 let pk = ws_pk.expect("pk exist");
