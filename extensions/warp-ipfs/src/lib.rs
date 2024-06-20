@@ -19,6 +19,7 @@ use ipfs::p2p::{
 use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
 use parking_lot::RwLock;
 use rust_ipfs as ipfs;
+use rust_ipfs::p2p::UpgradeVersion;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{error, info, warn, Instrument, Span};
@@ -370,6 +371,7 @@ impl WarpIpfs {
                 // We check the target arch since it doesnt really make much sense to have each native peer to use websocket or webrtc transport
                 // as such connections would be established through the relay
                 enable_websocket: cfg!(target_arch = "wasm32"),
+                version: UpgradeVersion::Standard,
                 ..Default::default()
             });
 
