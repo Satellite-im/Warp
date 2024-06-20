@@ -489,13 +489,6 @@ impl IdentityStore {
                     .config
                     .store_setting()
                     .auto_push
-                    .map(|i| {
-                        if i.as_millis() < 300000 {
-                            Duration::from_millis(300000)
-                        } else {
-                            i
-                        }
-                    })
                     .unwrap_or(Duration::from_millis(300000));
 
                 let mut tick = Delay::new(interval);

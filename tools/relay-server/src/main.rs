@@ -8,6 +8,7 @@ use base64::{
     Engine,
 };
 use clap::Parser;
+use rust_ipfs::p2p::UpgradeVersion;
 use rust_ipfs::{
     p2p::{RateLimit, RelayConfig, TransportConfig},
     FDLimit, Keypair, Multiaddr, UninitializedIpfs,
@@ -284,6 +285,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let pk = ws_pk.expect("pk exist");
                 (cert, pk)
             }),
+            version: UpgradeVersion::Standard,
             ..Default::default()
         })
         .listen_as_external_addr()

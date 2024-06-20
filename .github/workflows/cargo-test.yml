@@ -25,8 +25,8 @@ jobs:
       - name: Catch common mistakes and unwrap calls
         run: cargo clippy -- -D warnings
 
-  test:
-    name: Test
+  test-native:
+    name: Test (Native)
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
@@ -45,3 +45,25 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
+
+  test-wasm:
+    name: Check (WASM)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+      RUST_BACKTRACE: full
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev
+          sudo apt-get install -y librust-alsa-sys-dev libxdo-dev llvm-dev cmake libudev-dev
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p warp-ipfs -p warp --target wasm32-unknown-unknown

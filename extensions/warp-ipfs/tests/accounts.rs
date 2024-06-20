@@ -2,6 +2,7 @@ pub mod common;
 
 #[cfg(test)]
 mod test {
+
     use std::time::Duration;
 
     use crate::common::{self, create_account, create_accounts};
@@ -11,7 +12,16 @@ mod test {
     use warp::tesseract::Tesseract;
     use warp_ipfs::WarpIpfsBuilder;
 
-    #[tokio::test]
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test as async_test;
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use tokio::test as async_test;
+
+    #[async_test]
     async fn create_identity() -> anyhow::Result<()> {
         let (_, _, did, _) = create_account(
             None,
@@ -28,7 +38,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn get_own_identity() -> anyhow::Result<()> {
         let (_, _, _, identity) = create_account(
             Some("JohnDoe"),
@@ -46,7 +56,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn get_identity() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (Some("JohnDoe"), None, Some("test::get_identity".into())),
@@ -59,7 +69,7 @@ mod test {
         let (_, _, did_b, _) = accounts.last().expect("Account exist");
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
-        let identity_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let identity_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Ok(Some(id)) = account_a
                     .get_identity(did_b.clone().into())
@@ -77,7 +87,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn get_identity_by_username() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (
@@ -99,7 +109,7 @@ mod test {
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
 
-        let identity_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let identity_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(id) = account_a
                     .get_identity(String::from("JaneDoe").into())
@@ -118,7 +128,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn update_identity_username() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
@@ -148,7 +158,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn update_identity_status_message() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
@@ -180,7 +190,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn identity_status() -> anyhow::Result<()> {
         let (account, _, did, _) =
             create_account(Some("JohnDoe"), None, Some("test::identity_status".into())).await?;
@@ -189,7 +199,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn update_identity_status() -> anyhow::Result<()> {
         let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
@@ -208,7 +218,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn get_identity_status() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (
@@ -228,7 +238,7 @@ mod test {
 
         let (mut account_b, _, did_b, _) = accounts.last().cloned().unwrap();
 
-        let status_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let status_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Ok(status) = account_a.identity_status(&did_b).await {
                     break status;
@@ -241,7 +251,7 @@ mod test {
 
         account_b.set_identity_status(IdentityStatus::Away).await?;
 
-        let status = tokio::time::timeout(Duration::from_secs(60), async {
+        let status = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Ok(status) = account_a.identity_status(&did_b).await {
                     if status != status_b {
@@ -257,7 +267,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn identity_platform() -> anyhow::Result<()> {
         let (account, _, did, _) = create_account(
             Some("JohnDoe"),
@@ -270,7 +280,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn identity_real_profile_picture() -> anyhow::Result<()> {
         let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
@@ -292,7 +302,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn identity_real_profile_picture_stream() -> anyhow::Result<()> {
         let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
@@ -316,7 +326,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn identity_profile_picture() -> anyhow::Result<()> {
         let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
@@ -338,7 +348,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn identity_profile_banner() -> anyhow::Result<()> {
         let (mut account, _, did, _) = create_account(
             Some("JohnDoe"),
@@ -360,7 +370,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn get_identity_platform() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (
@@ -380,7 +390,7 @@ mod test {
 
         let (_account_b, _, did_b, _) = accounts.last().unwrap();
 
-        let platform_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let platform_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Ok(platform) = account_a.identity_platform(did_b).await {
                     break platform;
