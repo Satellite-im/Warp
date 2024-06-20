@@ -7,7 +7,16 @@ mod test {
     use futures::StreamExt;
     use warp::multipass::MultiPassEventKind;
 
-    #[tokio::test]
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test as async_test;
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use tokio::test as async_test;
+
+    #[async_test]
     async fn add_friend() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (Some("JohnDoe"), None, Some("test::add_friend".into())),
@@ -22,7 +31,7 @@ mod test {
         let mut subscribe_b = account_b.multipass_subscribe().await?;
         account_a.send_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             let did = loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
                     subscribe_b.next().await
@@ -34,7 +43,7 @@ mod test {
         })
         .await??;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendAdded { .. }) = subscribe_a.next().await {
                     break;
@@ -48,7 +57,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn remove_friend() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (Some("JohnDoe"), None, Some("test::remove_friend".into())),
@@ -64,7 +73,7 @@ mod test {
 
         account_a.send_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             let did = loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
                     subscribe_b.next().await
@@ -76,7 +85,7 @@ mod test {
         })
         .await??;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendAdded { .. }) = subscribe_a.next().await {
                     break;
@@ -90,7 +99,7 @@ mod test {
 
         account_a.remove_friend(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRemoved { .. }) = subscribe_a.next().await {
                     break;
@@ -99,7 +108,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRemoved { .. }) = subscribe_b.next().await {
                     break;
@@ -111,7 +120,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn reject_friend() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (Some("JohnDoe"), None, Some("test::reject_friend".into())),
@@ -127,7 +136,7 @@ mod test {
 
         account_a.send_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             let did = loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
                     subscribe_b.next().await
@@ -139,7 +148,7 @@ mod test {
         })
         .await??;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::OutgoingFriendRequestRejected { .. }) =
                     subscribe_a.next().await
@@ -152,7 +161,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn close_request() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (Some("JohnDoe"), None, Some("test::close_request".into())),
@@ -168,7 +177,7 @@ mod test {
 
         account_a.send_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { .. }) =
                     subscribe_b.next().await
@@ -181,7 +190,7 @@ mod test {
 
         account_a.close_request(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::IncomingFriendRequestClosed { .. }) =
                     subscribe_b.next().await
@@ -192,7 +201,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::OutgoingFriendRequestClosed { .. }) =
                     subscribe_a.next().await
@@ -205,7 +214,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn incoming_request() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (Some("JohnDoe"), None, Some("test::incoming_request".into())),
@@ -220,7 +229,7 @@ mod test {
         let mut subscribe_b = account_b.multipass_subscribe().await?;
 
         account_a.send_request(&did_b).await?;
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRequestSent { .. }) = subscribe_a.next().await
                 {
@@ -230,7 +239,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { .. }) =
                     subscribe_b.next().await
@@ -248,7 +257,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn outgoing_request() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (Some("JohnDoe"), None, Some("test::outgoing_request".into())),
@@ -262,7 +271,7 @@ mod test {
         let mut subscribe_a = account_a.multipass_subscribe().await?;
 
         account_a.send_request(&did_b).await?;
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::FriendRequestSent { .. }) = subscribe_a.next().await
                 {
@@ -279,7 +288,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn block_unblock_identity() -> anyhow::Result<()> {
         let accounts = create_accounts(vec![
             (
@@ -304,7 +313,7 @@ mod test {
         account_a.block(&did_b).await?;
         account_b.block(&did_a).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(
                     MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did },
@@ -317,7 +326,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(
                     MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did },
@@ -333,7 +342,7 @@ mod test {
         account_a.unblock(&did_b).await?;
         account_b.unblock(&did_a).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(
                     MultiPassEventKind::Unblocked { did } | MultiPassEventKind::UnblockedBy { did },
@@ -346,7 +355,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(
                     MultiPassEventKind::Unblocked { did } | MultiPassEventKind::UnblockedBy { did },
@@ -362,7 +371,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn cannot_block_self() -> anyhow::Result<()> {
         let (mut account_a, _, did_a, _) = create_account(
             Some("JohnDoe"),

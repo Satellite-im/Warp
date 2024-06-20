@@ -3,9 +3,12 @@ use rust_ipfs::{libp2p::StreamProtocol, Keypair};
 use serde::{Deserialize, Serialize};
 use warp::{crypto::DID, multipass::identity::ShortId};
 
-use crate::payload::{PayloadBuilder, PayloadMessage};
+use crate::store::{
+    document::identity::IdentityDocument,
+    payload::{PayloadBuilder, PayloadMessage},
+};
 
-use super::{document::IdentityDocument, RequestPayload};
+use super::RequestPayload;
 
 pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/identity/0.0.1");
 
@@ -23,6 +26,7 @@ pub fn payload_message_construct(
     Ok(payload)
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Message {
@@ -42,6 +46,7 @@ impl From<Response> for Message {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Request {
@@ -110,6 +115,7 @@ impl From<LookupResponse> for Response {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mailbox {
@@ -142,6 +148,7 @@ pub enum MailboxError {
     Other(String),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Lookup {

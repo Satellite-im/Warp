@@ -22,9 +22,10 @@ use rust_ipfs::{
 use rust_ipfs::libp2p::request_response;
 use warp::crypto::DID;
 
-use crate::{identity::protocol::payload_message_construct, payload::PayloadMessage, PeerIdExt};
+use crate::store::{document::identity::IdentityDocument, payload::PayloadMessage, PeerIdExt};
 
-use super::document::IdentityDocument;
+use super::protocol::payload_message_construct;
+
 use super::{
     protocol::{Lookup, LookupResponse, Message, Register, RegisterResponse, Request, Response},
     RequestPayload,
@@ -46,6 +47,7 @@ pub struct Behaviour {
         HashMap<OutboundRequestId, oneshot::Receiver<Result<(), warp::error::Error>>>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum IdentityCommand {
     AddNode {

@@ -10,8 +10,11 @@ use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
 
 use crate::{
-    identity::{document::IdentityDocument, protocol::Lookup, RequestPayload, RootDocument},
-    DidExt,
+    shuttle::identity::{protocol::Lookup, RequestPayload},
+    store::{
+        document::{identity::IdentityDocument, RootDocument},
+        DidExt,
+    },
 };
 
 use super::root::RootStorage;

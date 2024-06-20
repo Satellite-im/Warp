@@ -18,10 +18,16 @@ use rust_ipfs::{
 };
 use tokio::task::JoinHandle;
 
-use crate::{
+use crate::store::{
+    document::identity::IdentityDocument,
+    payload::{PayloadBuilder, PayloadMessage},
+    topics::PeerTopic,
+    PeerIdExt,
+};
+
+use super::{
     identity::{
         self,
-        document::IdentityDocument,
         protocol::{
             payload_message_construct, Lookup, LookupResponse, Message, Register, RegisterResponse,
             Response, Synchronized, SynchronizedError, SynchronizedResponse,
@@ -31,9 +37,7 @@ use crate::{
         self,
         protocol::{RegisterConversation, Response as MessageResponse},
     },
-    payload::{PayloadBuilder, PayloadMessage},
     subscription_stream::Subscriptions,
-    PeerIdExt, PeerTopic,
 };
 
 type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
@@ -75,10 +79,10 @@ pub struct ShuttleServer {
 #[allow(dead_code)]
 struct ShuttleTask {
     ipfs: Ipfs,
-    root_storage: crate::store::root::RootStorage,
-    identity_storage: crate::store::identity::IdentityStorage,
-    message_storage: crate::store::messages::MessageStorage,
-    subscriptions: crate::subscription_stream::Subscriptions,
+    root_storage: super::store::root::RootStorage,
+    identity_storage: super::store::identity::IdentityStorage,
+    message_storage: super::store::messages::MessageStorage,
+    subscriptions: super::subscription_stream::Subscriptions,
     identity_rx: mpsc::Receiver<IdentityReceiver>,
     message_rx: mpsc::Receiver<MessageReceiver>,
     precord_tx: mpsc::Sender<PeerRecord>,
@@ -164,10 +168,10 @@ impl ShuttleServer {
             ipfs.add_listening_address(addr).await?;
         }
 
-        let root = crate::store::root::RootStorage::new(&ipfs, path).await;
-        let identity = crate::store::identity::IdentityStorage::new(&ipfs, &root).await;
+        let root = super::store::root::RootStorage::new(&ipfs, path).await;
+        let identity = super::store::identity::IdentityStorage::new(&ipfs, &root).await;
         let message =
-            crate::store::messages::MessageStorage::new(&ipfs, &root, &identity, None).await;
+            super::store::messages::MessageStorage::new(&ipfs, &root, &identity, None).await;
 
         println!(
             "Identities Registered: {}",

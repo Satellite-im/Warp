@@ -22,7 +22,8 @@ use tokio::sync::RwLock;
 use tracing::{error, warn, Span};
 use web_time::Instant;
 
-use shuttle::identity::{RequestEvent, RequestPayload};
+use crate::shuttle::identity::client::IdentityCommand;
+use crate::shuttle::identity::{RequestEvent, RequestPayload};
 use warp::{
     constellation::file::FileType,
     multipass::identity::{IdentityImage, Platform},
@@ -85,7 +86,7 @@ pub struct IdentityStore {
 
     tesseract: Tesseract,
 
-    identity_command: futures::channel::mpsc::Sender<shuttle::identity::client::IdentityCommand>,
+    identity_command: futures::channel::mpsc::Sender<IdentityCommand>,
 
     span: Span,
 
@@ -366,9 +367,7 @@ impl IdentityStore {
         tx: EventSubscription<MultiPassEventKind>,
         phonebook: PhoneBook,
         discovery: Discovery,
-        identity_command: futures::channel::mpsc::Sender<
-            shuttle::identity::client::IdentityCommand,
-        >,
+        identity_command: futures::channel::mpsc::Sender<IdentityCommand>,
         span: Span,
     ) -> Result<Self, Error> {
         if let Some(path) = config.path() {
@@ -490,13 +489,6 @@ impl IdentityStore {
                     .config
                     .store_setting()
                     .auto_push
-                    .map(|i| {
-                        if i.as_millis() < 300000 {
-                            Duration::from_millis(300000)
-                        } else {
-                            i
-                        }
-                    })
                     .unwrap_or(Duration::from_millis(300000));
 
                 let mut tick = Delay::new(interval);
@@ -657,7 +649,6 @@ impl IdentityStore {
             }
         });
 
-        tokio::task::yield_now().await;
         Ok(store)
     }
 
@@ -1688,7 +1679,7 @@ impl IdentityStore {
                 let _ = self
                     .identity_command
                     .clone()
-                    .send(shuttle::identity::client::IdentityCommand::Fetch {
+                    .send(IdentityCommand::Fetch {
                         peer_id,
                         response: tx,
                     })
@@ -1724,12 +1715,7 @@ impl IdentityStore {
                 let _ = self
                     .identity_command
                     .clone()
-                    .send(
-                        shuttle::identity::client::IdentityCommand::UpdateRootDocument {
-                            peer_id,
-                            package,
-                        },
-                    )
+                    .send(IdentityCommand::UpdateRootDocument { peer_id, package })
                     .await;
             }
         }
@@ -1743,7 +1729,7 @@ impl IdentityStore {
                 let _ = self
                     .identity_command
                     .clone()
-                    .send(shuttle::identity::client::IdentityCommand::IsRegistered {
+                    .send(IdentityCommand::IsRegistered {
                         peer_id,
                         response: tx,
                     })
@@ -1778,7 +1764,7 @@ impl IdentityStore {
                 let _ = self
                     .identity_command
                     .clone()
-                    .send(shuttle::identity::client::IdentityCommand::Register {
+                    .send(IdentityCommand::Register {
                         peer_id,
                         root_cid,
                         response: tx,
@@ -1815,12 +1801,10 @@ impl IdentityStore {
                 let _ = self
                     .identity_command
                     .clone()
-                    .send(
-                        shuttle::identity::client::IdentityCommand::FetchAllRequests {
-                            peer_id,
-                            response: tx,
-                        },
-                    )
+                    .send(IdentityCommand::FetchAllRequests {
+                        peer_id,
+                        response: tx,
+                    })
                     .await;
 
                 match rx.timeout(SHUTTLE_TIMEOUT).await {
@@ -1867,14 +1851,14 @@ impl IdentityStore {
             let request: RequestPayload = request.try_into()?;
 
             let request = request
-                .sign(&self.did_key)
+                .sign(self.root_document().keypair())
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
                 let _ = self
                     .identity_command
                     .clone()
-                    .send(shuttle::identity::client::IdentityCommand::SendRequest {
+                    .send(IdentityCommand::SendRequest {
                         peer_id,
                         to: did.clone(),
                         request: request.clone(),
@@ -2014,16 +1998,20 @@ impl IdentityStore {
         };
         if idents_docs.is_empty() {
             let kind = match lookup {
-                LookupBy::DidKey(did) => shuttle::identity::protocol::Lookup::PublicKey { did },
+                LookupBy::DidKey(did) => {
+                    crate::shuttle::identity::protocol::Lookup::PublicKey { did }
+                }
                 LookupBy::DidKeys(list) => {
-                    shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
+                    crate::shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
                 }
                 LookupBy::Username(username) => {
-                    shuttle::identity::protocol::Lookup::Username { username, count: 0 }
+                    crate::shuttle::identity::protocol::Lookup::Username { username, count: 0 }
                 }
-                LookupBy::ShortId(short_id) => shuttle::identity::protocol::Lookup::ShortId {
-                    short_id: short_id.try_into()?,
-                },
+                LookupBy::ShortId(short_id) => {
+                    crate::shuttle::identity::protocol::Lookup::ShortId {
+                        short_id: short_id.try_into()?,
+                    }
+                }
             };
             if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
                 for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
@@ -2031,7 +2019,7 @@ impl IdentityStore {
                     let _ = self
                         .identity_command
                         .clone()
-                        .send(shuttle::identity::client::IdentityCommand::Lookup {
+                        .send(IdentityCommand::Lookup {
                             peer_id,
                             kind: kind.clone(),
                             response: tx,
@@ -2041,7 +2029,7 @@ impl IdentityStore {
                     match rx.timeout(SHUTTLE_TIMEOUT).await {
                         Ok(Ok(Ok(list))) => {
                             for ident in &list {
-                                let ident = ident.clone().into();
+                                let ident = ident.clone();
                                 _ = self.identity_cache.insert(&ident).await;
 
                                 if self.discovery.contains(&ident.did).await {
@@ -2050,7 +2038,7 @@ impl IdentityStore {
                                 let _ = self.discovery.insert(&ident.did).await;
                             }
 
-                            idents_docs.extend(list.iter().cloned().map(|doc| doc.into()));
+                            idents_docs.extend(list.iter().cloned());
                             break;
                         }
                         Ok(Ok(Err(e))) => {
@@ -2307,59 +2295,6 @@ impl IdentityStore {
         let ipfs = &self.ipfs;
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid).recursive().await?;
-        }
-        Ok(())
-    }
-
-    pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {
-        {
-            let len = identity.username().chars().count();
-            if !(4..=64).contains(&len) {
-                return Err(Error::InvalidLength {
-                    context: "username".into(),
-                    current: len,
-                    minimum: Some(4),
-                    maximum: Some(64),
-                });
-            }
-        }
-        {
-            //Note: The only reason why this would ever error is if the short id is different. Likely from an update to `SHORT_ID_SIZE`
-            //      but other possibility would be through alteration to the `Identity` being sent in some way
-            let len = identity.short_id().len();
-            if len != SHORT_ID_SIZE {
-                return Err(Error::InvalidLength {
-                    context: "short id".into(),
-                    current: len,
-                    minimum: Some(SHORT_ID_SIZE),
-                    maximum: Some(SHORT_ID_SIZE),
-                });
-            }
-        }
-        {
-            let fingerprint = identity.did_key().fingerprint();
-            let bytes = fingerprint.as_bytes();
-
-            let short_id: [u8; SHORT_ID_SIZE] = bytes[bytes.len() - SHORT_ID_SIZE..]
-                .try_into()
-                .map_err(anyhow::Error::from)?;
-
-            if identity.short_id() != short_id.into() {
-                return Err(Error::PublicKeyInvalid);
-            }
-        }
-        {
-            if let Some(status) = identity.status_message() {
-                let len = status.chars().count();
-                if len >= 512 {
-                    return Err(Error::InvalidLength {
-                        context: "status".into(),
-                        current: len,
-                        minimum: None,
-                        maximum: Some(512),
-                    });
-                }
-            }
         }
         Ok(())
     }

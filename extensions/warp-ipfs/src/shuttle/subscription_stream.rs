@@ -5,10 +5,8 @@ use rust_ipfs::libp2p::gossipsub::Message;
 use rust_ipfs::Ipfs;
 use tokio_stream::StreamMap;
 
-use crate::message::ConversationTopic;
-use crate::store::{identity::IdentityStorage, messages::MessageStorage};
-use crate::PeerTopic;
-
+use super::store::{identity::IdentityStorage, messages::MessageStorage};
+use crate::store::topics::{ConversationTopic, PeerTopic};
 #[derive(Clone)]
 pub struct Subscriptions {
     tx: futures::channel::mpsc::Sender<SubscriptionCommand>,

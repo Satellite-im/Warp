@@ -15,7 +15,16 @@ mod test {
 
     use crate::common::{create_accounts_and_chat, PROFILE_IMAGE};
 
-    #[tokio::test]
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test as async_test;
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use tokio::test as async_test;
+
+    #[async_test]
     async fn create_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::create_conversation".into())),
@@ -31,7 +40,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -42,7 +51,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -63,7 +72,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn conversation_favorite() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::conversation_favorite".into())),
@@ -79,7 +88,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -90,7 +99,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -124,7 +133,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn destroy_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::destroy_conversation".into())),
@@ -140,7 +149,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -151,7 +160,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -173,7 +182,7 @@ mod test {
 
         chat_a.delete(id, None).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -185,7 +194,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -199,7 +208,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn send_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -223,7 +232,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -234,7 +243,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -250,7 +259,7 @@ mod test {
 
         chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
-        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
                     conversation_id,
@@ -263,7 +272,7 @@ mod test {
         })
         .await??;
 
-        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
                     conversation_id,
@@ -280,7 +289,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn send_and_download_attachment_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -304,7 +313,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -315,7 +324,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -366,7 +375,7 @@ mod test {
             }
         }
 
-        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
                     conversation_id,
@@ -379,7 +388,7 @@ mod test {
         })
         .await??;
 
-        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
                     conversation_id,
@@ -411,7 +420,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn send_attachment_stream_and_download_attachment_in_conversation() -> anyhow::Result<()>
     {
         let accounts = create_accounts_and_chat(vec![
@@ -436,7 +445,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -447,7 +456,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -495,7 +504,7 @@ mod test {
             }
         }
 
-        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
                     conversation_id,
@@ -508,7 +517,7 @@ mod test {
         })
         .await??;
 
-        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
                     conversation_id,
@@ -540,7 +549,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn delete_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -564,7 +573,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -575,7 +584,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -591,7 +600,7 @@ mod test {
 
         chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
-        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
                     conversation_id,
@@ -604,7 +613,7 @@ mod test {
         })
         .await??;
 
-        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
                     conversation_id,
@@ -622,7 +631,7 @@ mod test {
         chat_a.delete(id_a, Some(message_a.id())).await?;
 
         // Maybe cross check the message id and convo
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageDeleted { .. }) = conversation_a.next().await {
                     break;
@@ -631,7 +640,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageDeleted { .. }) = conversation_b.next().await {
                     break;
@@ -643,7 +652,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn edit_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -667,7 +676,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -678,7 +687,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -694,7 +703,7 @@ mod test {
 
         chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
-        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
                     conversation_id,
@@ -707,7 +716,7 @@ mod test {
         })
         .await??;
 
-        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
                     conversation_id,
@@ -726,7 +735,7 @@ mod test {
             .edit(id_a, message_a.id(), vec!["New Message".into()])
             .await?;
 
-        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageEdited {
                     conversation_id,
@@ -739,7 +748,7 @@ mod test {
         })
         .await??;
 
-        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageEdited {
                     conversation_id,
@@ -756,7 +765,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn react_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -780,7 +789,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -791,7 +800,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -807,7 +816,7 @@ mod test {
 
         chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
-        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
                     conversation_id,
@@ -820,7 +829,7 @@ mod test {
         })
         .await??;
 
-        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
                     conversation_id,
@@ -839,7 +848,7 @@ mod test {
             .react(id_a, message_a.id(), ReactionState::Add, ":smile:".into())
             .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReactionAdded {
                     conversation_id,
@@ -868,7 +877,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReactionAdded {
                     conversation_id,
@@ -906,7 +915,7 @@ mod test {
             )
             .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReactionRemoved {
                     conversation_id,
@@ -931,7 +940,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReactionRemoved {
                     conversation_id,
@@ -959,7 +968,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn pin_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::pin_message_in_conversation".into())),
@@ -975,7 +984,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -986,7 +995,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -1002,7 +1011,7 @@ mod test {
 
         chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
-        let message_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
                     conversation_id,
@@ -1015,7 +1024,7 @@ mod test {
         })
         .await??;
 
-        let message_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let message_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageReceived {
                     conversation_id,
@@ -1032,7 +1041,7 @@ mod test {
 
         chat_a.pin(id_a, message_a.id(), PinState::Pin).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessagePinned {
                     conversation_id,
@@ -1052,7 +1061,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessagePinned {
                     conversation_id,
@@ -1074,7 +1083,7 @@ mod test {
 
         chat_a.pin(id_a, message_a.id(), PinState::Unpin).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageUnpinned {
                     conversation_id,
@@ -1094,7 +1103,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::MessageUnpinned {
                     conversation_id,
@@ -1117,7 +1126,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn event_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -1141,7 +1150,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -1152,7 +1161,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -1167,7 +1176,7 @@ mod test {
 
         chat_a.send_event(id_a, MessageEvent::Typing).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::EventReceived {
                     conversation_id,
@@ -1186,7 +1195,7 @@ mod test {
 
         chat_a.cancel_event(id_a, MessageEvent::Typing).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::EventCancelled {
                     conversation_id,
@@ -1206,7 +1215,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
+    #[async_test]
     async fn delete_conversation_when_blocked() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -1233,7 +1242,7 @@ mod test {
 
         chat_a.create_conversation(&did_b).await?;
 
-        let id_a = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_a.next().await
@@ -1244,7 +1253,7 @@ mod test {
         })
         .await?;
 
-        let id_b = tokio::time::timeout(Duration::from_secs(60), async {
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
                     chat_subscribe_b.next().await
@@ -1265,7 +1274,7 @@ mod test {
 
         _account_a.block(&did_b).await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::Blocked { did }) = account_subscribe_a.next().await
                 {
@@ -1276,7 +1285,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationDeleted { .. }) =
                     chat_subscribe_a.next().await
@@ -1287,7 +1296,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MultiPassEventKind::BlockedBy { did }) =
                     account_subscribe_b.next().await
@@ -1299,7 +1308,7 @@ mod test {
         })
         .await?;
 
-        tokio::time::timeout(Duration::from_secs(60), async {
+        crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(RayGunEventKind::ConversationDeleted { .. }) =
                     chat_subscribe_b.next().await

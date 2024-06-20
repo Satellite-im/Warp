@@ -1,16 +1,12 @@
-use warp::tesseract::Tesseract;
 use warp_ipfs::WarpIpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let tesseract = Tesseract::default();
-    tesseract
-        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
+    let (mut account, _, mut filesystem) = WarpIpfsBuilder::default().finalize().await;
 
-    let (mut account, _, mut filesystem) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
-        .finalize()
-        .await;
+    account
+        .tesseract()
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     account.create_identity(None, None).await?;
 
