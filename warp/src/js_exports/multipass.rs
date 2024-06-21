@@ -6,6 +6,7 @@ use crate::{
         identity::{self, Identity, IdentityProfile},
         MultiPass,
     },
+    tesseract::Tesseract,
 };
 use futures::StreamExt;
 use js_sys::Uint8Array;
@@ -49,8 +50,12 @@ impl MultiPassBox {
             .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
     }
 
-    pub async fn get_own_identity(&self) -> Result<Identity, JsError> {
-        self.inner.get_own_identity().await.map_err(|e| e.into())
+    pub async fn identity(&self) -> Result<Identity, JsError> {
+        self.inner.identity().await.map_err(|e| e.into())
+    }
+
+    pub fn tesseract(&self) -> Tesseract {
+        self.inner.tesseract()
     }
 
     pub async fn update_identity(
@@ -298,7 +303,6 @@ pub enum Identifier {
     DID,
     DIDList,
     Username,
-    Own,
 }
 fn to_identifier_enum(option: Identifier, value: JsValue) -> Result<identity::Identifier, JsError> {
     match option {
@@ -332,7 +336,6 @@ fn to_identifier_enum(option: Identifier, value: JsValue) -> Result<identity::Id
             Some(s) => Ok(identity::Identifier::Username(s)),
             None => Err(JsError::new("JsValue is not a string")),
         },
-        Identifier::Own => Ok(identity::Identifier::Own),
     }
 }
 

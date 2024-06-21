@@ -11,8 +11,10 @@ members = [
     "extensions/*",
     "warp",
     "tools/*",
+    "extensions/warp-ipfs/shuttle",
     "extensions/warp-ipfs/examples/wasm-ipfs-identity",
     "extensions/warp-ipfs/examples/wasm-ipfs-friends",
+    "extensions/warp-ipfs/examples/wasm-ipfs-storage",
 ]
 exclude = ["deprecated/*", "tools/opencv-test", "tools/video-codec-cli"]
 
@@ -69,6 +71,7 @@ chrono = { version = "~0.4.27", default-features = false, features = [
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0" }
 serde_cbor = "0.11.2"
+cbor4ii = { version = "0.3.2", features = ["serde1", "use_std"] }
 serde_yaml = "0.9"
 toml = "0.5"
 bs58 = "0.4"
@@ -90,7 +93,7 @@ tracing = { version = "0.1" }
 either = "1"
 void = "1"
 
-#ipfs dependency
+# ipfs dependency
 rust-ipfs = "0.11.18"
 
 # wasm crates
@@ -102,6 +105,7 @@ console_error_panic_hook = "0.1.7"
 wasm-streams = "0.4"
 wasm-bindgen-futures = "0.4"
 serde-wasm-bindgen = "0.4"
+send_wrapper = "0.6.0"
 
 # Blink related crates
 # av-data is needed to use libaom. need to ensure that Warp and libaom use the same version of av-data

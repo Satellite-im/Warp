@@ -1,14 +1,15 @@
 use chrono::{DateTime, Utc};
 use libipld::Cid;
+use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use warp::{
-    crypto::{did_key::CoreSign, Fingerprint, DID},
+    crypto::{Fingerprint, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
 
-use crate::store::{MAX_STATUS_LENGTH, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+use crate::store::{DidExt, MAX_STATUS_LENGTH, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -56,44 +57,6 @@ pub struct IdentityMetadata {
     pub status: Option<IdentityStatus>,
 }
 
-impl From<shuttle::identity::document::IdentityMetadata> for IdentityMetadata {
-    fn from(meta: shuttle::identity::document::IdentityMetadata) -> Self {
-        Self {
-            profile_picture: meta.profile_picture,
-            profile_banner: meta.profile_banner,
-            platform: meta.platform,
-            status: meta.status,
-        }
-    }
-}
-
-impl From<shuttle::identity::document::IdentityDocumentVersion> for IdentityDocumentVersion {
-    fn from(v: shuttle::identity::document::IdentityDocumentVersion) -> Self {
-        match v {
-            shuttle::identity::document::IdentityDocumentVersion::V0 => IdentityDocumentVersion::V0,
-        }
-    }
-}
-
-impl From<IdentityMetadata> for shuttle::identity::document::IdentityMetadata {
-    fn from(meta: IdentityMetadata) -> Self {
-        Self {
-            profile_picture: meta.profile_picture,
-            profile_banner: meta.profile_banner,
-            platform: meta.platform,
-            status: meta.status,
-        }
-    }
-}
-
-impl From<IdentityDocumentVersion> for shuttle::identity::document::IdentityDocumentVersion {
-    fn from(v: IdentityDocumentVersion) -> Self {
-        match v {
-            IdentityDocumentVersion::V0 => shuttle::identity::document::IdentityDocumentVersion::V0,
-        }
-    }
-}
-
 impl From<Identity> for IdentityDocument {
     fn from(identity: Identity) -> Self {
         let username = identity.username();
@@ -113,38 +76,6 @@ impl From<Identity> for IdentityDocument {
             metadata: Default::default(),
             version: IdentityDocumentVersion::V0,
             signature: None,
-        }
-    }
-}
-
-impl From<shuttle::identity::document::IdentityDocument> for IdentityDocument {
-    fn from(document: shuttle::identity::document::IdentityDocument) -> Self {
-        Self {
-            username: document.username,
-            did: document.did,
-            short_id: document.short_id,
-            created: document.created,
-            modified: document.modified,
-            status_message: document.status_message,
-            metadata: document.metadata.into(),
-            version: document.version.into(),
-            signature: document.signature,
-        }
-    }
-}
-
-impl From<IdentityDocument> for shuttle::identity::document::IdentityDocument {
-    fn from(document: IdentityDocument) -> Self {
-        Self {
-            username: document.username,
-            did: document.did,
-            short_id: document.short_id,
-            created: document.created,
-            modified: document.modified,
-            status_message: document.status_message,
-            metadata: document.metadata.into(),
-            version: document.version.into(),
-            signature: document.signature,
         }
     }
 }
@@ -208,7 +139,7 @@ impl IdentityDocument {
         Ok(self.into())
     }
 
-    pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
+    pub fn sign(mut self, keypair: &Keypair) -> Result<Self, Error> {
         let metadata = self.metadata;
 
         //We blank out the metadata since it will not be used as apart of the
@@ -219,7 +150,7 @@ impl IdentityDocument {
         self.modified = Utc::now();
 
         let bytes = serde_json::to_vec(&self)?;
-        let signature = bs58::encode(did.sign(&bytes)).into_string();
+        let signature = bs58::encode(keypair.sign(&bytes).expect("not RSA")).into_string();
         self.metadata = metadata;
         self.signature = Some(signature);
         Ok(self)
@@ -273,9 +204,11 @@ impl IdentityDocument {
         let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
         let signature_bytes = bs58::decode(signature).into_vec()?;
         let bytes = serde_json::to_vec(&payload)?;
-        self.did
-            .verify(&bytes, &signature_bytes)
-            .map_err(|_| Error::InvalidSignature)?;
+        let pk = self.did.to_public_key()?;
+        if !pk.verify(&bytes, &signature_bytes) {
+            return Err(Error::InvalidSignature);
+        }
+
         Ok(())
     }
 }

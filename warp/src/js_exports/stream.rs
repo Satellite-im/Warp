@@ -1,5 +1,7 @@
-use futures::{stream::BoxStream, StreamExt};
+use futures::{stream::BoxStream, Stream, StreamExt};
 use js_sys::Promise;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use wasm_bindgen::prelude::*;
 
 /// Wraps BoxStream<'static, TesseractEvent> into a js compatible struct
@@ -41,5 +43,34 @@ impl PromiseResult {
     #[wasm_bindgen(getter)]
     pub fn value(&self) -> JsValue {
         self.value.clone()
+    }
+}
+
+pub struct InnerStream {
+    inner: send_wrapper::SendWrapper<wasm_streams::readable::IntoStream<'static>>,
+}
+
+impl From<wasm_streams::ReadableStream> for InnerStream {
+    fn from(stream: wasm_streams::ReadableStream) -> Self {
+        Self {
+            inner: send_wrapper::SendWrapper::new(stream.into_stream()),
+        }
+    }
+}
+
+impl Stream for InnerStream {
+    type Item = Vec<u8>;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+        match futures::ready!(Pin::new(&mut this.inner).poll_next(cx)) {
+            Some(Ok(val)) => {
+                let bytes = serde_wasm_bindgen::from_value(val).expect("valid bytes");
+                return Poll::Ready(Some(bytes));
+            }
+            _ => {
+                // Any other condition should cause this stream to end
+                return Poll::Ready(None);
+            }
+        }
     }
 }

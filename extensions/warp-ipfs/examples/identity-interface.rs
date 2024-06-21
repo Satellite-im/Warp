@@ -1,17 +1,19 @@
+use std::io::Write;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::Duration;
+
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rust_ipfs::Multiaddr;
 use rustyline_async::Readline;
-use std::io::Write;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::time::Duration;
 use tracing_subscriber::EnvFilter;
+
 use warp::crypto::DID;
+use warp::error::Error;
 use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus, IdentityUpdate};
 use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
-use warp::tesseract::Tesseract;
 use warp_ipfs::config::{Bootstrap, Config, Discovery, DiscoveryType};
 use warp_ipfs::WarpIpfsBuilder;
 
@@ -57,14 +59,6 @@ async fn account(
     username: Option<&str>,
     opt: &Opt,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Option<IdentityProfile>)> {
-    let tesseract = match path.as_ref() {
-        Some(path) => Tesseract::open_or_create(path, "tdatastore")?,
-        None => Tesseract::default(),
-    };
-
-    tesseract
-        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
-
     let mut config = match path.as_ref() {
         Some(path) => Config::production(path),
         None => Config::testing(),
@@ -114,14 +108,17 @@ async fn account(
     config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
     let (mut account, _, _) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
 
+    account
+        .tesseract()
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
+
     let mut profile = None;
 
-    if account.get_own_identity().await.is_err() {
+    if account.identity().await.is_err() {
         match (opt.import.clone(), opt.phrase.clone()) {
             (Some(path), Some(passphrase)) => {
                 account
@@ -140,7 +137,14 @@ async fn account(
                     .await?;
             }
             _ => {
-                profile = Some(account.create_identity(username, None).await?);
+                profile = match account.create_identity(username, None).await {
+                    Ok(profile) => Some(profile),
+                    Err(Error::IdentityExist) => {
+                        let identity = account.identity().await?;
+                        Some(IdentityProfile::new(identity, None))
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
         };
     }
@@ -179,7 +183,7 @@ async fn main() -> anyhow::Result<()> {
         }
         None => {
             println!("Obtained identity....");
-            account.get_own_identity().await?
+            account.identity().await?
         }
     };
 
@@ -751,8 +755,8 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 Some("own") | None => {
-                                    match account.get_identity(Identifier::own()).await {
-                                        Ok(identity) => identity,
+                                    match account.identity().await {
+                                        Ok(identity) => vec![identity],
                                         Err(e) => {
                                             writeln!(stdout, "Error obtaining own identity: {e}")?;
                                             continue;
@@ -760,7 +764,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 _ => {
-                                    writeln!(stdout, "/lookup <username | publickey> [username | publickey]")?;
+                                    writeln!(stdout, "/lookup <username | publickey> [username | publickey ...]")?;
                                     continue
                                 }
                             };

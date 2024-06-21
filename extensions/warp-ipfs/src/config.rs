@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use ipfs::{Multiaddr, Protocol};
 use rust_ipfs as ipfs;
@@ -90,14 +90,7 @@ impl Default for RelayClient {
             #[cfg(target_arch="wasm32")]
             relay_address: vec![
                 //NYC-1
-                "/ip4/146.190.184.59/tcp/4001/wss/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
-                "/ip4/146.190.184.59/udp/4002/webrtc-direct/certhash/uEiC7m8m2pxf_DHr488akg-wSAxsa-f2agH5zc2nE70vx_g/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
-                //SF-1
-                "/ip4/64.225.88.100/tcp/4001/wss/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
-                "/ip4/64.225.88.100/udp/4002/webrtc-direct/certhash/uEiD25LqH8FlAgimcIY4XB1QiHHROlCYn7WJIukuRMe3tfQ/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
-                //NYC-1-EXP
-                "/ip4/24.199.86.91/tcp/46315/wss/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
-                "/ip4/24.199.86.91/udp/4002/webrtc-direct/certhash/uEiCZ8YAx_IZ7_x5dKltFESWHe4TUg8_gYpla6tmWR9jlfw/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
+                "/ip4/167.71.93.202/tcp/4445/ws/p2p/12D3KooWSsn13GxHchpG6dtr7o6ARqSkcMtsBuojgL9XU9t1M1uE".parse().unwrap(),
             ],
             background: true,
             quorum: Default::default()
@@ -177,6 +170,7 @@ impl Default for StoreSetting {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Config {
     path: Option<PathBuf>,
+    persist: bool,
     bootstrap: Bootstrap,
     listen_on: Vec<Multiaddr>,
     ipfs_setting: IpfsSetting,
@@ -190,6 +184,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn persist(&self) -> bool {
+        self.persist
+    }
+
     pub fn path(&self) -> Option<&PathBuf> {
         self.path.as_ref()
     }
@@ -240,6 +238,10 @@ impl Config {
         &mut self.path
     }
 
+    pub fn persist_mut(&mut self) -> &mut bool {
+        &mut self.persist
+    }
+
     pub fn bootstrap_mut(&mut self) -> &mut Bootstrap {
         &mut self.bootstrap
     }
@@ -283,8 +285,11 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        use std::str::FromStr;
         Config {
             path: None,
+            persist: false,
             bootstrap: Bootstrap::Ipfs,
             #[cfg(not(target_arch = "wasm32"))]
             listen_on: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"]
@@ -355,6 +360,52 @@ impl Config {
                 relay_client: RelayClient {
                     ..Default::default()
                 },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: Discovery::None,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+    pub fn minimal_basic() -> Config {
+        Config {
+            persist: true,
+            bootstrap: Bootstrap::None,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
+            ipfs_setting: IpfsSetting {
+                relay_client: RelayClient {
+                    ..Default::default()
+                },
+                memory_transport: true,
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: Discovery::None,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen::prelude::wasm_bindgen]
+    pub fn minimal_with_relay(addresses: Vec<String>) -> Config {
+        Config {
+            persist: true,
+            bootstrap: Bootstrap::None,
+            listen_on: vec![Multiaddr::empty().with(Protocol::Memory(0))],
+            ipfs_setting: IpfsSetting {
+                relay_client: RelayClient {
+                    relay_address: addresses
+                        .into_iter()
+                        .filter_map(|addr| addr.parse().ok())
+                        .collect::<Vec<_>>(),
+                    ..Default::default()
+                },
                 memory_transport: true,
                 ..Default::default()
             },
@@ -391,6 +442,7 @@ impl Config {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn production<P: AsRef<std::path::Path>>(path: P) -> Config {
         Config {
+            persist: true,
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {

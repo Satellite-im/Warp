@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 warp.workspace = true
 
 futures-timeout.workspace = true
+cbor4ii.workspace = true
 rust-ipfs = { workspace = true, features = ["webrtc_transport", "experimental_stream"] }
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
@@ -38,13 +39,15 @@ mediatype.workspace = true
 bincode.workspace = true
 bytes.workspace = true
 
-shuttle = { path = "../../tools/shuttle", default-features = false }
 fs = { path = "../../tools/fs", default-features = false }
 
 tokio-util = { workspace = true }
 tokio-stream = { workspace = true }
 
 web-time = "1.1.0"
+
+base64 = "0.21"
+
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
@@ -71,6 +74,11 @@ clap = { version = "4.0", features = ["derive"] }
 
 rpassword = "7.3"
 
+# crates for examples
+tiny_file_server = "0.1.5"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3.42"
 
 [features]
 default = []

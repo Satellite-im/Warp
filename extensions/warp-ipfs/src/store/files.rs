@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, ffi::OsStr, path::PathBuf, sync::Arc};
+#[cfg(not(target_arch = "wasm32"))]
+use std::ffi::OsStr;
+
+use std::{collections::VecDeque, path::PathBuf, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
@@ -145,6 +148,7 @@ impl FileStore {
         PathBuf::from(self.path.read().to_string_lossy().replace('\\', "/"))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn put(
         &mut self,
         name: impl Into<String>,
@@ -163,6 +167,7 @@ impl FileStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn get(
         &self,
         name: impl Into<String>,
@@ -318,6 +323,7 @@ impl FileStore {
 type GetStream = BoxStream<'static, Result<Vec<u8>, Error>>;
 type GetBufferFutResult = BoxFuture<'static, Result<Vec<u8>, Error>>;
 enum FileTaskCommand {
+    #[cfg(not(target_arch = "wasm32"))]
     Put {
         name: String,
         path: String,
@@ -334,7 +340,7 @@ enum FileTaskCommand {
         stream: BoxStream<'static, Vec<u8>>,
         response: oneshot::Sender<Result<ConstellationProgressStream, Error>>,
     },
-
+    #[cfg(not(target_arch = "wasm32"))]
     Get {
         name: String,
         path: String,
@@ -392,6 +398,7 @@ impl FileTask {
                 biased;
                 Some(command) = self.command_receiver.next() => {
                     match command {
+                        #[cfg(not(target_arch = "wasm32"))]
                         FileTaskCommand::Put {
                             name,
                             path,
@@ -414,6 +421,7 @@ impl FileTask {
                         } => {
                             _ = response.send(self.put_stream(&name, total_size, stream));
                         },
+                        #[cfg(not(target_arch = "wasm32"))]
                         FileTaskCommand::Get {
                             name,
                             path,
@@ -519,6 +527,7 @@ impl FileTask {
         PathBuf::from(self.path.read().to_string_lossy().replace('\\', "/"))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         let (name, dest_path) = split_file_from_path(name)?;
 
@@ -662,6 +671,7 @@ impl FileTask {
         Ok(progress_stream.boxed())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         let ipfs = self.ipfs.clone();
 

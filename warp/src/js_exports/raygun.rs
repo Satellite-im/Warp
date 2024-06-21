@@ -1,17 +1,19 @@
 use crate::{
     crypto::DID,
-    js_exports::stream::AsyncIterator,
+    js_exports::stream::{AsyncIterator, InnerStream},
     raygun::{
-        self, EmbedState, GroupSettings, MessageEvent, MessageStatus, MessageType, PinState,
-        RayGun, ReactionState,
+        self, EmbedState, GroupSettings, Location, LocationKind, MessageEvent, MessageStatus,
+        PinState, RayGun, ReactionState,
     },
 };
-
 use futures::StreamExt;
+use js_sys::Promise;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
+
+use super::constellation::Progression;
 
 #[derive(Clone)]
 #[wasm_bindgen]
@@ -60,6 +62,17 @@ impl RayGunBox {
             .await
             .map_err(|e| e.into())
             .map(|ok| Conversation::new(ok))
+    }
+
+    pub async fn set_favorite_conversation(
+        &mut self,
+        conversation_id: String,
+        favorite: bool,
+    ) -> Result<(), JsError> {
+        self.inner
+            .set_favorite_conversation(Uuid::from_str(&conversation_id).unwrap(), favorite)
+            .await
+            .map_err(|e| e.into())
     }
 
     /// List all active conversations
@@ -287,6 +300,109 @@ impl RayGunBox {
             )
             .await
             .map_err(|e| e.into())
+    }
+}
+
+/// impl RayGunGroup trait
+#[wasm_bindgen]
+impl RayGunBox {
+    //Update conversation name Note: This will only update the group conversation name
+    pub async fn update_conversation_name(
+        &mut self,
+        conversation_id: String,
+        name: String,
+    ) -> Result<(), JsError> {
+        self.inner
+            .update_conversation_name(Uuid::from_str(&conversation_id).unwrap(), &name)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Add a recipient to the conversation
+    pub async fn add_recipient(
+        &mut self,
+        conversation_id: String,
+        recipient: String,
+    ) -> Result<(), JsError> {
+        self.inner
+            .add_recipient(
+                Uuid::from_str(&conversation_id).unwrap(),
+                &DID::from_str(&recipient).unwrap(),
+            )
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Remove a recipient from the conversation
+    pub async fn remove_recipient(
+        &mut self,
+        conversation_id: String,
+        recipient: String,
+    ) -> Result<(), JsError> {
+        self.inner
+            .remove_recipient(
+                Uuid::from_str(&conversation_id).unwrap(),
+                &DID::from_str(&recipient).unwrap(),
+            )
+            .await
+            .map_err(|e| e.into())
+    }
+}
+
+/// impl RayGunAttachment trait
+#[wasm_bindgen]
+impl RayGunBox {
+    /// Send files to a conversation.
+    /// If no files is provided in the array, it will throw an error
+    pub async fn attach(
+        &mut self,
+        conversation_id: String,
+        message_id: Option<String>,
+        files: Vec<AttachmentFile>,
+        message: Vec<String>,
+    ) -> Result<AttachmentResult, JsError> {
+        self.inner
+            .attach(
+                Uuid::from_str(&conversation_id).unwrap(),
+                message_id.map(|s| Uuid::from_str(&s).unwrap()),
+                files.iter().map(|f| f.clone().into()).collect(),
+                message,
+            )
+            .await
+            .map_err(|e| e.into())
+            .map(|(id, ok)| AttachmentResult {
+                message_id: id.to_string(),
+                stream: AsyncIterator::new(Box::pin(
+                    ok.map(|s| serde_wasm_bindgen::to_value(&AttachmentKind::from(s)).unwrap()),
+                )),
+            })
+    }
+
+    /// Stream a file that been attached to a message
+    /// Note: Must use the filename associated when downloading
+    pub async fn download_stream(
+        &self,
+        conversation_id: String,
+        message_id: String,
+        file: String,
+    ) -> Result<AsyncIterator, JsError> {
+        self.inner
+            .download_stream(
+                Uuid::from_str(&conversation_id).unwrap(),
+                Uuid::from_str(&message_id).unwrap(),
+                &file,
+            )
+            .await
+            .map_err(|e| e.into())
+            .map(|ok| {
+                AsyncIterator::new(Box::pin(ok.map(|s| match s {
+                    Ok(v) => serde_wasm_bindgen::to_value(&v).unwrap(),
+                    Err(e) => {
+                        let err: JsError = e.into();
+                        err.into()
+                    }
+                })))
+            })
     }
 }
 
@@ -630,5 +746,72 @@ impl Message {
 
     pub fn replied(&self) -> Option<String> {
         self.inner.replied().map(|uuid| uuid.to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[wasm_bindgen]
+pub struct AttachmentFile {
+    file: String,
+    stream: Option<web_sys::ReadableStream>,
+}
+
+#[wasm_bindgen]
+impl AttachmentFile {
+    #[wasm_bindgen(constructor)]
+    pub fn new(file: String, stream: Option<web_sys::ReadableStream>) -> Self {
+        Self { file, stream }
+    }
+}
+
+impl Into<raygun::Location> for AttachmentFile {
+    fn into(self) -> raygun::Location {
+        if let Some(stream) = self.stream {
+            Location::Stream {
+                name: self.file,
+                stream: {
+                    let stream = InnerStream::from(wasm_streams::ReadableStream::from_raw(stream));
+                    Box::pin(stream)
+                },
+            }
+        } else {
+            Location::Constellation { path: self.file }
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct AttachmentResult {
+    message_id: String,
+    stream: AsyncIterator,
+}
+
+#[wasm_bindgen]
+impl AttachmentResult {
+    pub fn get_message_id(&self) -> String {
+        self.message_id.clone()
+    }
+
+    pub async fn next(&mut self) -> std::result::Result<Promise, JsError> {
+        self.stream.next().await
+    }
+}
+
+#[derive(serde::Serialize)]
+pub enum AttachmentKind {
+    AttachedProgress(LocationKind, Progression),
+    Pending(Result<(), String>),
+}
+
+impl From<raygun::AttachmentKind> for AttachmentKind {
+    fn from(value: raygun::AttachmentKind) -> Self {
+        match value {
+            raygun::AttachmentKind::AttachedProgress(loc, prog) => {
+                AttachmentKind::AttachedProgress(loc, prog.into())
+            }
+            raygun::AttachmentKind::Pending(res) => {
+                AttachmentKind::Pending(res.map_err(|e| e.to_string()))
+            }
+        }
     }
 }

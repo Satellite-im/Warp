@@ -1,18 +1,20 @@
-use futures::{stream, StreamExt};
+use futures::{stream, Future, StreamExt};
+use futures_timeout::TimeoutExt;
 use rust_ipfs::{Ipfs, Multiaddr, PeerId, Protocol};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
 use warp::{
     constellation::Constellation,
     crypto::DID,
     multipass::{identity::Identity, MultiPass},
     raygun::RayGun,
-    tesseract::Tesseract,
 };
 use warp_ipfs::{
     config::{Bootstrap, Discovery},
     WarpIpfsBuilder,
 };
 
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use std::time::Duration;
 
 pub async fn node_info(nodes: Vec<Ipfs>) -> Vec<(Ipfs, PeerId, Vec<Multiaddr>)> {
     stream::iter(nodes)
@@ -50,26 +52,26 @@ pub async fn mesh_connect(nodes: Vec<Ipfs>) -> anyhow::Result<()> {
 pub async fn create_account(
     username: Option<&str>,
     passphrase: Option<&str>,
-    context: Option<String>,
+    _: Option<String>,
 ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn Constellation>, DID, Identity)> {
-    let tesseract = Tesseract::default();
-    tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
     *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
     config.ipfs_setting_mut().memory_transport = true;
-    config.store_setting_mut().discovery = Discovery::Namespace {
-        namespace: context,
-        discovery_type: Default::default(),
-    };
+    config.store_setting_mut().discovery = Discovery::None;
     config.store_setting_mut().share_platform = true;
     config.ipfs_setting_mut().relay_client.relay_address = vec![];
+    config.store_setting_mut().announce_to_mesh = true;
+    config.store_setting_mut().auto_push = Some(Duration::from_secs(1));
+
     *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, _, fs) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
+
+    account.tesseract().unlock(b"internal pass").unwrap();
+
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 
@@ -117,8 +119,6 @@ pub async fn create_account_and_chat(
     DID,
     Identity,
 )> {
-    let tesseract = Tesseract::default();
-    tesseract.unlock(b"internal pass").unwrap();
     let mut config = warp_ipfs::config::Config::development();
     *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
     config.ipfs_setting_mut().memory_transport = true;
@@ -131,10 +131,11 @@ pub async fn create_account_and_chat(
     *config.bootstrap_mut() = Bootstrap::None;
 
     let (mut account, raygun, fs) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
         .set_config(config)
         .finalize()
         .await;
+
+    account.tesseract().unlock(b"internal pass").unwrap();
 
     let profile = account.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
@@ -177,6 +178,14 @@ pub async fn create_accounts_and_chat(
     mesh_connect(nodes).await?;
 
     Ok(accounts)
+}
+
+#[allow(dead_code)]
+pub async fn timeout<F>(duration: Duration, future: F) -> Result<F::Output, std::io::Error>
+where
+    F: Future,
+{
+    future.timeout(duration).await
 }
 
 #[allow(dead_code)]
