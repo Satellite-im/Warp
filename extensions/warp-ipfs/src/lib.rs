@@ -29,7 +29,7 @@ use config::Config;
 use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
 use store::files::FileStore;
-use store::identity::{IdentityStore, LookupBy};
+use store::identity::IdentityStore;
 use store::message::MessageStore;
 use utils::ExtensionType;
 use warp::constellation::directory::Directory;
@@ -47,8 +47,9 @@ use warp::multipass::identity::{
     Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity,
-    MultiPass, MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
+    identity, Friends, GetIdentity, IdentityImportOption, IdentityInformation, ImportLocation,
+    LocalIdentity, MultiPass, MultiPassEvent, MultiPassEventKind, MultiPassEventStream,
+    MultiPassImportExport,
 };
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
@@ -743,6 +744,18 @@ impl WarpIpfs {
             .ok_or(Error::ConstellationExtensionUnavailable)
     }
 
+    pub(crate) fn direct_identity_store(&self) -> std::result::Result<IdentityStore, Error> {
+        let store = self
+            .inner
+            .components
+            .read()
+            .as_ref()
+            .map(|com| com.identity_store.clone())
+            .ok_or(Error::MultiPassExtensionUnavailable)?;
+
+        Ok(store)
+    }
+
     pub(crate) fn ipfs(&self) -> Result<Ipfs, Error> {
         self.inner
             .components
@@ -852,19 +865,13 @@ impl MultiPass for WarpIpfs {
         Ok(profile)
     }
 
-    async fn get_identity(&self, id: Identifier) -> BoxStream<'static, Identity> {
-        let store = match self.identity_store(true).await {
+    fn get_identity(&self, id: Identifier) -> GetIdentity {
+        let store = match self.direct_identity_store() {
             Ok(store) => store,
-            _ => return stream::empty().boxed(),
+            _ => return GetIdentity::new(id, stream::empty().boxed()),
         };
 
-        let kind = match id {
-            Identifier::DID(pk) => LookupBy::DidKey(pk),
-            Identifier::Username(username) => LookupBy::Username(username),
-            Identifier::DIDList(list) => LookupBy::DidKeys(list),
-        };
-
-        store.lookup_stream(kind).await
+        store.lookup_stream(id)
     }
 }
 

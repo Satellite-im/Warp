@@ -1,9 +1,13 @@
 #![allow(clippy::result_large_err)]
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use identity::Identity;
@@ -86,7 +90,7 @@ pub trait MultiPass:
     ) -> Result<IdentityProfile, Error>;
 
     /// Obtain an [`Identity`] using [`Identifier`]
-    async fn get_identity(&self, id: Identifier) -> BoxStream<'static, Identity>;
+    fn get_identity(&self, id: Identifier) -> GetIdentity;
 }
 
 dyn_clone::clone_trait_object!(MultiPass);
@@ -240,5 +244,50 @@ pub trait IdentityInformation: Send + Sync {
     /// Returns the identity platform while online.
     async fn identity_platform(&self, _: &DID) -> Result<Platform, Error> {
         Err(Error::Unimplemented)
+    }
+}
+
+pub struct GetIdentity {
+    identifier: Identifier,
+    stream: Option<BoxStream<'static, Identity>>,
+}
+
+impl GetIdentity {
+    pub fn new(identifier: Identifier, stream: BoxStream<'static, Identity>) -> Self {
+        GetIdentity {
+            identifier,
+            stream: Some(stream),
+        }
+    }
+}
+
+impl Stream for GetIdentity {
+    type Item = Identity;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let Some(stream) = self.stream.as_mut() else {
+            return Poll::Ready(None);
+        };
+
+        match futures::ready!(stream.poll_next_unpin(cx)) {
+            Some(item) => Poll::Ready(Some(item)),
+            None => {
+                self.stream.take();
+                Poll::Ready(None)
+            }
+        }
+    }
+}
+
+impl Future for GetIdentity {
+    type Output = Result<Identity, Error>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if !matches!(self.identifier, Identifier::DID(_)) {
+            return Poll::Ready(Err(Error::InvalidIdentifierCondition));
+        }
+        let result = match futures::ready!(self.poll_next(cx)) {
+            Some(identity) => Ok(identity),
+            None => Err(Error::IdentityDoesntExist),
+        };
+        Poll::Ready(result)
     }
 }

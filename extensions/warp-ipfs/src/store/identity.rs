@@ -6,7 +6,6 @@ use std::{
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use futures::stream::BoxStream;
 use futures::{
     channel::oneshot::{self, Canceled},
     stream::SelectAll,
@@ -25,6 +24,8 @@ use web_time::Instant;
 
 use crate::shuttle::identity::client::IdentityCommand;
 use crate::shuttle::identity::{RequestEvent, RequestPayload};
+use warp::multipass::identity::Identifier;
+use warp::multipass::GetIdentity;
 use warp::{
     constellation::file::FileType,
     multipass::identity::{IdentityImage, Platform},
@@ -1878,8 +1879,14 @@ impl IdentityStore {
         &self.root_document
     }
 
-    pub async fn lookup_stream(&self, lookup: LookupBy) -> BoxStream<'static, Identity> {
+    pub fn lookup_stream(&self, id: impl Into<Identifier>) -> GetIdentity {
         let store = self.clone();
+        let id = id.into();
+        let lookup = match id {
+            Identifier::DID(ref pk) => LookupBy::DidKey(pk.clone()),
+            Identifier::Username(ref username) => LookupBy::Username(username.clone()),
+            Identifier::DIDList(ref list) => LookupBy::DidKeys(list.clone()),
+        };
 
         let stream = async_stream::stream! {
             // first lets evaluate the cache
@@ -2005,7 +2012,7 @@ impl IdentityStore {
             }
         };
 
-        stream.boxed()
+        GetIdentity::new(id, stream.boxed())
     }
 
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
