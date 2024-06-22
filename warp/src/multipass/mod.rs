@@ -86,7 +86,7 @@ pub trait MultiPass:
     ) -> Result<IdentityProfile, Error>;
 
     /// Obtain an [`Identity`] using [`Identifier`]
-    async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error>;
+    async fn get_identity(&self, id: Identifier) -> BoxStream<'static, Identity>;
 }
 
 dyn_clone::clone_trait_object!(MultiPass);

@@ -852,8 +852,11 @@ impl MultiPass for WarpIpfs {
         Ok(profile)
     }
 
-    async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        let store = self.identity_store(true).await?;
+    async fn get_identity(&self, id: Identifier) -> BoxStream<'static, Identity> {
+        let store = match self.identity_store(true).await {
+            Ok(store) => store,
+            _ => return stream::empty().boxed(),
+        };
 
         let kind = match id {
             Identifier::DID(pk) => LookupBy::DidKey(pk),
@@ -861,7 +864,7 @@ impl MultiPass for WarpIpfs {
             Identifier::DIDList(list) => LookupBy::DidKeys(list),
         };
 
-        store.lookup(kind).await
+        store.lookup_stream(kind).await
     }
 }
 
@@ -1436,10 +1439,10 @@ impl IdentityInformation for WarpIpfs {
     }
 
     async fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
-        self.get_identity(Identifier::did_key(did.clone()))
-            .await?
-            .first()
-            .ok_or(Error::IdentityDoesntExist)?;
+        // self.get_identity(Identifier::did_key(did.clone()))
+        //     .await.timeout(Duration::n)
+        //     .first()
+        //     .ok_or(Error::IdentityDoesntExist)?;
         let friends = self.has_friend(did).await?;
         let received_friend_request = self.received_friend_request_from(did).await?;
         let sent_friend_request = self.sent_friend_request_to(did).await?;

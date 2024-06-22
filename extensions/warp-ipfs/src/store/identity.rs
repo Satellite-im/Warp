@@ -6,6 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use futures::stream::BoxStream;
 use futures::{
     channel::oneshot::{self, Canceled},
     stream::SelectAll,
@@ -1875,6 +1876,136 @@ impl IdentityStore {
 
     pub(crate) fn root_document(&self) -> &RootDocumentMap {
         &self.root_document
+    }
+
+    pub async fn lookup_stream(&self, lookup: LookupBy) -> BoxStream<'static, Identity> {
+        let store = self.clone();
+
+        let stream = async_stream::stream! {
+            // first lets evaluate the cache
+            let cache = store.identity_cache.list().await;
+
+             // anything missing we will push off to additional discovery service
+            let mut missing = HashSet::new();
+
+            match lookup {
+                LookupBy::DidKey(ref did) => {
+                    if did == &store.did_key {
+                        // Note: We can ignore errors if node own identity if invalid or not created
+                        if let Ok(id) = store.own_identity().await {
+                            yield id;
+                            return;
+                        }
+                        return;
+                    }
+
+
+                    for await document in cache.filter(|ident| {
+                        let val = &ident.did == did;
+                        async move { val }
+                    }){
+                        let id = document.into();
+                        yield id;
+                        return
+                    }
+
+                    missing.insert(did.clone());
+                },
+                LookupBy::DidKeys(ref list) => {
+                     for pubkey in list {
+                        if !pubkey.eq(&store.did_key) && !store.discovery.contains(pubkey).await {
+                            if let Err(e) = store.discovery.insert(pubkey).await {
+                                tracing::error!("Error inserting {pubkey} into discovery: {e}")
+                            }
+                        }
+                    }
+
+                    if list.contains(&store.did_key) {
+                        if let Ok(own_identity) = store.own_identity_document().await {
+                            yield own_identity.into();
+                        }
+                    }
+
+                    let mut found = HashSet::new();
+
+                    for await document in cache
+                        .filter(|id| {
+                            let id = id.clone();
+                            async move { list.contains(&id.did) }
+                        }) {
+                        found.insert(document.did.clone());
+                        yield document.into();
+                    }
+
+                    missing.extend(list.iter().filter(|did| !found.contains(did)).cloned());
+                },
+                LookupBy::Username(username) if username.contains('#') => {
+                    let split_data = username.split('#').collect::<Vec<&str>>();
+
+                    if split_data.len() != 2 {
+                        for await document in cache
+                            .filter(|ident| {
+                                let ident = ident.clone();
+                                let val = ident
+                                        .username
+                                        .to_lowercase()
+                                        .contains(&username.to_lowercase());
+                                async move {
+                                    val
+                                }
+                            }) {
+                            yield document.into();
+                        }
+                    } else {
+                        match (
+                            split_data.first().map(|s| s.to_lowercase()),
+                            split_data.last().map(|s| s.to_lowercase()),
+                        ) {
+                            (Some(name), Some(code)) => {
+                                for await document in cache
+                                    .filter(|ident| {
+                                        let ident = ident.clone();
+                                        let name = name.clone();
+                                        let code = code.clone();
+                                        async move {
+                                            ident.username.to_lowercase().eq(&name)
+                                                && String::from_utf8_lossy(&ident.short_id)
+                                                    .to_lowercase()
+                                                    .eq(&code)
+                                        }
+                                    }) {
+                                    yield document.into();
+                                }
+                            }
+                            _ => {},
+                        }
+                    }
+                }
+                LookupBy::Username(username) => {
+                    let username = username.to_lowercase();
+                    for await document in cache
+                        .filter(|ident| {
+                            let ident = ident.clone();
+                            let username = username.clone();
+                            async move { ident.username.to_lowercase().contains(&username) }
+                        }) {
+                        yield document.into();
+                    }
+                }
+                LookupBy::ShortId(short_id) => {
+                    for await document in cache.filter(|ident| {
+                        let ident = ident.clone();
+                        let id = short_id.clone();
+                        async move { String::from_utf8_lossy(&ident.short_id).eq(&id) }
+                    }) {
+                        yield document.into();
+                        return;
+                    }
+                }
+            }
+        };
+
+        stream.boxed()
     }
 
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
