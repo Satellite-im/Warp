@@ -1935,33 +1935,23 @@ impl IdentityStore {
 
                     let mut found = HashSet::new();
 
-                    for await document in cache
-                        .filter(|id| {
-                            let id = id.clone();
-                            async move { list.contains(&id.did) }
-                        }) {
-                        found.insert(document.did.clone());
-                        yield document.into();
+                    for await document in cache {
+                        if list.contains(&document.did) {
+                            found.insert(document.did.clone());
+                            yield document.into();
+                        }
                     }
 
                     missing.extend(list.iter().filter(|did| !found.contains(did)).cloned());
                 },
-                LookupBy::Username(username) if username.contains('#') => {
+                LookupBy::Username(ref username) if username.contains('#') => {
                     let split_data = username.split('#').collect::<Vec<&str>>();
 
                     if split_data.len() != 2 {
-                        for await document in cache
-                            .filter(|ident| {
-                                let ident = ident.clone();
-                                let val = ident
-                                        .username
-                                        .to_lowercase()
-                                        .contains(&username.to_lowercase());
-                                async move {
-                                    val
-                                }
-                            }) {
-                            yield document.into();
+                        for await document in cache {
+                            if document.username.to_lowercase().contains(&username.to_lowercase()) {
+                                yield document.into();
+                            }
                         }
                     } else {
                         match (
@@ -1969,37 +1959,25 @@ impl IdentityStore {
                             split_data.last().map(|s| s.to_lowercase()),
                         ) {
                             (Some(name), Some(code)) => {
-                                for await document in cache
-                                    .filter(|ident| {
-                                        let ident = ident.clone();
-                                        let name = name.clone();
-                                        let code = code.clone();
-                                        async move {
-                                            ident.username.to_lowercase().eq(&name)
-                                                && String::from_utf8_lossy(&ident.short_id)
-                                                    .to_lowercase()
-                                                    .eq(&code)
-                                        }
-                                    }) {
-                                    yield document.into();
+                                for await document in cache {
+                                    if document.username.to_lowercase().eq(&name) && String::from_utf8_lossy(&document.short_id).to_lowercase().eq(&code) {
+                                        yield document.into();
+                                    }
                                 }
                             }
                             _ => {},
                         }
                     }
                 }
-                LookupBy::Username(username) => {
+                LookupBy::Username(ref username) => {
                     let username = username.to_lowercase();
-                    for await document in cache
-                        .filter(|ident| {
-                            let ident = ident.clone();
-                            let username = username.clone();
-                            async move { ident.username.to_lowercase().contains(&username) }
-                        }) {
-                        yield document.into();
+                    for await document in cache {
+                        if document.username.to_lowercase().eq(&username) {
+                            yield document.into();
+                        }
                     }
                 }
-                LookupBy::ShortId(short_id) => {
+                LookupBy::ShortId(ref short_id) => {
                     for await document in cache.filter(|ident| {
                         let ident = ident.clone();
                         let id = short_id.clone();
@@ -2010,6 +1988,8 @@ impl IdentityStore {
                     }
                 }
             }
+
+
         };
 
         GetIdentity::new(id, stream.boxed())
