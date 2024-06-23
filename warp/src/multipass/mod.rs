@@ -280,14 +280,23 @@ impl Stream for GetIdentity {
 
 impl Future for GetIdentity {
     type Output = Result<Identity, Error>;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if !matches!(self.identifier, Identifier::DID(_)) {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+
+        let Some(stream) = this.stream.as_mut() else {
+            return Poll::Ready(Err(Error::IdentityDoesntExist));
+        };
+
+        if matches!(this.identifier, Identifier::DIDList(_)) {
+            this.stream.take();
             return Poll::Ready(Err(Error::InvalidIdentifierCondition));
         }
-        let result = match futures::ready!(self.poll_next(cx)) {
+
+        let result = match futures::ready!(stream.poll_next_unpin(cx)) {
             Some(identity) => Ok(identity),
             None => Err(Error::IdentityDoesntExist),
         };
+        this.stream.take();
         Poll::Ready(result)
     }
 }
