@@ -8,7 +8,6 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{
     channel::oneshot::{self, Canceled},
-    stream::SelectAll,
     SinkExt, StreamExt,
 };
 use futures_timeout::TimeoutExt;
@@ -24,7 +23,7 @@ use web_time::Instant;
 
 use crate::shuttle::identity::client::IdentityCommand;
 use crate::shuttle::identity::{RequestEvent, RequestPayload};
-use warp::multipass::identity::Identifier;
+use warp::multipass::identity::{Identifier, ShortId};
 use warp::multipass::GetIdentity;
 use warp::{
     constellation::file::FileType,
@@ -309,7 +308,7 @@ pub enum LookupBy {
     DidKey(DID),
     DidKeys(Vec<DID>),
     Username(String),
-    ShortId(String),
+    ShortId(ShortId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -769,7 +768,7 @@ impl IdentityStore {
                     if self.identity_cache.get(&from).await.is_err() {
                         // Attempt to send identity request to peer if identity is not available locally.
                         if self.request(&from, RequestOption::Identity).await.is_err() {
-                            if let Err(e) = self.lookup(LookupBy::DidKey(from.clone())).await {
+                            if let Err(e) = self.lookup(from.clone()).await {
                                 tracing::warn!("Failed to request identity from {from}: {e}.");
                             }
                         }
@@ -1879,7 +1878,7 @@ impl IdentityStore {
         &self.root_document
     }
 
-    pub fn lookup_stream(&self, id: impl Into<Identifier>) -> GetIdentity {
+    pub fn lookup(&self, id: impl Into<Identifier>) -> GetIdentity {
         let store = self.clone();
         let id = id.into();
         let lookup = match id {
@@ -1892,7 +1891,7 @@ impl IdentityStore {
             // first lets evaluate the cache
             let cache = store.identity_cache.list().await;
 
-             // anything missing we will push off to additional discovery service
+            // anything missing we will push off to additional discovery service
             let mut missing = HashSet::new();
 
             match lookup {
@@ -1905,7 +1904,6 @@ impl IdentityStore {
                         }
                         return;
                     }
-
 
                     for await document in cache.filter(|ident| {
                         let val = &ident.did == did;
@@ -1972,211 +1970,82 @@ impl IdentityStore {
                         }
                     }
                 }
-                LookupBy::ShortId(ref short_id) => {
-                    for await document in cache.filter(|ident| {
-                        let ident = ident.clone();
-                        let id = short_id.clone();
-                        async move { String::from_utf8_lossy(&ident.short_id).eq(&id) }
-                    }) {
-                        yield document.into();
-                        return;
+                LookupBy::ShortId(short_id) => {
+                    for await document in cache {
+                        let id = ShortId::from(document.short_id);
+                        if id == short_id {
+                            yield document.into();
+                            return;
+                        }
                     }
                 }
             }
 
+            if !missing.is_empty() || matches!(lookup, LookupBy::Username(_) | LookupBy::ShortId(_)) {
+                let kind = match lookup {
+                    LookupBy::DidKey(did) => {
+                        crate::shuttle::identity::protocol::Lookup::PublicKey { did }
+                    }
+                    LookupBy::DidKeys(list) => {
+                        crate::shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
+                    }
+                    LookupBy::Username(username) => {
+                        crate::shuttle::identity::protocol::Lookup::Username { username, count: 0 }
+                    }
+                    LookupBy::ShortId(short_id) => {
+                        crate::shuttle::identity::protocol::Lookup::ShortId { short_id }
+                    }
+                };
+                if let DiscoveryConfig::Shuttle { addresses } = store.discovery.discovery_config() {
+                    for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                        let (tx, rx) = futures::channel::oneshot::channel();
+                        let _ = store
+                            .identity_command
+                            .clone()
+                            .send(IdentityCommand::Lookup {
+                                peer_id,
+                                kind: kind.clone(),
+                                response: tx,
+                            })
+                            .await;
 
+                        match rx.timeout(SHUTTLE_TIMEOUT).await {
+                            Ok(Ok(Ok(list))) => {
+                                for ident in &list {
+                                    let ident = ident.clone();
+                                    let did = ident.did.clone();
+
+                                    _ = store.identity_cache.insert(&ident).await;
+
+                                    yield ident.into();
+
+                                    if store.discovery.contains(&did).await {
+                                        continue;
+                                    }
+                                    let _ = store.discovery.insert(&did).await;
+                                }
+
+                                break;
+                            }
+                            Ok(Ok(Err(e))) => {
+                                error!("Error registering identity to {peer_id}: {e}");
+                                break;
+                            }
+                            Ok(Err(Canceled)) => {
+                                error!("Channel been unexpectedly closed for {peer_id}");
+                                continue;
+                            }
+                            Err(_) => {
+                                error!("Request timed out for {peer_id}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
         };
 
         GetIdentity::new(id, stream.boxed())
-    }
-
-    //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
-    pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
-        let own_did = self
-            .own_identity()
-            .await
-            .map(|identity| identity.did_key())
-            .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
-
-        let cache = self.identity_cache.list().await;
-
-        let mut idents_docs = match &lookup {
-            //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
-            //TODO: Maybe move cache into the backend to serve as a secondary cache
-            LookupBy::DidKey(pubkey) => {
-                //Maybe we should omit our own key here?
-                if *pubkey == own_did {
-                    return self.own_identity().await.map(|i| vec![i]);
-                }
-
-                if !self.discovery.contains(pubkey).await {
-                    self.discovery.insert(pubkey).await?;
-                }
-                cache
-                    .filter(|ident| {
-                        let ident = ident.clone();
-                        async move { ident.did == *pubkey }
-                    })
-                    .collect::<HashSet<_>>()
-                    .await
-            }
-            LookupBy::DidKeys(list) => {
-                for pubkey in list {
-                    if !pubkey.eq(&own_did) && !self.discovery.contains(pubkey).await {
-                        if let Err(e) = self.discovery.insert(pubkey).await {
-                            tracing::error!("Error inserting {pubkey} into discovery: {e}")
-                        }
-                    }
-                }
-
-                let mut prestream = SelectAll::new();
-
-                if list.contains(&own_did) {
-                    if let Ok(own_identity) = self.own_identity_document().await {
-                        prestream.push(futures::stream::iter(vec![own_identity]));
-                    }
-                }
-
-                cache
-                    .filter(|id| {
-                        let id = id.clone();
-                        async move { list.contains(&id.did) }
-                    })
-                    .chain(prestream.boxed())
-                    .collect::<HashSet<_>>()
-                    .await
-            }
-            LookupBy::Username(username) if username.contains('#') => {
-                let split_data = username.split('#').collect::<Vec<&str>>();
-
-                if split_data.len() != 2 {
-                    cache
-                        .filter(|ident| {
-                            let ident = ident.clone();
-                            async move {
-                                ident
-                                    .username
-                                    .to_lowercase()
-                                    .contains(&username.to_lowercase())
-                            }
-                        })
-                        .collect::<HashSet<_>>()
-                        .await
-                } else {
-                    match (
-                        split_data.first().map(|s| s.to_lowercase()),
-                        split_data.last().map(|s| s.to_lowercase()),
-                    ) {
-                        (Some(name), Some(code)) => {
-                            cache
-                                .filter(|ident| {
-                                    let ident = ident.clone();
-                                    let name = name.clone();
-                                    let code = code.clone();
-                                    async move {
-                                        ident.username.to_lowercase().eq(&name)
-                                            && String::from_utf8_lossy(&ident.short_id)
-                                                .to_lowercase()
-                                                .eq(&code)
-                                    }
-                                })
-                                .collect::<HashSet<_>>()
-                                .await
-                        }
-                        _ => HashSet::new(),
-                    }
-                }
-            }
-            LookupBy::Username(username) => {
-                let username = username.to_lowercase();
-                cache
-                    .filter(|ident| {
-                        let ident = ident.clone();
-                        let username = username.clone();
-                        async move { ident.username.to_lowercase().contains(&username) }
-                    })
-                    .collect::<HashSet<_>>()
-                    .await
-            }
-            LookupBy::ShortId(id) => {
-                cache
-                    .filter(|ident| {
-                        let ident = ident.clone();
-                        let id = id.clone();
-                        async move { String::from_utf8_lossy(&ident.short_id).eq(&id) }
-                    })
-                    .collect::<HashSet<_>>()
-                    .await
-            }
-        };
-        if idents_docs.is_empty() {
-            let kind = match lookup {
-                LookupBy::DidKey(did) => {
-                    crate::shuttle::identity::protocol::Lookup::PublicKey { did }
-                }
-                LookupBy::DidKeys(list) => {
-                    crate::shuttle::identity::protocol::Lookup::PublicKeys { dids: list }
-                }
-                LookupBy::Username(username) => {
-                    crate::shuttle::identity::protocol::Lookup::Username { username, count: 0 }
-                }
-                LookupBy::ShortId(short_id) => {
-                    crate::shuttle::identity::protocol::Lookup::ShortId {
-                        short_id: short_id.try_into()?,
-                    }
-                }
-            };
-            if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let (tx, rx) = futures::channel::oneshot::channel();
-                    let _ = self
-                        .identity_command
-                        .clone()
-                        .send(IdentityCommand::Lookup {
-                            peer_id,
-                            kind: kind.clone(),
-                            response: tx,
-                        })
-                        .await;
-
-                    match rx.timeout(SHUTTLE_TIMEOUT).await {
-                        Ok(Ok(Ok(list))) => {
-                            for ident in &list {
-                                let ident = ident.clone();
-                                _ = self.identity_cache.insert(&ident).await;
-
-                                if self.discovery.contains(&ident.did).await {
-                                    continue;
-                                }
-                                let _ = self.discovery.insert(&ident.did).await;
-                            }
-
-                            idents_docs.extend(list.iter().cloned());
-                            break;
-                        }
-                        Ok(Ok(Err(e))) => {
-                            error!("Error registering identity to {peer_id}: {e}");
-                            break;
-                        }
-                        Ok(Err(Canceled)) => {
-                            error!("Channel been unexpectedly closed for {peer_id}");
-                            continue;
-                        }
-                        Err(_) => {
-                            error!("Request timed out for {peer_id}");
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-
-        let list = idents_docs
-            .iter()
-            .filter_map(|doc| doc.resolve().ok())
-            .collect::<Vec<_>>();
-
-        Ok(list)
     }
 
     pub async fn identity_update(&mut self, identity: IdentityDocument) -> Result<(), Error> {
@@ -2221,11 +2090,7 @@ impl IdentityStore {
             self.discovery_type(),
             DiscoveryConfig::None | DiscoveryConfig::Shuttle { .. }
         ) {
-            self.lookup(LookupBy::DidKey(did.clone()))
-                .await?
-                .first()
-                .cloned()
-                .ok_or(Error::IdentityDoesntExist)?;
+            self.lookup(did).await?;
         }
 
         let status: IdentityStatus = connected_to_peer(&self.ipfs, did.clone())

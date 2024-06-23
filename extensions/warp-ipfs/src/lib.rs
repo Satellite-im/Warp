@@ -871,7 +871,7 @@ impl MultiPass for WarpIpfs {
             _ => return GetIdentity::new(id, stream::empty().boxed()),
         };
 
-        store.lookup_stream(id)
+        store.lookup(id)
     }
 }
 
