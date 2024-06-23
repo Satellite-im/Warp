@@ -1953,15 +1953,13 @@ impl IdentityStore {
                                 yield document.into();
                             }
                         }
-                    } else {
-                        if let (Some(name), Some(code)) = (
+                    } else if let (Some(name), Some(code)) = (
                             split_data.first().map(|s| s.to_lowercase()),
                             split_data.last().map(|s| s.to_lowercase()),
-                        ) {
-                            for await document in cache {
-                                if document.username.to_lowercase().eq(&name) && String::from_utf8_lossy(&document.short_id).to_lowercase().eq(&code) {
+                    ) {
+                        for await document in cache {
+                            if document.username.to_lowercase().eq(&name) && String::from_utf8_lossy(&document.short_id).to_lowercase().eq(&code) {
                                     yield document.into();
-                                }
                             }
                         }
                     }
