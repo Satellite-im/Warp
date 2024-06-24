@@ -764,11 +764,6 @@ impl WarpIpfs {
             .map(|com| com.ipfs.clone())
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
-
-    pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
-        let identity = self.identity_store(true).await?;
-        identity.is_blocked_by(pubkey).await
-    }
 }
 
 impl Extension for WarpIpfs {
@@ -1446,12 +1441,13 @@ impl IdentityInformation for WarpIpfs {
     }
 
     async fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
-        self.get_identity(did.into()).await?;
-        let friends = self.has_friend(did).await?;
-        let received_friend_request = self.received_friend_request_from(did).await?;
-        let sent_friend_request = self.sent_friend_request_to(did).await?;
-        let blocked = self.is_blocked(did).await?;
-        let blocked_by = self.is_blocked_by(did).await?;
+        let store = self.identity_store(true).await?;
+        store.lookup(did).await?;
+        let friends = store.is_friend(did).await?;
+        let received_friend_request = store.received_friend_request_from(did).await?;
+        let sent_friend_request = store.sent_friend_request_to(did).await?;
+        let blocked = store.is_blocked(did).await?;
+        let blocked_by = store.is_blocked_by(did).await?;
 
         let mut relationship = Relationship::default();
         relationship.set_friends(friends);
