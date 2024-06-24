@@ -1446,10 +1446,7 @@ impl IdentityInformation for WarpIpfs {
     }
 
     async fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
-        // self.get_identity(Identifier::did_key(did.clone()))
-        //     .await.timeout(Duration::n)
-        //     .first()
-        //     .ok_or(Error::IdentityDoesntExist)?;
+        self.get_identity(did.into()).await?;
         let friends = self.has_friend(did).await?;
         let received_friend_request = self.received_friend_request_from(did).await?;
         let sent_friend_request = self.sent_friend_request_to(did).await?;
