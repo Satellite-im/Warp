@@ -1358,7 +1358,7 @@ impl ConversationInner {
             .from_ipfs(&self.ipfs)
             .await?;
 
-        let topic = conversation.reqres_topic(did);
+        let topic = conversation.exchange_topic(did);
 
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
         let peer_id = did.to_peer_id()?;
@@ -3161,7 +3161,7 @@ impl ConversationInner {
 
         let main_topic = conversation.topic();
         let event_topic = conversation.event_topic();
-        let request_topic = conversation.reqres_topic(&self.identity.did_key());
+        let request_topic = conversation.exchange_topic(&self.identity.did_key());
 
         let messaging_stream = self
             .ipfs
@@ -4060,7 +4060,7 @@ async fn process_request_response_event(
                     kind: ConversationResponseKind::Key { key },
                 };
 
-                let topic = conversation.reqres_topic(&sender);
+                let topic = conversation.exchange_topic(&sender);
 
                 let bytes = ecdh_encrypt(keypair, Some(&sender), serde_json::to_vec(&response)?)?;
 
