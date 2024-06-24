@@ -29,7 +29,7 @@ use config::Config;
 use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
 use store::files::FileStore;
-use store::identity::{IdentityStore, LookupBy};
+use store::identity::IdentityStore;
 use store::message::MessageStore;
 use utils::ExtensionType;
 use warp::constellation::directory::Directory;
@@ -47,8 +47,9 @@ use warp::multipass::identity::{
     Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity,
-    MultiPass, MultiPassEvent, MultiPassEventKind, MultiPassEventStream, MultiPassImportExport,
+    identity, Friends, GetIdentity, IdentityImportOption, IdentityInformation, ImportLocation,
+    LocalIdentity, MultiPass, MultiPassEvent, MultiPassEventKind, MultiPassEventStream,
+    MultiPassImportExport,
 };
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
@@ -743,6 +744,18 @@ impl WarpIpfs {
             .ok_or(Error::ConstellationExtensionUnavailable)
     }
 
+    pub(crate) fn direct_identity_store(&self) -> std::result::Result<IdentityStore, Error> {
+        let store = self
+            .inner
+            .components
+            .read()
+            .as_ref()
+            .map(|com| com.identity_store.clone())
+            .ok_or(Error::MultiPassExtensionUnavailable)?;
+
+        Ok(store)
+    }
+
     pub(crate) fn ipfs(&self) -> Result<Ipfs, Error> {
         self.inner
             .components
@@ -750,11 +763,6 @@ impl WarpIpfs {
             .as_ref()
             .map(|com| com.ipfs.clone())
             .ok_or(Error::MultiPassExtensionUnavailable)
-    }
-
-    pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
-        let identity = self.identity_store(true).await?;
-        identity.is_blocked_by(pubkey).await
     }
 }
 
@@ -852,16 +860,13 @@ impl MultiPass for WarpIpfs {
         Ok(profile)
     }
 
-    async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        let store = self.identity_store(true).await?;
-
-        let kind = match id {
-            Identifier::DID(pk) => LookupBy::DidKey(pk),
-            Identifier::Username(username) => LookupBy::Username(username),
-            Identifier::DIDList(list) => LookupBy::DidKeys(list),
+    fn get_identity(&self, id: Identifier) -> GetIdentity {
+        let store = match self.direct_identity_store() {
+            Ok(store) => store,
+            _ => return GetIdentity::new(id, stream::empty().boxed()),
         };
 
-        store.lookup(kind).await
+        store.lookup(id)
     }
 }
 
@@ -1436,15 +1441,13 @@ impl IdentityInformation for WarpIpfs {
     }
 
     async fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
-        self.get_identity(Identifier::did_key(did.clone()))
-            .await?
-            .first()
-            .ok_or(Error::IdentityDoesntExist)?;
-        let friends = self.has_friend(did).await?;
-        let received_friend_request = self.received_friend_request_from(did).await?;
-        let sent_friend_request = self.sent_friend_request_to(did).await?;
-        let blocked = self.is_blocked(did).await?;
-        let blocked_by = self.is_blocked_by(did).await?;
+        let store = self.identity_store(true).await?;
+        store.lookup(did).await?;
+        let friends = store.is_friend(did).await?;
+        let received_friend_request = store.received_friend_request_from(did).await?;
+        let sent_friend_request = store.sent_friend_request_to(did).await?;
+        let blocked = store.is_blocked(did).await?;
+        let blocked_by = store.is_blocked_by(did).await?;
 
         let mut relationship = Relationship::default();
         relationship.set_friends(friends);

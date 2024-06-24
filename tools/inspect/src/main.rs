@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use comfy_table::Table;
+use futures::StreamExt;
 
 use warp::constellation::Constellation;
 use warp::crypto::zeroize::Zeroizing;
@@ -97,13 +98,11 @@ async fn main() -> anyhow::Result<()> {
         table.set_header(vec!["Username", "DID"]);
 
         let start_time = Instant::now();
-        let identites = account
-            .get_identity(Identifier::DIDList(friends.clone()))
-            .await?;
+        let mut identites = account.get_identity(Identifier::DIDList(friends.clone()));
         let end_time = start_time.elapsed();
         println!("Took {}ms to load friends identities", end_time.as_millis());
 
-        for identity in identites {
+        while let Some(identity) = identites.next().await {
             table.add_row(vec![
                 format!("{}#{}", identity.username(), identity.short_id()),
                 identity.did_key().to_string(),
@@ -135,12 +134,9 @@ async fn main() -> anyhow::Result<()> {
     for convo in conversations {
         let recipients = account
             .get_identity(Identifier::DIDList(convo.recipients()))
-            .await
-            .map(|list| {
-                list.iter()
-                    .map(|id| format!("{}#{}", id.username(), id.short_id()))
-                    .collect::<Vec<_>>()
-            })?;
+            .map(|id| format!("{}#{}", id.username(), id.short_id()))
+            .collect::<Vec<_>>()
+            .await;
 
         let count = rg.get_message_count(convo.id()).await?;
 

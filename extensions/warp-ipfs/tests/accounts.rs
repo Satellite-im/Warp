@@ -71,11 +71,7 @@ mod test {
         //used to wait for the nodes to discover eachother and provide their identity to each other
         let identity_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
-                if let Ok(Some(id)) = account_a
-                    .get_identity(did_b.clone().into())
-                    .await
-                    .map(|s| s.first().cloned())
-                {
+                if let Ok(id) = account_a.get_identity(did_b.clone().into()).await {
                     break id;
                 }
             }
@@ -111,13 +107,7 @@ mod test {
 
         let identity_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
-                if let Some(id) = account_a
-                    .get_identity(String::from("JaneDoe").into())
-                    .await
-                    .expect("Should not fail")
-                    .first()
-                    .cloned()
-                {
+                if let Ok(id) = account_a.get_identity(String::from("JaneDoe").into()).await {
                     break id;
                 }
             }
