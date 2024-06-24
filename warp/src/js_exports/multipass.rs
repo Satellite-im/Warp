@@ -1,3 +1,4 @@
+use crate::error::Error;
 use crate::{
     crypto::DID,
     js_exports::stream::AsyncIterator,
@@ -43,11 +44,17 @@ impl MultiPassBox {
         id_variant: Identifier,
         id_value: JsValue,
     ) -> Result<JsValue, JsError> {
-        self.inner
-            .get_identity(to_identifier_enum(id_variant, id_value)?)
-            .await
-            .map_err(|e| e.into())
-            .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
+        let id = to_identifier_enum(id_variant, id_value)?;
+        let single_id = matches!(id, crate::multipass::identity::Identifier::DID(_));
+        let list = self
+            .inner
+            .get_identity(id.clone())
+            .collect::<Vec<_>>()
+            .await;
+        match (single_id, list.is_empty()) {
+            (true, true) => Err(Error::IdentityDoesntExist.into()),
+            (_, false) | (_, true) => Ok(serde_wasm_bindgen::to_value(&list).unwrap()),
+        }
     }
 
     pub async fn identity(&self) -> Result<Identity, JsError> {

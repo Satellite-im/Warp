@@ -93,20 +93,14 @@ pub async fn run() -> Result<(), JsError> {
     body.append_p(&format!("{} Outgoing request:", username(&ident_a)))?;
 
     for outgoing in account_a.list_outgoing_request().await? {
-        let ident = account_a
-            .get_identity(Identifier::from(outgoing))
-            .await
-            .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
+        let ident = account_a.get_identity(Identifier::from(outgoing)).await?;
         body.append_p(&format!("To: {}", username(&ident)))?;
         body.append_p("")?;
     }
 
     body.append_p(&format!("{} Incoming request:", username(&ident_b)))?;
     for incoming in account_b.list_incoming_request().await? {
-        let ident = account_b
-            .get_identity(Identifier::from(incoming))
-            .await
-            .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
+        let ident = account_b.get_identity(Identifier::from(incoming)).await?;
 
         body.append_p(&format!("From: {}", username(&ident)))?;
         body.append_p("")?;
@@ -131,10 +125,7 @@ pub async fn run() -> Result<(), JsError> {
 
             body.append_p(&format!("{} Friends:", username(&ident_a)))?;
             for friend in account_a.list_friends().await? {
-                let friend = account_a
-                    .get_identity(Identifier::did_key(friend))
-                    .await
-                    .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
+                let friend = account_a.get_identity(Identifier::did_key(friend)).await?;
                 body.append_p(&format!("Username: {}", username(&friend)))?;
                 body.append_p(&format!("Public Key: {}", friend.did_key()))?;
                 body.append_p("")?;
@@ -142,10 +133,7 @@ pub async fn run() -> Result<(), JsError> {
 
             body.append_p(&format!("{} Friends:", username(&ident_b)))?;
             for friend in account_b.list_friends().await? {
-                let friend = account_b
-                    .get_identity(Identifier::did_key(friend))
-                    .await
-                    .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
+                let friend = account_b.get_identity(Identifier::did_key(friend)).await?;
                 body.append_p(&format!("Username: {}", username(&friend)))?;
                 body.append_p(&format!("Public Key: {}", friend.did_key()))?;
                 body.append_p("")?;
