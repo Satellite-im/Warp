@@ -178,7 +178,7 @@ impl ShuttleServer {
             identity.list().await.count().await
         );
 
-        let mut subscriptions = Subscriptions::new(&ipfs, &identity);
+        let mut subscriptions = Subscriptions::new(&ipfs, &identity, &message);
         _ = subscriptions
             .subscribe("/identity/announce/v0".into())
             .await;

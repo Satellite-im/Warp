@@ -1,8 +1,8 @@
 // This module handles storing items in a mailbox for its intended recipients to fetch, download, and notify about this node
 // about it being delivered. Messages that are new or updated will be inserted in the same manner
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
-use futures::{stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use std::path::PathBuf;
@@ -94,6 +94,11 @@ impl MessageStorage {
         inner
             .message_delivered(member, conversation_id, message_id)
             .await
+    }
+
+    pub async fn list_conversations(&self) -> impl Stream<Item = Uuid> {
+        let inner = &*self.inner.read().await;
+        inner.list_conversations()
     }
 }
 
@@ -449,5 +454,31 @@ impl MessageStorageInner {
         self.root.set_conversation_mailbox(root_cid).await?;
 
         Ok(())
+    }
+
+    //TODO: Expose conversation type (after registration is impl)
+    fn list_conversations(&self) -> impl Stream<Item = Uuid> {
+        let list = self.list;
+        let ipfs = self.ipfs.clone();
+
+        async_stream::stream! {
+            let list: BTreeMap<String, Cid> = match list {
+                Some(cid) => ipfs
+                    .get_dag(cid)
+                    .local()
+                    .deserialized()
+                    .await
+                    .unwrap_or_default(),
+                None => return,
+            };
+
+            for id in list.keys() {
+                let Ok(id) = Uuid::from_str(id) else {
+                    continue;
+                };
+
+                yield id;
+            }
+        }
     }
 }

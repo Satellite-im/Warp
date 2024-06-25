@@ -271,10 +271,8 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
                         if !opt.autoaccept_friend {
                             writeln!(stdout, "> Pending request from {username}. Do \"/accept-request {did}\" to accept.")?;
                         } else {
@@ -284,129 +282,103 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> A request has been sent to {username}. Do \"/close-request {did}\" to if you wish to close the request")?;
                     }
                     warp::multipass::MultiPassEventKind::IncomingFriendRequestRejected { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> You've rejected {username} request")?;
                     },
                     warp::multipass::MultiPassEventKind::OutgoingFriendRequestRejected { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} rejected your request")?;
                     },
                     warp::multipass::MultiPassEventKind::IncomingFriendRequestClosed { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} has retracted their request")?;
                     },
                     warp::multipass::MultiPassEventKind::OutgoingFriendRequestClosed { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> Request for {username} has been retracted")?;
                     },
                     warp::multipass::MultiPassEventKind::FriendAdded { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> You are now friends with {username}")?;
                     },
                     warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} has been removed from friends list")?;
                     },
                     warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} has came online")?;
                     },
                     warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} went offline")?;
                     },
                     warp::multipass::MultiPassEventKind::Blocked { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} was blocked")?;
                     },
                     warp::multipass::MultiPassEventKind::Unblocked { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
                         writeln!(stdout, "> {username} was unblocked")?;
                     },
                     warp::multipass::MultiPassEventKind::UnblockedBy { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} unblocked you")?;
                     },
                     warp::multipass::MultiPassEventKind::BlockedBy { did } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .ok()
-                            .and_then(|list| list.first().cloned())
                             .map(|ident| ident.username())
-                            .unwrap_or_else(|| did.to_string());
+                            .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} blocked you")?;
                     },
@@ -962,13 +934,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                         },
                         Lookup(id) => {
-                            let identities = match new_account.get_identity(id).await {
-                                Ok(identity) => identity,
-                                Err(e) => {
-                                    writeln!(stdout, "Error obtaining own identity: {e}")?;
-                                    continue;
-                                }
-                            };
+                            let identities = new_account.get_identity(id).collect::<Vec<_>>().await;
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status"]);
                             for identity in identities {
@@ -1010,11 +976,7 @@ async fn get_username(account: &dyn MultiPass, did: DID) -> String {
     account
         .get_identity(Identifier::did_key(did.clone()))
         .await
-        .map(|list| {
-            list.first()
-                .map(|identity| format!("{}#{}", identity.username(), identity.short_id()))
-                .unwrap_or(did.to_string())
-        })
+        .map(|id| format!("{}#{}", id.username(), id.short_id()))
         .unwrap_or(did.to_string())
 }
 

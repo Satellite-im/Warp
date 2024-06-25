@@ -3,7 +3,6 @@ use std::time::Duration;
 use futures::StreamExt;
 
 use warp::crypto::rand::{self, prelude::*};
-use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::{MultiPass, MultiPassEventKind};
 use warp_ipfs::config::Config;
@@ -77,20 +76,14 @@ async fn main() -> anyhow::Result<()> {
     println!("{} Outgoing request:", username(&ident_a));
 
     for outgoing in account_a.list_outgoing_request().await? {
-        let ident = account_a
-            .get_identity(Identifier::from(outgoing))
-            .await
-            .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
+        let ident = account_a.get_identity(Identifier::from(outgoing)).await?;
         println!("To: {}", username(&ident));
         println!();
     }
 
     println!("{} Incoming request:", username(&ident_b));
     for incoming in account_b.list_incoming_request().await? {
-        let ident = account_b
-            .get_identity(Identifier::from(incoming))
-            .await
-            .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
+        let ident = account_b.get_identity(Identifier::from(incoming)).await?;
 
         println!("From: {}", username(&ident));
         println!();
@@ -115,10 +108,7 @@ async fn main() -> anyhow::Result<()> {
 
             println!("{} Friends:", username(&ident_a));
             for friend in account_a.list_friends().await? {
-                let friend = account_a
-                    .get_identity(Identifier::did_key(friend))
-                    .await
-                    .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
+                let friend = account_a.get_identity(Identifier::did_key(friend)).await?;
                 println!("Username: {}", username(&friend));
                 println!("Public Key: {}", friend.did_key());
                 println!();
@@ -126,10 +116,7 @@ async fn main() -> anyhow::Result<()> {
 
             println!("{} Friends:", username(&ident_b));
             for friend in account_b.list_friends().await? {
-                let friend = account_b
-                    .get_identity(Identifier::did_key(friend))
-                    .await
-                    .and_then(|list| list.first().cloned().ok_or(Error::IdentityDoesntExist))?;
+                let friend = account_b.get_identity(Identifier::did_key(friend)).await?;
                 println!("Username: {}", username(&friend));
                 println!("Public Key: {}", friend.did_key());
                 println!();
