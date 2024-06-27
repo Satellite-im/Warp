@@ -6,7 +6,7 @@ use crate::{
         PinState, RayGun, ReactionState,
     },
 };
-use futures::StreamExt;
+use futures::{StreamExt};
 use js_sys::Promise;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -753,24 +753,37 @@ impl Message {
 #[wasm_bindgen]
 pub struct AttachmentFile {
     file: String,
-    stream: Option<web_sys::ReadableStream>,
+    stream: Option<AttachmentStream>,
 }
-
 #[wasm_bindgen]
 impl AttachmentFile {
     #[wasm_bindgen(constructor)]
-    pub fn new(file: String, stream: Option<web_sys::ReadableStream>) -> Self {
+    pub fn new(file: String, stream: Option<AttachmentStream>) -> Self {
         Self { file, stream }
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[wasm_bindgen]
+pub struct AttachmentStream {
+    size: usize,
+    stream: web_sys::ReadableStream,
+}
+#[wasm_bindgen]
+impl AttachmentStream {
+    #[wasm_bindgen(constructor)]
+    pub fn new(size: usize, stream: web_sys::ReadableStream) -> Self {
+        Self { size, stream }
+    }
+}
 impl Into<raygun::Location> for AttachmentFile {
     fn into(self) -> raygun::Location {
-        if let Some(stream) = self.stream {
+        if let Some(attachment) = self.stream {
             Location::Stream {
                 name: self.file,
+                size: Some(attachment.size),
                 stream: {
-                    let stream = InnerStream::from(wasm_streams::ReadableStream::from_raw(stream));
+                    let stream = InnerStream::from(wasm_streams::ReadableStream::from_raw(attachment.stream));
                     Box::pin(stream)
                 },
             }
