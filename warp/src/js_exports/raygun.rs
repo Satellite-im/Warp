@@ -385,7 +385,7 @@ impl RayGunBox {
         conversation_id: String,
         message_id: String,
         file: String,
-    ) -> Result<AsyncIterator, JsError> {
+    ) -> Result<DownloadStream, JsError> {
         self.inner
             .download_stream(
                 Uuid::from_str(&conversation_id).unwrap(),
@@ -394,14 +394,15 @@ impl RayGunBox {
             )
             .await
             .map_err(|e| e.into())
-            .map(|ok| {
-                AsyncIterator::new(Box::pin(ok.map(|s| match s {
+            .map(|(size, ok)| DownloadStream {
+                size,
+                stream: AsyncIterator::new(Box::pin(ok.map(|s| match s {
                     Ok(v) => serde_wasm_bindgen::to_value(&v).unwrap(),
                     Err(e) => {
                         let err: JsError = e.into();
                         err.into()
                     }
-                })))
+                }))),
             })
     }
 }
@@ -790,6 +791,23 @@ pub struct AttachmentResult {
 impl AttachmentResult {
     pub fn get_message_id(&self) -> String {
         self.message_id.clone()
+    }
+
+    pub async fn next(&mut self) -> std::result::Result<Promise, JsError> {
+        self.stream.next().await
+    }
+}
+
+#[wasm_bindgen]
+pub struct DownloadStream {
+    size: usize,
+    stream: AsyncIterator,
+}
+
+#[wasm_bindgen]
+impl DownloadStream {
+    pub fn size(&self) -> usize {
+        self.size
     }
 
     pub async fn next(&mut self) -> std::result::Result<Promise, JsError> {

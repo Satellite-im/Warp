@@ -440,7 +440,7 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<DownloadStream, Error> {
+    ) -> Result<(usize, DownloadStream), Error> {
         let inner = &*self.inner.read().await;
         inner
             .download_stream(conversation_id, message_id, file)
@@ -2470,7 +2470,7 @@ impl ConversationInner {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<(usize, BoxStream<'static, Result<Vec<u8>, Error>>), Error> {
         let conversation = self.get(conversation_id).await?;
 
         let members = conversation
@@ -2497,7 +2497,7 @@ impl ConversationInner {
 
         let stream = attachment.download_stream(&self.ipfs, &members, None);
 
-        Ok(stream)
+        Ok((attachment.size, stream))
     }
 
     pub async fn add_restricted(
