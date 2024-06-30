@@ -974,7 +974,10 @@ impl FileTask {
     }
 
     /// Used to download data from the filesystem using a stream
-    fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    fn get_stream(
+        &self,
+        name: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;

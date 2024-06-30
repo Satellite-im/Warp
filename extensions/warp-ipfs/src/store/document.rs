@@ -544,11 +544,7 @@ impl FileAttachmentDocument {
             .cat(link)
             .providers(members)
             .timeout(timeout.unwrap_or(Duration::from_secs(60)))
-            .map(|result| {
-                result
-                    .map(|b| b.into())
-                    .map_err(std::io::Error::other)
-            });
+            .map(|result| result.map(|b| b.into()).map_err(std::io::Error::other));
 
         stream.boxed()
     }
