@@ -1788,7 +1788,7 @@ impl Constellation for WarpIpfs {
     async fn get_stream(
         &self,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         self.file_store()?.get_stream(name).await
     }
 

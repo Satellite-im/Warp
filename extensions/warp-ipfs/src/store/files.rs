@@ -242,7 +242,7 @@ impl FileStore {
     pub async fn get_stream(
         &self,
         name: impl Into<String>,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_sender
@@ -320,7 +320,7 @@ impl FileStore {
     }
 }
 
-type GetStream = BoxStream<'static, Result<Vec<u8>, Error>>;
+type GetStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
 type GetBufferFutResult = BoxFuture<'static, Result<Vec<u8>, Error>>;
 enum FileTaskCommand {
     #[cfg(not(target_arch = "wasm32"))]
@@ -974,24 +974,23 @@ impl FileTask {
     }
 
     /// Used to download data from the filesystem using a stream
-    fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let size = file.size();
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-
+        let path = reference.parse::<IpfsPath>()?;
         let tx = self.constellation_tx.clone();
 
         let stream = async_stream::stream! {
-            let cat_stream = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?);
+            let cat_stream = ipfs.cat_unixfs(path);
 
             for await data in cat_stream {
                 match data {
                     Ok(data) => yield Ok(data.into()),
-                    Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
+                    Err(e) => yield Err(std::io::Error::other(e)),
                 }
             }
 

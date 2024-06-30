@@ -190,7 +190,7 @@ pub trait Constellation:
     async fn get_stream(
         &self,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 
