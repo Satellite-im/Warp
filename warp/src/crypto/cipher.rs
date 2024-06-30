@@ -144,8 +144,8 @@ impl Cipher {
 
     /// Encrypts and embeds private key into async stream
     pub async fn self_encrypt_async_stream<'a>(
-        stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        stream: impl Stream<Item = std::io::Result<Vec<u8>>> + Unpin + Send + 'a,
+    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
         let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_owned())));
 
@@ -158,7 +158,7 @@ impl Cipher {
     /// Decrypts with embedded private key into async stream
     pub async fn self_decrypt_async_stream<'a>(
         mut stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let mut key = [0u8; 34];
         {
             let mut reader = stream.by_ref().into_async_read();
@@ -171,7 +171,7 @@ impl Cipher {
 
     pub async fn self_encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         reader: R,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
         let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_owned())));
 
@@ -182,7 +182,7 @@ impl Cipher {
 
     pub async fn self_decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         mut reader: R,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let mut key = [0u8; 34];
 
         reader.read_exact(&mut key).await?;
@@ -194,8 +194,8 @@ impl Cipher {
     /// Encrypts data from async stream into another async stream
     pub async fn encrypt_async_stream<'a>(
         &self,
-        stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        stream: impl Stream<Item = std::io::Result<Vec<u8>>> + Unpin + Send + 'a,
+    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let mut reader = stream.into_async_read();
 
         let nonce = crate::crypto::generate::<7>();
@@ -214,7 +214,7 @@ impl Cipher {
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
+                    Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| std::io::Error::other(Error::EncryptionStreamError)) {
                         Ok(data) => yield Ok(data),
                         Err(e) => {
                             yield Err(e);
@@ -222,12 +222,12 @@ impl Cipher {
                         }
                     }
                     Ok(read_count) => {
-                        yield stream.encrypt_last(&buffer[..read_count]).map_err(|_| Error::EncryptionStreamError);
+                        yield stream.encrypt_last(&buffer[..read_count]).map_err(|_| std::io::Error::other(Error::EncryptionStreamError)) ;
                         break;
                     }
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                     Err(e) => {
-                        yield Err(Error::from(e));
+                        yield Err(e);
                         break;
                     },
                 }
@@ -240,8 +240,8 @@ impl Cipher {
     /// Decrypt data from async stream into another async stream
     pub async fn decrypt_async_stream<'a>(
         &self,
-        stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        stream: impl Stream<Item = std::io::Result<Vec<u8>>> + Unpin + Send + 'a,
+    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let mut reader = stream.into_async_read();
 
         let mut nonce = [0u8; 7];
@@ -261,7 +261,7 @@ impl Cipher {
             loop {
                 match reader.read(&mut buffer).await {
                     Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
-                        match stream.decrypt_next(buffer.as_slice()).map_err(|_| Error::DecryptionStreamError) {
+                        match stream.decrypt_next(buffer.as_slice()).map_err(|_| std::io::Error::other(Error::DecryptionStreamError)) {
                             Ok(data) => yield Ok(data),
                             Err(e) => {
                                 yield Err(e);
@@ -271,7 +271,7 @@ impl Cipher {
                     }
                     Ok(0) => break,
                     Ok(read_count) => {
-                        match stream.decrypt_last(&buffer[..read_count]).map_err(|_| Error::DecryptionStreamError) {
+                        match stream.decrypt_last(&buffer[..read_count]).map_err(|_| std::io::Error::other(Error::DecryptionStreamError))  {
                             Ok(data) => {
                                 yield Ok(data);
                                 break;
@@ -284,7 +284,7 @@ impl Cipher {
                     }
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                     Err(e) => {
-                        yield Err::<_, Error>(Error::from(e));
+                        yield Err::<_, std::io::Error>(e);
                         break;
                     },
                 };
@@ -298,7 +298,7 @@ impl Cipher {
     pub async fn encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         &self,
         mut reader: R,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let nonce = crate::crypto::generate::<7>();
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
@@ -314,7 +314,7 @@ impl Cipher {
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
+                    Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| std::io::Error::other(Error::EncryptionStreamError)) {
                         Ok(data) => yield Ok(data),
                         Err(e) => {
                             yield Err(e);
@@ -322,12 +322,12 @@ impl Cipher {
                         }
                     }
                     Ok(read_count) => {
-                        yield stream.encrypt_last(&buffer[..read_count]).map_err(|_| Error::EncryptionStreamError);
+                        yield stream.encrypt_last(&buffer[..read_count]).map_err(|_| std::io::Error::other(Error::EncryptionStreamError));
                         break;
                     }
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                     Err(e) => {
-                        yield Err(Error::from(e));
+                        yield Err(e);
                         break;
                     },
                 }
@@ -341,7 +341,7 @@ impl Cipher {
     pub async fn decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         &self,
         mut reader: R,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let mut nonce = [0u8; 7];
 
         reader.read_exact(&mut nonce).await?;
@@ -359,7 +359,7 @@ impl Cipher {
             loop {
                 match reader.read(&mut buffer).await {
                     Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
-                        match stream.decrypt_next(buffer.as_slice()).map_err(|_| Error::DecryptionStreamError) {
+                        match stream.decrypt_next(buffer.as_slice()).map_err(|_| std::io::Error::other(Error::DecryptionStreamError)){
                             Ok(data) => yield Ok(data),
                             Err(e) => {
                                 yield Err(e);
@@ -369,7 +369,7 @@ impl Cipher {
                     }
                     Ok(0) => break,
                     Ok(read_count) => {
-                        match stream.decrypt_last(&buffer[..read_count]).map_err(|_| Error::DecryptionStreamError) {
+                        match stream.decrypt_last(&buffer[..read_count]).map_err(|_| std::io::Error::other(Error::DecryptionStreamError)) {
                             Ok(data) => {
                                 yield Ok(data);
                                 break;
@@ -382,7 +382,7 @@ impl Cipher {
                     }
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                     Err(e) => {
-                        yield Err::<_, Error>(Error::from(e));
+                        yield Err(e);
                         break;
                     },
                 };
