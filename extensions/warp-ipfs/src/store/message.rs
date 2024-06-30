@@ -74,7 +74,7 @@ use super::{
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
-pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, Error>>;
+pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
 
 enum MessagingCommand {
     Receiver {
@@ -2470,7 +2470,7 @@ impl ConversationInner {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         let conversation = self.get(conversation_id).await?;
 
         let members = conversation

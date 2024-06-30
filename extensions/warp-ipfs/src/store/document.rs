@@ -533,10 +533,10 @@ impl FileAttachmentDocument {
         ipfs: &Ipfs,
         members: &[PeerId],
         timeout: Option<Duration>,
-    ) -> BoxStream<'static, Result<Vec<u8>, Error>> {
+    ) -> BoxStream<'static, Result<Vec<u8>, std::io::Error>> {
         let link = match Cid::from_str(&self.data) {
             Ok(link) => link,
-            Err(e) => return stream::once(async { Err(anyhow::Error::from(e).into()) }).boxed(),
+            Err(e) => return stream::once(async { Err(std::io::Error::other(e)) }).boxed(),
         };
 
         let stream = ipfs
@@ -547,8 +547,7 @@ impl FileAttachmentDocument {
             .map(|result| {
                 result
                     .map(|b| b.into())
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
+                    .map_err(std::io::Error::other)
             });
 
         stream.boxed()
