@@ -222,7 +222,7 @@ impl FileStore {
         &mut self,
         name: impl Into<String>,
         total_size: impl Into<Option<usize>>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -337,7 +337,7 @@ enum FileTaskCommand {
     PutStream {
         name: String,
         total_size: Option<usize>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
         response: oneshot::Sender<Result<ConstellationProgressStream, Error>>,
     },
     #[cfg(not(target_arch = "wasm32"))]
@@ -851,7 +851,7 @@ impl FileTask {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let (name, dest_path) = split_file_from_path(name)?;
 
@@ -866,7 +866,6 @@ impl FileTask {
             return Err(Error::FileExist);
         }
 
-        let stream = stream.map(Ok::<_, std::io::Error>).boxed();
         let constellation_tx = self.constellation_tx.clone();
         let mut export_tx = self.export_tx.clone();
         let max_size = self.max_size();
