@@ -2170,7 +2170,7 @@ impl ConversationInner {
                             },
                         }
                     }
-                    Location::Stream { name, stream } => {
+                    Location::Stream { name, size, stream } => {
                         let mut filename = name;
 
                         let original = filename.clone();
@@ -2212,7 +2212,7 @@ impl ConversationInner {
 
                         let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
 
-                        let mut progress = match constellation.put_stream(&filename, None, stream).await {
+                        let mut progress = match constellation.put_stream(&filename, size, stream).await {
                             Ok(stream) => stream,
                             Err(e) => {
                                 error!(%conversation_id, "Error uploading {filename}: {e}");
