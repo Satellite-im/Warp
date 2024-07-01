@@ -59,13 +59,17 @@ impl From<wasm_streams::ReadableStream> for InnerStream {
 }
 
 impl Stream for InnerStream {
-    type Item = Vec<u8>;
+    type Item = std::io::Result<Vec<u8>>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
         match futures::ready!(Pin::new(&mut this.inner).poll_next(cx)) {
             Some(Ok(val)) => {
                 let bytes = serde_wasm_bindgen::from_value(val).expect("valid bytes");
-                return Poll::Ready(Some(bytes));
+                return Poll::Ready(Some(Ok(bytes)));
+            }
+            Some(Err(e)) => {
+                //TODO: Make inner stream optional and take from stream to prevent repeated polling
+                return Poll::Ready(Some(Err(std::io::Error::other(e))));
             }
             _ => {
                 // Any other condition should cause this stream to end
