@@ -40,7 +40,7 @@ mod test {
     async fn upload_file_stream() -> anyhow::Result<()> {
         let (_, mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
-        let stream = stream::once(async { PROFILE_IMAGE.to_vec() }).boxed();
+        let stream = stream::iter(vec![Ok(PROFILE_IMAGE.to_vec())]).boxed();
         let mut status = fs.put_stream("image.png", None, stream).await?;
         while let Some(progress) = status.next().await {
             match progress {
