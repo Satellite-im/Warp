@@ -920,6 +920,7 @@ pub enum Location {
     /// Stream of bytes
     Stream {
         name: String,
+        size: Option<usize>,
         stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
     },
 }

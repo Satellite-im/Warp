@@ -477,6 +477,7 @@ mod test {
                 vec![Location::Stream {
                     name: "image.png".into(),
                     stream: futures::stream::iter(vec![Ok(PROFILE_IMAGE.to_vec())]).boxed(),
+                    size: Some(PROFILE_IMAGE.len()),
                 }],
                 vec![],
             )
