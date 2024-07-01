@@ -9,8 +9,9 @@ use futures::{
     channel::{mpsc, oneshot},
     future::BoxFuture,
     stream::BoxStream,
-    FutureExt, SinkExt, StreamExt,
+    FutureExt, SinkExt, StreamExt, TryStreamExt,
 };
+use futures_finally::try_stream::FinallyTryStreamExt;
 
 use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath};
 
@@ -987,18 +988,19 @@ impl FileTask {
         let path = reference.parse::<IpfsPath>()?;
         let tx = self.constellation_tx.clone();
 
-        let stream = async_stream::stream! {
-            let cat_stream = ipfs.cat_unixfs(path);
-
-            for await data in cat_stream {
-                match data {
-                    Ok(data) => yield Ok(data.into()),
-                    Err(e) => yield Err(std::io::Error::other(e)),
-                }
-            }
-
-            let _ = tx.emit(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).await;
-        };
+        let stream = ipfs
+            .cat_unixfs(path)
+            .map_ok(|bytes| bytes.into())
+            .map_err(std::io::Error::other)
+            .try_finally(move || async move {
+                let _ = tx
+                    .emit(ConstellationEventKind::Downloaded {
+                        filename: file.name(),
+                        size: Some(size),
+                        location: None,
+                    })
+                    .await;
+            });
 
         //TODO: Validate file against the hashed reference
         Ok(stream.boxed())
