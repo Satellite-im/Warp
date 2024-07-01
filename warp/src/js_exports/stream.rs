@@ -69,7 +69,8 @@ impl Stream for InnerStream {
             }
             Some(Err(e)) => {
                 //TODO: Make inner stream optional and take from stream to prevent repeated polling
-                return Poll::Ready(Some(Err(std::io::Error::other(e))));
+                let str: String = serde_wasm_bindgen::from_value(e).expect("valid string");
+                return Poll::Ready(Some(Err(std::io::Error::other(str))));
             }
             _ => {
                 // Any other condition should cause this stream to end
