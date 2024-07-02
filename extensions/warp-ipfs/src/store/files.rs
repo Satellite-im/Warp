@@ -25,6 +25,7 @@ use warp::{
 };
 
 use parking_lot::RwLock;
+use warp::constellation::item::{Item, ItemType};
 
 use crate::{
     config::{self, Config},
@@ -1007,30 +1008,27 @@ impl FileTask {
     }
 
     /// Used to remove data from the filesystem
-    async fn remove(&mut self, name: &str, _: bool) -> Result<(), Error> {
-        let ipfs = self.ipfs.clone();
+    async fn remove(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
         //TODO: Recursively delete directory but for now only support deleting a file
         let directory = self.current_directory()?;
 
-        let item = directory.get_item_by_path(name)?;
+        let item = match name {
+            "/" => return Err(Error::InvalidDirectory),
+            path => directory.get_item_by_path(path)?,
+        };
 
-        let file = item.get_file()?;
-        let reference = file
-            .reference()
-            .ok_or(Error::ObjectNotFound)?
-            .parse::<IpfsPath>()?; //Reference not found
-
-        let cid = reference
-            .root()
-            .cid()
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
-
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid).recursive().await?;
+        if !recursive
+            && item.is_directory()
+            && item.size() > 0
+            && item
+                .directory()
+                .map(|s| !s.get_items().is_empty())
+                .unwrap_or_default()
+        {
+            return Err(Error::Other); // directory not empty
         }
 
-        directory.remove_item(&item.name())?;
+        _remove(&self.ipfs, &item).await?;
 
         _ = self.export().await;
 
@@ -1154,4 +1152,45 @@ fn split_file_from_path(name: impl Into<String>) -> Result<(String, Option<Strin
     }
     let dest_path = (!split_path.is_empty()).then(|| split_path.join("/"));
     Ok((name.to_string(), dest_path))
+}
+
+#[async_recursion::async_recursion]
+async fn _remove(ipfs: &Ipfs, item: &Item) -> Result<(), Error> {
+    println!("{:?} --", item);
+    match item {
+        Item::File(file) => {
+            let reference = file
+                .reference()
+                .ok_or(Error::ObjectNotFound)?
+                .parse::<IpfsPath>()?; //Reference not found
+
+            let cid = reference
+                .root()
+                .cid()
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
+
+            if ipfs.is_pinned(&cid).await? {
+                ipfs.remove_pin(&cid).recursive().await?;
+            }
+        }
+        Item::Directory(directory) => {
+            for item in directory.get_items() {
+                let name = item.name();
+                let item_type = item.item_type();
+
+                if let Err(e) = _remove(ipfs, &item).await {
+                    tracing::error!(error = %e, item_type = %item_type, item_name = %name, "unable to remove item");
+                    continue;
+                }
+                if item.size() == 0 || item.item_type() == ItemType::FileItem {
+                    if let Err(e) = directory.remove_item(&name) {
+                        tracing::error!(error = %e, item_type = %item_type, item_name = %name, "unable to remove item");
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
