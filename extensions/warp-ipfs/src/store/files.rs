@@ -9,8 +9,9 @@ use futures::{
     channel::{mpsc, oneshot},
     future::BoxFuture,
     stream::BoxStream,
-    FutureExt, SinkExt, StreamExt,
+    FutureExt, SinkExt, StreamExt, TryStreamExt,
 };
+use futures_finally::try_stream::FinallyTryStreamExt;
 
 use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath};
 
@@ -222,7 +223,7 @@ impl FileStore {
         &mut self,
         name: impl Into<String>,
         total_size: impl Into<Option<usize>>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -242,7 +243,7 @@ impl FileStore {
     pub async fn get_stream(
         &self,
         name: impl Into<String>,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_sender
@@ -320,7 +321,7 @@ impl FileStore {
     }
 }
 
-type GetStream = BoxStream<'static, Result<Vec<u8>, Error>>;
+type GetStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
 type GetBufferFutResult = BoxFuture<'static, Result<Vec<u8>, Error>>;
 enum FileTaskCommand {
     #[cfg(not(target_arch = "wasm32"))]
@@ -337,7 +338,7 @@ enum FileTaskCommand {
     PutStream {
         name: String,
         total_size: Option<usize>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
         response: oneshot::Sender<Result<ConstellationProgressStream, Error>>,
     },
     #[cfg(not(target_arch = "wasm32"))]
@@ -851,7 +852,7 @@ impl FileTask {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let (name, dest_path) = split_file_from_path(name)?;
 
@@ -866,7 +867,6 @@ impl FileTask {
             return Err(Error::FileExist);
         }
 
-        let stream = stream.map(Ok::<_, std::io::Error>).boxed();
         let constellation_tx = self.constellation_tx.clone();
         let mut export_tx = self.export_tx.clone();
         let max_size = self.max_size();
@@ -975,29 +975,32 @@ impl FileTask {
     }
 
     /// Used to download data from the filesystem using a stream
-    fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    fn get_stream(
+        &self,
+        name: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let size = file.size();
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-
+        let path = reference.parse::<IpfsPath>()?;
         let tx = self.constellation_tx.clone();
 
-        let stream = async_stream::stream! {
-            let cat_stream = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?);
-
-            for await data in cat_stream {
-                match data {
-                    Ok(data) => yield Ok(data.into()),
-                    Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
-                }
-            }
-
-            let _ = tx.emit(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).await;
-        };
+        let stream = ipfs
+            .cat_unixfs(path)
+            .map_ok(|bytes| bytes.into())
+            .map_err(std::io::Error::other)
+            .try_finally(move || async move {
+                let _ = tx
+                    .emit(ConstellationEventKind::Downloaded {
+                        filename: file.name(),
+                        size: Some(size),
+                        location: None,
+                    })
+                    .await;
+            });
 
         //TODO: Validate file against the hashed reference
         Ok(stream.boxed())

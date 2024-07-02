@@ -1658,7 +1658,7 @@ impl RayGunAttachment for WarpIpfs {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         self.messaging_store()?
             .download_stream(conversation_id, message_id, file)
             .await
@@ -1777,7 +1777,7 @@ impl Constellation for WarpIpfs {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
     ) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?
             .put_stream(name, total_size, stream)
@@ -1788,7 +1788,7 @@ impl Constellation for WarpIpfs {
     async fn get_stream(
         &self,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         self.file_store()?.get_stream(name).await
     }
 

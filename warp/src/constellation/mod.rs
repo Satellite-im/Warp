@@ -181,7 +181,7 @@ pub trait Constellation:
         &mut self,
         _: &str,
         _: Option<usize>,
-        _: BoxStream<'static, Vec<u8>>,
+        _: BoxStream<'static, std::io::Result<Vec<u8>>>,
     ) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
@@ -190,7 +190,7 @@ pub trait Constellation:
     async fn get_stream(
         &self,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 
