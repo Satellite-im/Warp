@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 warp.workspace = true
 
 futures-timeout.workspace = true
+futures-finally = "0.1.0-alpha.2"
 cbor4ii.workspace = true
 rust-ipfs = { workspace = true, features = ["webrtc_transport", "experimental_stream"] }
 libipld.workspace = true
