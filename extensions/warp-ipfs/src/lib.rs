@@ -778,13 +778,7 @@ impl Extension for WarpIpfs {
 
 impl SingleHandle for WarpIpfs {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
-        self.inner
-            .components
-            .read()
-            .as_ref()
-            .map(|com| com.ipfs.clone())
-            .map(|ipfs| Box::new(ipfs) as Box<_>)
-            .ok_or(Error::MultiPassExtensionUnavailable)
+        self.ipfs().map(|ipfs| Box::new(ipfs) as Box<_>)
     }
 }
 
