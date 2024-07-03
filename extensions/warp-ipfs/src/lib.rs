@@ -641,24 +641,21 @@ impl WarpIpfs {
             }
         }
 
-        let discovery = Discovery::new(
-            ipfs.clone(),
-            self.inner.config.store_setting().discovery.clone(),
-            relays.clone(),
-        );
+        let discovery =
+            Discovery::new(&ipfs, &self.inner.config.store_setting().discovery, &relays);
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
-            ipfs.clone(),
+            &ipfs,
             &self.inner.config,
-            tesseract.clone(),
+            &tesseract,
             self.multipass_tx.clone(),
-            phonebook,
-            discovery.clone(),
+            &phonebook,
+            &discovery,
             id_sh_tx,
-            span.clone(),
+            &span,
         )
         .await?;
 
@@ -667,20 +664,20 @@ impl WarpIpfs {
         let root = identity_store.root_document();
 
         let filestore = FileStore::new(
-            ipfs.clone(),
-            root.clone(),
+            &ipfs,
+            root,
             &self.inner.config,
             self.constellation_tx.clone(),
-            span.clone(),
+            &span,
         )
-        .await?;
+        .await;
 
         let message_store = MessageStore::new(
             &ipfs,
             discovery,
-            filestore.clone(),
+            &filestore,
             self.raygun_tx.clone(),
-            identity_store.clone(),
+            &identity_store,
             msg_sh_tx,
         )
         .await;

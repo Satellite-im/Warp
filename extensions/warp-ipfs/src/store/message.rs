@@ -92,9 +92,9 @@ impl MessageStore {
     pub async fn new(
         ipfs: &Ipfs,
         discovery: Discovery,
-        file: FileStore,
+        file: &FileStore,
         event: EventSubscription<RayGunEventKind>,
-        identity: IdentityStore,
+        identity: &IdentityStore,
         message_command: mpsc::Sender<MessageCommand>,
     ) -> Self {
         info!("Initializing MessageStore");
@@ -116,7 +116,7 @@ impl MessageStore {
             identity: identity.clone(),
             root,
             discovery,
-            file,
+            file: file.clone(),
             event,
             attachment_tx: atx,
             conversation_mailbox_task_tx,
@@ -137,7 +137,7 @@ impl MessageStore {
             inner: inner.clone(),
             ipfs: ipfs.clone(),
             topic_stream: Default::default(),
-            identity,
+            identity: identity.clone(),
             command_rx: rx,
             attachment_rx: arx,
             conversation_mailbox_task_rx,

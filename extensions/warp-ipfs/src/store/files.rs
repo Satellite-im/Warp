@@ -45,17 +45,17 @@ pub struct FileStore {
 
 impl FileStore {
     pub async fn new(
-        ipfs: Ipfs,
-        root: RootDocumentMap,
+        ipfs: &Ipfs,
+        root: &RootDocumentMap,
         config: &Config,
         constellation_tx: EventSubscription<ConstellationEventKind>,
-        span: Span,
-    ) -> Result<Self, Error> {
+        span: &Span,
+    ) -> Self {
         let config = config.clone();
 
         let index = Directory::new("root");
 
-        let thumbnail_store = ThumbnailGenerator::new(ipfs.clone());
+        let thumbnail_store = ThumbnailGenerator::new(ipfs);
 
         let (command_sender, command_receiver) = futures::channel::mpsc::channel(1);
         let (export_tx, export_rx) = futures::channel::mpsc::channel(0);
@@ -64,9 +64,9 @@ impl FileStore {
         let mut task = FileTask {
             index,
             path: Arc::default(),
-            root,
+            root: root.clone(),
             thumbnail_store,
-            ipfs,
+            ipfs: ipfs.clone(),
             constellation_tx,
             config,
             export_rx,
@@ -90,6 +90,8 @@ impl FileStore {
         let token = CancellationToken::new();
         let _guard = Arc::new(token.clone().drop_guard());
 
+        let span = span.clone();
+
         crate::rt::spawn(async move {
             tokio::select! {
                 _ = task.run().instrument(span) => {}
@@ -97,13 +99,13 @@ impl FileStore {
             }
         });
 
-        Ok(FileStore {
+        FileStore {
             index,
             config,
             path,
             command_sender,
             _guard,
-        })
+        }
     }
 }
 

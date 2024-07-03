@@ -63,9 +63,9 @@ pub struct ThumbnailGenerator {
 }
 
 impl ThumbnailGenerator {
-    pub fn new(ipfs: Ipfs) -> Self {
+    pub fn new(ipfs: &Ipfs) -> Self {
         Self {
-            ipfs,
+            ipfs: ipfs.clone(),
             tasks: Arc::default(),
         }
     }
