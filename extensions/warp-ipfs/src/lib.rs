@@ -1224,7 +1224,7 @@ impl MultiPassImportExport for WarpIpfs {
                 exported_document.verify()?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),
@@ -1257,7 +1257,7 @@ impl MultiPassImportExport for WarpIpfs {
                 exported_document.verify()?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),
@@ -1280,7 +1280,7 @@ impl MultiPassImportExport for WarpIpfs {
                     .map_err(|_| Error::PrivateKeyInvalid)?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),
