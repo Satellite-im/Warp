@@ -829,7 +829,7 @@ impl MultiPass for WarpIpfs {
         if !tesseract.exist("keypair") {
             warn!("Loading keypair generated from mnemonic phrase into tesseract");
             warp::crypto::keypair::mnemonic_into_tesseract(
-                &mut tesseract,
+                &tesseract,
                 &phrase,
                 None,
                 self.inner.config.save_phrase(),
