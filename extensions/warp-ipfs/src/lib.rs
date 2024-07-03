@@ -825,7 +825,7 @@ impl MultiPass for WarpIpfs {
             ),
         };
 
-        let mut tesseract = self.tesseract.clone();
+        let tesseract = self.tesseract.clone();
         if !tesseract.exist("keypair") {
             warn!("Loading keypair generated from mnemonic phrase into tesseract");
             warp::crypto::keypair::mnemonic_into_tesseract(
