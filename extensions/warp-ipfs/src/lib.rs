@@ -92,6 +92,7 @@ struct Inner {
     init_guard: tokio::sync::Mutex<()>,
     span: RwLock<Span>,
     components: RwLock<Option<Components>>,
+    explicit_lock: tokio::sync::RwLock<bool>,
 }
 
 // Holds the initialized components
@@ -215,6 +216,8 @@ impl WarpIpfs {
             components: Default::default(),
             identity_guard: Default::default(),
             init_guard: Default::default(),
+            // we go base on tesseract status for now to maintain compatibility for some time
+            explicit_lock: tokio::sync::RwLock::new(tesseract.is_unlock()),
             span,
         });
 
@@ -872,6 +875,25 @@ impl MultiPass for WarpIpfs {
 
 #[async_trait::async_trait]
 impl LocalIdentity for WarpIpfs {
+    async fn unlock(&mut self, passphrase: &[u8]) -> Result<(), Error> {
+        let _g = &mut *self.inner.explicit_lock.write().await;
+        if self.tesseract.is_unlock() {
+            return Err(Error::Other); // multipass is unlocked
+        }
+        self.tesseract.unlock(passphrase)?;
+        *_g = true;
+        Ok(())
+    }
+
+    async fn lock(&mut self) -> Result<(), Error> {
+        let _g = &mut *self.inner.explicit_lock.write().await;
+        if !self.tesseract.is_unlock() {
+            return Err(Error::Other); // multipass is locked
+        }
+        self.tesseract.lock();
+        Ok(())
+    }
+
     async fn identity(&self) -> Result<Identity, Error> {
         let store = self.identity_store(true).await?;
         store.own_identity().await

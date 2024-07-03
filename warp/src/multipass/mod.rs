@@ -97,6 +97,14 @@ dyn_clone::clone_trait_object!(MultiPass);
 
 #[async_trait::async_trait]
 pub trait LocalIdentity: Sync + Send {
+    async fn unlock(&mut self, _: &[u8]) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn lock(&mut self) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// Reference to the local [`Identity`]
     async fn identity(&self) -> Result<Identity, Error>;
 
@@ -109,6 +117,7 @@ pub trait LocalIdentity: Sync + Send {
     /// Update your own [`Identity`] using [`IdentityUpdate`]
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
 
+    /// Returns an instance of [`Tesseract`]
     fn tesseract(&self) -> Tesseract;
 }
 
