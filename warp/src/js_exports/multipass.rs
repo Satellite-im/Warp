@@ -4,7 +4,9 @@ use crate::{
     js_exports::stream::AsyncIterator,
     multipass::{
         self,
-        identity::{self, Identity, IdentityProfile},
+        identity::{
+            self, Identity, IdentityImage, IdentityProfile, IdentityStatus, Platform, Relationship,
+        },
         MultiPass,
     },
     tesseract::Tesseract,
@@ -236,6 +238,61 @@ impl MultiPassBox {
     pub async fn has_friend(&self, pubkey: String) -> Result<bool, JsError> {
         self.inner
             .has_friend(&DID::from_str(&pubkey).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+}
+
+/// impl IdentityInformation trait
+#[wasm_bindgen]
+impl MultiPassBox {
+    /// Profile picture belonging to the `Identity`
+    pub async fn identity_picture(
+        &self,
+        did: String,
+    ) -> Result<multipass::identity::IdentityImage, JsError> {
+        self.inner
+            .identity_picture(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Profile banner belonging to the `Identity`
+    pub async fn identity_banner(&self, did: String) -> Result<IdentityImage, JsError> {
+        self.inner
+            .identity_banner(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Identity status to determine if they are online or offline
+    pub async fn identity_status(&self, did: String) -> Result<IdentityStatus, JsError> {
+        self.inner
+            .identity_status(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Identity status to determine if they are online or offline
+    pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), JsError> {
+        self.inner
+            .set_identity_status(status)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Find the relationship with an existing identity.
+    pub async fn identity_relationship(&self, did: String) -> Result<Relationship, JsError> {
+        self.inner
+            .identity_relationship(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Returns the identity platform while online.
+    pub async fn identity_platform(&self, did: String) -> Result<Platform, JsError> {
+        self.inner
+            .identity_platform(&DID::from_str(&did).unwrap_or_default())
             .await
             .map_err(|e| e.into())
     }
