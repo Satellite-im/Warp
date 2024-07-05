@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub const SHORT_ID_SIZE: usize = 8;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
@@ -26,6 +27,7 @@ pub enum IdentityStatus {
     Offline,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
@@ -92,6 +94,7 @@ impl IdentityProfile {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IdentityImage {
     data: Vec<u8>,
@@ -118,6 +121,7 @@ impl IdentityImage {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Relationship {
     friends: bool,
