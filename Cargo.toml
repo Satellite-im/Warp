@@ -16,7 +16,7 @@ members = [
     "extensions/warp-ipfs/examples/wasm-ipfs-friends",
     "extensions/warp-ipfs/examples/wasm-ipfs-storage",
 ]
-exclude = ["deprecated/*", "tools/opencv-test", "tools/video-codec-cli"]
+exclude = ["deprecated/*", "tools/opencv-test", "tools/video-codec-cli", "extensions/warp-blink-wrtc", "tools/blink-repl", "tools/audio-codec-repl"]
 
 resolver = "2"
 
