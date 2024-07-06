@@ -362,14 +362,14 @@ impl std::fmt::Debug for ResponseOption {
 impl IdentityStore {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        ipfs: Ipfs,
+        ipfs: &Ipfs,
         config: &config::Config,
-        tesseract: Tesseract,
+        tesseract: &Tesseract,
         tx: EventSubscription<MultiPassEventKind>,
-        phonebook: PhoneBook,
-        discovery: Discovery,
+        phonebook: &PhoneBook,
+        discovery: &Discovery,
         identity_command: futures::channel::mpsc::Sender<IdentityCommand>,
-        span: Span,
+        span: &Span,
     ) -> Result<Self, Error> {
         if let Some(path) = config.path() {
             if !path.exists() {
@@ -378,11 +378,11 @@ impl IdentityStore {
         }
         let config = config.clone();
 
-        let identity_cache = IdentityCache::new(&ipfs).await;
+        let identity_cache = IdentityCache::new(ipfs).await;
 
         let event = tx.clone();
 
-        let root_document = RootDocumentMap::new(&ipfs, None).await;
+        let root_document = RootDocumentMap::new(ipfs, None).await;
 
         let did_key = root_document
             .keypair()
@@ -394,19 +394,19 @@ impl IdentityStore {
         let signal = Default::default();
 
         let store = Self {
-            ipfs,
+            ipfs: ipfs.clone(),
             root_document,
             identity_cache,
-            discovery,
+            discovery: discovery.clone(),
             config,
-            tesseract,
+            tesseract: tesseract.clone(),
             event,
             identity_command,
             did_key,
             queue,
-            phonebook,
+            phonebook: phonebook.clone(),
             signal,
-            span,
+            span: span.clone(),
         };
 
         // Move shuttle logic logic into its own task

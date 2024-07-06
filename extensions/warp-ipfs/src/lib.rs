@@ -641,24 +641,21 @@ impl WarpIpfs {
             }
         }
 
-        let discovery = Discovery::new(
-            ipfs.clone(),
-            self.inner.config.store_setting().discovery.clone(),
-            relays.clone(),
-        );
+        let discovery =
+            Discovery::new(&ipfs, &self.inner.config.store_setting().discovery, &relays);
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
-            ipfs.clone(),
+            &ipfs,
             &self.inner.config,
-            tesseract.clone(),
+            &tesseract,
             self.multipass_tx.clone(),
-            phonebook,
-            discovery.clone(),
+            &phonebook,
+            &discovery,
             id_sh_tx,
-            span.clone(),
+            &span,
         )
         .await?;
 
@@ -667,20 +664,20 @@ impl WarpIpfs {
         let root = identity_store.root_document();
 
         let filestore = FileStore::new(
-            ipfs.clone(),
-            root.clone(),
+            &ipfs,
+            root,
             &self.inner.config,
             self.constellation_tx.clone(),
-            span.clone(),
+            &span,
         )
-        .await?;
+        .await;
 
         let message_store = MessageStore::new(
             &ipfs,
             discovery,
-            filestore.clone(),
+            &filestore,
             self.raygun_tx.clone(),
-            identity_store.clone(),
+            &identity_store,
             msg_sh_tx,
         )
         .await;
@@ -781,14 +778,7 @@ impl Extension for WarpIpfs {
 
 impl SingleHandle for WarpIpfs {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
-        let ipfs = self
-            .inner
-            .components
-            .read()
-            .as_ref()
-            .map(|com| com.ipfs.clone())
-            .ok_or(Error::MultiPassExtensionUnavailable)?;
-        Ok(Box::new(ipfs) as Box<dyn Any>)
+        self.ipfs().map(|ipfs| Box::new(ipfs) as Box<_>)
     }
 }
 
@@ -835,11 +825,11 @@ impl MultiPass for WarpIpfs {
             ),
         };
 
-        let mut tesseract = self.tesseract.clone();
+        let tesseract = self.tesseract.clone();
         if !tesseract.exist("keypair") {
             warn!("Loading keypair generated from mnemonic phrase into tesseract");
             warp::crypto::keypair::mnemonic_into_tesseract(
-                &mut tesseract,
+                &tesseract,
                 &phrase,
                 None,
                 self.inner.config.save_phrase(),
@@ -1234,7 +1224,7 @@ impl MultiPassImportExport for WarpIpfs {
                 exported_document.verify()?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),
@@ -1267,7 +1257,7 @@ impl MultiPassImportExport for WarpIpfs {
                 exported_document.verify()?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),
@@ -1290,7 +1280,7 @@ impl MultiPassImportExport for WarpIpfs {
                     .map_err(|_| Error::PrivateKeyInvalid)?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),

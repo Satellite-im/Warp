@@ -307,7 +307,6 @@ mod test {
     use tracing::Span;
     use warp::constellation::directory::Directory;
     use warp::constellation::ConstellationEventKind;
-    use warp::error::Error;
 
     use super::DirectoryDocument;
     use crate::config::Config;
@@ -317,17 +316,16 @@ mod test {
     async fn file_store(
         ipfs: &Ipfs,
         event: &EventSubscription<ConstellationEventKind>,
-    ) -> Result<FileStore, Error> {
+    ) -> FileStore {
         let root_document = RootDocumentMap::new(ipfs, None).await;
-        let store = FileStore::new(
-            ipfs.clone(),
-            root_document,
+        FileStore::new(
+            ipfs,
+            &root_document,
             &Config::development(),
             event.clone(),
-            Span::current(),
+            &Span::current(),
         )
-        .await?;
-        Ok(store)
+        .await
     }
 
     // TODO: Write test with a larger index and build and resolve graph
@@ -341,7 +339,7 @@ mod test {
 
         let event = EventSubscription::new();
 
-        let mut store = file_store(&ipfs, &event).await?;
+        let mut store = file_store(&ipfs, &event).await;
 
         store.put_buffer("image.png", PROFILE_IMAGE).await?;
 
