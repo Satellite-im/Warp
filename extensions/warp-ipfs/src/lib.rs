@@ -492,7 +492,7 @@ impl WarpIpfs {
                     continue;
                 };
 
-                if let Err(e) = ipfs.add_peer(peer_id, addr.clone()).await {
+                if let Err(e) = ipfs.add_peer((peer_id, addr.clone())).await {
                     warn!("Failed to add relay to address book: {e}");
                 }
 
@@ -630,7 +630,7 @@ impl WarpIpfs {
                     continue;
                 };
 
-                if let Err(e) = ipfs.add_peer(peer_id, addr).await {
+                if let Err(e) = ipfs.add_peer((peer_id, addr)).await {
                     error!("Error adding peer to address book {e}");
                     continue;
                 }

@@ -4,7 +4,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

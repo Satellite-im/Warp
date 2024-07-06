@@ -63,7 +63,7 @@ send_wrapper.workspace = true
 tokio = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-tokio = { version = "1", default-features = false, features = ["sync"]}
+tokio = { version = "1", default-features = false, features = ["sync"] }
 wasm-bindgen.workspace = true
 gloo.workspace = true
 web-sys.workspace = true

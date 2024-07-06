@@ -76,7 +76,7 @@ serde_yaml = "0.9"
 toml = "0.5"
 bs58 = "0.4"
 hex = "0.4"
-libipld = { version = "0.16", features = ["serde-codec"] }
+ipld-core = { version = "0.4.1" }
 bytes = { version = "1", features = ["serde"] }
 bincode = "1"
 image = { version = "0.25.1", default-features = false, features = [
@@ -118,3 +118,7 @@ opus = { git = "https://github.com/Satellite-im/opus-rs", rev = "893b9f7e7e0cd00
 warp = { path = "./warp" }
 warp-ipfs = { path = "./extensions/warp-ipfs" }
 warp-blink-wrtc = { path = "./extensions/warp-blink-wrtc" }
+
+[patch.crates-io]
+rust-ipfs = { git = "https://github.com/dariusc93/rust-ipfs", rev = "fc6332739789805a8b994c5f0f382e53b4ee1c78" }
+

@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
 use warp::{constellation::file::FileType, error::Error, multipass::identity::IdentityImage};

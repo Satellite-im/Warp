@@ -5,7 +5,7 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered},
     StreamExt, TryFutureExt,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;

@@ -24,7 +24,7 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered, SelectAll},
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, Keypair, PeerId};
 
 use serde::{Deserialize, Serialize};

@@ -14,7 +14,7 @@ use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
 use ipfs::Keypair;
 use ipfs::{p2p::MultiaddrExt, Ipfs};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;

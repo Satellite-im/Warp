@@ -145,7 +145,7 @@ pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Result<(), Error> {
     use ds_key::DataStoreKey;
-    use libipld::Cid;
+    use ipld_core::cid::Cid;
 
     let path = path.as_ref();
     let ds = ipfs.repo().data_store();

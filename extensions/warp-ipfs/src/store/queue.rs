@@ -1,6 +1,6 @@
 use futures::{channel::mpsc, StreamExt, TryFutureExt};
 
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, Keypair};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::RwLock;

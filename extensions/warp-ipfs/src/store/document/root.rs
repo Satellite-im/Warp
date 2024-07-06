@@ -5,7 +5,7 @@ use futures::{
     stream::{BoxStream, FuturesUnordered},
     StreamExt,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use tokio::sync::RwLock;
 use uuid::Uuid;

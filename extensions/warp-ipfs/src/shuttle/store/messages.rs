@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use futures::{stream, Stream, StreamExt};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use std::path::PathBuf;
 use tokio::sync::RwLock;

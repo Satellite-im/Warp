@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use futures::TryFutureExt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;

@@ -6,7 +6,7 @@ use futures::{
     StreamExt, TryFutureExt,
 };
 use ipfs::{Ipfs, Keypair, PeerId};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
