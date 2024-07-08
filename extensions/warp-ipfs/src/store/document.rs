@@ -331,7 +331,7 @@ impl RootDocument {
 
         let document = document.sign(keypair)?;
 
-        let identity = ipfs.dag().put().serialize(document).await?;
+        let identity = ipfs.put_dag(document).await?;
 
         let mut root_document = RootDocument {
             identity,
@@ -355,37 +355,36 @@ impl RootDocument {
         let has_keystore = !data.conversation_keystore.is_empty();
 
         if has_friends {
-            root_document.friends = ipfs.dag().put().serialize(data.friends).await.ok();
+            root_document.friends = ipfs.put_dag(data.friends).await.ok();
         }
 
         if has_blocks {
-            root_document.blocks = ipfs.dag().put().serialize(data.block_list).await.ok();
+            root_document.blocks = ipfs.put_dag(data.block_list).await.ok();
         }
 
         if has_block_by_list {
-            root_document.block_by = ipfs.dag().put().serialize(data.block_by_list).await.ok();
+            root_document.block_by = ipfs.put_dag(data.block_by_list).await.ok();
         }
 
         if has_requests {
-            root_document.request = ipfs.dag().put().serialize(data.request).await.ok();
+            root_document.request = ipfs.put_dag(data.request).await.ok();
         }
 
         if has_keystore {
             let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
             for (k, v) in data.conversation_keystore {
-                if let Ok(cid) = ipfs.dag().put().serialize(v).await {
+                if let Ok(cid) = ipfs.put_dag(v).await {
                     pointer_map.insert(k.to_string(), cid);
                 }
             }
 
-            root_document.conversations_keystore =
-                ipfs.dag().put().serialize(pointer_map).await.ok();
+            root_document.conversations_keystore = ipfs.put_dag(pointer_map).await.ok();
         }
 
         if let Some(root) = data.file_index {
             let cid = DirectoryDocument::new(ipfs, &root)
                 .and_then(|document| async move {
-                    let cid = ipfs.dag().put().serialize(document).await?;
+                    let cid = ipfs.put_dag(document).await?;
                     Ok(cid)
                 })
                 .await

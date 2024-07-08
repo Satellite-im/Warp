@@ -66,7 +66,7 @@ pub async fn store_photo(
         mime: file_type,
     };
 
-    let cid = ipfs.dag().put().serialize(dag).pin(true).await?;
+    let cid = ipfs.put_dag(dag).pin(true).await?;
 
     Ok(cid)
 }

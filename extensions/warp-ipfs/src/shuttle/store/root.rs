@@ -119,9 +119,7 @@ impl RootInner {
         // .await?;
 
         let cid = ipfs
-            .dag()
-            .put()
-            .serialize(self.root)
+            .put_dag(self.root)
             .pin(false)
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;

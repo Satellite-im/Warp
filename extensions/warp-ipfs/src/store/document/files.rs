@@ -54,7 +54,7 @@ impl DirectoryDocument {
         .collect::<Vec<_>>()
         .await;
 
-        let cid = ipfs.dag().put().serialize(items).await?;
+        let cid = ipfs.put_dag(items).await?;
 
         document.items = Some(cid);
 
@@ -142,12 +142,12 @@ impl ItemDocument {
         let document = match item {
             Item::File(file) => {
                 let document = FileDocument::new(ipfs, file).await?;
-                let cid = ipfs.dag().put().serialize(document).await?;
+                let cid = ipfs.put_dag(document).await?;
                 ItemDocument::File(cid)
             }
             Item::Directory(directory) => {
                 let document = DirectoryDocument::new(ipfs, directory).await?;
-                let cid = ipfs.dag().put().serialize(document).await?;
+                let cid = ipfs.put_dag(document).await?;
                 ItemDocument::Directory(cid)
             }
         };

@@ -142,7 +142,7 @@ impl IdentityStorageInner {
 
         list.insert(did_str, root_cid);
 
-        let cid = self.ipfs.dag().put().serialize(list).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         let old_cid = self.users.replace(cid);
 
@@ -205,7 +205,7 @@ impl IdentityStorageInner {
 
         list.insert(did.to_string(), document);
 
-        let cid = self.ipfs.dag().put().serialize(list).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         self.ipfs.insert_pin(&cid).recursive().await?;
 
@@ -412,11 +412,11 @@ impl IdentityStorageInner {
 
         let remaining = mailbox.len();
 
-        let cid = self.ipfs.dag().put().serialize(mailbox).await?;
+        let cid = self.ipfs.put_dag(mailbox).await?;
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list).pin(true).await?;
+        let cid = self.ipfs.put_dag(list).pin(true).await?;
 
         let old_cid = self.mailbox.replace(cid);
 
@@ -471,11 +471,11 @@ impl IdentityStorageInner {
 
         mailbox.push(request.clone());
 
-        let cid = self.ipfs.dag().put().serialize(mailbox).await?;
+        let cid = self.ipfs.put_dag(mailbox).await?;
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list).pin(true).await?;
+        let cid = self.ipfs.put_dag(list).pin(true).await?;
 
         let old_cid = self.mailbox.replace(cid);
 
@@ -519,7 +519,7 @@ impl IdentityStorageInner {
     //         return Err(Error::IdentityDoesntExist);
     //     }
 
-    //     let cid = self.ipfs.dag().put().serialize(list)?.await?;
+    //     let cid = self.ipfs.put_dag(list)?.await?;
 
     //     let old_cid = self.list.replace(cid);
 

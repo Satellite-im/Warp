@@ -188,7 +188,7 @@ impl Queue {
             }
         };
 
-        let cid = match self.ipfs.dag().put().serialize(&data).pin(true).await {
+        let cid = match self.ipfs.put_dag(&data).pin(true).await {
             Ok(cid) => cid,
             Err(e) => {
                 tracing::error!(error = %e, "unable to save queue");

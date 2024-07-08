@@ -193,7 +193,7 @@ impl MessageStorageInner {
             message_mailbox.insert(message_id.to_string(), message_cid);
 
             tracing::info!(%conversation_id, %recipient, "saving mailbox");
-            let cid = self.ipfs.dag().put().serialize(message_mailbox).await?;
+            let cid = self.ipfs.put_dag(message_mailbox).await?;
 
             tracing::info!(%conversation_id, %recipient, "storing mailbox into conversation index");
             conversation_mailbox.insert(recipient.to_string(), cid);
@@ -208,7 +208,7 @@ impl MessageStorageInner {
 
         list.insert(conversation_id.to_string(), cid);
 
-        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+        let root_cid = self.ipfs.put_dag(list).await?;
 
         if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
             self.ipfs.insert_pin(&root_cid).recursive().local().await?;
@@ -247,7 +247,7 @@ impl MessageStorageInner {
 
         list.remove(&conversation_id.to_string());
 
-        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+        let root_cid = self.ipfs.put_dag(list).await?;
 
         if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
             self.ipfs.insert_pin(&root_cid).recursive().local().await?;
@@ -312,7 +312,7 @@ impl MessageStorageInner {
 
             current_map.remove(&message_id.to_string());
 
-            let Ok(new_cid) = self.ipfs.dag().put().serialize(current_map).await else {
+            let Ok(new_cid) = self.ipfs.put_dag(current_map).await else {
                 continue;
             };
 
@@ -328,7 +328,7 @@ impl MessageStorageInner {
 
         list.insert(conversation_id.to_string(), cid);
 
-        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+        let root_cid = self.ipfs.put_dag(list).await?;
 
         if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
             self.ipfs.insert_pin(&root_cid).recursive().local().await?;
@@ -424,7 +424,7 @@ impl MessageStorageInner {
             .remove(&message_id.to_string())
             .ok_or(Error::MessageNotFound)?;
 
-        let cid = self.ipfs.dag().put().serialize(message_mailbox).await?;
+        let cid = self.ipfs.put_dag(message_mailbox).await?;
 
         conversation_mailbox.insert(member.to_string(), cid);
 
@@ -437,7 +437,7 @@ impl MessageStorageInner {
 
         list.insert(conversation_id.to_string(), cid);
 
-        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+        let root_cid = self.ipfs.put_dag(list).await?;
 
         if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
             self.ipfs.insert_pin(&root_cid).recursive().local().await?;

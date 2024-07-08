@@ -1611,7 +1611,7 @@ impl IdentityStore {
 
         let identity = identity.sign(self.root_document.keypair())?;
 
-        let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
+        let ident_cid = self.ipfs.put_dag(identity).await?;
 
         let root_document = RootDocument {
             identity: ident_cid,
@@ -2055,7 +2055,7 @@ impl IdentityStore {
 
         tracing::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
-        let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
+        let ident_cid = self.ipfs.put_dag(identity).await?;
         root_document.identity = ident_cid;
 
         self.root_document

@@ -114,22 +114,22 @@ impl IdentityCacheInner {
                     return Ok(None);
                 }
 
-                let cid = self.ipfs.dag().put().serialize(document).await?;
+                let cid = self.ipfs.put_dag(document).await?;
 
                 list.insert(did_str, cid);
 
-                let cid = self.ipfs.dag().put().serialize(list).await?;
+                let cid = self.ipfs.put_dag(list).await?;
 
                 self.save(cid).await?;
 
                 Ok(Some(old_document))
             }
             None => {
-                let cid = self.ipfs.dag().put().serialize(document).await?;
+                let cid = self.ipfs.put_dag(document).await?;
 
                 list.insert(did_str, cid);
 
-                let cid = self.ipfs.dag().put().serialize(list).await?;
+                let cid = self.ipfs.put_dag(list).await?;
 
                 self.save(cid).await?;
 
@@ -209,7 +209,7 @@ impl IdentityCacheInner {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let cid = self.ipfs.dag().put().serialize(list).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         self.save(cid).await?;
 
