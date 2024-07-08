@@ -153,6 +153,7 @@ impl Relationship {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Relationship {
     pub fn friends(&self) -> bool {
         self.friends
