@@ -1,0 +1,5 @@
+FROM rust:slim
+
+ADD ./entry_point.sh entry_point.sh
+
+CMD [ "/entry_point.sh" ]
