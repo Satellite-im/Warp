@@ -60,11 +60,14 @@
     });
   </script>
   <body>
+    <h2>Description:</h2>
+    <p>This example creates an instance of tesseract and stores some arbitrary data into it. It subscribes to the TesseractEvent stream, an calls the lock function 10 times. </p>
     <h2>How to use this example:</h2>
-    <h3>1 - Make sure the wasm is compiled:</h3>
+    <h3>1 - Compile the wasm and serve the js examples:</h3>
     <pre>
-      wasm-pack build extensions/warp-ipfs --target web --out-dir ../../tools/wasm-example/www/wasm/warp-ipfs
+      cargo run --example from-js
     </pre>
     <h3>2 - Check ouput in the console</h3>
+    <p>Expected output: you should see a 'Locked' log 10 times. (They are received from the event stream)</p>
   </body>
 </html>
