@@ -50,11 +50,14 @@
     });
   </script>
   <body>
+    <h2>Description:</h2>
+    <p>This example creates an identity and then updates it.</p>
     <h2>How to use this example:</h2>
-    <h3>1 - Make sure the wasm is compiled:</h3>
+    <h3>1 - Compile the wasm and serve the js examples:</h3>
     <pre>
-        wasm-pack build extensions/warp-ipfs --target web --out-dir ../../tools/wasm-example/www/wasm/warp-ipfs
+      cargo run --example from-js
     </pre>
     <h3>2 - Check ouput in the console</h3>
+    <p>Expected output: in the logs you should see the identity that was created as well as the one that was updated. They should have different usernames and the updated one's status message should be: "New status message"</p>
   </body>
 </html>
