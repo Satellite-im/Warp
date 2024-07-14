@@ -15,6 +15,7 @@ members = [
     "extensions/warp-ipfs/examples/wasm-ipfs-identity",
     "extensions/warp-ipfs/examples/wasm-ipfs-friends",
     "extensions/warp-ipfs/examples/wasm-ipfs-storage",
+    "extensions/warp-ipfs/examples/warp-ipfs-messenger",
 ]
 exclude = ["deprecated/*", "tools/opencv-test", "tools/video-codec-cli"]
 
