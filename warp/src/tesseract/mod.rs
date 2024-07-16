@@ -431,7 +431,7 @@ impl Tesseract {
         inner.disable_key_check();
     }
 
-    /// Enable the key check to allow any passphrase to be used when unlocking the datastore
+    /// Enable the key check to disallow any passphrase to be used when unlocking the datastore
     ///
     /// # Example
     ///
