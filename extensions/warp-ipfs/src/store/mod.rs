@@ -44,7 +44,7 @@ pub const MIN_ATTACHMENT: usize = 1;
 pub const MAX_CONVERSATIONS: usize = 1_000;
 pub const MAX_FRIENDS: usize = 1_000;
 pub const MAX_REQUEST: usize = 1_000;
-pub const MAX_METADATA_KEY_LENGTH: usize = 72;
+pub const MAX_METADATA_KEY_LENGTH: usize = 32;
 pub const MAX_METADATA_VALUE_LENGTH: usize = 128;
 pub const MAX_METADATA_ENTRIES: usize = 20;
 
