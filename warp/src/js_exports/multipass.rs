@@ -514,3 +514,16 @@ pub enum MultiPassEventKindEnum {
     Unblocked,
     UnblockedBy,
 }
+
+#[wasm_bindgen]
+impl IdentityImage {
+    #[wasm_bindgen(js_name = data)]
+    pub fn data_js(&self) -> Vec<u8> {
+        self.data().to_vec()
+    }
+
+    #[wasm_bindgen(js_name = image_type)]
+    pub fn image_type_js(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.image_type()).unwrap()
+    }
+}
