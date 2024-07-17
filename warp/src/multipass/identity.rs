@@ -1,13 +1,14 @@
+use crate::{constellation::file::FileType, crypto::DID, error::Error};
+use std::hash::Hasher;
 use std::{
     fmt::{Debug, Display},
     vec,
 };
 
-use crate::{constellation::file::FileType, crypto::DID, error::Error};
-
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use futures::stream::BoxStream;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 pub const SHORT_ID_SIZE: usize = 8;
@@ -211,7 +212,7 @@ impl Display for ShortId {
     }
 }
 
-#[derive(Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Identity {
     /// Username of the identity
@@ -231,6 +232,16 @@ pub struct Identity {
 
     /// Status message
     status_message: Option<String>,
+
+    /// Metadata
+    metadata: IndexMap<String, String>,
+}
+
+impl core::hash::Hash for Identity {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.short_id.hash(state);
+        self.did_key.hash(state);
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
@@ -279,6 +290,10 @@ impl Identity {
     pub fn set_modified(&mut self, time: DateTime<Utc>) {
         self.modified = time;
     }
+
+    pub fn set_metadata(&mut self, map: IndexMap<String, String>) {
+        self.metadata = map;
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
@@ -311,6 +326,11 @@ impl Identity {
     pub fn modified_wasm(&self) -> js_sys::Date {
         self.modified.into()
     }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = metadata))]
+    pub fn metadata_wasm(&self) -> wasm_bindgen::JsValue {
+        serde_wasm_bindgen::to_value(&self.metadata).expect("valid ser")
+    }
 }
 impl Identity {
     pub fn short_id(&self) -> ShortId {
@@ -327,6 +347,10 @@ impl Identity {
 
     pub fn modified(&self) -> DateTime<Utc> {
         self.modified
+    }
+
+    pub fn metadata(&self) -> &IndexMap<String, String> {
+        &self.metadata
     }
 }
 
@@ -399,6 +423,8 @@ pub enum IdentityUpdate {
     Picture(Vec<u8>),
     PicturePath(std::path::PathBuf),
     PictureStream(BoxStream<'static, Result<Vec<u8>, std::io::Error>>),
+    AddMetadataKey { key: String, value: String },
+    RemoveMetadataKey { key: String },
     ClearPicture,
     Banner(Vec<u8>),
     BannerPath(std::path::PathBuf),
@@ -432,6 +458,10 @@ impl Debug for IdentityUpdate {
                 write!(f, "IdentityUpdate::StatusMessage({status:?})")
             }
             IdentityUpdate::ClearStatusMessage => write!(f, "IdentityUpdate::ClearStatusMessage"),
+            IdentityUpdate::AddMetadataKey { .. } => write!(f, "IdentityUpdate::AddMetadataKey"),
+            IdentityUpdate::RemoveMetadataKey { .. } => {
+                write!(f, "IdentityUpdate::RemoveMetadataKey")
+            }
         }
     }
 }

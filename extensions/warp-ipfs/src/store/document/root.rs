@@ -5,6 +5,7 @@ use futures::{
     stream::{BoxStream, FuturesUnordered},
     StreamExt,
 };
+use indexmap::IndexMap;
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use tokio::sync::RwLock;
@@ -17,7 +18,8 @@ use warp::{
 
 use crate::store::{
     conversation::ConversationDocument, ds_key::DataStoreKey, ecdh_decrypt, ecdh_encrypt,
-    identity::Request, keystore::Keystore, VecExt,
+    identity::Request, keystore::Keystore, VecExt, MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH,
+    MAX_METADATA_VALUE_LENGTH,
 };
 
 use super::{
@@ -215,6 +217,20 @@ impl RootDocumentMap {
         inner.set_root_index(root).await
     }
 
+    pub async fn add_metadata_key(
+        &self,
+        key: impl Into<String>,
+        val: impl Into<String>,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.add_metadata_key(key, val).await
+    }
+
+    pub async fn remove_metadata_key(&self, key: impl Into<String>) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.remove_metadata_key(key).await
+    }
+
     pub fn keypair(&self) -> &Keypair {
         self.keypair.as_ref().unwrap_or(self.ipfs.keypair())
     }
@@ -354,6 +370,97 @@ impl RootDocumentInner {
         }
 
         Ok(())
+    }
+
+    async fn add_metadata_key(
+        &mut self,
+        key: impl Into<String>,
+        val: impl Into<String>,
+    ) -> Result<(), Error> {
+        let mut root = self.get_root_document().await?;
+        let mut document = self.identity().await?;
+        let key = key.into();
+        let val = val.into();
+
+        if key.len() > MAX_METADATA_KEY_LENGTH {
+            return Err(Error::InvalidLength {
+                current: key.len(),
+                context: key,
+                minimum: None,
+                maximum: Some(MAX_METADATA_KEY_LENGTH),
+            });
+        }
+
+        if val.len() > MAX_METADATA_VALUE_LENGTH {
+            return Err(Error::InvalidLength {
+                current: val.len(),
+                context: val,
+                minimum: None,
+                maximum: Some(MAX_METADATA_VALUE_LENGTH),
+            });
+        }
+
+        let mut map = match document.metadata.arb_data {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized::<IndexMap<String, String>>()
+                .await
+                .unwrap_or_default(),
+            None => IndexMap::default(),
+        };
+
+        if !map.contains_key(&key) && map.len() >= MAX_METADATA_ENTRIES {
+            return Err(Error::Other); //TODO: Max Entries Reached
+        }
+
+        map.insert(key, val);
+
+        let cid = self.ipfs.dag().put().serialize(map).await?;
+
+        document.metadata.arb_data = Some(cid);
+
+        let identity = document.sign(self.keypair())?;
+
+        let cid = self.ipfs.dag().put().serialize(identity).await?;
+
+        root.identity = cid;
+
+        self.set_root_document(root).await
+    }
+
+    async fn remove_metadata_key(&mut self, key: impl Into<String>) -> Result<(), Error> {
+        let mut root = self.get_root_document().await?;
+        let mut document = self.identity().await?;
+        let key = key.into();
+
+        let mut map = match document.metadata.arb_data {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized::<IndexMap<String, String>>()
+                .await
+                .unwrap_or_default(),
+            None => IndexMap::default(),
+        };
+
+        if map.shift_remove(&key).is_none() {
+            return Err(Error::Other); //Entry Key Doesnt Exist
+        }
+
+        let cid = self.ipfs.dag().put().serialize(map).await?;
+
+        document.metadata.arb_data = Some(cid);
+
+        let identity = document.sign(self.keypair())?;
+
+        let cid = self.ipfs.dag().put().serialize(identity).await?;
+
+        root.identity = cid;
+
+        self.set_root_document(root).await
     }
 
     async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {

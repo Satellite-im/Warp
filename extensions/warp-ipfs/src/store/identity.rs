@@ -12,6 +12,7 @@ use futures::{
 };
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
+use indexmap::IndexMap;
 use ipfs::Keypair;
 use ipfs::{p2p::MultiaddrExt, Ipfs};
 use libipld::Cid;
@@ -57,7 +58,8 @@ use super::{
     phonebook::PhoneBook,
     queue::Queue,
     topics::IDENTITY_ANNOUNCEMENT,
-    MAX_IMAGE_SIZE, SHUTTLE_TIMEOUT,
+    MAX_IMAGE_SIZE, MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH, MAX_METADATA_VALUE_LENGTH,
+    SHUTTLE_TIMEOUT,
 };
 
 // TODO: Split into its own task
@@ -332,6 +334,7 @@ pub enum RequestOption {
         banner: Option<Cid>,
         picture: Option<Cid>,
     },
+    Metadata,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -342,6 +345,8 @@ pub enum ResponseOption {
     Identity { identity: IdentityDocument },
     /// Pictures
     Image { cid: Cid, ty: FileType, data: Bytes },
+    /// Metadata
+    Metadata { data: IndexMap<String, String> },
 }
 
 impl std::fmt::Debug for ResponseOption {
@@ -354,6 +359,10 @@ impl std::fmt::Debug for ResponseOption {
             ResponseOption::Image { cid, .. } => f
                 .debug_struct("ResponseOption::Image")
                 .field("cid", &cid.to_string())
+                .finish(),
+            ResponseOption::Metadata { data } => f
+                .debug_struct("ResponseOption::Metadata")
+                .field("data", data)
                 .finish(),
         }
     }
@@ -1101,6 +1110,83 @@ impl IdentityStore {
     }
 
     #[tracing::instrument(skip(self))]
+    pub async fn push_metadata(&self, out_did: &DID) -> Result<(), Error> {
+        let out_peer_id = out_did.to_peer_id()?;
+
+        if !self.ipfs.is_connected(out_peer_id).await? {
+            return Err(Error::IdentityDoesntExist);
+        }
+
+        let pk_did = self.root_document.keypair();
+
+        let identity = self.own_identity_document().await?;
+
+        let Some(arb_data_cid) = identity.metadata.arb_data else {
+            return Ok(());
+        };
+
+        // if cid != arb_data {
+        //     tracing::debug!("Requested profile picture does not match current picture.");
+        //     return Ok(());
+        // }
+
+        let metadata = self
+            .ipfs
+            .get_dag(arb_data_cid)
+            .deserialized::<IndexMap<String, String>>()
+            .await?;
+
+        if metadata.is_empty() || metadata.len() > MAX_METADATA_ENTRIES {
+            return Err(Error::Other);
+        }
+
+        for (k, v) in &metadata {
+            if k.len() > MAX_METADATA_KEY_LENGTH {
+                return Err(Error::InvalidLength {
+                    current: k.len(),
+                    context: k.clone(),
+                    minimum: None,
+                    maximum: Some(MAX_METADATA_KEY_LENGTH),
+                });
+            }
+
+            if v.len() > MAX_METADATA_VALUE_LENGTH {
+                return Err(Error::InvalidLength {
+                    current: v.len(),
+                    context: v.clone(),
+                    minimum: None,
+                    maximum: Some(MAX_METADATA_VALUE_LENGTH),
+                });
+            }
+        }
+
+        let event = IdentityEvent::Receive {
+            option: ResponseOption::Metadata { data: metadata },
+        };
+
+        let payload_bytes = serde_json::to_vec(&event)?;
+
+        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+
+        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
+
+        if self
+            .ipfs
+            .pubsub_peers(Some(out_did.events()))
+            .await?
+            .contains(&out_peer_id)
+        {
+            let timer = Instant::now();
+            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
+            let end = timer.elapsed();
+            tracing::info!(to = %out_did, event = ?event, "Event sent");
+            tracing::trace!("Took {}ms to send event", end.as_millis());
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
     pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
         let out_peer_id = out_did.to_peer_id()?;
 
@@ -1174,6 +1260,9 @@ impl IdentityStore {
                         self.push_profile_picture(in_did, cid).await?;
                     }
                 }
+                RequestOption::Metadata => {
+                    self.push_metadata(in_did).await?;
+                }
             },
             IdentityEvent::Receive {
                 option: ResponseOption::Identity { identity },
@@ -1216,6 +1305,44 @@ impl IdentityStore {
                             .await;
 
                             if !exclude_images {
+                                if document.metadata.arb_data != identity.metadata.arb_data
+                                    && identity.metadata.arb_data.is_some()
+                                {
+                                    if !self.config.store_setting().fetch_over_bitswap {
+                                        if let Err(e) =
+                                            self.request(in_did, RequestOption::Metadata).await
+                                        {
+                                            error!("Error requesting metadata from {in_did}: {e}");
+                                        }
+                                    } else {
+                                        let identity_meta_cid =
+                                            identity.metadata.arb_data.expect("Cid is provided");
+                                        crate::rt::spawn({
+                                            let ipfs = self.ipfs.clone();
+                                            let store = self.clone();
+                                            let did = in_did.clone();
+                                            async move {
+                                                _ = async {
+                                                    let peer_id = did.to_peer_id()?;
+                                                    ipfs.get_dag(identity_meta_cid)
+                                                        .provider(peer_id)
+                                                        .await?;
+                                                    store
+                                                        .emit_event(
+                                                            MultiPassEventKind::IdentityUpdate {
+                                                                did,
+                                                            },
+                                                        )
+                                                        .await;
+
+                                                    Ok::<_, anyhow::Error>(())
+                                                }
+                                                .await;
+                                            }
+                                        });
+                                    }
+                                }
+
                                 if document.metadata.profile_picture
                                     != identity.metadata.profile_picture
                                     && identity.metadata.profile_picture.is_some()
@@ -1237,8 +1364,8 @@ impl IdentityStore {
                                             .await
                                         {
                                             error!(
-                                            "Error requesting profile picture from {in_did}: {e}"
-                                        );
+                                                "Error requesting profile picture from {in_did}: {e}"
+                                            );
                                         }
                                     } else {
                                         let identity_profile_picture = identity
@@ -1364,18 +1491,11 @@ impl IdentityStore {
                             .await;
 
                         if !exclude_images {
-                            let mut picture = None;
-                            let mut banner = None;
+                            let picture = identity.metadata.profile_picture;
+                            let banner = identity.metadata.profile_banner;
+                            let meta = identity.metadata.arb_data;
 
-                            if let Some(cid) = identity.metadata.profile_picture {
-                                picture = Some(cid);
-                            }
-
-                            if let Some(cid) = identity.metadata.profile_banner {
-                                banner = Some(cid)
-                            }
-
-                            if banner.is_some() || picture.is_some() {
+                            if banner.is_some() || picture.is_some() || meta.is_some() {
                                 if !self.config.store_setting().fetch_over_bitswap {
                                     self.request(in_did, RequestOption::Image { banner, picture })
                                         .await?;
@@ -1498,6 +1618,21 @@ impl IdentityStore {
                         }
                     });
                 }
+            }
+            IdentityEvent::Receive {
+                option: ResponseOption::Metadata { data },
+            } => {
+                if data.is_empty() || data.len() > MAX_METADATA_ENTRIES {
+                    return Ok(());
+                }
+
+                for (k, v) in &data {
+                    if k.len() > MAX_METADATA_KEY_LENGTH || v.len() > MAX_METADATA_VALUE_LENGTH {
+                        return Ok(());
+                    }
+                }
+
+                self.ipfs.dag().put().serialize(data).await?;
             }
         };
         Ok(())
@@ -1888,6 +2023,24 @@ impl IdentityStore {
         };
 
         let stream = async_stream::stream! {
+
+            async fn resolve_identity(store: &IdentityStore, identity: IdentityDocument) -> Identity {
+                let metadata = match identity.metadata.arb_data {
+                    Some(cid) => store
+                        .ipfs
+                        .get_dag(cid)
+                        .local()
+                        .deserialized::<IndexMap<_, _>>()
+                        .await
+                        .unwrap_or_default(),
+                    None => IndexMap::new(),
+                };
+
+                let mut identity: Identity = identity.into();
+                identity.set_metadata(metadata);
+                identity
+            }
+
             // first lets evaluate the cache
             let cache = store.identity_cache.list().await;
 
@@ -1909,7 +2062,7 @@ impl IdentityStore {
                         let val = &ident.did == did;
                         async move { val }
                     }){
-                        let id = document.into();
+                        let id = resolve_identity(&store, document).await;
                         yield id;
                         return
                     }
@@ -1926,7 +2079,7 @@ impl IdentityStore {
                     }
 
                     if list.contains(&store.did_key) {
-                        if let Ok(own_identity) = store.own_identity_document().await {
+                        if let Ok(own_identity) = store.own_identity().await {
                             yield own_identity.into();
                         }
                     }
@@ -1936,7 +2089,8 @@ impl IdentityStore {
                     for await document in cache {
                         if list.contains(&document.did) {
                             found.insert(document.did.clone());
-                            yield document.into();
+                            let id = resolve_identity(&store, document).await;
+                            yield id;
                         }
                     }
 
@@ -1948,7 +2102,8 @@ impl IdentityStore {
                     if split_data.len() != 2 {
                         for await document in cache {
                             if document.username.to_lowercase().contains(&username.to_lowercase()) {
-                                yield document.into();
+                                let id = resolve_identity(&store, document).await;
+                                yield id;
                             }
                         }
                     } else if let (Some(name), Some(code)) = (
@@ -1957,7 +2112,8 @@ impl IdentityStore {
                     ) {
                         for await document in cache {
                             if document.username.to_lowercase().eq(&name) && String::from_utf8_lossy(&document.short_id).to_lowercase().eq(&code) {
-                                yield document.into();
+                                let id = resolve_identity(&store, document).await;
+                                yield id;
                             }
                         }
                     }
@@ -1966,7 +2122,8 @@ impl IdentityStore {
                     let username = username.to_lowercase();
                     for await document in cache {
                         if document.username.to_lowercase().eq(&username) {
-                            yield document.into();
+                            let id = resolve_identity(&store, document).await;
+                            yield id;
                         }
                     }
                 }
@@ -1974,7 +2131,8 @@ impl IdentityStore {
                     for await document in cache {
                         let id = ShortId::from(document.short_id);
                         if id == short_id {
-                            yield document.into();
+                            let id = resolve_identity(&store, document).await;
+                            yield id;
                             return;
                         }
                     }
@@ -2017,7 +2175,7 @@ impl IdentityStore {
 
                                     _ = store.identity_cache.insert(&ident).await;
 
-                                    yield ident.into();
+                                    yield resolve_identity(&store, ident).await;
 
                                     if store.discovery.contains(&did).await {
                                         continue;
@@ -2163,7 +2321,20 @@ impl IdentityStore {
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
         let identity = self.own_identity_document().await?;
-        Ok(identity.into())
+        let metadata = match identity.metadata.arb_data {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized::<IndexMap<_, _>>()
+                .await
+                .unwrap_or_default(),
+            None => IndexMap::new(),
+        };
+
+        let mut identity: Identity = identity.into();
+        identity.set_metadata(metadata);
+        Ok(identity)
     }
 
     pub async fn profile_picture(&self) -> Result<IdentityImage, Error> {
