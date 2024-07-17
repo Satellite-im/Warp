@@ -2080,7 +2080,7 @@ impl IdentityStore {
 
                     if list.contains(&store.did_key) {
                         if let Ok(own_identity) = store.own_identity().await {
-                            yield own_identity.into();
+                            yield own_identity;
                         }
                     }
 
