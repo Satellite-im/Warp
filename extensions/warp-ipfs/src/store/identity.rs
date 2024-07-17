@@ -2121,7 +2121,7 @@ impl IdentityStore {
                 LookupBy::Username(ref username) => {
                     let username = username.to_lowercase();
                     for await document in cache {
-                        if document.username.to_lowercase().eq(&username) {
+                        if document.username.to_lowercase().contains(&username) {
                             let id = resolve_identity(&store, document).await;
                             yield id;
                         }
