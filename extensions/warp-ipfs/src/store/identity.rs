@@ -2023,24 +2023,6 @@ impl IdentityStore {
         };
 
         let stream = async_stream::stream! {
-
-            async fn resolve_identity(store: &IdentityStore, identity: IdentityDocument) -> Identity {
-                let metadata = match identity.metadata.arb_data {
-                    Some(cid) => store
-                        .ipfs
-                        .get_dag(cid)
-                        .local()
-                        .deserialized::<IndexMap<_, _>>()
-                        .await
-                        .unwrap_or_default(),
-                    None => IndexMap::new(),
-                };
-
-                let mut identity: Identity = identity.into();
-                identity.set_metadata(metadata);
-                identity
-            }
-
             // first lets evaluate the cache
             let cache = store.identity_cache.list().await;
 
@@ -2076,7 +2058,7 @@ impl IdentityStore {
                                 tracing::error!("Error inserting {pubkey} into discovery: {e}")
                             }
                         }
-                    }
+                     }
 
                     if list.contains(&store.did_key) {
                         if let Ok(own_identity) = store.own_identity().await {
@@ -2949,4 +2931,21 @@ impl IdentityStore {
         };
         Ok(())
     }
+}
+
+async fn resolve_identity(store: &IdentityStore, identity: IdentityDocument) -> Identity {
+    let metadata = match identity.metadata.arb_data {
+        Some(cid) => store
+            .ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized::<IndexMap<_, _>>()
+            .await
+            .unwrap_or_default(),
+        None => IndexMap::new(),
+    };
+
+    let mut identity: Identity = identity.into();
+    identity.set_metadata(metadata);
+    identity
 }
