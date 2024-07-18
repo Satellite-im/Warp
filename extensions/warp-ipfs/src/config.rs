@@ -308,8 +308,8 @@ impl Default for Config {
             #[cfg(not(target_arch = "wasm32"))]
             max_storage_size: Some(10 * 1024 * 1024 * 1024),
             #[cfg(target_arch = "wasm32")]
-            max_storage_size: Some(50 * 1024 * 1024),
-            max_file_size: Some(50 * 1024 * 1024),
+            max_storage_size: Some(2 * 1024 * 1024 * 1024),
+            max_file_size: Some(100 * 1024 * 1024),
             thumbnail_size: (128, 128),
             thumbnail_exact_format: true,
         }
