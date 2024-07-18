@@ -1107,6 +1107,23 @@ impl LocalIdentity for WarpIpfs {
                 return Err(Error::Unimplemented);
             }
             IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
+            //TODO: Likely tie this to the store itself when it comes to pushing the update logic to `IdentityStore`
+            IdentityUpdate::AddMetadataKey { key, value } => {
+                let root = store.root_document();
+                root.add_metadata_key(key, value).await?;
+
+                let _ = store.export_root_document().await;
+                store.push_to_all().await;
+                return Ok(());
+            }
+            IdentityUpdate::RemoveMetadataKey { key } => {
+                let root = store.root_document();
+                root.remove_metadata_key(key).await?;
+
+                let _ = store.export_root_document().await;
+                store.push_to_all().await;
+                return Ok(());
+            }
         };
 
         let mut data = Vec::with_capacity(MAX_IMAGE_SIZE);

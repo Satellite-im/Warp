@@ -58,12 +58,13 @@ paste.workspace = true
 tracing = { workspace = true }
 mediatype.workspace = true
 send_wrapper.workspace = true
+indexmap.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-tokio = { version = "1", default-features = false, features = ["sync"]}
+tokio = { version = "1", default-features = false, features = ["sync"] }
 wasm-bindgen.workspace = true
 gloo.workspace = true
 web-sys.workspace = true
