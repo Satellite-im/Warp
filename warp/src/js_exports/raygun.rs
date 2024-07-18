@@ -76,19 +76,12 @@ impl RayGunBox {
     }
 
     /// List all active conversations
-    pub async fn list_conversations(&self) -> Result<JsValue, JsError> {
+    pub async fn list_conversations(&self) -> Result<ConversationList, JsError> {
         self.inner
             .list_conversations()
             .await
             .map_err(|e| e.into())
-            .map(|ok| {
-                serde_wasm_bindgen::to_value(
-                    &ok.iter()
-                        .map(|c| Conversation::new(c.clone()))
-                        .collect::<Vec<Conversation>>(),
-                )
-                .unwrap()
-            })
+            .map(|ok| ConversationList { inner: ok })
     }
 
     /// Retrieve all messages from a conversation
@@ -469,6 +462,21 @@ impl RayGunBox {
 
 #[derive(Serialize, Deserialize)]
 #[wasm_bindgen]
+pub struct ConversationList {
+    inner: Vec<raygun::Conversation>,
+}
+#[wasm_bindgen]
+impl ConversationList {
+    pub fn convs(&self) -> Vec<Conversation> {
+        self.inner
+            .iter()
+            .map(|c| Conversation::new(c.clone()))
+            .collect()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[wasm_bindgen]
 pub struct Conversation {
     inner: raygun::Conversation,
 }
@@ -516,13 +524,7 @@ impl Messages {
         match messages {
             raygun::Messages::List(list) => Self {
                 variant: MessagesEnum::List,
-                value: serde_wasm_bindgen::to_value(
-                    &list
-                        .iter()
-                        .map(|m| Message::new(m.clone()))
-                        .collect::<Vec<Message>>(),
-                )
-                .unwrap(),
+                value: serde_wasm_bindgen::to_value(&list).unwrap(),
             },
             raygun::Messages::Stream(stream) => Self {
                 variant: MessagesEnum::List,
@@ -679,6 +681,12 @@ impl MessageReference {
     pub fn deleted(&self) -> bool {
         self.inner.deleted()
     }
+}
+
+// Convert a JS object of raygun::Message to a Message
+#[wasm_bindgen]
+pub fn message_from(js: JsValue) -> Message {
+    Message::new(serde_wasm_bindgen::from_value(js).unwrap())
 }
 
 #[wasm_bindgen]
