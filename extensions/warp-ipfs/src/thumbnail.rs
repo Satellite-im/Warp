@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use futures::channel::oneshot;
-use image::io::Reader as ImageReader;
-use image::ImageFormat;
+use image::{ImageFormat, ImageReader};
 use rust_ipfs::{Ipfs, IpfsPath};
 use std::{
     collections::BTreeMap,
