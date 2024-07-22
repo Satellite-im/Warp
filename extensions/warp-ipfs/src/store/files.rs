@@ -869,6 +869,17 @@ impl FileTask {
             return Err(Error::FileExist);
         }
 
+        if let Some(total_size) = total_size {
+            if total_size + self.current_size() > self.max_size() {
+                return Err(Error::InvalidLength {
+                    context: "stream".into(),
+                    minimum: None,
+                    maximum: Some(self.max_size()),
+                    current: self.current_size() + total_size,
+                });
+            }
+        }
+
         let constellation_tx = self.constellation_tx.clone();
         let mut export_tx = self.export_tx.clone();
         let max_size = self.max_size();
