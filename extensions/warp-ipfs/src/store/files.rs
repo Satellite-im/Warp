@@ -929,7 +929,7 @@ impl FileTask {
                     }
                 }
 
-                if root.size() + last_written >= max_size {
+                if root.size() + last_written > max_size {
                     yield Progression::ProgressFailed {
                         name,
                         last_size: Some(last_written),
