@@ -1,7 +1,12 @@
-use std::str::FromStr;
-
+use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::{AsyncRead, FutureExt, Stream, TryStreamExt};
 use image::ImageFormat;
 use mediatype::MediaTypeBuf;
+use std::future::IntoFuture;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::task::{Context, Poll};
 use warp::{
     constellation::{file::FileType, item::FormatType},
     error::Error,
@@ -121,5 +126,143 @@ impl From<ExtensionType> for FormatType {
             Ok(media) => Self::Mime(media),
             Err(_) => Self::Generic,
         }
+    }
+}
+
+// Small utility that converts AsyncRead to a Stream, while supporting max size from that stream
+pub struct StreamReader<R> {
+    reader: Option<R>,
+    buffer: usize,
+    size: usize,
+    max_cap: Option<usize>,
+}
+
+impl<R> StreamReader<R>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    pub fn from_reader(reader: R) -> Self {
+        Self::from_reader_with_cap(reader, 512, None)
+    }
+
+    pub fn from_reader_with_cap(reader: R, buffer: usize, max_cap: Option<usize>) -> Self {
+        Self {
+            reader: Some(reader),
+            buffer,
+            size: 0,
+            max_cap,
+        }
+    }
+}
+
+impl<R> Stream for StreamReader<R>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    type Item = std::io::Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+
+        let Some(reader) = this.reader.as_mut() else {
+            return Poll::Ready(None);
+        };
+
+        let buf_size: usize = this.buffer;
+        let mut buffer = vec![0u8; buf_size];
+
+        match futures::ready!(Pin::new(reader).poll_read(cx, &mut buffer)) {
+            Ok(0) => {
+                this.reader.take();
+                return Poll::Ready(None);
+            }
+            Ok(size) => {
+                this.size += size;
+                if let Some(max_size) = this.max_cap {
+                    if size > max_size {
+                        this.reader.take();
+                        return Poll::Ready(Some(Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "max size has been reached",
+                        ))));
+                    }
+                }
+                let new_buf = &buffer[..size];
+                let buf = Bytes::copy_from_slice(new_buf);
+                Poll::Ready(Some(Ok(buf)))
+            }
+            Err(e) => {
+                this.reader.take();
+                return Poll::Ready(Some(Err(e)));
+            }
+        }
+    }
+}
+
+impl<R> IntoFuture for StreamReader<R>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    type Output = std::io::Result<Bytes>;
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(mut self) -> Self::IntoFuture {
+        async move {
+            let mut buffer = vec![];
+            while let Some(bytes) = self.try_next().await? {
+                buffer.extend(bytes);
+            }
+            Ok(Bytes::from(buffer))
+        }
+        .boxed()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::utils::StreamReader;
+    use bytes::Bytes;
+
+    #[tokio::test]
+    async fn async_read_to_stream() -> std::io::Result<()> {
+        let data = b"hello, world".to_vec();
+
+        let cursor = futures::io::Cursor::new(data.to_vec());
+
+        let st = StreamReader::from_reader(cursor);
+
+        let bytes = st.await?;
+
+        assert_eq!(bytes, Bytes::copy_from_slice(&data));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn async_read_with_max_size() -> std::io::Result<()> {
+        let data = b"hello, world".to_vec();
+
+        let cursor = futures::io::Cursor::new(data.to_vec());
+
+        let st = StreamReader::from_reader_with_cap(cursor, 512, Some(data.len()));
+
+        let bytes = st.await?;
+
+        assert_eq!(bytes, Bytes::copy_from_slice(&data));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cannot_read_due_to_max_size() -> std::io::Result<()> {
+        let data = b"hello, world".to_vec();
+
+        let cursor = futures::io::Cursor::new(data.to_vec());
+
+        let st = StreamReader::from_reader_with_cap(cursor, 512, Some(11));
+
+        assert!(st.await.is_err());
+
+        Ok(())
     }
 }
