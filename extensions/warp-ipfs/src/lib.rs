@@ -953,7 +953,7 @@ impl LocalIdentity for WarpIpfs {
                 }
                 let cursor = std::io::Cursor::new(data);
 
-                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+                let image = image::ImageReader::new(cursor).with_guessed_format()?;
 
                 let format = image
                     .format()
@@ -1036,7 +1036,7 @@ impl LocalIdentity for WarpIpfs {
 
                 let cursor = std::io::Cursor::new(data);
 
-                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+                let image = image::ImageReader::new(cursor).with_guessed_format()?;
 
                 let format = image
                     .format()
@@ -1140,7 +1140,7 @@ impl LocalIdentity for WarpIpfs {
 
                 let cursor = std::io::Cursor::new(&data);
 
-                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+                let image = image::ImageReader::new(cursor).with_guessed_format()?;
 
                 image
                     .format()

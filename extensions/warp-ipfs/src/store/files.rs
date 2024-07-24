@@ -752,6 +752,17 @@ impl FileTask {
             });
         }
 
+        if let Some(max_file_size) = self.config.max_storage_size() {
+            if buffer.len() > max_file_size {
+                return Err(Error::InvalidLength {
+                    context: "buffer".into(),
+                    minimum: None,
+                    maximum: Some(max_file_size),
+                    current: buffer.len(),
+                });
+            }
+        }
+
         let current_directory = match dest_path {
             Some(dest) => self.root_directory().get_last_directory_from_path(&dest)?,
             None => self.current_directory()?,
@@ -869,9 +880,32 @@ impl FileTask {
             return Err(Error::FileExist);
         }
 
+        if let Some(total_size) = total_size {
+            if total_size + self.current_size() > self.max_size() {
+                return Err(Error::InvalidLength {
+                    context: "stream".into(),
+                    minimum: None,
+                    maximum: Some(self.max_size()),
+                    current: self.current_size() + total_size,
+                });
+            }
+
+            if let Some(max_file_size) = self.config.max_storage_size() {
+                if total_size > max_file_size {
+                    return Err(Error::InvalidLength {
+                        context: "stream".into(),
+                        minimum: None,
+                        maximum: Some(max_file_size),
+                        current: total_size,
+                    });
+                }
+            }
+        }
+
         let constellation_tx = self.constellation_tx.clone();
         let mut export_tx = self.export_tx.clone();
         let max_size = self.max_size();
+        let max_file_size = self.config.max_file_size();
         let root = self.root_directory();
 
         let progress_stream = async_stream::stream! {
@@ -918,7 +952,7 @@ impl FileTask {
                     }
                 }
 
-                if root.size() + last_written >= max_size {
+                if root.size() + last_written > max_size {
                     yield Progression::ProgressFailed {
                         name,
                         last_size: Some(last_written),
@@ -930,6 +964,22 @@ impl FileTask {
                         }
                     };
                     return;
+                }
+
+                if let Some(max_file_size) = max_file_size {
+                    if last_written > max_file_size {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Error::InvalidLength {
+                                context: "buffer".into(),
+                                current: last_written,
+                                minimum: None,
+                                maximum: Some(max_file_size),
+                            }
+                        };
+                        return;
+                    }
                 }
 
             }
