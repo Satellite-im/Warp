@@ -9,8 +9,6 @@ use chrono::{DateTime, Utc};
 use futures::channel::mpsc::channel;
 use futures::future::BoxFuture;
 use futures::stream::{self, BoxStream};
-#[cfg(not(target_arch = "wasm32"))]
-use futures::AsyncReadExt;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_timeout::TimeoutExt;
 use ipfs::p2p::{
@@ -65,6 +63,7 @@ use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
 use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+use crate::utils::{ByteCollection, StreamReader};
 
 mod behaviour;
 pub mod config;
@@ -888,7 +887,7 @@ impl LocalIdentity for WarpIpfs {
             Picture(Option<ExtensionType>),
             Banner(Option<ExtensionType>),
         }
-        let (opt, mut stream) = match option {
+        let (opt, stream) = match option {
             IdentityUpdate::Username(username) => {
                 let len = username.chars().count();
                 if !(4..=64).contains(&len) {
@@ -962,10 +961,11 @@ impl LocalIdentity for WarpIpfs {
 
                 let inner = image.into_inner();
 
-                let data = inner.into_inner();
+                let async_cursor = futures::io::Cursor::new(inner.into_inner());
 
-                let stream = stream::iter(vec![Ok(data)]).boxed();
-                (OptType::Picture(Some(format)), stream)
+                let stream =
+                    StreamReader::from_reader_with_cap(async_cursor, 512, Some(MAX_IMAGE_SIZE));
+                (OptType::Picture(Some(format)), stream.boxed())
             }
             #[cfg(not(target_arch = "wasm32"))]
             IdentityUpdate::PicturePath(path) => {
@@ -998,31 +998,23 @@ impl LocalIdentity for WarpIpfs {
 
                 tracing::trace!("image size = {}", len);
 
-                let stream = async_stream::stream! {
-                    let mut reader = file.compat();
-                    let mut buffer = vec![0u8; 512];
-                    loop {
-                        match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
-                            Ok(_n) => {
-                                yield Ok(buffer.clone());
-                                break;
-                            },
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                            Err(e) => {
-                                yield Err(e);
-                                break;
-                            }
-                        }
-                    }
-                };
+                let stream =
+                    StreamReader::from_reader_with_cap(file.compat(), 512, Some(MAX_IMAGE_SIZE));
+
                 (OptType::Picture(Some(extension)), stream.boxed())
             }
             #[cfg(target_arch = "wasm32")]
             IdentityUpdate::PicturePath(_) => {
                 return Err(Error::Unimplemented);
             }
-            IdentityUpdate::PictureStream(stream) => (OptType::Picture(None), stream),
+            IdentityUpdate::PictureStream(stream) => {
+                let stream = StreamReader::from_reader_with_cap(
+                    stream.into_async_read(),
+                    512,
+                    Some(MAX_IMAGE_SIZE),
+                );
+                (OptType::Picture(None), stream.boxed())
+            }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
                 if len == 0 || len > MAX_IMAGE_SIZE {
@@ -1045,10 +1037,12 @@ impl LocalIdentity for WarpIpfs {
 
                 let inner = image.into_inner();
 
-                let data = inner.into_inner();
+                let async_cursor = futures::io::Cursor::new(inner.into_inner());
 
-                let stream = stream::iter(vec![Ok(data)]).boxed();
-                (OptType::Banner(Some(format)), stream)
+                let stream =
+                    StreamReader::from_reader_with_cap(async_cursor, 512, Some(MAX_IMAGE_SIZE));
+
+                (OptType::Banner(Some(format)), stream.boxed())
             }
             #[cfg(not(target_arch = "wasm32"))]
             IdentityUpdate::BannerPath(path) => {
@@ -1081,24 +1075,8 @@ impl LocalIdentity for WarpIpfs {
 
                 tracing::trace!("image size = {}", len);
 
-                let stream = async_stream::stream! {
-                    let mut reader = file.compat();
-                    let mut buffer = vec![0u8; 512];
-                    loop {
-                        match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
-                            Ok(_n) => {
-                                yield Ok(buffer.clone());
-                                break;
-                            },
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                            Err(e) => {
-                                yield Err(e);
-                                break;
-                            }
-                        }
-                    }
-                };
+                let stream =
+                    StreamReader::from_reader_with_cap(file.compat(), 512, Some(2 * 1024 * 1024));
 
                 (OptType::Picture(Some(extension)), stream.boxed())
             }
@@ -1106,7 +1084,14 @@ impl LocalIdentity for WarpIpfs {
             IdentityUpdate::BannerPath(_) => {
                 return Err(Error::Unimplemented);
             }
-            IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
+            IdentityUpdate::BannerStream(stream) => {
+                let stream = StreamReader::from_reader_with_cap(
+                    stream.into_async_read(),
+                    512,
+                    Some(MAX_IMAGE_SIZE),
+                );
+                (OptType::Banner(None), stream.boxed())
+            }
             //TODO: Likely tie this to the store itself when it comes to pushing the update logic to `IdentityStore`
             IdentityUpdate::AddMetadataKey { key, value } => {
                 let root = store.root_document();
@@ -1126,11 +1111,7 @@ impl LocalIdentity for WarpIpfs {
             }
         };
 
-        let mut data = Vec::with_capacity(MAX_IMAGE_SIZE);
-
-        while let Some(s) = stream.try_next().await? {
-            data.extend(s);
-        }
+        let data = ByteCollection::new(stream).await?;
 
         let format = match opt {
             OptType::Picture(Some(format)) => format,
