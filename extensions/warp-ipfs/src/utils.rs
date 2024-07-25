@@ -232,7 +232,7 @@ where
         match futures::ready!(Pin::new(reader).poll_read(cx, &mut buffer)) {
             Ok(0) => {
                 this.reader.take();
-                Poll::Ready(None);
+                Poll::Ready(None)
             }
             Ok(size) => {
                 this.size += size;
@@ -251,7 +251,7 @@ where
             }
             Err(e) => {
                 this.reader.take();
-                Poll::Ready(Some(Err(e)));
+                Poll::Ready(Some(Err(e)))
             }
         }
     }
