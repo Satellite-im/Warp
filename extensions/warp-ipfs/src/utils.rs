@@ -232,6 +232,9 @@ where
         match futures::ready!(Pin::new(reader).poll_read(cx, &mut buffer)) {
             Ok(0) => {
                 this.reader.take();
+                if this.size == 0 {
+                    return Poll::Ready(Some(Err(std::io::ErrorKind::BrokenPipe.into())));
+                }
                 Poll::Ready(None)
             }
             Ok(size) => {
@@ -276,15 +279,15 @@ mod test {
 
     #[tokio::test]
     async fn async_read_to_stream() -> std::io::Result<()> {
-        let data = b"hello, world".to_vec();
+        let data = Bytes::copy_from_slice(b"hello, world");
 
-        let cursor = futures::io::Cursor::new(data.to_vec());
+        let cursor = futures::io::Cursor::new(data.clone());
 
         let st = StreamReader::from_reader(cursor);
 
         let bytes = st.await?;
 
-        assert_eq!(bytes, &data);
+        assert_eq!(bytes, data);
 
         Ok(())
     }
@@ -306,15 +309,15 @@ mod test {
 
     #[tokio::test]
     async fn async_read_with_max_size() -> std::io::Result<()> {
-        let data = b"hello, world".to_vec();
+        let data = Bytes::copy_from_slice(b"hello, world");
 
-        let cursor = futures::io::Cursor::new(data.to_vec());
+        let cursor = futures::io::Cursor::new(data.clone());
 
         let st = StreamReader::from_reader_with_cap(cursor, 512, Some(data.len()));
 
         let bytes = st.await?;
 
-        assert_eq!(bytes, Bytes::copy_from_slice(&data));
+        assert_eq!(bytes, data);
 
         Ok(())
     }
