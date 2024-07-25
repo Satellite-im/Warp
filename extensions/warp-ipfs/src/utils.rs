@@ -1,9 +1,10 @@
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use futures::future::BoxFuture;
-use futures::{AsyncRead, FutureExt, Stream, TryStreamExt};
+use futures::stream::BoxStream;
+use futures::{AsyncRead, FutureExt, Stream, StreamExt};
 use image::ImageFormat;
 use mediatype::MediaTypeBuf;
-use std::future::IntoFuture;
+use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::task::{Context, Poll};
@@ -129,6 +130,62 @@ impl From<ExtensionType> for FormatType {
     }
 }
 
+pub struct ByteCollection {
+    stream: Option<BoxStream<'static, std::io::Result<Bytes>>>,
+    buffer: BytesMut,
+}
+
+impl ByteCollection {
+    pub fn new<S>(stream: S) -> Self
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + Send + 'static,
+    {
+        let stream = stream.boxed();
+        Self {
+            stream: Some(stream),
+            buffer: BytesMut::new(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Self {
+        let bytes = bytes.into();
+        let stream = futures::stream::iter(vec![Ok(bytes)]);
+        Self::new(stream)
+    }
+}
+
+impl Future for ByteCollection {
+    type Output = std::io::Result<Bytes>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+
+        let Some(st) = this.stream.as_mut() else {
+            return Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()));
+        };
+
+        loop {
+            match futures::ready!(st.poll_next_unpin(cx)) {
+                Some(Ok(bytes)) => {
+                    this.buffer.put(bytes);
+                }
+                Some(Err(e)) => {
+                    this.buffer.clear();
+                    this.stream.take();
+                    return Poll::Ready(Err(e));
+                }
+                None => {
+                    this.stream.take();
+                    let bytes_mut = this.buffer.split();
+                    let bytes = bytes_mut.freeze();
+                    return Poll::Ready(Ok(bytes));
+                }
+            }
+        }
+    }
+}
+
 // Small utility that converts AsyncRead to a Stream, while supporting max size from that stream
 pub struct StreamReader<R> {
     reader: Option<R>,
@@ -141,6 +198,7 @@ impl<R> StreamReader<R>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
+    #[allow(dead_code)]
     pub fn from_reader(reader: R) -> Self {
         Self::from_reader_with_cap(reader, 512, None)
     }
@@ -206,21 +264,14 @@ where
     type Output = std::io::Result<Bytes>;
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
-    fn into_future(mut self) -> Self::IntoFuture {
-        async move {
-            let mut buffer = vec![];
-            while let Some(bytes) = self.try_next().await? {
-                buffer.extend(bytes);
-            }
-            Ok(Bytes::from(buffer))
-        }
-        .boxed()
+    fn into_future(self) -> Self::IntoFuture {
+        ByteCollection::new(self).boxed()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::utils::StreamReader;
+    use crate::utils::{ByteCollection, StreamReader};
     use bytes::Bytes;
 
     #[tokio::test]
@@ -233,7 +284,22 @@ mod test {
 
         let bytes = st.await?;
 
-        assert_eq!(bytes, Bytes::copy_from_slice(&data));
+        assert_eq!(bytes, &data);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn byte_collection_from_stream() -> std::io::Result<()> {
+        let data = Bytes::copy_from_slice(b"hello, world");
+
+        let st = futures::stream::iter(vec![std::io::Result::Ok(data.clone())]);
+
+        let col = ByteCollection::new(st);
+
+        let bytes = col.await?;
+
+        assert_eq!(bytes, data);
 
         Ok(())
     }

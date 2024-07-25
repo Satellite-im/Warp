@@ -63,7 +63,7 @@ use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
 use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
-use crate::utils::StreamReader;
+use crate::utils::{ByteCollection, StreamReader};
 
 mod behaviour;
 pub mod config;
@@ -887,7 +887,7 @@ impl LocalIdentity for WarpIpfs {
             Picture(Option<ExtensionType>),
             Banner(Option<ExtensionType>),
         }
-        let (opt, mut stream) = match option {
+        let (opt, stream) = match option {
             IdentityUpdate::Username(username) => {
                 let len = username.chars().count();
                 if !(4..=64).contains(&len) {
@@ -1111,11 +1111,7 @@ impl LocalIdentity for WarpIpfs {
             }
         };
 
-        let mut data = Vec::with_capacity(MAX_IMAGE_SIZE);
-
-        while let Some(s) = stream.try_next().await? {
-            data.extend(s);
-        }
+        let data = ByteCollection::new(stream).await?;
 
         let format = match opt {
             OptType::Picture(Some(format)) => format,
