@@ -15,11 +15,11 @@ use std::{
 };
 
 use futures::Stream;
-#[cfg(not(target_arch = "wasm32"))]
-use std::{
-    io::{self, ErrorKind},
-    path::Path,
-};
+use std::io::{self, Cursor};
+
+#[allow(unused_imports)]
+use std::{io::ErrorKind, path::Path};
+
 use tokio::sync::Mutex;
 use warp::{constellation::file::FileType, error::Error};
 use web_time::Instant;
@@ -109,7 +109,7 @@ impl ThumbnailGenerator {
 
                             let thumbnail = image.thumbnail(width, height);
 
-                            let mut t_buffer = std::io::Cursor::new(vec![]);
+                            let mut t_buffer = Cursor::new(vec![]);
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
@@ -201,7 +201,7 @@ impl ThumbnailGenerator {
                             let format: ImageFormat = extension.try_into()?;
 
                             let data = bytes.await.map(|b| b.to_vec())?;
-                            let cursor = io::Cursor::new(data);
+                            let cursor = Cursor::new(data);
                             let image = ImageReader::new(cursor)
                                 .with_guessed_format()?
                                 .decode()
@@ -297,7 +297,7 @@ impl ThumbnailGenerator {
                             let height = height.min(image.height());
 
                             let thumbnail = image.thumbnail(width, height);
-                            let mut t_buffer = std::io::Cursor::new(vec![]);
+                            let mut t_buffer = Cursor::new(vec![]);
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
