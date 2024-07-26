@@ -210,14 +210,14 @@ impl Future for ByteCollection {
 }
 
 // Small utility that converts AsyncRead to a Stream, while supporting max size from that stream
-pub struct StreamReader<R> {
+pub struct ReaderStream<R> {
     reader: Option<R>,
     buffer: usize,
     size: usize,
     max_cap: Option<usize>,
 }
 
-impl<R> StreamReader<R>
+impl<R> ReaderStream<R>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -236,7 +236,7 @@ where
     }
 }
 
-impl<R> Stream for StreamReader<R>
+impl<R> Stream for ReaderStream<R>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -283,7 +283,7 @@ where
     }
 }
 
-impl<R> IntoFuture for StreamReader<R>
+impl<R> IntoFuture for ReaderStream<R>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -297,7 +297,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::utils::{ByteCollection, StreamReader};
+    use crate::utils::{ByteCollection, ReaderStream};
     use bytes::Bytes;
 
     #[tokio::test]
@@ -306,7 +306,7 @@ mod test {
 
         let cursor = futures::io::Cursor::new(data.clone());
 
-        let st = StreamReader::from_reader(cursor);
+        let st = ReaderStream::from_reader(cursor);
 
         let bytes = st.await?;
 
@@ -336,7 +336,7 @@ mod test {
 
         let cursor = futures::io::Cursor::new(data.clone());
 
-        let st = StreamReader::from_reader_with_cap(cursor, 512, Some(data.len()));
+        let st = ReaderStream::from_reader_with_cap(cursor, 512, Some(data.len()));
 
         let bytes = st.await?;
 
@@ -351,7 +351,7 @@ mod test {
 
         let cursor = futures::io::Cursor::new(data.to_vec());
 
-        let st = StreamReader::from_reader_with_cap(cursor, 512, Some(11));
+        let st = ReaderStream::from_reader_with_cap(cursor, 512, Some(11));
 
         assert!(st.await.is_err());
 

@@ -63,7 +63,7 @@ use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
 use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
-use crate::utils::{ByteCollection, StreamReader};
+use crate::utils::{ByteCollection, ReaderStream};
 
 mod behaviour;
 pub mod config;
@@ -964,7 +964,7 @@ impl LocalIdentity for WarpIpfs {
                 let async_cursor = futures::io::Cursor::new(inner.into_inner());
 
                 let stream =
-                    StreamReader::from_reader_with_cap(async_cursor, 512, Some(MAX_IMAGE_SIZE));
+                    ReaderStream::from_reader_with_cap(async_cursor, 512, Some(MAX_IMAGE_SIZE));
                 (OptType::Picture(Some(format)), stream.boxed())
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -999,7 +999,7 @@ impl LocalIdentity for WarpIpfs {
                 tracing::trace!("image size = {}", len);
 
                 let stream =
-                    StreamReader::from_reader_with_cap(file.compat(), 512, Some(MAX_IMAGE_SIZE));
+                    ReaderStream::from_reader_with_cap(file.compat(), 512, Some(MAX_IMAGE_SIZE));
 
                 (OptType::Picture(Some(extension)), stream.boxed())
             }
@@ -1008,7 +1008,7 @@ impl LocalIdentity for WarpIpfs {
                 return Err(Error::Unimplemented);
             }
             IdentityUpdate::PictureStream(stream) => {
-                let stream = StreamReader::from_reader_with_cap(
+                let stream = ReaderStream::from_reader_with_cap(
                     stream.into_async_read(),
                     512,
                     Some(MAX_IMAGE_SIZE),
@@ -1040,7 +1040,7 @@ impl LocalIdentity for WarpIpfs {
                 let async_cursor = futures::io::Cursor::new(inner.into_inner());
 
                 let stream =
-                    StreamReader::from_reader_with_cap(async_cursor, 512, Some(MAX_IMAGE_SIZE));
+                    ReaderStream::from_reader_with_cap(async_cursor, 512, Some(MAX_IMAGE_SIZE));
 
                 (OptType::Banner(Some(format)), stream.boxed())
             }
@@ -1076,7 +1076,7 @@ impl LocalIdentity for WarpIpfs {
                 tracing::trace!("image size = {}", len);
 
                 let stream =
-                    StreamReader::from_reader_with_cap(file.compat(), 512, Some(2 * 1024 * 1024));
+                    ReaderStream::from_reader_with_cap(file.compat(), 512, Some(2 * 1024 * 1024));
 
                 (OptType::Picture(Some(extension)), stream.boxed())
             }
@@ -1085,7 +1085,7 @@ impl LocalIdentity for WarpIpfs {
                 return Err(Error::Unimplemented);
             }
             IdentityUpdate::BannerStream(stream) => {
-                let stream = StreamReader::from_reader_with_cap(
+                let stream = ReaderStream::from_reader_with_cap(
                     stream.into_async_read(),
                     512,
                     Some(MAX_IMAGE_SIZE),
