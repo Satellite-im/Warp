@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Warp Wasm Test</title>
+  </head>
+  <script type="module">
+    import init, * as wasm from './built-wasm/warp-ipfs/warp_ipfs.js';
+    init().then(async (_exports) => {
+      let ipfs = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), null)
+      let multipass = ipfs.multipass
+      let tesseract = multipass.tesseract()
+      const passphrase = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+      tesseract.unlock(passphrase)
+      
+      console.log(`creating identity...`)
+      let profile = await multipass.create_identity(null, null)
+      let identity = profile.identity()
+      let metadata = identity.metadata()
+      console.log("metadata:", metadata)
+      
+      console.log("adding metadata...")
+      await multipass.update_identity(wasm.IdentityUpdate.AddMetadataKey, ["MyKey", "MyValue"])
+      identity = await multipass.identity()
+      metadata = identity.metadata()
+      console.log("metadata:", metadata)
+
+      console.log("updating metadata...")
+      await multipass.update_identity(wasm.IdentityUpdate.AddMetadataKey, ["MyKey", "MyNewValue"])
+      identity = await multipass.identity()
+      metadata = identity.metadata()
+      console.log("metadata:", metadata)
+
+      console.log("removing metadata...")
+      await multipass.update_identity(wasm.IdentityUpdate.RemoveMetadataKey, "MyKey")
+      identity = await multipass.identity()
+      metadata = identity.metadata()
+      console.log("metadata:", metadata)
+
+    });
+  </script>
+  <body>
+    <h2>Description:</h2>
+    <p>This example adds metadata, updates it, and then removes it.</p>
+    <h2>How to use this example:</h2>
+    <h3>1 - Compile the wasm and serve the js examples:</h3>
+    <pre>
+      cargo run --example from-js
+    </pre>
+    <h3>2 - Check ouput in the console</h3>
+    <p>Expected output: in the logs you should see the following sequence of values for metadata (initially empty, added key/value, updated key/value, empty after removal) 
+      
+    <pre>
+      Map(0) {size: 0}
+      Map(1) {'MyKey' => 'MyValue'}
+      Map(1) {'MyKey' => 'MyNewValue'}
+      Map(0) {size: 0}
+    </pre>
+  </body>
+</html>

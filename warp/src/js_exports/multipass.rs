@@ -12,7 +12,7 @@ use crate::{
     tesseract::Tesseract,
 };
 use futures::StreamExt;
-use js_sys::Uint8Array;
+use js_sys::{Array, Uint8Array};
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 
@@ -311,6 +311,8 @@ pub enum IdentityUpdate {
     ClearBanner,
     StatusMessage,
     ClearStatusMessage,
+    AddMetadataKey,
+    RemoveMetadataKey,
 }
 
 fn to_identity_update_enum(
@@ -358,6 +360,18 @@ fn to_identity_update_enum(
             }
         }
         IdentityUpdate::ClearStatusMessage => Ok(identity::IdentityUpdate::ClearStatusMessage),
+        IdentityUpdate::AddMetadataKey => {
+            let array: Array = value.dyn_into().map_err(|_| JsError::new("key, value should be in an array"))?;
+            let key = array.get(0).as_string().ok_or(JsError::new("key should be a string"))?;
+            let value = array.get(1).as_string().ok_or(JsError::new("value should be a string"))?;
+            Ok(identity::IdentityUpdate::AddMetadataKey { key, value })
+        }
+        IdentityUpdate::RemoveMetadataKey => Ok(identity::IdentityUpdate::RemoveMetadataKey {
+            key: value
+                .as_string()
+                .ok_or(JsError::new("JsValue is not a string"))?
+                .into(),
+        }),
         _ => Err(JsError::new("IdentityUpdate variant not yet implemented")),
     }
 }
