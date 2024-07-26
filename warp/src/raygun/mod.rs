@@ -12,8 +12,8 @@ use futures::stream::BoxStream;
 
 use chrono::{DateTime, Utc};
 use core::ops::Range;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -681,7 +681,7 @@ pub struct Message {
     pinned: bool,
 
     /// List of the reactions for the `Message`
-    reactions: BTreeMap<String, Vec<DID>>,
+    reactions: IndexMap<String, Vec<DID>>,
 
     /// List of users public keys mentioned in this message
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -699,7 +699,7 @@ pub struct Message {
 
     /// Metadata related to the message. Can be used externally, but more internally focused
     #[serde(flatten)]
-    metadata: HashMap<String, String>,
+    metadata: IndexMap<String, String>,
 }
 
 impl Default for Message {
@@ -712,12 +712,12 @@ impl Default for Message {
             date: Utc::now(),
             modified: None,
             pinned: false,
-            reactions: BTreeMap::new(),
+            reactions: IndexMap::new(),
             mentions: Vec::new(),
             replied: None,
             lines: Vec::new(),
             attachment: Vec::new(),
-            metadata: HashMap::new(),
+            metadata: IndexMap::new(),
         }
     }
 }
@@ -770,7 +770,7 @@ impl Message {
         self.pinned
     }
 
-    pub fn reactions(&self) -> BTreeMap<String, Vec<DID>> {
+    pub fn reactions(&self) -> IndexMap<String, Vec<DID>> {
         self.reactions.clone()
     }
 
@@ -786,7 +786,7 @@ impl Message {
         self.attachment.clone()
     }
 
-    pub fn metadata(&self) -> HashMap<String, String> {
+    pub fn metadata(&self) -> IndexMap<String, String> {
         self.metadata.clone()
     }
 
@@ -824,7 +824,7 @@ impl Message {
         self.pinned = pin
     }
 
-    pub fn set_reactions(&mut self, reaction: BTreeMap<String, Vec<DID>>) {
+    pub fn set_reactions(&mut self, reaction: IndexMap<String, Vec<DID>>) {
         self.reactions = reaction
     }
 
@@ -840,7 +840,7 @@ impl Message {
         self.attachment = attachments
     }
 
-    pub fn set_metadata(&mut self, metadata: HashMap<String, String>) {
+    pub fn set_metadata(&mut self, metadata: IndexMap<String, String>) {
         self.metadata = metadata
     }
 
@@ -855,7 +855,7 @@ impl Message {
         &mut self.pinned
     }
 
-    pub fn reactions_mut(&mut self) -> &mut BTreeMap<String, Vec<DID>> {
+    pub fn reactions_mut(&mut self) -> &mut IndexMap<String, Vec<DID>> {
         &mut self.reactions
     }
 
@@ -863,7 +863,7 @@ impl Message {
         &mut self.lines
     }
 
-    pub fn metadata_mut(&mut self) -> &mut HashMap<String, String> {
+    pub fn metadata_mut(&mut self) -> &mut IndexMap<String, String> {
         &mut self.metadata
     }
 }
