@@ -6,9 +6,7 @@ use tokio_stream::StreamMap;
 use tracing::info;
 
 use std::{
-    collections::{
-        btree_map::Entry as BTreeEntry, hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet,
-    },
+    collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
     ffi::OsStr,
     path::{Path, PathBuf},
     str::FromStr,
@@ -1996,7 +1994,7 @@ impl ConversationInner {
             }
             ReactionState::Remove => {
                 match reactions.entry(emoji.clone()) {
-                    BTreeEntry::Occupied(mut e) => {
+                    indexmap::map::Entry::Occupied(mut e) => {
                         let list = e.get_mut();
 
                         if !list.contains(&own_did) {
@@ -2005,10 +2003,10 @@ impl ConversationInner {
 
                         list.retain(|did| did != &own_did);
                         if list.is_empty() {
-                            e.remove();
+                            e.swap_remove();
                         }
                     }
-                    BTreeEntry::Vacant(_) => return Err(Error::ReactionDoesntExist),
+                    indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
                 };
 
                 message_document
@@ -3731,7 +3729,7 @@ async fn message_event(
                 }
                 ReactionState::Remove => {
                     match reactions.entry(emoji.clone()) {
-                        BTreeEntry::Occupied(mut e) => {
+                        indexmap::map::Entry::Occupied(mut e) => {
                             let list = e.get_mut();
 
                             if !list.contains(&reactor) {
@@ -3740,10 +3738,10 @@ async fn message_event(
 
                             list.retain(|did| did != &reactor);
                             if list.is_empty() {
-                                e.remove();
+                                e.swap_remove();
                             }
                         }
-                        BTreeEntry::Vacant(_) => return Err(Error::ReactionDoesntExist),
+                        indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
                     };
 
                     message_document
