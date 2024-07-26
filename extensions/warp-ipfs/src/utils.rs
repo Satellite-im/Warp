@@ -132,6 +132,7 @@ impl From<ExtensionType> for FormatType {
 
 pub struct ByteCollection {
     stream: Option<BoxStream<'static, std::io::Result<Bytes>>>,
+    max_size: Option<usize>,
     buffer: BytesMut,
 }
 
@@ -140,9 +141,17 @@ impl ByteCollection {
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + Send + 'static,
     {
+        Self::new_with_max_capacity(stream, 0)
+    }
+
+    pub fn new_with_max_capacity<S>(stream: S, capacity: usize) -> Self
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + Send + 'static,
+    {
         let stream = stream.boxed();
         Self {
             stream: Some(stream),
+            max_size: (capacity > 0).then_some(capacity),
             buffer: BytesMut::new(),
         }
     }
@@ -152,6 +161,13 @@ impl ByteCollection {
         let bytes = bytes.into();
         let stream = futures::stream::iter(vec![Ok(bytes)]);
         Self::new(stream)
+    }
+
+    #[allow(dead_code)]
+    pub fn from_bytes_with_capacity<B: Into<Bytes>>(bytes: B, capacity: usize) -> Self {
+        let bytes = bytes.into();
+        let stream = futures::stream::iter(vec![Ok(bytes)]);
+        Self::new_with_max_capacity(stream, capacity)
     }
 }
 
@@ -169,6 +185,13 @@ impl Future for ByteCollection {
             match futures::ready!(st.poll_next_unpin(cx)) {
                 Some(Ok(bytes)) => {
                     this.buffer.put(bytes);
+                    if let Some(max_size) = this.max_size {
+                        if this.buffer.len() > max_size {
+                            this.buffer.clear();
+                            this.stream.take();
+                            return Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()));
+                        }
+                    }
                 }
                 Some(Err(e)) => {
                     this.buffer.clear();
@@ -296,7 +319,7 @@ mod test {
     async fn byte_collection_from_stream() -> std::io::Result<()> {
         let data = Bytes::copy_from_slice(b"hello, world");
 
-        let st = futures::stream::iter(vec![std::io::Result::Ok(data.clone())]);
+        let st = futures::stream::iter(vec![Ok(data.clone())]);
 
         let col = ByteCollection::new(st);
 
