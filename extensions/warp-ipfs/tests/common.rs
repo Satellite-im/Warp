@@ -8,13 +8,15 @@ use warp::{
     crypto::DID,
     multipass::{identity::Identity, MultiPass},
     raygun::RayGun,
+    SingleHandle,
 };
 use warp_ipfs::{
     config::{Bootstrap, Discovery},
-    WarpIpfsBuilder,
+    WarpIpfs, WarpIpfsBuilder,
 };
 
 use std::time::Duration;
+use warp::multipass::LocalIdentity;
 
 pub async fn node_info(nodes: Vec<Ipfs>) -> Vec<(Ipfs, PeerId, Vec<Multiaddr>)> {
     stream::iter(nodes)
@@ -53,7 +55,7 @@ pub async fn create_account(
     username: Option<&str>,
     passphrase: Option<&str>,
     _: Option<String>,
-) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn Constellation>, DID, Identity)> {
+) -> anyhow::Result<(WarpIpfs, DID, Identity)> {
     let mut config = warp_ipfs::config::Config::development();
     *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
     config.ipfs_setting_mut().memory_transport = true;
@@ -65,23 +67,20 @@ pub async fn create_account(
 
     *config.bootstrap_mut() = Bootstrap::None;
 
-    let (mut account, _, fs) = WarpIpfsBuilder::default()
-        .set_config(config)
-        .finalize()
-        .await;
+    let mut instance = WarpIpfsBuilder::default().set_config(config).await;
 
-    account.tesseract().unlock(b"internal pass").unwrap();
+    instance.tesseract().unlock(b"internal pass").unwrap();
 
-    let profile = account.create_identity(username, passphrase).await?;
+    let profile = instance.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 
-    Ok((account, fs, identity.did_key(), identity))
+    Ok((instance, identity.did_key(), identity))
 }
 
 #[allow(dead_code)]
 pub async fn create_accounts(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
-) -> anyhow::Result<Vec<(Box<dyn MultiPass>, Box<dyn Constellation>, DID, Identity)>> {
+) -> anyhow::Result<Vec<(WarpIpfs, DID, Identity)>> {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer().pretty())
         .with(EnvFilter::from_default_env())
@@ -108,76 +107,10 @@ pub async fn create_accounts(
 }
 
 #[allow(dead_code)]
-pub async fn create_account_and_chat(
-    username: Option<&str>,
-    passphrase: Option<&str>,
-    context: Option<String>,
-) -> anyhow::Result<(
-    Box<dyn MultiPass>,
-    Box<dyn RayGun>,
-    Box<dyn Constellation>,
-    DID,
-    Identity,
-)> {
-    let mut config = warp_ipfs::config::Config::development();
-    *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
-    config.ipfs_setting_mut().memory_transport = true;
-    config.store_setting_mut().discovery = Discovery::Namespace {
-        namespace: context,
-        discovery_type: Default::default(),
-    };
-    config.store_setting_mut().share_platform = true;
-    config.ipfs_setting_mut().relay_client.relay_address = vec![];
-    *config.bootstrap_mut() = Bootstrap::None;
-
-    let (mut account, raygun, fs) = WarpIpfsBuilder::default()
-        .set_config(config)
-        .finalize()
-        .await;
-
-    account.tesseract().unlock(b"internal pass").unwrap();
-
-    let profile = account.create_identity(username, passphrase).await?;
-    let identity = profile.identity().clone();
-
-    Ok((account, raygun, fs, identity.did_key(), identity))
-}
-
-#[allow(dead_code)]
 pub async fn create_accounts_and_chat(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
-) -> anyhow::Result<
-    Vec<(
-        Box<dyn MultiPass>,
-        Box<dyn RayGun>,
-        Box<dyn Constellation>,
-        DID,
-        Identity,
-    )>,
-> {
-    let _ = tracing_subscriber::registry()
-        .with(fmt::layer().pretty())
-        .with(EnvFilter::from_default_env())
-        .try_init();
-
-    let mut accounts = vec![];
-    let mut nodes = vec![];
-    for (username, passphrase, context) in infos {
-        let account = create_account_and_chat(username, passphrase, context).await?;
-        let ipfs = account
-            .0
-            .handle()
-            .expect("Handle accessible")
-            .downcast_ref::<Ipfs>()
-            .cloned()
-            .unwrap();
-        nodes.push(ipfs);
-        accounts.push(account);
-    }
-
-    mesh_connect(nodes).await?;
-
-    Ok(accounts)
+) -> anyhow::Result<Vec<(WarpIpfs, DID, Identity)>> {
+    create_accounts(infos).await
 }
 
 #[allow(dead_code)]
