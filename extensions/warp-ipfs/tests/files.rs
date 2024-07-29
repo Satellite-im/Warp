@@ -55,6 +55,8 @@ mod test {
             }
         }
         assert!(root_directory.has_item("image.png"));
+        let item = root_directory.get_item("image.png")?;
+        assert!(!item.thumbnail().is_empty());
         Ok(())
     }
 

@@ -32,7 +32,10 @@ use crate::{
     to_file_type,
 };
 
-use super::{document::root::RootDocumentMap, event_subscription::EventSubscription};
+use super::{
+    document::root::RootDocumentMap, event_subscription::EventSubscription,
+    MAX_THUMBNAIL_STREAM_SIZE,
+};
 
 #[derive(Clone)]
 pub struct FileStore {
@@ -908,6 +911,10 @@ impl FileTask {
         let max_file_size = self.config.max_file_size();
         let root = self.root_directory();
 
+        let thumbnail_store = self.thumbnail_store.clone();
+        let thumbnail_size = self.config.thumbnail_size();
+        let thumbnail_format = self.config.thumbnail_exact_format();
+
         let progress_stream = async_stream::stream! {
 
             let mut last_written = 0;
@@ -996,10 +1003,33 @@ impl FileTask {
                     }
                 };
 
+            // NOTE: To prevent the need of "cloning" the main stream, we will get a stream of bytes from rust-ipfs to pass-through to
+            //       the thumbnail store.
+            let st = ipfs
+                .cat_unixfs(ipfs_path.clone())
+                .max_length(MAX_THUMBNAIL_STREAM_SIZE)
+                .map(|result| result.map_err(std::io::Error::other))
+                .boxed();
+
+            let ((width, height), exact) = (thumbnail_size, thumbnail_format);
+
+            let ticket = thumbnail_store.insert_stream(&name, st, width, height, exact, MAX_THUMBNAIL_STREAM_SIZE).await;
+
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
             file.set_file_type(to_file_type(&name));
+
+            match thumbnail_store.get(ticket).await {
+                Ok((extension_type, path, thumbnail)) => {
+                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail_format(extension_type.into());
+                    file.set_thumbnail_reference(&path.to_string());
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
+                }
+            }
 
             if let Err(e) = current_directory.add_item(file) {
                 yield Progression::ProgressFailed {

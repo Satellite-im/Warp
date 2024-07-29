@@ -14,16 +14,17 @@ use std::{
     },
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::{
-    io::{self, ErrorKind},
-    path::Path,
-};
+use futures::Stream;
+use std::io::{self, Cursor};
+
+#[allow(unused_imports)]
+use std::{io::ErrorKind, path::Path};
 
 use tokio::sync::Mutex;
 use warp::{constellation::file::FileType, error::Error};
 use web_time::Instant;
 
+use crate::utils::ByteCollection;
 use crate::{store::document::image_dag::ImageDag, utils::ExtensionType};
 
 static GLOBAL_ID: AtomicUsize = AtomicUsize::new(0);
@@ -108,7 +109,7 @@ impl ThumbnailGenerator {
 
                             let thumbnail = image.thumbnail(width, height);
 
-                            let mut t_buffer = std::io::Cursor::new(vec![]);
+                            let mut t_buffer = Cursor::new(vec![]);
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
@@ -159,6 +160,104 @@ impl ThumbnailGenerator {
         Ok(id)
     }
 
+    pub async fn insert_stream<
+        N: AsRef<str>,
+        S: Stream<Item = io::Result<Bytes>> + Unpin + Send + 'static,
+    >(
+        &self,
+        name: N,
+        stream: S,
+        width: u32,
+        height: u32,
+        output_exact: bool,
+        max_size: usize,
+    ) -> ThumbnailId {
+        let name = PathBuf::from(name.as_ref());
+
+        // Note: We have a max of 20mb for the thumbnail generation from stream so if a file exceeds this capacity
+        // the thumbnail will not be generated.
+        // TODO: We could probably check the signature of the stream first before deciding what to do with it. If its an invalid
+        //       stream we could error out and prevent any attempts of generating the thumbnail.
+
+        let bytes = ByteCollection::new_with_max_capacity(stream, max_size);
+
+        let id = ThumbnailId::default();
+
+        let ipfs = self.ipfs.clone();
+
+        let (tx, rx) = oneshot::channel();
+        crate::rt::spawn(async move {
+            let res = async move {
+                let instant = Instant::now();
+
+                let extension = name
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .map(ExtensionType::from)
+                    .unwrap_or(ExtensionType::Other);
+
+                let result = match extension.into() {
+                    FileType::Mime(media) => match media.ty().as_str() {
+                        "image" => {
+                            let format: ImageFormat = extension.try_into()?;
+
+                            let data = bytes.await.map(|b| b.to_vec())?;
+                            let cursor = Cursor::new(data);
+                            let image = ImageReader::new(cursor)
+                                .with_guessed_format()?
+                                .decode()
+                                .map_err(anyhow::Error::from)?;
+
+                            let width = width.min(image.width());
+                            let height = height.min(image.height());
+
+                            let thumbnail = image.thumbnail(width, height);
+                            let mut t_buffer = std::io::Cursor::new(Vec::new());
+                            let output_format = match (output_exact, format) {
+                                (false, _) => ImageFormat::Jpeg,
+                                (true, format) => format,
+                            };
+                            thumbnail
+                                .write_to(&mut t_buffer, output_format)
+                                .map_err(anyhow::Error::from)?;
+                            Ok::<_, Error>((
+                                ExtensionType::try_from(output_format)?,
+                                Bytes::from(t_buffer.into_inner()),
+                            ))
+                        }
+                        _ => Err(Error::Unimplemented),
+                    },
+                    _ => Err(Error::Other),
+                };
+
+                let stop = instant.elapsed();
+
+                let (ty, data) = result?;
+
+                tracing::trace!("Took: {}ms to complete for {}", stop.as_millis(), id);
+
+                let path = ipfs.add_unixfs(data.clone()).await?;
+
+                let link = *path.root().cid().expect("valid cid");
+
+                let image_dag = ImageDag {
+                    link,
+                    size: data.len() as _,
+                    mime: ty.into(),
+                };
+
+                let cid = ipfs.dag().put().serialize(image_dag).await?;
+
+                Ok((ty, IpfsPath::from(cid), data))
+            };
+            _ = tx.send(res.await);
+        });
+
+        self.tasks.lock().await.insert(id, rx);
+
+        id
+    }
+
     pub async fn insert_buffer<S: AsRef<str>>(
         &self,
         name: S,
@@ -199,7 +298,7 @@ impl ThumbnailGenerator {
                             let height = height.min(image.height());
 
                             let thumbnail = image.thumbnail(width, height);
-                            let mut t_buffer = std::io::Cursor::new(vec![]);
+                            let mut t_buffer = Cursor::new(vec![]);
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
