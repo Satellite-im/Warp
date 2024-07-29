@@ -105,13 +105,6 @@ pub async fn create_accounts(
 }
 
 #[allow(dead_code)]
-pub async fn create_accounts_and_chat(
-    infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
-) -> anyhow::Result<Vec<(WarpIpfs, DID, Identity)>> {
-    create_accounts(infos).await
-}
-
-#[allow(dead_code)]
 pub async fn timeout<F>(duration: Duration, future: F) -> Result<F::Output, std::io::Error>
 where
     F: Future,

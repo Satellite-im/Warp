@@ -13,7 +13,7 @@ mod test {
         },
     };
 
-    use crate::common::{create_accounts_and_chat, PROFILE_IMAGE};
+    use crate::common::{create_accounts, PROFILE_IMAGE};
 
     #[cfg(target_arch = "wasm32")]
     use wasm_bindgen_test::wasm_bindgen_test as async_test;
@@ -29,7 +29,7 @@ mod test {
 
     #[async_test]
     async fn create_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::create_conversation".into())),
             (None, None, Some("test::create_conversation".into())),
         ])
@@ -77,7 +77,7 @@ mod test {
 
     #[async_test]
     async fn conversation_favorite() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::conversation_favorite".into())),
             (None, None, Some("test::conversation_favorite".into())),
         ])
@@ -138,7 +138,7 @@ mod test {
 
     #[async_test]
     async fn destroy_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::destroy_conversation".into())),
             (None, None, Some("test::destroy_conversation".into())),
         ])
@@ -213,7 +213,7 @@ mod test {
 
     #[async_test]
     async fn send_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -294,7 +294,7 @@ mod test {
 
     #[async_test]
     async fn send_and_download_attachment_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -426,7 +426,7 @@ mod test {
     #[async_test]
     async fn send_attachment_stream_and_download_attachment_in_conversation() -> anyhow::Result<()>
     {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -555,7 +555,7 @@ mod test {
 
     #[async_test]
     async fn delete_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -658,7 +658,7 @@ mod test {
 
     #[async_test]
     async fn edit_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -771,7 +771,7 @@ mod test {
 
     #[async_test]
     async fn react_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -974,7 +974,7 @@ mod test {
 
     #[async_test]
     async fn pin_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::pin_message_in_conversation".into())),
             (None, None, Some("test::pin_message_in_conversation".into())),
         ])
@@ -1134,7 +1134,7 @@ mod test {
 
     #[async_test]
     async fn event_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -1223,7 +1223,7 @@ mod test {
 
     #[async_test]
     async fn delete_conversation_when_blocked() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,

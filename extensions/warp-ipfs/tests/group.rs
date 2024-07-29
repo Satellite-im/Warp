@@ -3,7 +3,7 @@ mod common;
 mod test {
     use std::time::Duration;
 
-    use crate::common::create_accounts_and_chat;
+    use crate::common::create_accounts;
     use futures::StreamExt;
     use warp::{
         multipass::MultiPassEventKind,
@@ -26,7 +26,7 @@ mod test {
 
     #[async_test]
     async fn create_empty_group_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![(
+        let accounts = create_accounts(vec![(
             None,
             None,
             Some("test::create_empty_group_conversation".into()),
@@ -65,7 +65,7 @@ mod test {
 
     #[async_test]
     async fn update_group_conversation_name() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![(
+        let accounts = create_accounts(vec![(
             None,
             None,
             Some("test::update_group_conversation_name".into()),
@@ -133,7 +133,7 @@ mod test {
 
     #[async_test]
     async fn create_group_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::create_group_conversation".into())),
             (None, None, Some("test::create_group_conversation".into())),
             (None, None, Some("test::create_group_conversation".into())),
@@ -206,7 +206,7 @@ mod test {
 
     #[async_test]
     async fn destroy_group_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::destroy_group_conversation".into())),
             (None, None, Some("test::destroy_group_conversation".into())),
         ])
@@ -283,7 +283,7 @@ mod test {
 
     #[async_test]
     async fn member_change_name_to_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -450,7 +450,7 @@ mod test {
 
     #[async_test]
     async fn add_recipient_to_conversation_to_open_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -614,7 +614,7 @@ mod test {
 
     #[async_test]
     async fn add_recipient_to_conversation_to_close_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -767,7 +767,7 @@ mod test {
 
     #[async_test]
     async fn attempt_to_add_blocked_recipient() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -875,7 +875,7 @@ mod test {
 
     #[async_test]
     async fn remove_recipient_from_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -1090,7 +1090,7 @@ mod test {
 
     #[async_test]
     async fn send_message_in_group_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -1247,7 +1247,7 @@ mod test {
 
     #[async_test]
     async fn remove_recipient_from_conversation_when_blocked() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -1405,7 +1405,7 @@ mod test {
 
     #[async_test]
     async fn delete_group_conversation_when_blocking_creator() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
