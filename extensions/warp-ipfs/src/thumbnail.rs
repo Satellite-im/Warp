@@ -170,6 +170,7 @@ impl ThumbnailGenerator {
         width: u32,
         height: u32,
         output_exact: bool,
+        max_size: usize,
     ) -> ThumbnailId {
         let name = PathBuf::from(name.as_ref());
 
@@ -178,7 +179,7 @@ impl ThumbnailGenerator {
         // TODO: We could probably check the signature of the stream first before deciding what to do with it. If its an invalid
         //       stream we could error out and prevent any attempts of generating the thumbnail.
 
-        let bytes = ByteCollection::new_with_max_capacity(stream, 20 * 1024 * 1024);
+        let bytes = ByteCollection::new_with_max_capacity(stream, max_size);
 
         let id = ThumbnailId::default();
 

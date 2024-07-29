@@ -47,6 +47,7 @@ pub const MAX_REQUEST: usize = 1_000;
 pub const MAX_METADATA_KEY_LENGTH: usize = 32;
 pub const MAX_METADATA_VALUE_LENGTH: usize = 128;
 pub const MAX_METADATA_ENTRIES: usize = 20;
+pub const MAX_THUMBNAIL_STREAM_SIZE: usize = 20 * 1024 * 1024;
 
 pub(super) mod topics {
     use std::fmt::Display;

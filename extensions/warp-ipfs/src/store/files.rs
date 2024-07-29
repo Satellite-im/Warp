@@ -32,7 +32,10 @@ use crate::{
     to_file_type,
 };
 
-use super::{document::root::RootDocumentMap, event_subscription::EventSubscription};
+use super::{
+    document::root::RootDocumentMap, event_subscription::EventSubscription,
+    MAX_THUMBNAIL_STREAM_SIZE,
+};
 
 #[derive(Clone)]
 pub struct FileStore {
@@ -1000,15 +1003,17 @@ impl FileTask {
                     }
                 };
 
+            // NOTE: To prevent the need of "cloning" the main stream, we will get a stream of bytes from rust-ipfs to pass-through to
+            //       the thumbnail store.
             let st = ipfs
                 .cat_unixfs(ipfs_path.clone())
-                .max_length(20*1024*1024)
+                .max_length(MAX_THUMBNAIL_STREAM_SIZE)
                 .map(|result| result.map_err(std::io::Error::other))
                 .boxed();
 
             let ((width, height), exact) = (thumbnail_size, thumbnail_format);
 
-            let ticket = thumbnail_store.insert_stream(&name, st, width, height, exact).await;
+            let ticket = thumbnail_store.insert_stream(&name, st, width, height, exact, MAX_THUMBNAIL_STREAM_SIZE).await;
 
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
