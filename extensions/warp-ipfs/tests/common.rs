@@ -4,10 +4,8 @@ use rust_ipfs::{Ipfs, Multiaddr, PeerId, Protocol};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use warp::{
-    constellation::Constellation,
     crypto::DID,
     multipass::{identity::Identity, MultiPass},
-    raygun::RayGun,
     SingleHandle,
 };
 use warp_ipfs::{
