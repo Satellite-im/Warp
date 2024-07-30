@@ -15,10 +15,11 @@ mod test {
 
     #[cfg(not(target_arch = "wasm32"))]
     use tokio::test as async_test;
+    use warp::constellation::Constellation;
 
     #[async_test]
     async fn create_directory() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.create_directory("data", false).await?;
 
@@ -28,7 +29,7 @@ mod test {
 
     #[async_test]
     async fn upload_file() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.put_buffer("image.png", PROFILE_IMAGE).await?;
 
@@ -38,7 +39,7 @@ mod test {
 
     #[async_test]
     async fn upload_file_stream() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         let stream = stream::iter(vec![Ok(PROFILE_IMAGE.to_vec())]).boxed();
         let mut status = fs.put_stream("image.png", None, stream).await?;
@@ -62,7 +63,7 @@ mod test {
 
     #[async_test]
     async fn get_file() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.put_buffer("image.png", PROFILE_IMAGE).await?;
 
@@ -76,7 +77,7 @@ mod test {
 
     #[async_test]
     async fn get_file_stream() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.put_buffer("image.png", PROFILE_IMAGE).await?;
 
@@ -90,7 +91,7 @@ mod test {
 
     #[async_test]
     async fn upload_file_to_directory() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.create_directory("images", false).await?;
         fs.put_buffer("/images/image.png", PROFILE_IMAGE).await?;
@@ -104,7 +105,7 @@ mod test {
 
     #[async_test]
     async fn rename_file_via_constellation() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.put_buffer("image.png", PROFILE_IMAGE).await?;
 
@@ -118,7 +119,7 @@ mod test {
 
     #[async_test]
     async fn rename_directory_via_constellation() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.create_directory("data", false).await?;
 
@@ -132,7 +133,7 @@ mod test {
 
     #[async_test]
     async fn rename_file_in_directory() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.create_directory("/my/storage", true).await?;
 
@@ -149,7 +150,7 @@ mod test {
 
     #[async_test]
     async fn remove_file() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.put_buffer("image.png", PROFILE_IMAGE).await?;
 
@@ -163,7 +164,7 @@ mod test {
 
     #[async_test]
     async fn check_thumbnail_of_file() -> anyhow::Result<()> {
-        let (_, mut fs, _, _) = create_account(None, None, None).await?;
+        let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.put_buffer("image.png", PROFILE_IMAGE).await?;
         fs.put_buffer("data.txt", &b"hello, world!"[..]).await?;
