@@ -55,12 +55,12 @@ mod test {
                         id_b.replace(conversation_id);
                     },
                 }
-                
+
                 if id_a.is_some() && id_b.is_some() {
                     assert_eq!(id_a, id_b);
                     break id_a.expect("valid conversation_id")
                 }
-            } 
+            }
         }).await?;
 
         let conversation = instance_a.get_conversation(conversation_id).await?;
@@ -191,7 +191,7 @@ mod test {
                         b_del = true;
                     },
                 }
-                
+
                 if a_del && b_del {
                     break;
                 }
