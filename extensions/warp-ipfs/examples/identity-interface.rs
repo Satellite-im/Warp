@@ -491,6 +491,44 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "Account is unblocked")?;
                         }
+                        Some("kv-add") => {
+                            let key = match cmd_line.next() {
+                                Some(key) => key.to_string(),
+                                None => {
+                                    writeln!(stdout, "kv-add <key> <val>")?;
+                                    continue;
+                                }
+                            };
+
+                            let mut vals = vec![];
+
+                            for item in cmd_line.by_ref() {
+                                vals.push(item);
+                            }
+
+                            let val = vals.join(" ");
+
+                            if let Err(e) = account.update_identity(IdentityUpdate::AddMetadataKey { key, value: val }).await {
+                                writeln!(stdout, "Error: {e}")?;
+                                continue;
+                            }
+                            writeln!(stdout, "Added metadata")?;
+                        }
+                        Some("kv-del") => {
+                            let key = match cmd_line.next() {
+                                Some(key) => key.to_string(),
+                                None => {
+                                    writeln!(stdout, "kv-del <key>")?;
+                                    continue;
+                                }
+                            };
+
+                            if let Err(e) = account.update_identity(IdentityUpdate::RemoveMetadataKey { key }).await {
+                                writeln!(stdout, "Error: {e}")?;
+                                continue;
+                            }
+                            writeln!(stdout, "remove metadata")?;
+                        }
                         Some("request") => {
                             match cmd_line.next() {
                                 Some("send") => {
@@ -728,13 +766,14 @@ async fn main() -> anyhow::Result<()> {
                                     };
 
                                     let mut table = Table::new();
-                                    table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status"]);
+                                    table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status", "KV"]);
                                     let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
                                     let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
                                     let profile_picture = account.identity_picture(&identity.did_key()).await.unwrap_or_default();
                                     let profile_banner = account.identity_banner(&identity.did_key()).await.unwrap_or_default();
                                     let created = identity.created();
                                     let modified = identity.modified();
+                                    let meta = identity.metadata();
 
                                     table.add_row(vec![
                                         identity.username(),
@@ -746,6 +785,7 @@ async fn main() -> anyhow::Result<()> {
                                         (!profile_picture.data().is_empty()).to_string(),
                                         platform.to_string(),
                                         format!("{status:?}"),
+                                        format!("{meta:?}"),
                                     ]);
                                     writeln!(stdout, "{table}")?;
                                     continue;
@@ -762,7 +802,7 @@ async fn main() -> anyhow::Result<()> {
                                 async move {
                                     let idents = stream.collect::<Vec<_>>().await;
                                     let mut table = Table::new();
-                                    table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status"]);
+                                    table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status", "KV"]);
                                     for identity in idents {
                                         let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
                                         let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
@@ -770,6 +810,7 @@ async fn main() -> anyhow::Result<()> {
                                         let profile_banner = account.identity_banner(&identity.did_key()).await.unwrap_or_default();
                                         let created = identity.created();
                                         let modified = identity.modified();
+                                        let meta = identity.metadata();
 
                                         table.add_row(vec![
                                             identity.username(),
@@ -781,6 +822,7 @@ async fn main() -> anyhow::Result<()> {
                                             (!profile_picture.data().is_empty()).to_string(),
                                             platform.to_string(),
                                             format!("{status:?}"),
+                                            format!("{meta:?}"),
                                         ]);
                                     }
                                     writeln!(stdout, "{table}").unwrap();

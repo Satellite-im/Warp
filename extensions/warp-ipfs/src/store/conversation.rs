@@ -5,6 +5,7 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered},
     StreamExt, TryFutureExt,
 };
+use indexmap::IndexMap;
 use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -1036,7 +1037,7 @@ impl MessageDocument {
         }
 
         if let Some(cid) = self.reactions {
-            let reactions: BTreeMap<String, Vec<DID>> = ipfs
+            let reactions: IndexMap<String, Vec<DID>> = ipfs
                 .get_dag(cid)
                 .timeout(Duration::from_secs(10))
                 .set_local(local)

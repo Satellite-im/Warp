@@ -1,7 +1,13 @@
-use std::str::FromStr;
-
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::future::BoxFuture;
+use futures::stream::BoxStream;
+use futures::{AsyncRead, FutureExt, Stream, StreamExt};
 use image::ImageFormat;
 use mediatype::MediaTypeBuf;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
+use std::str::FromStr;
+use std::task::{Context, Poll};
 use warp::{
     constellation::{file::FileType, item::FormatType},
     error::Error,
@@ -121,5 +127,234 @@ impl From<ExtensionType> for FormatType {
             Ok(media) => Self::Mime(media),
             Err(_) => Self::Generic,
         }
+    }
+}
+
+pub struct ByteCollection {
+    stream: Option<BoxStream<'static, std::io::Result<Bytes>>>,
+    max_size: Option<usize>,
+    buffer: BytesMut,
+}
+
+impl ByteCollection {
+    pub fn new<S>(stream: S) -> Self
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + Send + 'static,
+    {
+        Self::new_with_max_capacity(stream, 0)
+    }
+
+    pub fn new_with_max_capacity<S>(stream: S, capacity: usize) -> Self
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + Send + 'static,
+    {
+        let stream = stream.boxed();
+        Self {
+            stream: Some(stream),
+            max_size: (capacity > 0).then_some(capacity),
+            buffer: BytesMut::new(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Self {
+        let bytes = bytes.into();
+        let stream = futures::stream::iter(vec![Ok(bytes)]);
+        Self::new(stream)
+    }
+
+    #[allow(dead_code)]
+    pub fn from_bytes_with_capacity<B: Into<Bytes>>(bytes: B, capacity: usize) -> Self {
+        let bytes = bytes.into();
+        let stream = futures::stream::iter(vec![Ok(bytes)]);
+        Self::new_with_max_capacity(stream, capacity)
+    }
+}
+
+impl Future for ByteCollection {
+    type Output = std::io::Result<Bytes>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+
+        let Some(st) = this.stream.as_mut() else {
+            return Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()));
+        };
+
+        loop {
+            match futures::ready!(st.poll_next_unpin(cx)) {
+                Some(Ok(bytes)) => {
+                    this.buffer.put(bytes);
+                    if let Some(max_size) = this.max_size {
+                        if this.buffer.len() > max_size {
+                            this.buffer.clear();
+                            this.stream.take();
+                            return Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()));
+                        }
+                    }
+                }
+                Some(Err(e)) => {
+                    this.buffer.clear();
+                    this.stream.take();
+                    return Poll::Ready(Err(e));
+                }
+                None => {
+                    this.stream.take();
+                    let bytes_mut = this.buffer.split();
+                    let bytes = bytes_mut.freeze();
+                    return Poll::Ready(Ok(bytes));
+                }
+            }
+        }
+    }
+}
+
+// Small utility that converts AsyncRead to a Stream, while supporting max size from that stream
+pub struct ReaderStream<R> {
+    reader: Option<R>,
+    buffer: usize,
+    size: usize,
+    max_cap: Option<usize>,
+}
+
+impl<R> ReaderStream<R>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    #[allow(dead_code)]
+    pub fn from_reader(reader: R) -> Self {
+        Self::from_reader_with_cap(reader, 512, None)
+    }
+
+    pub fn from_reader_with_cap(reader: R, buffer: usize, max_cap: Option<usize>) -> Self {
+        Self {
+            reader: Some(reader),
+            buffer,
+            size: 0,
+            max_cap,
+        }
+    }
+}
+
+impl<R> Stream for ReaderStream<R>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    type Item = std::io::Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+
+        let Some(reader) = this.reader.as_mut() else {
+            return Poll::Ready(None);
+        };
+
+        let buf_size: usize = this.buffer;
+        let mut buffer = vec![0u8; buf_size];
+
+        match futures::ready!(Pin::new(reader).poll_read(cx, &mut buffer)) {
+            Ok(0) => {
+                this.reader.take();
+                if this.size == 0 {
+                    return Poll::Ready(Some(Err(std::io::ErrorKind::BrokenPipe.into())));
+                }
+                Poll::Ready(None)
+            }
+            Ok(size) => {
+                this.size += size;
+                if let Some(max_size) = this.max_cap {
+                    if size > max_size {
+                        this.reader.take();
+                        return Poll::Ready(Some(Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "max size has been reached",
+                        ))));
+                    }
+                }
+                let new_buf = &buffer[..size];
+                let buf = Bytes::copy_from_slice(new_buf);
+                Poll::Ready(Some(Ok(buf)))
+            }
+            Err(e) => {
+                this.reader.take();
+                Poll::Ready(Some(Err(e)))
+            }
+        }
+    }
+}
+
+impl<R> IntoFuture for ReaderStream<R>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    type Output = std::io::Result<Bytes>;
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        ByteCollection::new(self).boxed()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::utils::{ByteCollection, ReaderStream};
+    use bytes::Bytes;
+
+    #[tokio::test]
+    async fn async_read_to_stream() -> std::io::Result<()> {
+        let data = Bytes::copy_from_slice(b"hello, world");
+
+        let cursor = futures::io::Cursor::new(data.clone());
+
+        let st = ReaderStream::from_reader(cursor);
+
+        let bytes = st.await?;
+
+        assert_eq!(bytes, data);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn byte_collection_from_stream() -> std::io::Result<()> {
+        let data = Bytes::copy_from_slice(b"hello, world");
+
+        let st = futures::stream::iter(vec![Ok(data.clone())]);
+
+        let col = ByteCollection::new(st);
+
+        let bytes = col.await?;
+
+        assert_eq!(bytes, data);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn async_read_with_max_size() -> std::io::Result<()> {
+        let data = Bytes::copy_from_slice(b"hello, world");
+
+        let cursor = futures::io::Cursor::new(data.clone());
+
+        let st = ReaderStream::from_reader_with_cap(cursor, 512, Some(data.len()));
+
+        let bytes = st.await?;
+
+        assert_eq!(bytes, data);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cannot_read_due_to_max_size() -> std::io::Result<()> {
+        let data = b"hello, world".to_vec();
+
+        let cursor = futures::io::Cursor::new(data.to_vec());
+
+        let st = ReaderStream::from_reader_with_cap(cursor, 512, Some(11));
+
+        assert!(st.await.is_err());
+
+        Ok(())
     }
 }

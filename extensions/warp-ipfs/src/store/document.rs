@@ -327,7 +327,14 @@ impl RootDocument {
 
         let keypair = ipfs.keypair();
 
-        let document: IdentityDocument = data.identity.into();
+        let metadata = data.identity.metadata().clone();
+
+        let mut document: IdentityDocument = data.identity.into();
+
+        if !metadata.is_empty() {
+            let cid = ipfs.dag().put().serialize(metadata).await?;
+            document.metadata.arb_data = Some(cid);
+        }
 
         let document = document.sign(keypair)?;
 

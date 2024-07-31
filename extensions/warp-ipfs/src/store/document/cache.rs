@@ -50,7 +50,7 @@ impl IdentityCache {
 
     pub async fn get(&self, did: &DID) -> Result<IdentityDocument, Error> {
         let inner = &*self.inner.read().await;
-        inner.get(did.clone()).await
+        inner.get(did).await
     }
 
     pub async fn remove(&self, did: &DID) -> Result<(), Error> {
@@ -168,7 +168,7 @@ impl IdentityCacheInner {
         Ok(())
     }
 
-    async fn get(&self, did: DID) -> Result<IdentityDocument, Error> {
+    async fn get(&self, did: &DID) -> Result<IdentityDocument, Error> {
         let cid = match self.list {
             Some(cid) => cid,
             None => return Err(Error::IdentityDoesntExist),
@@ -184,7 +184,7 @@ impl IdentityCacheInner {
             .await
             .map_err(|_| Error::IdentityDoesntExist)?;
 
-        debug_assert_eq!(id.did, did);
+        debug_assert_eq!(&id.did, did);
 
         id.verify()?;
 

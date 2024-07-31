@@ -55,6 +55,9 @@ pub struct IdentityMetadata {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arb_data: Option<Cid>,
 }
 
 impl From<Identity> for IdentityDocument {

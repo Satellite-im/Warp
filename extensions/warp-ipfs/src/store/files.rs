@@ -32,7 +32,10 @@ use crate::{
     to_file_type,
 };
 
-use super::{document::root::RootDocumentMap, event_subscription::EventSubscription};
+use super::{
+    document::root::RootDocumentMap, event_subscription::EventSubscription,
+    MAX_THUMBNAIL_STREAM_SIZE,
+};
 
 #[derive(Clone)]
 pub struct FileStore {
@@ -752,6 +755,17 @@ impl FileTask {
             });
         }
 
+        if let Some(max_file_size) = self.config.max_storage_size() {
+            if buffer.len() > max_file_size {
+                return Err(Error::InvalidLength {
+                    context: "buffer".into(),
+                    minimum: None,
+                    maximum: Some(max_file_size),
+                    current: buffer.len(),
+                });
+            }
+        }
+
         let current_directory = match dest_path {
             Some(dest) => self.root_directory().get_last_directory_from_path(&dest)?,
             None => self.current_directory()?,
@@ -869,10 +883,37 @@ impl FileTask {
             return Err(Error::FileExist);
         }
 
+        if let Some(total_size) = total_size {
+            if total_size + self.current_size() > self.max_size() {
+                return Err(Error::InvalidLength {
+                    context: "stream".into(),
+                    minimum: None,
+                    maximum: Some(self.max_size()),
+                    current: self.current_size() + total_size,
+                });
+            }
+
+            if let Some(max_file_size) = self.config.max_storage_size() {
+                if total_size > max_file_size {
+                    return Err(Error::InvalidLength {
+                        context: "stream".into(),
+                        minimum: None,
+                        maximum: Some(max_file_size),
+                        current: total_size,
+                    });
+                }
+            }
+        }
+
         let constellation_tx = self.constellation_tx.clone();
         let mut export_tx = self.export_tx.clone();
         let max_size = self.max_size();
+        let max_file_size = self.config.max_file_size();
         let root = self.root_directory();
+
+        let thumbnail_store = self.thumbnail_store.clone();
+        let thumbnail_size = self.config.thumbnail_size();
+        let thumbnail_format = self.config.thumbnail_exact_format();
 
         let progress_stream = async_stream::stream! {
 
@@ -918,7 +959,7 @@ impl FileTask {
                     }
                 }
 
-                if root.size() + last_written >= max_size {
+                if root.size() + last_written > max_size {
                     yield Progression::ProgressFailed {
                         name,
                         last_size: Some(last_written),
@@ -930,6 +971,22 @@ impl FileTask {
                         }
                     };
                     return;
+                }
+
+                if let Some(max_file_size) = max_file_size {
+                    if last_written > max_file_size {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Error::InvalidLength {
+                                context: "buffer".into(),
+                                current: last_written,
+                                minimum: None,
+                                maximum: Some(max_file_size),
+                            }
+                        };
+                        return;
+                    }
                 }
 
             }
@@ -946,10 +1003,33 @@ impl FileTask {
                     }
                 };
 
+            // NOTE: To prevent the need of "cloning" the main stream, we will get a stream of bytes from rust-ipfs to pass-through to
+            //       the thumbnail store.
+            let st = ipfs
+                .cat_unixfs(ipfs_path.clone())
+                .max_length(MAX_THUMBNAIL_STREAM_SIZE)
+                .map(|result| result.map_err(std::io::Error::other))
+                .boxed();
+
+            let ((width, height), exact) = (thumbnail_size, thumbnail_format);
+
+            let ticket = thumbnail_store.insert_stream(&name, st, width, height, exact, MAX_THUMBNAIL_STREAM_SIZE).await;
+
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
             file.set_file_type(to_file_type(&name));
+
+            match thumbnail_store.get(ticket).await {
+                Ok((extension_type, path, thumbnail)) => {
+                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail_format(extension_type.into());
+                    file.set_thumbnail_reference(&path.to_string());
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, ticket = %ticket, "Error generating thumbnail");
+                }
+            }
 
             if let Err(e) = current_directory.add_item(file) {
                 yield Progression::ProgressFailed {
