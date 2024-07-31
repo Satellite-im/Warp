@@ -121,5 +121,5 @@ warp-ipfs = { path = "./extensions/warp-ipfs" }
 warp-blink-wrtc = { path = "./extensions/warp-blink-wrtc" }
 
 [patch.crates-io]
-rust-ipfs = { git = "https://github.com/dariusc93/rust-ipfs", rev = "fc6332739789805a8b994c5f0f382e53b4ee1c78" }
+rust-ipfs = { git = "https://github.com/dariusc93/rust-ipfs", rev = "b2a91ecc1faafbe1fa5606f377d679c19725d547" }
 
