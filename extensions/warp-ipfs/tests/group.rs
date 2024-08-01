@@ -1607,7 +1607,7 @@ mod test {
                                 assert!(!conversation.archived());
                                 unarchived = true;
                             }
-                            RayGunEventKind::ConversationDeleted{ .. } => unreachable!()
+                            RayGunEventKind::ConversationDeleted { .. } => unreachable!()
                         }
                     }
                 }
