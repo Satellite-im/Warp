@@ -268,7 +268,9 @@ impl ConversationDocument {
             let construct = warp::crypto::hash::sha256_iter(
                 [
                     Some(self.id().into_bytes().to_vec()),
-                    self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                    (!settings.members_can_change_name())
+                        .then(|| self.name.as_deref().map(|s| s.as_bytes().to_vec()))
+                        .flatten(),
                     Some(creator.to_string().as_bytes().to_vec()),
                     self.icon.map(|s| s.hash().digest().to_vec()),
                     self.banner.map(|s| s.hash().digest().to_vec()),
@@ -342,7 +344,9 @@ impl ConversationDocument {
                 ConversationVersion::V2 => warp::crypto::hash::sha256_iter(
                     [
                         Some(self.id().into_bytes().to_vec()),
-                        self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                        (!settings.members_can_change_name())
+                            .then(|| self.name.as_deref().map(|s| s.as_bytes().to_vec()))
+                            .flatten(),
                         Some(creator.to_string().as_bytes().to_vec()),
                         Some(Vec::from_iter(
                             self.restrict
