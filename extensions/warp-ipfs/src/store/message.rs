@@ -28,7 +28,6 @@ use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, IpfsPath, K
 
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio_util::compat::TokioAsyncReadCompatExt;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -39,7 +38,7 @@ use super::{
 };
 use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;
-use crate::utils::{ByteCollection, ExtensionType, ReaderStream};
+use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
     config,
     shuttle::message::client::MessageCommand,
@@ -2816,6 +2815,9 @@ impl ConversationInner {
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 {
+                    use crate::utils::ReaderStream;
+                    use tokio_util::compat::TokioAsyncReadCompatExt;
+
                     let extension = path
                         .extension()
                         .and_then(OsStr::to_str)
