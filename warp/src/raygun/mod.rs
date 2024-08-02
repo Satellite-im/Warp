@@ -25,7 +25,6 @@ use self::group::GroupChat;
 #[serde(rename_all = "snake_case")]
 pub enum RayGunEventKind {
     ConversationCreated { conversation_id: Uuid },
-    ConversationUpdated { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
 }
 
