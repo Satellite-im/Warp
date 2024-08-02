@@ -1,9 +1,7 @@
 use super::{
     document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, topics::ConversationTopic,
-    verify_serde_sig, ConversationImageType, PeerIdExt, MAX_ATTACHMENT,
-    MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
+    verify_serde_sig, PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
 };
-use crate::store::document::image_dag::ImageDag;
 use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
@@ -22,7 +20,6 @@ use std::{
     time::Duration,
 };
 use uuid::Uuid;
-use warp::raygun::ConversationImage;
 use warp::{
     crypto::{cipher::Cipher, hash::sha256_iter, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
@@ -252,58 +249,6 @@ impl ConversationDocument {
 }
 
 impl ConversationDocument {
-    pub async fn resolve(&self, ipfs: &Ipfs) -> Result<Conversation, Error> {
-        let mut conversation = Conversation::from(self);
-        async fn resolve_image(
-            ipfs: &Ipfs,
-            document: &ConversationDocument,
-            image_type: ConversationImageType,
-        ) -> Result<ConversationImage, Error> {
-            let (cid, max_size) = match image_type {
-                ConversationImageType::Icon => {
-                    let cid = document.icon.ok_or(Error::Other)?;
-                    (cid, MAX_CONVERSATION_ICON_SIZE)
-                }
-                ConversationImageType::Banner => {
-                    let cid = document.banner.ok_or(Error::Other)?;
-                    (cid, MAX_CONVERSATION_BANNER_SIZE)
-                }
-            };
-
-            let dag: ImageDag = ipfs.get_dag(cid).deserialized().await?;
-
-            if dag.size > max_size as _ {
-                return Err(Error::InvalidLength {
-                    context: "image".into(),
-                    current: dag.size as _,
-                    minimum: None,
-                    maximum: Some(max_size),
-                });
-            }
-
-            let image = ipfs
-                .cat_unixfs(dag.link)
-                .max_length(dag.size as _)
-                .await
-                .map_err(anyhow::Error::from)?;
-
-            let mut img = ConversationImage::default();
-            img.set_image_type(dag.mime);
-            img.set_data(image.into());
-            Ok(img)
-        }
-        let resolve_icon = resolve_image(ipfs, self, ConversationImageType::Icon);
-        let resolve_banner = resolve_image(ipfs, self, ConversationImageType::Icon);
-
-        let (icon, banner) = futures::join!(resolve_icon, resolve_banner);
-        if let Ok(icon) = icon {
-            conversation.set_icon(icon);
-        }
-        if let Ok(banner) = banner {
-            conversation.set_banner(banner);
-        }
-        Ok(conversation)
-    }
     pub fn sign(&mut self, keypair: &Keypair) -> Result<(), Error> {
         if let ConversationSettings::Group(settings) = self.settings {
             assert_eq!(self.conversation_type(), ConversationType::Group);

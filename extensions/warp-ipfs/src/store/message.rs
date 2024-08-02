@@ -33,19 +33,6 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
 
-use warp::{
-    constellation::{directory::Directory, ConstellationProgressStream, Progression},
-    crypto::{cipher::Cipher, generate, DID},
-    error::Error,
-    multipass::MultiPassEventKind,
-    raygun::{
-        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
-        ConversationType, DirectConversationSettings, GroupSettings, Location, LocationKind,
-        MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
-        MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
-    },
-};
-
 use super::{
     document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
     MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE, MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
@@ -73,6 +60,19 @@ use crate::{
         MIN_MESSAGE_SIZE,
     },
 };
+use warp::raygun::ConversationImage;
+use warp::{
+    constellation::{directory::Directory, ConstellationProgressStream, Progression},
+    crypto::{cipher::Cipher, generate, DID},
+    error::Error,
+    multipass::MultiPassEventKind,
+    raygun::{
+        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
+        ConversationType, DirectConversationSettings, GroupSettings, Location, LocationKind,
+        MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
+        MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
+    },
+};
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
@@ -86,7 +86,6 @@ enum MessagingCommand {
 
 #[derive(Clone)]
 pub struct MessageStore {
-    ipfs: Ipfs,
     inner: Arc<tokio::sync::RwLock<ConversationInner>>,
     _task_cancellation: Arc<DropGuard>,
 }
@@ -156,7 +155,6 @@ impl MessageStore {
         });
 
         Self {
-            ipfs: ipfs.clone(),
             inner,
             _task_cancellation: Arc::new(drop_guard),
         }
@@ -166,7 +164,7 @@ impl MessageStore {
 impl MessageStore {
     pub async fn get_conversation(&self, id: Uuid) -> Result<Conversation, Error> {
         let document = self.get(id).await?;
-        document.resolve(&self.ipfs).await
+        Ok(document.into())
     }
 
     pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
@@ -488,6 +486,26 @@ impl MessageStore {
         let inner = &mut *self.inner.write().await;
         inner
             .update_conversation_image(conversation_id, location, ConversationImageType::Banner)
+            .await
+    }
+
+    pub async fn conversation_icon(
+        &mut self,
+        conversation_id: Uuid,
+    ) -> Result<ConversationImage, Error> {
+        let inner = &*self.inner.read().await;
+        inner
+            .conversation_image(conversation_id, ConversationImageType::Icon)
+            .await
+    }
+
+    pub async fn conversation_banner(
+        &mut self,
+        conversation_id: Uuid,
+    ) -> Result<ConversationImage, Error> {
+        let inner = &*self.inner.read().await;
+        inner
+            .conversation_image(conversation_id, ConversationImageType::Banner)
             .await
     }
 
@@ -2696,6 +2714,47 @@ impl ConversationInner {
         });
 
         self.publish(conversation_id, None, event, true).await
+    }
+
+    pub async fn conversation_image(
+        &self,
+        conversation_id: Uuid,
+        image_type: ConversationImageType,
+    ) -> Result<ConversationImage, Error> {
+        let document = self.get(conversation_id).await?;
+        let (cid, max_size) = match image_type {
+            ConversationImageType::Icon => {
+                let cid = document.icon.ok_or(Error::Other)?;
+                (cid, MAX_CONVERSATION_ICON_SIZE)
+            }
+            ConversationImageType::Banner => {
+                let cid = document.banner.ok_or(Error::Other)?;
+                (cid, MAX_CONVERSATION_BANNER_SIZE)
+            }
+        };
+
+        let dag: ImageDag = self.ipfs.get_dag(cid).deserialized().await?;
+
+        if dag.size > max_size as _ {
+            return Err(Error::InvalidLength {
+                context: "image".into(),
+                current: dag.size as _,
+                minimum: None,
+                maximum: Some(max_size),
+            });
+        }
+
+        let image = self
+            .ipfs
+            .cat_unixfs(dag.link)
+            .max_length(dag.size as _)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        let mut img = ConversationImage::default();
+        img.set_image_type(dag.mime);
+        img.set_data(image.into());
+        Ok(img)
     }
 
     pub async fn update_conversation_image(

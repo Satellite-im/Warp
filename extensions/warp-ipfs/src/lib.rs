@@ -50,10 +50,10 @@ use warp::multipass::{
     MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
-    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, ConversationImage, ConversationSettings, EmbedState,
+    GroupSettings, Location, Message, MessageEvent, MessageEventStream, MessageOptions,
+    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind,
+    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
@@ -1631,6 +1631,18 @@ impl RayGun for WarpIpfs {
     ) -> Result<(), Error> {
         self.messaging_store()?
             .update_conversation_banner(conversation_id, location)
+            .await
+    }
+
+    async fn conversation_icon(&self, conversation_id: Uuid) -> Result<ConversationImage, Error> {
+        self.messaging_store()?
+            .conversation_icon(conversation_id)
+            .await
+    }
+
+    async fn conversation_banner(&self, conversation_id: Uuid) -> Result<ConversationImage, Error> {
+        self.messaging_store()?
+            .conversation_banner(conversation_id)
             .await
     }
 

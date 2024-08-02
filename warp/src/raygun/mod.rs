@@ -393,8 +393,6 @@ pub struct Conversation {
     modified: DateTime<Utc>,
     settings: ConversationSettings,
     recipients: Vec<DID>,
-    icon: Option<ConversationImage>,
-    banner: Option<ConversationImage>,
 }
 
 impl core::hash::Hash for Conversation {
@@ -425,8 +423,6 @@ impl Default for Conversation {
             modified: timestamp,
             settings: ConversationSettings::default(),
             recipients,
-            icon: None,
-            banner: None,
         }
     }
 }
@@ -470,14 +466,6 @@ impl Conversation {
     pub fn recipients(&self) -> Vec<DID> {
         self.recipients.clone()
     }
-
-    pub fn icon(&self) -> Option<&ConversationImage> {
-        self.icon.as_ref()
-    }
-
-    pub fn banner(&self) -> Option<&ConversationImage> {
-        self.banner.as_ref()
-    }
 }
 
 impl Conversation {
@@ -511,14 +499,6 @@ impl Conversation {
 
     pub fn set_recipients(&mut self, recipients: Vec<DID>) {
         self.recipients = recipients;
-    }
-
-    pub fn set_icon(&mut self, icon: impl Into<Option<ConversationImage>>) {
-        self.icon = icon.into();
-    }
-
-    pub fn set_banner(&mut self, banner: impl Into<Option<ConversationImage>>) {
-        self.banner = banner.into();
     }
 }
 
@@ -1173,6 +1153,10 @@ pub trait RayGun:
         conversation_id: Uuid,
         settings: ConversationSettings,
     ) -> Result<(), Error>;
+
+    async fn conversation_icon(&self, conversation_id: Uuid) -> Result<ConversationImage, Error>;
+
+    async fn conversation_banner(&self, conversation_id: Uuid) -> Result<ConversationImage, Error>;
 
     async fn update_conversation_icon(
         &mut self,
