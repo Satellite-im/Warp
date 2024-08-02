@@ -1,6 +1,6 @@
 pub mod group;
 
-use crate::constellation::file::File;
+use crate::constellation::file::{File, FileType};
 use crate::constellation::{ConstellationProgressStream, Progression};
 use crate::crypto::DID;
 use crate::error::Error;
@@ -25,6 +25,7 @@ use self::group::GroupChat;
 #[serde(rename_all = "snake_case")]
 pub enum RayGunEventKind {
     ConversationCreated { conversation_id: Uuid },
+    ConversationUpdated { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
 }
 
@@ -72,6 +73,12 @@ pub enum MessageEventKind {
     ConversationNameUpdated {
         conversation_id: Uuid,
         name: String,
+    },
+    ConversationUpdatedIcon {
+        conversation_id: Uuid,
+    },
+    ConversationUpdatedBanner {
+        conversation_id: Uuid,
     },
     RecipientAdded {
         conversation_id: Uuid,
@@ -338,6 +345,33 @@ impl Ord for MessagePage {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ConversationImage {
+    data: Vec<u8>,
+    image_type: FileType,
+}
+
+impl ConversationImage {
+    pub fn set_data(&mut self, data: Vec<u8>) {
+        self.data = data
+    }
+
+    pub fn set_image_type(&mut self, image_type: FileType) {
+        self.image_type = image_type
+    }
+}
+
+impl ConversationImage {
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn image_type(&self) -> &FileType {
+        &self.image_type
+    }
+}
+
 #[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
@@ -359,6 +393,8 @@ pub struct Conversation {
     modified: DateTime<Utc>,
     settings: ConversationSettings,
     recipients: Vec<DID>,
+    icon: Option<ConversationImage>,
+    banner: Option<ConversationImage>,
 }
 
 impl core::hash::Hash for Conversation {
@@ -389,6 +425,8 @@ impl Default for Conversation {
             modified: timestamp,
             settings: ConversationSettings::default(),
             recipients,
+            icon: None,
+            banner: None,
         }
     }
 }
@@ -432,6 +470,14 @@ impl Conversation {
     pub fn recipients(&self) -> Vec<DID> {
         self.recipients.clone()
     }
+
+    pub fn icon(&self) -> Option<&ConversationImage> {
+        self.icon.as_ref()
+    }
+
+    pub fn banner(&self) -> Option<&ConversationImage> {
+        self.banner.as_ref()
+    }
 }
 
 impl Conversation {
@@ -465,6 +511,14 @@ impl Conversation {
 
     pub fn set_recipients(&mut self, recipients: Vec<DID>) {
         self.recipients = recipients;
+    }
+
+    pub fn set_icon(&mut self, icon: impl Into<Option<ConversationImage>>) {
+        self.icon = icon.into();
+    }
+
+    pub fn set_banner(&mut self, banner: impl Into<Option<ConversationImage>>) {
+        self.banner = banner.into();
     }
 }
 
@@ -1119,6 +1173,22 @@ pub trait RayGun:
         conversation_id: Uuid,
         settings: ConversationSettings,
     ) -> Result<(), Error>;
+
+    async fn update_conversation_icon(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error>;
+
+    async fn update_conversation_banner(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error>;
+
+    async fn remove_conversation_icon(&mut self, conversation_id: Uuid) -> Result<(), Error>;
+
+    async fn remove_conversation_banner(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 }
 
 dyn_clone::clone_trait_object!(RayGun);

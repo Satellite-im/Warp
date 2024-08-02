@@ -5,6 +5,8 @@ use futures_timer::Delay;
 use tokio_stream::StreamMap;
 use tracing::info;
 
+use bytes::Bytes;
+use std::borrow::BorrowMut;
 use std::{
     collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
     ffi::OsStr,
@@ -13,7 +15,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
 use web_time::Instant;
 
 use futures::{
@@ -23,10 +24,11 @@ use futures::{
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use libipld::Cid;
-use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, Keypair, PeerId};
+use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, PeerId};
 
 use serde::{Deserialize, Serialize};
 use tokio::select;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -44,6 +46,13 @@ use warp::{
     },
 };
 
+use super::{
+    document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
+    MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE, MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+};
+use crate::store::document::files::FileDocument;
+use crate::store::document::image_dag::ImageDag;
+use crate::utils::{ByteCollection, ExtensionType, ReaderStream};
 use crate::{
     config,
     shuttle::message::client::MessageCommand,
@@ -65,11 +74,6 @@ use crate::{
     },
 };
 
-use super::{
-    document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt, MAX_MESSAGE_SIZE,
-    SHUTTLE_TIMEOUT,
-};
-
 const CHAT_DIRECTORY: &str = "chat_media";
 
 pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
@@ -82,6 +86,7 @@ enum MessagingCommand {
 
 #[derive(Clone)]
 pub struct MessageStore {
+    ipfs: Ipfs,
     inner: Arc<tokio::sync::RwLock<ConversationInner>>,
     _task_cancellation: Arc<DropGuard>,
 }
@@ -151,6 +156,7 @@ impl MessageStore {
         });
 
         Self {
+            ipfs: ipfs.clone(),
             inner,
             _task_cancellation: Arc::new(drop_guard),
         }
@@ -160,7 +166,7 @@ impl MessageStore {
 impl MessageStore {
     pub async fn get_conversation(&self, id: Uuid) -> Result<Conversation, Error> {
         let document = self.get(id).await?;
-        Ok(document.into())
+        document.resolve(&self.ipfs).await
     }
 
     pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
@@ -461,6 +467,42 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.cancel_event(conversation_id, event).await
+    }
+
+    pub async fn update_conversation_icon(
+        &self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .update_conversation_image(conversation_id, location, ConversationImageType::Icon)
+            .await
+    }
+
+    pub async fn update_conversation_banner(
+        &self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .update_conversation_image(conversation_id, location, ConversationImageType::Banner)
+            .await
+    }
+
+    pub async fn remove_conversation_icon(&self, conversation_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .remove_conversation_image(conversation_id, ConversationImageType::Icon)
+            .await
+    }
+
+    pub async fn remove_conversation_banner(&self, conversation_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .remove_conversation_image(conversation_id, ConversationImageType::Banner)
+            .await
     }
 }
 
@@ -1178,7 +1220,11 @@ impl ConversationInner {
         self.root.set_conversation_keystore_map(map).await
     }
 
-    pub async fn set_document(&mut self, mut document: ConversationDocument) -> Result<(), Error> {
+    pub async fn set_document<B: BorrowMut<ConversationDocument>>(
+        &mut self,
+        mut document: B,
+    ) -> Result<(), Error> {
+        let document = document.borrow_mut();
         let keypair = self.root.keypair();
         if let Some(creator) = document.creator.as_ref() {
             let did = keypair.to_did()?;
@@ -2652,6 +2698,198 @@ impl ConversationInner {
         self.publish(conversation_id, None, event, true).await
     }
 
+    pub async fn update_conversation_image(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+        image_type: ConversationImageType,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        let max_size = match image_type {
+            ConversationImageType::Banner => MAX_CONVERSATION_BANNER_SIZE,
+            ConversationImageType::Icon => MAX_CONVERSATION_ICON_SIZE,
+        };
+
+        let own_did = self.identity.did_key();
+
+        if conversation.conversation_type() == ConversationType::Group
+            && !matches!(conversation.creator.as_ref(), Some(creator) if own_did.eq(creator))
+        {
+            return Err(Error::InvalidConversation);
+        }
+
+        let (cid, size, ext) = match location {
+            Location::Constellation { path } => {
+                let file = self
+                    .file
+                    .root_directory()
+                    .get_item_by_path(&path)
+                    .and_then(|item| item.get_file())?;
+
+                let extension = file.file_type();
+
+                if file.size() > max_size {
+                    return Err(Error::InvalidLength {
+                        context: "image".into(),
+                        current: file.size(),
+                        minimum: Some(1),
+                        maximum: Some(max_size),
+                    });
+                }
+
+                let document = FileDocument::new(&self.ipfs, &file).await?;
+                let cid = document
+                    .reference
+                    .as_ref()
+                    .and_then(|reference| IpfsPath::from_str(reference).ok())
+                    .and_then(|path| path.root().cid().copied())
+                    .ok_or(Error::Other)?;
+
+                (cid, document.size, extension)
+            }
+            Location::Disk { path } => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    _ = path;
+                    unreachable!()
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let extension = path
+                        .extension()
+                        .and_then(OsStr::to_str)
+                        .map(ExtensionType::from)
+                        .unwrap_or(ExtensionType::Other)
+                        .into();
+
+                    let file = tokio::fs::File::open(path).await?;
+                    let size = file.metadata().await?.len() as _;
+                    let stream =
+                        ReaderStream::from_reader_with_cap(file.compat(), 512, Some(max_size))
+                            .boxed();
+                    let path = self.ipfs.add_unixfs(stream).pin(false).await?;
+                    let cid = path.root().cid().copied().expect("valid cid in path");
+                    (cid, size, extension)
+                }
+            }
+            Location::Stream {
+                // NOTE: `name` and `size` would not be used here as we are only storing the data. If we are to store in constellation too, we would make use of these fields
+                name: _,
+                size: _,
+                stream,
+            } => {
+                let bytes = ByteCollection::new_with_max_capacity(
+                    stream.map(|result| result.map(Bytes::from)),
+                    max_size,
+                )
+                .await?;
+
+                let bytes_len = bytes.len();
+
+                let path = self.ipfs.add_unixfs(bytes.clone()).pin(false).await?;
+                let cid = path.root().cid().copied().expect("valid cid in path");
+
+                let cursor = std::io::Cursor::new(bytes);
+
+                let image = image::ImageReader::new(cursor).with_guessed_format()?;
+
+                let format = image
+                    .format()
+                    .and_then(|format| ExtensionType::try_from(format).ok())
+                    .unwrap_or(ExtensionType::Other)
+                    .into();
+
+                (cid, bytes_len, format)
+            }
+        };
+
+        let dag = ImageDag {
+            link: cid,
+            size: size as _,
+            mime: ext,
+        };
+
+        let cid = self.ipfs.dag().put().serialize(dag).await?;
+
+        let kind = match image_type {
+            ConversationImageType::Icon => {
+                conversation.icon.replace(cid);
+                ConversationUpdateKind::AddedIcon
+            }
+            ConversationImageType::Banner => {
+                conversation.banner.replace(cid);
+                ConversationUpdateKind::AddedBanner
+            }
+        };
+
+        self.set_document(&mut conversation).await?;
+
+        let event = MessagingEvents::UpdateConversation { conversation, kind };
+
+        let message_event = match image_type {
+            ConversationImageType::Icon => {
+                MessageEventKind::ConversationUpdatedIcon { conversation_id }
+            }
+            ConversationImageType::Banner => {
+                MessageEventKind::ConversationUpdatedBanner { conversation_id }
+            }
+        };
+
+        let _ = tx.send(message_event);
+
+        self.publish(conversation_id, None, event, true).await
+    }
+
+    pub async fn remove_conversation_image(
+        &mut self,
+        conversation_id: Uuid,
+        image_type: ConversationImageType,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+
+        let own_did = self.identity.did_key();
+
+        if conversation.conversation_type() == ConversationType::Group
+            && !matches!(conversation.creator.as_ref(), Some(creator) if own_did.eq(creator))
+        {
+            return Err(Error::InvalidConversation);
+        }
+
+        let cid = match image_type {
+            ConversationImageType::Icon => conversation.icon.take(),
+            ConversationImageType::Banner => conversation.banner.take(),
+        };
+
+        if cid.is_none() {
+            return Err(Error::ObjectNotFound); //TODO: conversation image doesnt exist
+        }
+
+        self.set_document(&mut conversation).await?;
+
+        let kind = match image_type {
+            ConversationImageType::Icon => ConversationUpdateKind::RemovedIcon,
+            ConversationImageType::Banner => ConversationUpdateKind::RemovedBanner,
+        };
+
+        let event = MessagingEvents::UpdateConversation { conversation, kind };
+
+        let message_event = match image_type {
+            ConversationImageType::Icon => {
+                MessageEventKind::ConversationUpdatedIcon { conversation_id }
+            }
+            ConversationImageType::Banner => {
+                MessageEventKind::ConversationUpdatedBanner { conversation_id }
+            }
+        };
+
+        let _ = tx.send(message_event);
+
+        self.publish(conversation_id, None, event, true).await
+    }
+
     pub async fn add_recipient(
         &mut self,
         conversation_id: Uuid,
@@ -3884,6 +4122,32 @@ async fn message_event(
                         conversation_id,
                         settings,
                     }) {
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
+                    }
+                }
+
+                ConversationUpdateKind::AddedIcon | ConversationUpdateKind::RemovedIcon => {
+                    conversation.excluded = document.excluded;
+                    conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
+                    this.set_document(conversation).await?;
+
+                    if let Err(e) =
+                        tx.send(MessageEventKind::ConversationUpdatedIcon { conversation_id })
+                    {
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
+                    }
+                }
+
+                ConversationUpdateKind::AddedBanner | ConversationUpdateKind::RemovedBanner => {
+                    conversation.excluded = document.excluded;
+                    conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
+                    this.set_document(conversation).await?;
+
+                    if let Err(e) =
+                        tx.send(MessageEventKind::ConversationUpdatedBanner { conversation_id })
+                    {
                         tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }
                 }

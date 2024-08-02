@@ -1613,6 +1613,38 @@ impl RayGun for WarpIpfs {
             .update_conversation_settings(conversation_id, settings)
             .await
     }
+
+    async fn update_conversation_icon(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .update_conversation_icon(conversation_id, location)
+            .await
+    }
+
+    async fn update_conversation_banner(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .update_conversation_banner(conversation_id, location)
+            .await
+    }
+
+    async fn remove_conversation_icon(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .remove_conversation_icon(conversation_id)
+            .await
+    }
+
+    async fn remove_conversation_banner(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .remove_conversation_banner(conversation_id)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
