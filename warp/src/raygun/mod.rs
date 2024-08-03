@@ -1153,24 +1153,30 @@ pub trait RayGun:
         settings: ConversationSettings,
     ) -> Result<(), Error>;
 
+    /// Provides [`ConversationImage`] of the conversation icon
     async fn conversation_icon(&self, conversation_id: Uuid) -> Result<ConversationImage, Error>;
 
+    /// Provides [`ConversationImage`] of the conversation banner
     async fn conversation_banner(&self, conversation_id: Uuid) -> Result<ConversationImage, Error>;
 
+    /// Updates [`Conversation`] icon
     async fn update_conversation_icon(
         &mut self,
         conversation_id: Uuid,
         location: Location,
     ) -> Result<(), Error>;
 
+    /// Updates [`Conversation`] banner
     async fn update_conversation_banner(
         &mut self,
         conversation_id: Uuid,
         location: Location,
     ) -> Result<(), Error>;
 
+    /// Remove icon from [`Conversation`]
     async fn remove_conversation_icon(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 
+    /// Remove banner from [`Conversation`]
     async fn remove_conversation_banner(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 }
 
