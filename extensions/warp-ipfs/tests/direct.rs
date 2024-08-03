@@ -970,6 +970,130 @@ mod test {
     }
 
     #[async_test]
+    async fn change_conversation_description() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::change_conversation_description".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::change_conversation_description".into()),
+            ),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+
+        chat_a.create_conversation(&did_b).await?;
+
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
+        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+
+        chat_a
+            .set_conversation_description(id_a, Some("hello, world!"))
+            .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationDescriptionChanged {
+                    conversation_id,
+                    description,
+                }) = conversation_a.next().await
+                {
+                    assert_eq!(id_a, conversation_id);
+                    assert_eq!(description, Some("hello, world!".into()));
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationDescriptionChanged {
+                    conversation_id,
+                    description,
+                }) = conversation_b.next().await
+                {
+                    assert_eq!(id_a, conversation_id);
+                    assert_eq!(description, Some("hello, world!".into()));
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.description().as_deref(), Some("hello, world!"));
+
+        chat_a.set_conversation_description(id_a, None).await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationDescriptionChanged {
+                    conversation_id,
+                    description,
+                }) = conversation_a.next().await
+                {
+                    assert_eq!(id_a, conversation_id);
+                    assert_eq!(description, None);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationDescriptionChanged {
+                    conversation_id,
+                    description,
+                }) = conversation_b.next().await
+                {
+                    assert_eq!(id_a, conversation_id);
+                    assert_eq!(description, None);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.description(), None);
+
+        Ok(())
+    }
+
+    #[async_test]
     async fn pin_message_in_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::pin_message_in_conversation".into())),
