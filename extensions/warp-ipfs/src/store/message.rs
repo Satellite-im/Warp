@@ -3950,7 +3950,7 @@ async fn message_event(
                 }
                 ConversationUpdateKind::ChangeDescription { description } => {
                     if let Some(desc) = description.as_ref() {
-                        if desc.is_empty() == 0 || desc.len() > MAX_CONVERSATION_DESCRIPTION {
+                        if desc.is_empty() || desc.len() > MAX_CONVERSATION_DESCRIPTION {
                             return Err(Error::InvalidLength {
                                 context: "description".into(),
                                 minimum: Some(1),
