@@ -1133,10 +1133,10 @@ pub trait RayGun:
     ) -> Result<(), Error>;
 
     /// Archive a conversation
-    async fn archived_conversation(&mut self, _: Uuid) -> Result<(), Error>;
+    async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 
     /// Unarchived a conversation
-    async fn unarchived_conversation(&mut self, _: Uuid) -> Result<(), Error>;
+    async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 }
 
 dyn_clone::clone_trait_object!(RayGun);
