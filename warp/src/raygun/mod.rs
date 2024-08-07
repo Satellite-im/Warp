@@ -25,6 +25,8 @@ use self::group::GroupChat;
 #[serde(rename_all = "snake_case")]
 pub enum RayGunEventKind {
     ConversationCreated { conversation_id: Uuid },
+    ConversationArchived { conversation_id: Uuid },
+    ConversationUnarchived { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
 }
 
@@ -362,6 +364,7 @@ pub struct Conversation {
     favorite: bool,
     modified: DateTime<Utc>,
     settings: ConversationSettings,
+    archived: bool,
     recipients: Vec<DID>,
     description: Option<String>,
 }
@@ -393,6 +396,7 @@ impl Default for Conversation {
             favorite: false,
             modified: timestamp,
             settings: ConversationSettings::default(),
+            archived: false,
             recipients,
             description: None,
         }
@@ -442,6 +446,10 @@ impl Conversation {
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
     }
+
+    pub fn archived(&self) -> bool {
+        self.archived
+    }
 }
 
 impl Conversation {
@@ -479,6 +487,10 @@ impl Conversation {
 
     pub fn set_description(&mut self, description: impl Into<Option<String>>) {
         self.description = description.into();
+    }
+
+    pub fn set_archived(&mut self, archived: bool) {
+        self.archived = archived;
     }
 }
 
@@ -1134,6 +1146,12 @@ pub trait RayGun:
         conversation_id: Uuid,
         settings: ConversationSettings,
     ) -> Result<(), Error>;
+
+    /// Archive a conversation
+    async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error>;
+
+    /// Unarchived a conversation
+    async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 }
 
 dyn_clone::clone_trait_object!(RayGun);

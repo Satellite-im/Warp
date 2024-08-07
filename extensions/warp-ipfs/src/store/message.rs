@@ -471,6 +471,15 @@ impl MessageStore {
         let inner = &mut *self.inner.write().await;
         inner.set_description(conversation_id, desc).await
     }
+    pub async fn archived_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.archived_conversation(conversation_id).await
+    }
+
+    pub async fn unarchived_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.unarchived_conversation(conversation_id).await
+    }
 }
 
 type AttachmentChan = (Uuid, MessageDocument, oneshot::Sender<Result<(), Error>>);
@@ -3021,6 +3030,32 @@ impl ConversationInner {
         self.send_message_event(conversation_id, event).await
     }
 
+    pub async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let prev = conversation.archived;
+        conversation.archived = true;
+        self.set_document(conversation).await?;
+        if !prev {
+            self.event
+                .emit(RayGunEventKind::ConversationArchived { conversation_id })
+                .await;
+        }
+        Ok(())
+    }
+
+    pub async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let prev = conversation.archived;
+        conversation.archived = false;
+        self.set_document(conversation).await?;
+        if prev {
+            self.event
+                .emit(RayGunEventKind::ConversationUnarchived { conversation_id })
+                .await;
+        }
+        Ok(())
+    }
+
     pub async fn send_message_event(
         &mut self,
         conversation_id: Uuid,
@@ -3400,6 +3435,7 @@ async fn process_conversation(
 
             //TODO: Resolve message list
             conversation.messages = None;
+            conversation.archived = false;
             conversation.favorite = false;
 
             this.set_document(conversation).await?;
@@ -3844,6 +3880,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = this.request_key(conversation_id, &did).await {
@@ -3871,6 +3908,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if can_emit {
@@ -3903,6 +3941,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3917,6 +3956,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3939,6 +3979,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
