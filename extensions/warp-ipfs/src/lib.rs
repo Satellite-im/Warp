@@ -1657,6 +1657,18 @@ impl RayGun for WarpIpfs {
             .remove_conversation_banner(conversation_id)
             .await
     }
+
+    async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .archived_conversation(conversation_id)
+            .await
+    }
+
+    async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .unarchived_conversation(conversation_id)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
