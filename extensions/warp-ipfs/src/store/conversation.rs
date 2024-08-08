@@ -1,3 +1,8 @@
+use super::{
+    document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, topics::ConversationTopic,
+    verify_serde_sig, PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
+};
+use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use either::Either;
@@ -25,19 +30,13 @@ use warp::{
     },
 };
 
-use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
-
-use super::{
-    document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, topics::ConversationTopic,
-    verify_serde_sig, PeerIdExt, MAX_ATTACHMENT, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
-};
-
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ConversationVersion {
-    #[default]
     V0,
     V1,
+    #[default]
+    V2,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
@@ -64,6 +63,10 @@ pub struct ConversationDocument {
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
 }
@@ -162,7 +165,7 @@ impl ConversationDocument {
 
         let mut document = Self {
             id,
-            version: ConversationVersion::V1,
+            version: ConversationVersion::default(),
             name,
             recipients,
             creator,
@@ -176,6 +179,8 @@ impl ConversationDocument {
             signature,
             restrict,
             deleted: false,
+            icon: None,
+            banner: None,
         };
 
         if document.signature.is_some() {
@@ -259,15 +264,19 @@ impl ConversationDocument {
                 return Err(Error::PublicKeyInvalid);
             }
 
-            if self.version == ConversationVersion::V0 {
-                self.version = ConversationVersion::V1;
+            if self.version != ConversationVersion::default() {
+                self.version = ConversationVersion::default();
             }
 
             let construct = warp::crypto::hash::sha256_iter(
                 [
                     Some(self.id().into_bytes().to_vec()),
-                    // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                    (!settings.members_can_change_name())
+                        .then(|| self.name.as_deref().map(|s| s.as_bytes().to_vec()))
+                        .flatten(),
                     Some(creator.to_string().as_bytes().to_vec()),
+                    self.icon.map(|s| s.hash().digest().to_vec()),
+                    self.banner.map(|s| s.hash().digest().to_vec()),
                     Some(Vec::from_iter(
                         self.restrict
                             .iter()
@@ -326,6 +335,29 @@ impl ConversationDocument {
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                         )),
+                        (!settings.members_can_add_participants()).then_some(Vec::from_iter(
+                            self.recipients
+                                .iter()
+                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                        )),
+                    ]
+                    .into_iter(),
+                    None,
+                ),
+                ConversationVersion::V2 => warp::crypto::hash::sha256_iter(
+                    [
+                        Some(self.id().into_bytes().to_vec()),
+                        (!settings.members_can_change_name())
+                            .then(|| self.name.as_deref().map(|s| s.as_bytes().to_vec()))
+                            .flatten(),
+                        Some(creator.to_string().as_bytes().to_vec()),
+                        Some(Vec::from_iter(
+                            self.restrict
+                                .iter()
+                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                        )),
+                        self.icon.map(|s| s.hash().digest().to_vec()),
+                        self.banner.map(|s| s.hash().digest().to_vec()),
                         (!settings.members_can_add_participants()).then_some(Vec::from_iter(
                             self.recipients
                                 .iter()
