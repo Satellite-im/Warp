@@ -137,6 +137,12 @@ struct Opt {
     #[clap(long)]
     listen_addr: Vec<Multiaddr>,
 
+    /// External address in multiaddr format that would indicate how the node can be reached.
+    /// If empty, all listening addresses will be used as an external address
+    #[clap(long)]
+    external_addr: Vec<Multiaddr>,
+
+    /// Path to key file
     #[clap(long)]
     keyfile: Option<PathBuf>,
 
@@ -288,15 +294,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             version: UpgradeVersion::Standard,
             ..Default::default()
         })
-        .listen_as_external_addr()
         .with_custom_behaviour(ext_behaviour::Behaviour::new(keypair.public().to_peer_id()))
         .set_listening_addrs(addrs);
+
+    if opts.external_addr.is_empty() {
+        uninitialized = uninitialized.listen_as_external_addr();
+    }
 
     if let Some(path) = path {
         uninitialized = uninitialized.set_path(path);
     }
 
     let _ipfs = uninitialized.start().await?;
+
+    for external_addr in opts.external_addr {
+        if let Err(e) = _ipfs.add_external_address(external_addr.clone()).await {
+            println!("unable to use {external_addr} as an external address: {e}")
+        }
+    }
 
     tokio::signal::ctrl_c().await?;
 
