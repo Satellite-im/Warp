@@ -294,7 +294,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             version: UpgradeVersion::Standard,
             ..Default::default()
         })
-        .with_custom_behaviour(ext_behaviour::Behaviour::new(keypair.public().to_peer_id()))
+        .with_custom_behaviour(ext_behaviour::Behaviour::new(
+            keypair.public().to_peer_id(),
+            !opts.external_addr.is_empty(),
+        ))
         .set_listening_addrs(addrs);
 
     if opts.external_addr.is_empty() {
@@ -341,15 +344,17 @@ mod ext_behaviour {
         peer_id: PeerId,
         addrs: HashSet<Multiaddr>,
         listened: HashMap<ListenerId, HashSet<Multiaddr>>,
+        external: bool,
     }
 
     impl Behaviour {
-        pub fn new(local_peer_id: PeerId) -> Self {
+        pub fn new(local_peer_id: PeerId, external: bool) -> Self {
             println!("PeerID: {}", local_peer_id);
             Self {
                 peer_id: local_peer_id,
                 addrs: Default::default(),
                 listened: Default::default(),
+                external,
             }
         }
     }
@@ -412,29 +417,31 @@ mod ext_behaviour {
                 }) => {
                     let addr = addr.clone();
 
-                    let addr = addr.with_p2p(self.peer_id).unwrap();
+                    let addr = match addr.with_p2p(self.peer_id) {
+                        Ok(a) => a,
+                        Err(a) => a,
+                    };
 
-                    if !self.addrs.insert(addr.clone()) {
-                        return;
+                    if !self.external && self.addrs.insert(addr.clone()) {
+                        self.listened
+                            .entry(listener_id)
+                            .or_default()
+                            .insert(addr.clone());
+
+                        println!("Listening on {addr}");
                     }
-
-                    self.listened
-                        .entry(listener_id)
-                        .or_default()
-                        .insert(addr.clone());
-
-                    println!("Listening on {addr}");
                 }
 
                 FromSwarm::ExternalAddrConfirmed(ev) => {
                     let addr = ev.addr.clone();
-                    let addr = addr.with_p2p(self.peer_id).unwrap();
+                    let addr = match addr.with_p2p(self.peer_id) {
+                        Ok(a) => a,
+                        Err(a) => a,
+                    };
 
-                    if !self.addrs.insert(addr.clone()) {
-                        return;
+                    if self.external && self.addrs.insert(addr.clone()) {
+                        println!("Listening on {}", addr);
                     }
-
-                    println!("Listening on {}", addr);
                 }
                 FromSwarm::ExternalAddrExpired(ExternalAddrExpired { addr }) => {
                     let addr = addr.clone();
