@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use either::Either;
@@ -377,7 +378,7 @@ impl ConversationDocument {
     pub async fn insert_message_document(
         &mut self,
         ipfs: &Ipfs,
-        message_document: MessageDocument,
+        message_document: &MessageDocument,
     ) -> Result<Cid, Error> {
         let mut list = self.message_reference_list(ipfs).await?;
         let cid = list.insert(ipfs, message_document).await?;
@@ -388,7 +389,7 @@ impl ConversationDocument {
     pub async fn update_message_document(
         &mut self,
         ipfs: &Ipfs,
-        message_document: MessageDocument,
+        message_document: &MessageDocument,
     ) -> Result<Cid, Error> {
         let mut list = self.message_reference_list(ipfs).await?;
         let cid = list.update(ipfs, message_document).await?;
@@ -440,12 +441,12 @@ impl ConversationDocument {
         }
 
         if option.first_message() && !messages.is_empty() {
-            let message = messages.first().copied().ok_or(Error::MessageNotFound)?;
+            let message = messages.first().cloned().ok_or(Error::MessageNotFound)?;
             return Ok(stream::once(async move { message.into() }).boxed());
         }
 
         if option.last_message() && !messages.is_empty() {
-            let message = messages.last().copied().ok_or(Error::MessageNotFound)?;
+            let message = messages.last().cloned().ok_or(Error::MessageNotFound)?;
             return Ok(stream::once(async move { message.into() }).boxed());
         }
 
@@ -642,7 +643,7 @@ impl ConversationDocument {
         self.get_message_list(ipfs).await.and_then(|list| {
             list.iter()
                 .find(|document| document.id == message_id)
-                .copied()
+                .cloned()
                 .ok_or(Error::MessageNotFound)
         })
     }
@@ -689,7 +690,7 @@ impl From<&ConversationDocument> for Conversation {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageDocument {
     pub id: Uuid,
     pub message_type: MessageType,
@@ -706,7 +707,7 @@ pub struct MessageDocument {
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replied: Option<Uuid>,
-    pub message: Option<Cid>,
+    pub message: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<MessageSignature>,
 }
@@ -804,12 +805,12 @@ impl MessageDocument {
         let data = match key {
             Either::Right(keystore) => {
                 let key = keystore.get_latest(keypair, &sender)?;
-                Cipher::direct_encrypt(&bytes, &key)?
+                Cipher::direct_encrypt(&bytes, &key)?.into()
             }
-            Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?,
+            Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?.into(),
         };
 
-        let message = Some(ipfs.dag().put().serialize(data).await?);
+        let message = Some(data);
 
         let sender = DIDEd25519Reference::from_did(&sender);
 
@@ -851,7 +852,7 @@ impl MessageDocument {
                 self.modified.map(|time| time.to_string().into_bytes()),
                 self.replied.map(|id| id.as_bytes().to_vec()),
                 self.attachments.map(|cid| cid.to_bytes()),
-                self.message.map(|cid| cid.to_bytes()),
+                self.message.as_ref().map(|m| m.to_vec()),
             ]
             .into_iter(),
             None,
@@ -860,16 +861,12 @@ impl MessageDocument {
         sender_pk.verify(&hash, signature.as_ref())
     }
 
-    pub async fn raw_encrypted_message(&self, ipfs: &Ipfs) -> Result<Vec<u8>, Error> {
-        let cid = self.message.ok_or(Error::MessageNotFound)?;
-
-        let bytes: Vec<u8> = ipfs.get_dag(cid).local().deserialized().await?;
-
-        Ok(bytes)
+    pub fn raw_encrypted_message(&self) -> Result<&Bytes, Error> {
+        self.message.as_ref().ok_or(Error::MessageNotFound)
     }
 
-    pub async fn nonce_from_message(&self, ipfs: &Ipfs) -> Result<[u8; 12], Error> {
-        let raw_encrypted_message = self.raw_encrypted_message(ipfs).await?;
+    pub fn nonce_from_message(&self) -> Result<[u8; 12], Error> {
+        let raw_encrypted_message = self.raw_encrypted_message()?;
         let (nonce, _) = super::extract_data_slice::<12>(&raw_encrypted_message);
         let nonce: [u8; 12] = nonce.try_into().map_err(anyhow::Error::from)?;
         Ok(nonce)
@@ -940,7 +937,7 @@ impl MessageDocument {
                 }
             }
 
-            let current_nonce = self.nonce_from_message(ipfs).await?;
+            let current_nonce = self.nonce_from_message()?;
 
             if matches!(nonce, Some(nonce) if nonce.eq(&current_nonce)) {
                 // Since the nonce from the current message matches the new one sent,
@@ -967,13 +964,12 @@ impl MessageDocument {
                 (Either::Left(key), None) => ecdh_encrypt(keypair, Some(key), &bytes)?,
             };
 
-            let message = ipfs.dag().put().serialize(data).await?;
-
-            self.message.replace(message);
+            self.message.replace(data.into());
 
             match (sender.eq(did), signature) {
                 (true, None) => {
-                    *self = self.sign(keypair)?;
+                    let new_documeent = self.clone();
+                    *self = new_documeent.sign(keypair)?;
                 }
                 (false, None) | (true, Some(_)) => return Err(Error::InvalidMessage),
                 (false, Some(sig)) => {
@@ -1000,7 +996,7 @@ impl MessageDocument {
         if !self.verify() {
             return Err(Error::InvalidMessage);
         }
-        let message_cid = self.message.ok_or(Error::MessageNotFound)?;
+        let message_cipher = self.message.as_ref().ok_or(Error::MessageNotFound)?;
         let mut message = Message::default();
         message.set_id(self.id);
         message.set_message_type(self.message_type);
@@ -1055,18 +1051,11 @@ impl MessageDocument {
             message.set_reactions(reactions);
         }
 
-        let bytes: Vec<u8> = ipfs
-            .get_dag(message_cid)
-            .timeout(Duration::from_secs(10))
-            .set_local(local)
-            .deserialized()
-            .await?;
-
         let sender = self.sender.to_did();
 
         let data = match key {
-            Either::Left(exchange) => ecdh_decrypt(keypair, Some(exchange), &bytes)?,
-            Either::Right(keystore) => keystore.try_decrypt(keypair, &sender, &bytes)?,
+            Either::Left(exchange) => ecdh_decrypt(keypair, Some(exchange), message_cipher)?,
+            Either::Right(keystore) => keystore.try_decrypt(keypair, &sender, message_cipher)?,
         };
 
         let lines: Vec<String> = serde_json::from_slice(&data)?;
@@ -1108,7 +1097,7 @@ impl MessageDocument {
                 self.modified.map(|time| time.to_string().into_bytes()),
                 self.replied.map(|id| id.as_bytes().to_vec()),
                 self.attachments.map(|cid| cid.to_bytes()),
-                self.message.map(|cid| cid.to_bytes()),
+                self.message.as_ref().map(|m| m.to_vec()),
             ]
             .into_iter(),
             None,
@@ -1238,7 +1227,7 @@ pub struct MessageReferenceList {
 
 impl MessageReferenceList {
     #[async_recursion::async_recursion]
-    pub async fn insert(&mut self, ipfs: &Ipfs, message: MessageDocument) -> Result<Cid, Error> {
+    pub async fn insert(&mut self, ipfs: &Ipfs, message: &MessageDocument) -> Result<Cid, Error> {
         let mut list_refs = match self.messages {
             Some(cid) => {
                 ipfs.get_dag(cid)
@@ -1282,7 +1271,7 @@ impl MessageReferenceList {
     }
 
     #[async_recursion::async_recursion]
-    pub async fn update(&mut self, ipfs: &Ipfs, message: MessageDocument) -> Result<Cid, Error> {
+    pub async fn update(&mut self, ipfs: &Ipfs, message: &MessageDocument) -> Result<Cid, Error> {
         let mut list_refs = match self.messages {
             Some(cid) => {
                 ipfs.get_dag(cid)

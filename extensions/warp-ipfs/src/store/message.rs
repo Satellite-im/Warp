@@ -835,7 +835,7 @@ impl ConversationInner {
                         .await?;
 
                     conversation
-                        .update_message_document(&self.ipfs, message)
+                        .update_message_document(&self.ipfs, &message)
                         .await?;
 
                     let is_edited = matches!((message.modified, current_message.modified), (Some(modified), Some(current_modified)) if modified > current_modified )
@@ -856,7 +856,7 @@ impl ConversationInner {
                 }
                 false => {
                     conversation
-                        .insert_message_document(&self.ipfs, message)
+                        .insert_message_document(&self.ipfs, &message)
                         .await?;
 
                     events.push(MessageEventKind::MessageReceived {
@@ -1575,7 +1575,7 @@ impl ConversationInner {
         let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
 
         let message_cid = conversation
-            .insert_message_document(&self.ipfs, message)
+            .insert_message_document(&self.ipfs, &message)
             .await?;
 
         let recipients = conversation.recipients();
@@ -1591,6 +1591,8 @@ impl ConversationInner {
             error!(%conversation_id, error = %e, "Error broadcasting event");
         }
 
+        let message_id = message.id;
+
         let event = MessagingEvents::New { message };
 
         if !recipients.is_empty() {
@@ -1603,7 +1605,7 @@ impl ConversationInner {
                             peer_id,
                             conversation_id,
                             recipients: recipients.clone(),
-                            message_id: message.id,
+                            message_id,
                             message_cid,
                         })
                         .await;
@@ -1677,11 +1679,11 @@ impl ConversationInner {
             .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
             .await?;
 
-        let nonce = message_document.nonce_from_message(&self.ipfs).await?;
+        let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
 
         let message_cid = conversation
-            .update_message_document(&self.ipfs, message_document)
+            .update_message_document(&self.ipfs, &message_document)
             .await?;
 
         let recipients = conversation.recipients();
@@ -1774,7 +1776,7 @@ impl ConversationInner {
         let message_id = message.id;
 
         let message_cid = conversation
-            .insert_message_document(&self.ipfs, message)
+            .insert_message_document(&self.ipfs, &message)
             .await?;
 
         let recipients = conversation.recipients();
@@ -1909,7 +1911,7 @@ impl ConversationInner {
             .await?;
 
         let message_cid = conversation
-            .update_message_document(&self.ipfs, message_document)
+            .update_message_document(&self.ipfs, &message_document)
             .await?;
 
         let recipients = conversation.recipients();
@@ -1991,7 +1993,7 @@ impl ConversationInner {
                     .await?;
 
                 message_cid = conversation
-                    .update_message_document(&self.ipfs, message_document)
+                    .update_message_document(&self.ipfs, &message_document)
                     .await?;
                 self.set_document(conversation).await?;
 
@@ -2024,7 +2026,7 @@ impl ConversationInner {
                     .await?;
 
                 message_cid = conversation
-                    .update_message_document(&self.ipfs, message_document)
+                    .update_message_document(&self.ipfs, &message_document)
                     .await?;
 
                 self.set_document(conversation).await?;
@@ -2397,7 +2399,7 @@ impl ConversationInner {
         let message_id = message.id;
 
         let message_cid = conversation
-            .insert_message_document(&self.ipfs, message)
+            .insert_message_document(&self.ipfs, &message)
             .await?;
 
         let recipients = conversation.recipients();
@@ -3560,7 +3562,7 @@ async fn message_event(
             let conversation_id = message.conversation_id;
 
             document
-                .insert_message_document(&this.ipfs, message)
+                .insert_message_document(&this.ipfs, &message)
                 .await?;
 
             this.set_document(document).await?;
@@ -3626,7 +3628,7 @@ async fn message_event(
                 .await?;
 
             document
-                .update_message_document(&this.ipfs, message_document)
+                .update_message_document(&this.ipfs, &message_document)
                 .await?;
 
             this.set_document(document).await?;
@@ -3709,7 +3711,7 @@ async fn message_event(
                 .await?;
 
             document
-                .update_message_document(&this.ipfs, message_document)
+                .update_message_document(&this.ipfs, &message_document)
                 .await?;
 
             this.set_document(document).await?;
@@ -3750,7 +3752,7 @@ async fn message_event(
                         .await?;
 
                     document
-                        .update_message_document(&this.ipfs, message_document)
+                        .update_message_document(&this.ipfs, &message_document)
                         .await?;
 
                     this.set_document(document).await?;
@@ -3786,7 +3788,7 @@ async fn message_event(
                         .await?;
 
                     document
-                        .update_message_document(&this.ipfs, message_document)
+                        .update_message_document(&this.ipfs, &message_document)
                         .await?;
 
                     this.set_document(document).await?;
