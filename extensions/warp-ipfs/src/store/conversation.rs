@@ -867,7 +867,7 @@ impl MessageDocument {
 
     pub fn nonce_from_message(&self) -> Result<[u8; 12], Error> {
         let raw_encrypted_message = self.raw_encrypted_message()?;
-        let (nonce, _) = super::extract_data_slice::<12>(&raw_encrypted_message);
+        let (nonce, _) = super::extract_data_slice::<12>(raw_encrypted_message);
         let nonce: [u8; 12] = nonce.try_into().map_err(anyhow::Error::from)?;
         Ok(nonce)
     }
