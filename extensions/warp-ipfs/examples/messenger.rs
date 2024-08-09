@@ -1163,6 +1163,20 @@ async fn message_event_handle(
                 writeln!(stdout, ">>> Conversation settings updated: {settings}")?;
             }
         }
+        MessageEventKind::ConversationDescriptionChanged {
+            conversation_id,
+            description,
+        } => {
+            if main_conversation_id == conversation_id {
+                match description {
+                    Some(desc) => writeln!(
+                        stdout,
+                        ">>> Conversation description changed to: \"{desc}\""
+                    )?,
+                    None => writeln!(stdout, ">>> Conversation description removed")?,
+                }
+            }
+        }
     }
 
     Ok(())
