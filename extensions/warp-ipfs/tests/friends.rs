@@ -33,7 +33,7 @@ mod test {
 
         crate::common::timeout(Duration::from_secs(60), async {
             let did = loop {
-                if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
+                if let Some(MultiPassEventKind::FriendRequestReceived { from, .. }) =
                     subscribe_b.next().await
                 {
                     break from;
@@ -75,7 +75,7 @@ mod test {
 
         crate::common::timeout(Duration::from_secs(60), async {
             let did = loop {
-                if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
+                if let Some(MultiPassEventKind::FriendRequestReceived { from, .. }) =
                     subscribe_b.next().await
                 {
                     break from;
@@ -138,7 +138,7 @@ mod test {
 
         crate::common::timeout(Duration::from_secs(60), async {
             let did = loop {
-                if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
+                if let Some(MultiPassEventKind::FriendRequestReceived { from, .. }) =
                     subscribe_b.next().await
                 {
                     break from;
@@ -252,7 +252,7 @@ mod test {
 
         let list = account_b.list_incoming_request().await?;
 
-        assert!(list.contains(&did_a));
+        assert!(list.iter().any(|request| request.identity().eq(&did_a)));
 
         Ok(())
     }
@@ -283,8 +283,7 @@ mod test {
 
         let list = account_a.list_outgoing_request().await?;
 
-        assert!(list.contains(&did_b));
-
+        assert!(list.iter().any(|request| request.identity().eq(&did_b)));
         Ok(())
     }
 

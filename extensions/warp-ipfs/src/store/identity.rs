@@ -24,7 +24,7 @@ use web_time::Instant;
 
 use crate::shuttle::identity::client::IdentityCommand;
 use crate::shuttle::identity::{RequestEvent, RequestPayload};
-use warp::multipass::identity::{Identifier, ShortId};
+use warp::multipass::identity::{FriendRequest, Identifier, ShortId};
 use warp::multipass::GetIdentity;
 use warp::{
     constellation::file::FileType,
@@ -699,8 +699,11 @@ impl IdentityStore {
         if self
             .list_incoming_request()
             .await
+            .map(|list| {
+                list.into_iter()
+                    .any(|request| request.identity().eq(&data.sender))
+            })
             .unwrap_or_default()
-            .contains(&data.sender)
             && data.event == Event::Request
         {
             warn!("Request exist locally. Skipping");
@@ -783,8 +786,11 @@ impl IdentityStore {
                         }
                     }
 
-                    self.emit_event(MultiPassEventKind::FriendRequestReceived { from })
-                        .await;
+                    self.emit_event(MultiPassEventKind::FriendRequestReceived {
+                        from,
+                        date: req.date(),
+                    })
+                    .await;
                 }
 
                 let payload =
@@ -2575,9 +2581,10 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn has_request_from(&self, pubkey: &DID) -> Result<bool, Error> {
-        self.list_incoming_request()
-            .await
-            .map(|list| list.contains(pubkey))
+        self.list_incoming_request().await.map(|list| {
+            list.into_iter()
+                .any(|request| request.identity().eq(pubkey))
+        })
     }
 }
 
@@ -2762,18 +2769,17 @@ impl IdentityStore {
     pub async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         self.list_incoming_request()
             .await
-            .map(|list| list.iter().any(|request| request.eq(did)))
+            .map(|list| list.iter().any(|request| request.identity().eq(did)))
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+    pub async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         self.list_all_raw_request().await.map(|list| {
-            list.iter()
+            list.into_iter()
                 .filter_map(|request| match request {
-                    Request::In { did, .. } => Some(did),
+                    Request::In { did, date } => Some(FriendRequest::new(did, Some(date))),
                     _ => None,
                 })
-                .cloned()
                 .collect::<Vec<_>>()
         })
     }
@@ -2782,18 +2788,17 @@ impl IdentityStore {
     pub async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         self.list_outgoing_request()
             .await
-            .map(|list| list.iter().any(|request| request.eq(did)))
+            .map(|list| list.iter().any(|request| request.identity().eq(did)))
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+    pub async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         self.list_all_raw_request().await.map(|list| {
-            list.iter()
+            list.into_iter()
                 .filter_map(|request| match request {
-                    Request::Out { did, .. } => Some(did),
+                    Request::Out { did, date } => Some(FriendRequest::new(did, Some(date))),
                     _ => None,
                 })
-                .cloned()
                 .collect::<Vec<_>>()
         })
     }
@@ -2812,11 +2817,15 @@ impl IdentityStore {
             self.discovery.insert(recipient).await?;
         }
 
+        let mut outgoing_request_date = None;
+
         if store_request {
             let outgoing_request = Request::Out {
                 did: recipient.clone(),
                 date: payload.created.unwrap_or_else(Utc::now),
             };
+
+            outgoing_request_date.replace(outgoing_request.date());
 
             let list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
@@ -2895,6 +2904,7 @@ impl IdentityStore {
             Event::Request => {
                 self.emit_event(MultiPassEventKind::FriendRequestSent {
                     to: recipient.clone(),
+                    date: outgoing_request_date.expect("date is valid"),
                 })
                 .await;
             }
