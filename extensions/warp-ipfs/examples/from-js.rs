@@ -20,7 +20,7 @@ fn main() {
     spawn_and_wait(cmd);
 
     println!("\nBuilding warp-ipfs wasm files ...");
-    let cmd = get_cmd("wasm-pack build extensions/warp-ipfs --target web --out-dir examples/from-js/built-wasm/warp-ipfs");
+    let cmd = get_cmd("wasm-pack build extensions/warp-ipfs --target web --out-dir examples/from-js/built-wasm/warp-ipfs --dev");
     spawn_and_wait(cmd);
 
     println!("\nStarting file server ...");

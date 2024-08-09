@@ -1,94 +1,124 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="UTF-8" />
+<head>
+    <meta charset="UTF-8"/>
     <title>Warp Wasm Test</title>
-  </head>
-  <script type="module">
+</head>
+<script type="module">
     import init, * as wasm from './built-wasm/warp-ipfs/warp_ipfs.js';
+
     init().then(async (_exports) => {
-      console.log(wasm)
+        console.log(wasm)
 
-      async function account() {
-        let warp = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), null)
+        async function account() {
+            let warp = await new wasm.WarpIpfs(wasm.Config.minimal_testing(), null)
 
-        let tesseract = warp.multipass.tesseract()
+            let tesseract = warp.multipass.tesseract()
 
-        const passphrase = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
-        tesseract.unlock(passphrase)
+            const passphrase = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+            tesseract.unlock(passphrase)
 
-        await warp.multipass.create_identity(null, null)
+            await warp.multipass.create_identity(null, null)
 
-        return warp
-      }
-
-      let warp_a = await account()
-      let identity_a = await warp_a.multipass.identity()
-      console.log(identity_a)
-
-      let warp_b = await account()
-      let identity_b = await warp_b.multipass.identity()
-      console.log(identity_b)
-
-      
-
-      let conversation_a = await warp_a.raygun.create_conversation(identity_b.did_key())
-      console.log(conversation_a)
-      let asynciterator_a = await warp_a.raygun.get_conversation_stream(conversation_a.id());
-      let subscribe_a = { [Symbol.asyncIterator]() { return asynciterator_a } }
-      async function subscribe_a_reader() {
-        for await (const value of subscribe_a) {
-          if (value.message_received) {
-            let conversation_id = value.message_received.conversation_id
-            let message_id = value.message_received.message_id
-            let message = await warp_a.raygun.get_message(conversation_id, message_id)
-            let lines = message.lines()
-            console.log(`${identity_a.username()} saw: ${lines}`)
-            lines[1] = (parseInt(lines[1]) + 1).toString()
-            await warp_a.raygun.send(conversation_id, lines)
-          }
+            return warp
         }
-      };
-      subscribe_a_reader()
 
-      let conversation_b = await warp_b.raygun.create_conversation(identity_a.did_key())
-      console.log(conversation_b)
-      let asynciterator_b = await warp_b.raygun.get_conversation_stream(conversation_b.id());
-      let subscribe_b = { [Symbol.asyncIterator]() { return asynciterator_b } }
-      async function subscribe_b_reader() {
-        for await (const value of subscribe_b) {
-          if (value.message_received) {
-            let conversation_id = value.message_received.conversation_id
-            let message_id = value.message_received.message_id
-            let message = await warp_b.raygun.get_message(conversation_id, message_id)
-            let lines = message.lines()
-            console.log(`${identity_b.username()} saw: ${lines}`)
-            lines[1] = (parseInt(lines[1]) + 1).toString()
-            await warp_b.raygun.send(conversation_id, lines)
-          }
+        let warp_a = await account()
+        let identity_a = await warp_a.multipass.identity()
+        console.log(identity_a)
+
+        let warp_b = await account()
+        let identity_b = await warp_b.multipass.identity()
+        console.log(identity_b)
+
+
+        let conversation_a = await warp_a.raygun.create_conversation(identity_b.did_key())
+        console.log(conversation_a)
+        let asynciterator_a = await warp_a.raygun.get_conversation_stream(conversation_a.id());
+        let subscribe_a = {
+            [Symbol.asyncIterator]() {
+                return asynciterator_a
+            }
         }
-      };
-      subscribe_b_reader()
 
-      let msg = ["hello", "1"]
-      let msg_id = await warp_a.raygun.send(conversation_a.id(), msg)
-      console.log(`identity: ${identity_a.username()} \nmsg_id: ${msg_id} \nmsg: ${msg} `)
+        async function subscribe_a_reader() {
+            for await (const value of subscribe_a) {
+                if (value.event_received) {
+                    console.log("event received:");
+                    console.log(value.event_received.event);
+                }
+                if (value.message_received) {
+                    let conversation_id = value.message_received.conversation_id
+                    let message_id = value.message_received.message_id
+                    let message = await warp_a.raygun.get_message(conversation_id, message_id)
+                    let lines = message.lines()
+                    console.log(`${identity_a.username()} saw: ${lines}`)
+                    lines[1] = (parseInt(lines[1]) + 1).toString()
+                    await warp_a.raygun.send(conversation_id, lines)
+                    try {
+                        await warp_a.raygun.send_event(conversation_id, Number(MessageEvent.Typing))
+                    } catch (e) {
+                        console.log(e)
+                    }
+                }
+            }
+        };
+        subscribe_a_reader()
+
+        let conversation_b = await warp_b.raygun.create_conversation(identity_a.did_key())
+        console.log(conversation_b)
+        let asynciterator_b = await warp_b.raygun.get_conversation_stream(conversation_b.id());
+        let subscribe_b = {
+            [Symbol.asyncIterator]() {
+                return asynciterator_b
+            }
+        }
+
+        async function subscribe_b_reader() {
+            for await (const value of subscribe_b) {
+                if (value.event_received) {
+                    console.log("event received:");
+                    console.log(value.event_received.event);
+                }
+                if (value.message_received) {
+                    let conversation_id = value.message_received.conversation_id
+                    let message_id = value.message_received.message_id
+                    let message = await warp_b.raygun.get_message(conversation_id, message_id)
+                    let lines = message.lines()
+                    console.log(`${identity_b.username()} saw: ${lines}`)
+                    lines[1] = (parseInt(lines[1]) + 1).toString()
+                    await warp_b.raygun.send(conversation_id, lines)
+                    try {
+                        await warp_b.raygun.send_event(conversation_id, Number(MessageEvent.Typing))
+                    } catch (e) {
+                        console.log(e)
+                    }
+                }
+            }
+        };
+        subscribe_b_reader()
+
+        let msg = ["hello", "1"]
+        let msg_id = await warp_a.raygun.send(conversation_a.id(), msg)
+        console.log(`identity: ${identity_a.username()} \nmsg_id: ${msg_id} \nmsg: ${msg} `)
 
     });
-  </script>
-  <body>
-    <h2>Description:</h2>
-    <p>This example creates 2 users in memory and has them start a conversation. Then they ping pong a message between each other, incrementing the counter in the message each time.</p>
-    <h2>How to use this example:</h2>
-    <h3>1 - Compile the wasm and serve the js examples:</h3>
-    <pre>
+</script>
+<body>
+<h2>Description:</h2>
+<p>This example creates 2 users in memory and has them start a conversation. Then they ping pong a message between each
+    other, incrementing the counter in the message each time.</p>
+<h2>How to use this example:</h2>
+<h3>1 - Compile the wasm and serve the js examples:</h3>
+<pre>
       cargo run --example from-js
     </pre>
-    <h3>2 - Check output in the console</h3>
-    <p>Expected output: you should the continuously incrementing message in the logs. Note it could take 10 seconds before the messages start being sent. It should look something like this:</p>
-    <li>username1 saw: hello,1</li>
-    <li>username2 saw: hello,2</li>
-    <li>username1 saw: hello,3</li>
-    <li>username2 saw: hello,4</li>
-  </body>
+<h3>2 - Check output in the console</h3>
+<p>Expected output: you should the continuously incrementing message in the logs. Note it could take 10 seconds before
+    the messages start being sent. It should look something like this:</p>
+<li>username1 saw: hello,1</li>
+<li>username2 saw: hello,2</li>
+<li>username1 saw: hello,3</li>
+<li>username2 saw: hello,4</li>
+</body>
 </html>
