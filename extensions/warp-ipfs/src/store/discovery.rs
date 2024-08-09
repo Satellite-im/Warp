@@ -60,10 +60,7 @@ impl Discovery {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
-                    let cid = self
-                        .ipfs
-                        .put_dag(libipld::ipld!(format!("discovery:{namespace}")))
-                        .await?;
+                    let cid = self.ipfs.put_dag(format!("discovery:{namespace}")).await?;
 
                     let task = tokio::spawn({
                         let discovery = self.clone();
@@ -126,7 +123,7 @@ impl Discovery {
                             continue;
                         };
 
-                        if let Err(e) = self.ipfs.add_peer(peer_id, addr).await {
+                        if let Err(e) = self.ipfs.add_peer((peer_id, addr)).await {
                             tracing::error!("Error adding peer to address book {e}");
                             continue;
                         }
@@ -395,7 +392,7 @@ impl DiscoveryEntry {
                 if !entry.relays.is_empty() {
                     //Adding relay for peer to address book in case we are connected over common relays
                     for addr in entry.relays.clone() {
-                        let _ = ipfs.add_peer(entry.peer_id, addr).await;
+                        let _ = ipfs.add_peer((entry.peer_id, addr)).await;
                     }
                 }
                 loop {

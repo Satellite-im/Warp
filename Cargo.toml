@@ -16,7 +16,7 @@ members = [
     "extensions/warp-ipfs/examples/wasm-ipfs-friends",
     "extensions/warp-ipfs/examples/wasm-ipfs-storage",
 ]
-exclude = ["deprecated/*", "tools/opencv-test", "tools/video-codec-cli"]
+exclude = ["deprecated/*", "tools/opencv-test", "tools/video-codec-cli", "extensions/warp-blink-wrtc", "tools/blink-repl", "tools/audio-codec-repl"]
 
 resolver = "2"
 
@@ -76,7 +76,7 @@ serde_yaml = "0.9"
 toml = "0.5"
 bs58 = "0.4"
 hex = "0.4"
-libipld = { version = "0.16", features = ["serde-codec"] }
+ipld-core = { version = "0.4.1" }
 bytes = { version = "1", features = ["serde"] }
 bincode = "1"
 image = { version = "0.25.2", default-features = false, features = [
@@ -119,3 +119,7 @@ opus = { git = "https://github.com/Satellite-im/opus-rs", rev = "893b9f7e7e0cd00
 warp = { path = "./warp" }
 warp-ipfs = { path = "./extensions/warp-ipfs" }
 warp-blink-wrtc = { path = "./extensions/warp-blink-wrtc" }
+
+[patch.crates-io]
+rust-ipfs = { git = "https://github.com/dariusc93/rust-ipfs", rev = "b2a91ecc1faafbe1fa5606f377d679c19725d547" }
+

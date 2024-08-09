@@ -6,7 +6,7 @@ use futures::{
     StreamExt,
 };
 use indexmap::IndexMap;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -289,7 +289,7 @@ impl RootDocumentInner {
             })
             .collect::<Vec<_>>();
 
-        let new_cid = match self.ipfs.dag().put().serialize(list).await {
+        let new_cid = match self.ipfs.put_dag(list).await {
             Ok(cid) => cid,
             Err(_) => return,
         };
@@ -337,7 +337,7 @@ impl RootDocumentInner {
         //Precautionary check
         document.verify(&self.ipfs).await?;
 
-        let root_cid = self.ipfs.dag().put().serialize(document).await?;
+        let root_cid = self.ipfs.put_dag(document).await?;
 
         self.ipfs
             .insert_pin(&root_cid)
@@ -468,7 +468,7 @@ impl RootDocumentInner {
         let mut identity = self.identity().await?;
         identity.metadata.status = Some(status);
         let identity = identity.sign(self.keypair())?;
-        root.identity = self.ipfs.dag().put().serialize(identity).await?;
+        root.identity = self.ipfs.put_dag(identity).await?;
 
         self.set_root_document(root).await
     }
@@ -518,7 +518,7 @@ impl RootDocumentInner {
         document.request = match !list.is_empty() {
             true => {
                 let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
-                Some(self.ipfs.dag().put().serialize(bytes).await?)
+                Some(self.ipfs.put_dag(bytes).await?)
             }
             false => None,
         };
@@ -552,7 +552,7 @@ impl RootDocumentInner {
         document.request = match !list.is_empty() {
             true => {
                 let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
-                Some(self.ipfs.dag().put().serialize(bytes).await?)
+                Some(self.ipfs.put_dag(bytes).await?)
             }
             false => None,
         };
@@ -606,7 +606,7 @@ impl RootDocumentInner {
         document.friends = match !list.is_empty() {
             true => {
                 let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
-                Some(self.ipfs.dag().put().serialize(bytes).await?)
+                Some(self.ipfs.put_dag(bytes).await?)
             }
             false => None,
         };
@@ -637,7 +637,7 @@ impl RootDocumentInner {
 
         let index_document = DirectoryDocument::new(&self.ipfs, &root).await?;
 
-        let cid = self.ipfs.dag().put().serialize(index_document).await?;
+        let cid = self.ipfs.put_dag(index_document).await?;
 
         document.file_index.replace(cid);
 
@@ -671,7 +671,7 @@ impl RootDocumentInner {
         document.friends = match !list.is_empty() {
             true => {
                 let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
-                Some(self.ipfs.dag().put().serialize(bytes).await?)
+                Some(self.ipfs.put_dag(bytes).await?)
             }
             false => None,
         };
@@ -738,7 +738,7 @@ impl RootDocumentInner {
         document.blocks = match !list.is_empty() {
             true => {
                 let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
-                Some(self.ipfs.dag().put().serialize(bytes).await?)
+                Some(self.ipfs.put_dag(bytes).await?)
             }
             false => None,
         };
@@ -773,7 +773,7 @@ impl RootDocumentInner {
         document.blocks = match !list.is_empty() {
             true => {
                 let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
-                Some(self.ipfs.dag().put().serialize(bytes).await?)
+                Some(self.ipfs.put_dag(bytes).await?)
             }
             false => None,
         };
@@ -828,7 +828,7 @@ impl RootDocumentInner {
         document.block_by = match !list.is_empty() {
             true => {
                 let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
-                Some(self.ipfs.dag().put().serialize(bytes).await?)
+                Some(self.ipfs.put_dag(bytes).await?)
             }
             false => None,
         };
@@ -863,7 +863,7 @@ impl RootDocumentInner {
         document.block_by = match !list.is_empty() {
             true => {
                 let bytes = ecdh_encrypt(self.keypair(), None, serde_json::to_vec(&list)?)?;
-                Some(self.ipfs.dag().put().serialize(bytes).await?)
+                Some(self.ipfs.put_dag(bytes).await?)
             }
             false => None,
         };
@@ -874,7 +874,7 @@ impl RootDocumentInner {
 
     async fn set_conversation_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        document.conversations_keystore = Some(self.ipfs.dag().put().serialize(map).await?);
+        document.conversations_keystore = Some(self.ipfs.put_dag(map).await?);
         self.set_root_document(document).await
     }
 
@@ -956,16 +956,11 @@ impl RootDocumentInner {
         };
 
         let id = conversation_document.id().to_string();
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(conversation_document)
-            .await?;
+        let cid = self.ipfs.put_dag(conversation_document).await?;
 
         list.insert(id, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         document.conversations.replace(cid);
 

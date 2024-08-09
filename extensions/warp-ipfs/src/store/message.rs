@@ -22,7 +22,7 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered, SelectAll},
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, Keypair, PeerId};
 
 use serde::{Deserialize, Serialize};
@@ -1135,7 +1135,7 @@ impl ConversationInner {
         let mut map = self.root.get_conversation_keystore_map().await?;
 
         let id = id.to_string();
-        let cid = self.ipfs.dag().put().serialize(document).await?;
+        let cid = self.ipfs.put_dag(document).await?;
 
         map.insert(id, cid);
 
@@ -1240,7 +1240,7 @@ impl ConversationInner {
             .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             .and_then(|cid_str| cid_str.parse::<Cid>().ok());
 
-        let cid = match self.ipfs.dag().put().serialize(&self.queue).pin(true).await {
+        let cid = match self.ipfs.put_dag(&self.queue).pin(true).await {
             Ok(cid) => cid,
             Err(e) => {
                 tracing::error!(error = %e, "unable to save queue");

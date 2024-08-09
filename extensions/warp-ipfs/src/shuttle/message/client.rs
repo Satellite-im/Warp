@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures::{channel::oneshot, FutureExt, StreamExt};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{
     libp2p::{
         core::Endpoint,

@@ -6,7 +6,7 @@ use futures::{
     StreamExt, TryFutureExt,
 };
 use indexmap::IndexMap;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
@@ -369,7 +369,7 @@ impl ConversationDocument {
         list: MessageReferenceList,
     ) -> Result<(), Error> {
         self.modified = Utc::now();
-        let next_cid = ipfs.dag().put().serialize(list).await?;
+        let next_cid = ipfs.put_dag(list).await?;
         self.messages.replace(next_cid);
         Ok(())
     }
@@ -773,13 +773,11 @@ impl MessageDocument {
         .collect::<Vec<_>>()
         .await;
 
-        let attachments =
-            (!attachments.is_empty()).then_some(ipfs.dag().put().serialize(attachments).await?);
+        let attachments = (!attachments.is_empty()).then_some(ipfs.put_dag(attachments).await?);
 
         let reactions = message.reactions();
 
-        let reactions =
-            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
+        let reactions = (!reactions.is_empty()).then_some(ipfs.put_dag(reactions).await?);
 
         if !lines.is_empty() {
             let lines_value_length: usize = lines
@@ -809,7 +807,7 @@ impl MessageDocument {
             Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?,
         };
 
-        let message = Some(ipfs.dag().put().serialize(data).await?);
+        let message = Some(ipfs.put_dag(data).await?);
 
         let sender = DIDEd25519Reference::from_did(&sender);
 
@@ -917,8 +915,7 @@ impl MessageDocument {
 
         let reactions = message.reactions();
 
-        self.reactions =
-            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
+        self.reactions = (!reactions.is_empty()).then_some(ipfs.put_dag(reactions).await?);
 
         if message.lines() != old_message.lines() {
             let lines = message.lines();
@@ -967,7 +964,7 @@ impl MessageDocument {
                 (Either::Left(key), None) => ecdh_encrypt(keypair, Some(key), &bytes)?,
             };
 
-            let message = ipfs.dag().put().serialize(data).await?;
+            let message = ipfs.put_dag(data).await?;
 
             self.message.replace(message);
 
@@ -1265,17 +1262,17 @@ impl MessageReferenceList {
             };
 
             let cid = next_ref.insert(ipfs, message).await?;
-            let next_cid = ipfs.dag().put().serialize(next_ref).await?;
+            let next_cid = ipfs.put_dag(next_ref).await?;
             self.next.replace(next_cid);
             return Ok(cid);
         }
 
         let id = message.id.to_string();
 
-        let cid = ipfs.dag().put().serialize(message).await?;
+        let cid = ipfs.put_dag(message).await?;
         list_refs.insert(id, cid);
 
-        let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
+        let ref_cid = ipfs.put_dag(list_refs).await?;
         self.messages.replace(ref_cid);
 
         Ok(cid)
@@ -1305,17 +1302,17 @@ impl MessageReferenceList {
             };
 
             let cid = next_ref.update(ipfs, message).await?;
-            let next_cid = ipfs.dag().put().serialize(next_ref).await?;
+            let next_cid = ipfs.put_dag(next_ref).await?;
             self.next.replace(next_cid);
             return Ok(cid);
         }
 
         let id = message.id.to_string();
 
-        let cid = ipfs.dag().put().serialize(message).await?;
+        let cid = ipfs.put_dag(message).await?;
         list_refs.insert(id, cid);
 
-        let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
+        let ref_cid = ipfs.put_dag(list_refs).await?;
         self.messages.replace(ref_cid);
 
         Ok(cid)
@@ -1477,7 +1474,7 @@ impl MessageReferenceList {
                     self.messages.take();
                 }
                 false => {
-                    let cid = ipfs.dag().put().serialize(list).await?;
+                    let cid = ipfs.put_dag(list).await?;
                     self.messages.replace(cid);
                 }
             };
@@ -1499,7 +1496,7 @@ impl MessageReferenceList {
             self.next.take();
             return Ok(());
         }
-        let cid = ipfs.dag().put().serialize(refs).await?;
+        let cid = ipfs.put_dag(refs).await?;
 
         self.next.replace(cid);
 

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
