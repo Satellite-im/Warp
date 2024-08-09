@@ -1,7 +1,6 @@
 use crate::constellation::{self, file::Hash, item::ItemType, Constellation};
 use crate::js_exports::stream::{AsyncIterator, InnerStream};
 use futures::StreamExt;
-use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
 #[derive(Clone)]
@@ -80,7 +79,7 @@ impl ConstellationBox {
             .get_buffer(name)
             .await
             .map_err(|e| e.into())
-            .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
+            .and_then(|ok| serde_wasm_bindgen::to_value(&ok).map_err(JsError::from))
     }
 
     pub async fn put_stream(
@@ -96,9 +95,9 @@ impl ConstellationBox {
             .await
             .map_err(|e| e.into())
             .map(|s| {
-                AsyncIterator::new(Box::pin(
-                    s.map(|t| serde_wasm_bindgen::to_value(&Progression::from(t)).unwrap()),
-                ))
+                AsyncIterator::new(Box::pin(s.map(|t| {
+                    serde_wasm_bindgen::to_value(&Progression::from(t)).unwrap_or_default()
+                })))
             })
     }
 
@@ -110,7 +109,7 @@ impl ConstellationBox {
             .map(|s| {
                 AsyncIterator::new(Box::pin(s.map(|t| {
                     serde_wasm_bindgen::to_value(&t.map_err(|e| String::from(e.to_string())))
-                        .unwrap()
+                        .unwrap_or_default()
                 })))
             })
     }
@@ -244,11 +243,13 @@ impl Directory {
         self.inner.set_name(name)
     }
     pub fn set_thumbnail_format(&self, format: JsValue) {
-        self.inner
-            .set_thumbnail_format(serde_wasm_bindgen::from_value(format).unwrap())
+        let Ok(val) = serde_wasm_bindgen::from_value(format) else {
+            return;
+        };
+        self.inner.set_thumbnail_format(val)
     }
     pub fn thumbnail_format(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap_or_default()
     }
     pub fn set_thumbnail(&self, desc: &[u8]) {
         self.inner.set_thumbnail(desc)
@@ -315,9 +316,6 @@ impl File {
     pub fn name(&self) -> String {
         self.inner.name()
     }
-    pub fn set_id(&self, id: String) {
-        self.inner.set_id(Uuid::parse_str(&id).unwrap())
-    }
     pub fn set_name(&self, name: &str) {
         self.inner.set_name(name)
     }
@@ -328,11 +326,13 @@ impl File {
         self.inner.set_description(desc)
     }
     pub fn set_thumbnail_format(&self, format: JsValue) {
-        self.inner
-            .set_thumbnail_format(serde_wasm_bindgen::from_value(format).unwrap())
+        let Ok(val) = serde_wasm_bindgen::from_value(format) else {
+            return;
+        };
+        self.inner.set_thumbnail_format(val)
     }
     pub fn thumbnail_format(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap_or_default()
     }
     pub fn set_thumbnail(&self, data: &[u8]) {
         self.inner.set_thumbnail(data)
@@ -377,11 +377,13 @@ impl File {
         self.inner.set_hash(hash)
     }
     pub fn set_file_type(&self, file_type: JsValue) {
-        self.inner
-            .set_file_type(serde_wasm_bindgen::from_value(file_type).unwrap())
+        let Ok(val) = serde_wasm_bindgen::from_value(file_type) else {
+            return;
+        };
+        self.inner.set_file_type(val)
     }
     pub fn file_type(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.file_type()).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner.file_type()).unwrap_or_default()
     }
     pub fn path(&self) -> String {
         self.inner.path().to_string()
@@ -452,7 +454,7 @@ impl Item {
         self.inner.size()
     }
     pub fn thumbnail_format(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap_or_default()
     }
     pub fn thumbnail(&self) -> Vec<u8> {
         self.inner.thumbnail()
@@ -482,8 +484,10 @@ impl Item {
         self.inner.set_thumbnail(data)
     }
     pub fn set_thumbnail_format(&self, format: JsValue) {
-        self.inner
-            .set_thumbnail_format(serde_wasm_bindgen::from_value(format).unwrap())
+        let Ok(val) = serde_wasm_bindgen::from_value(format) else {
+            return;
+        };
+        self.inner.set_thumbnail_format(val)
     }
     pub fn set_size(&self, size: usize) -> Result<(), JsError> {
         self.inner.set_size(size).map_err(|e| e.into())
