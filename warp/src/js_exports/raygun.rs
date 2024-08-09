@@ -32,7 +32,7 @@ impl RayGunBox {
     // Start a new conversation.
     pub async fn create_conversation(&mut self, did: String) -> Result<Conversation, JsError> {
         self.inner
-            .create_conversation(&DID::from_str(&did).unwrap())
+            .create_conversation(&DID::from_str(&did)?)
             .await
             .map_err(|e| e.into())
             .map(|ok| Conversation::new(ok))
@@ -46,7 +46,7 @@ impl RayGunBox {
     ) -> Result<Conversation, JsError> {
         let recipients = recipients
             .iter()
-            .map(|did| DID::from_str(did).unwrap())
+            .filter_map(|did| DID::from_str(did).ok())
             .collect();
         self.inner
             .create_group_conversation(name, recipients, settings)
@@ -58,7 +58,7 @@ impl RayGunBox {
     /// Get an active conversation
     pub async fn get_conversation(&self, conversation_id: String) -> Result<Conversation, JsError> {
         self.inner
-            .get_conversation(Uuid::from_str(&conversation_id).unwrap())
+            .get_conversation(Uuid::from_str(&conversation_id)?)
             .await
             .map_err(|e| e.into())
             .map(|ok| Conversation::new(ok))
@@ -70,7 +70,7 @@ impl RayGunBox {
         favorite: bool,
     ) -> Result<(), JsError> {
         self.inner
-            .set_favorite_conversation(Uuid::from_str(&conversation_id).unwrap(), favorite)
+            .set_favorite_conversation(Uuid::from_str(&conversation_id)?, favorite)
             .await
             .map_err(|e| e.into())
     }
@@ -92,8 +92,8 @@ impl RayGunBox {
     ) -> Result<Message, JsError> {
         self.inner
             .get_message(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
             )
             .await
             .map_err(|e| e.into())
@@ -103,7 +103,7 @@ impl RayGunBox {
     /// Get a number of messages in a conversation
     pub async fn get_message_count(&self, conversation_id: String) -> Result<usize, JsError> {
         self.inner
-            .get_message_count(Uuid::from_str(&conversation_id).unwrap())
+            .get_message_count(Uuid::from_str(&conversation_id)?)
             .await
             .map_err(|e| e.into())
     }
@@ -116,8 +116,8 @@ impl RayGunBox {
     ) -> Result<MessageStatus, JsError> {
         self.inner
             .message_status(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
             )
             .await
             .map_err(|e| e.into())
@@ -130,7 +130,7 @@ impl RayGunBox {
         options: MessageOptions,
     ) -> Result<AsyncIterator, JsError> {
         self.inner
-            .get_message_references(Uuid::from_str(&conversation_id).unwrap(), options.inner)
+            .get_message_references(Uuid::from_str(&conversation_id)?, options.inner)
             .await
             .map_err(|e| e.into())
             .map(|s| AsyncIterator::new(Box::pin(s.map(|t| MessageReference::new(t).into()))))
@@ -144,8 +144,8 @@ impl RayGunBox {
     ) -> Result<MessageReference, JsError> {
         self.inner
             .get_message_reference(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
             )
             .await
             .map_err(|e| e.into())
@@ -159,7 +159,7 @@ impl RayGunBox {
         options: MessageOptions,
     ) -> Result<Messages, JsError> {
         self.inner
-            .get_messages(Uuid::from_str(&conversation_id).unwrap(), options.inner)
+            .get_messages(Uuid::from_str(&conversation_id)?, options.inner)
             .await
             .map_err(|e| e.into())
             .map(|ok| Messages::new(ok))
@@ -172,7 +172,7 @@ impl RayGunBox {
         message: Vec<String>,
     ) -> Result<String, JsError> {
         self.inner
-            .send(Uuid::from_str(&conversation_id).unwrap(), message)
+            .send(Uuid::from_str(&conversation_id)?, message)
             .await
             .map_err(|e| e.into())
             .map(|ok| ok.to_string())
@@ -187,8 +187,8 @@ impl RayGunBox {
     ) -> Result<(), JsError> {
         self.inner
             .edit(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
                 message,
             )
             .await
@@ -203,8 +203,11 @@ impl RayGunBox {
     ) -> Result<(), JsError> {
         self.inner
             .delete(
-                Uuid::from_str(&conversation_id).unwrap(),
-                message_id.map(|s| Uuid::from_str(&s).unwrap()),
+                Uuid::from_str(&conversation_id)?,
+                match message_id {
+                    Some(id) => Some(Uuid::from_str(&id)?),
+                    None => None,
+                },
             )
             .await
             .map_err(|e| e.into())
@@ -220,8 +223,8 @@ impl RayGunBox {
     ) -> Result<(), JsError> {
         self.inner
             .react(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
                 state,
                 emoji,
             )
@@ -238,8 +241,8 @@ impl RayGunBox {
     ) -> Result<(), JsError> {
         self.inner
             .pin(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
                 state,
             )
             .await
@@ -255,8 +258,8 @@ impl RayGunBox {
     ) -> Result<String, JsError> {
         self.inner
             .reply(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
                 message,
             )
             .await
@@ -272,8 +275,8 @@ impl RayGunBox {
     ) -> Result<(), JsError> {
         self.inner
             .embeds(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
                 state,
             )
             .await
@@ -288,8 +291,8 @@ impl RayGunBox {
     ) -> Result<(), JsError> {
         self.inner
             .update_conversation_settings(
-                Uuid::from_str(&conversation_id).unwrap(),
-                serde_wasm_bindgen::from_value(settings).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                serde_wasm_bindgen::from_value(settings)?,
             )
             .await
             .map_err(|e| e.into())
@@ -306,7 +309,7 @@ impl RayGunBox {
         name: String,
     ) -> Result<(), JsError> {
         self.inner
-            .update_conversation_name(Uuid::from_str(&conversation_id).unwrap(), &name)
+            .update_conversation_name(Uuid::from_str(&conversation_id)?, &name)
             .await
             .map_err(|e| e.into())
     }
@@ -319,8 +322,8 @@ impl RayGunBox {
     ) -> Result<(), JsError> {
         self.inner
             .add_recipient(
-                Uuid::from_str(&conversation_id).unwrap(),
-                &DID::from_str(&recipient).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                &DID::from_str(&recipient)?,
             )
             .await
             .map_err(|e| e.into())
@@ -334,8 +337,8 @@ impl RayGunBox {
     ) -> Result<(), JsError> {
         self.inner
             .remove_recipient(
-                Uuid::from_str(&conversation_id).unwrap(),
-                &DID::from_str(&recipient).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                &DID::from_str(&recipient)?,
             )
             .await
             .map_err(|e| e.into())
@@ -356,18 +359,23 @@ impl RayGunBox {
     ) -> Result<AttachmentResult, JsError> {
         self.inner
             .attach(
-                Uuid::from_str(&conversation_id).unwrap(),
-                message_id.map(|s| Uuid::from_str(&s).unwrap()),
+                Uuid::from_str(&conversation_id)?,
+                match message_id {
+                    Some(id) => Some(Uuid::from_str(&id)?),
+                    None => None,
+                },
                 files.iter().map(|f| f.clone().into()).collect(),
                 message,
             )
             .await
             .map_err(|e| e.into())
-            .map(|(id, ok)| AttachmentResult {
-                message_id: id.to_string(),
-                stream: AsyncIterator::new(Box::pin(
-                    ok.map(|s| serde_wasm_bindgen::to_value(&AttachmentKind::from(s)).unwrap()),
-                )),
+            .and_then(|(id, ok)| {
+                Ok(AttachmentResult {
+                    message_id: id.to_string(),
+                    stream: AsyncIterator::new(Box::pin(ok.filter_map(|s| async move {
+                        serde_wasm_bindgen::to_value(&AttachmentKind::from(s)).ok()
+                    }))),
+                })
             })
     }
 
@@ -381,20 +389,21 @@ impl RayGunBox {
     ) -> Result<AsyncIterator, JsError> {
         self.inner
             .download_stream(
-                Uuid::from_str(&conversation_id).unwrap(),
-                Uuid::from_str(&message_id).unwrap(),
+                Uuid::from_str(&conversation_id)?,
+                Uuid::from_str(&message_id)?,
                 &file,
             )
             .await
             .map_err(|e| e.into())
-            .map(|ok| {
-                AsyncIterator::new(Box::pin(ok.map(|s| match s {
-                    Ok(v) => serde_wasm_bindgen::to_value(&v).unwrap(),
+            .and_then(|ok| {
+                let st = AsyncIterator::new(Box::pin(ok.map(|s| match s {
+                    Ok(v) => serde_wasm_bindgen::to_value(&v).unwrap_or_default(),
                     Err(e) => {
                         let err: JsError = e.into();
                         err.into()
                     }
-                })))
+                })));
+                Ok(st)
             })
     }
 }
@@ -408,13 +417,13 @@ impl RayGunBox {
         conversation_id: String,
     ) -> Result<AsyncIterator, JsError> {
         self.inner
-            .get_conversation_stream(Uuid::from_str(&conversation_id).unwrap())
+            .get_conversation_stream(Uuid::from_str(&conversation_id)?)
             .await
             .map_err(|e| e.into())
-            .map(|ok| {
-                AsyncIterator::new(Box::pin(
-                    ok.map(|s| serde_wasm_bindgen::to_value(&s).unwrap()),
-                ))
+            .and_then(|ok| {
+                Ok(AsyncIterator::new(Box::pin(ok.filter_map(
+                    |s| async move { serde_wasm_bindgen::to_value(&s).map_err(JsError::from).ok() },
+                ))))
             })
     }
 
@@ -426,7 +435,7 @@ impl RayGunBox {
             .map_err(|e| e.into())
             .map(|ok| {
                 AsyncIterator::new(Box::pin(
-                    ok.map(|s| serde_wasm_bindgen::to_value(&s).unwrap()),
+                    ok.filter_map(|s| async move { serde_wasm_bindgen::to_value(&s).ok() }),
                 ))
             })
     }
@@ -442,7 +451,7 @@ impl RayGunBox {
         event: MessageEvent,
     ) -> Result<(), JsError> {
         self.inner
-            .send_event(Uuid::from_str(&conversation_id).unwrap(), event)
+            .send_event(Uuid::from_str(&conversation_id)?, event)
             .await
             .map_err(|e| e.into())
     }
@@ -454,7 +463,7 @@ impl RayGunBox {
         event: MessageEvent,
     ) -> Result<(), JsError> {
         self.inner
-            .cancel_event(Uuid::from_str(&conversation_id).unwrap(), event)
+            .cancel_event(Uuid::from_str(&conversation_id)?, event)
             .await
             .map_err(|e| e.into())
     }
@@ -502,7 +511,7 @@ impl Conversation {
         self.inner.modified().into()
     }
     pub fn settings(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.settings()).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner.settings()).unwrap_or_default()
     }
     pub fn recipients(&self) -> Vec<String> {
         self.inner
@@ -524,7 +533,7 @@ impl Messages {
         match messages {
             raygun::Messages::List(list) => Self {
                 variant: MessagesEnum::List,
-                value: serde_wasm_bindgen::to_value(&list).unwrap(),
+                value: serde_wasm_bindgen::to_value(&list).unwrap_or_default(),
             },
             raygun::Messages::Stream(stream) => Self {
                 variant: MessagesEnum::List,
@@ -546,7 +555,7 @@ impl Messages {
 
                 Self {
                     variant: MessagesEnum::Page,
-                    value: serde_wasm_bindgen::to_value(&Page { pages, total }).unwrap(),
+                    value: serde_wasm_bindgen::to_value(&Page { pages, total }).unwrap_or_default(),
                 }
             }
         }
@@ -591,17 +600,17 @@ impl MessageOptions {
     }
 
     pub fn set_date_range(&mut self, range: JsValue) {
-        self.inner = self
-            .inner
-            .clone()
-            .set_date_range(serde_wasm_bindgen::from_value(range).unwrap());
+        let Ok(val) = serde_wasm_bindgen::from_value(range) else {
+            return;
+        };
+        self.inner = self.inner.clone().set_date_range(val);
     }
 
     pub fn set_range(&mut self, range: JsValue) {
-        self.inner = self
-            .inner
-            .clone()
-            .set_range(serde_wasm_bindgen::from_value(range).unwrap());
+        let Ok(val) = serde_wasm_bindgen::from_value(range) else {
+            return;
+        };
+        self.inner = self.inner.clone().set_range(val);
     }
 
     pub fn set_limit(&mut self, limit: u8) {
@@ -633,10 +642,10 @@ impl MessageOptions {
     }
 
     pub fn set_messages_type(&mut self, ty: JsValue) {
-        self.inner = self
-            .inner
-            .clone()
-            .set_messages_type(serde_wasm_bindgen::from_value(ty).unwrap());
+        let Ok(val) = serde_wasm_bindgen::from_value(ty) else {
+            return;
+        };
+        self.inner = self.inner.clone().set_messages_type(val);
     }
 }
 
@@ -685,8 +694,9 @@ impl MessageReference {
 
 // Convert a JS object of raygun::Message to a Message
 #[wasm_bindgen]
-pub fn message_from(js: JsValue) -> Message {
-    Message::new(serde_wasm_bindgen::from_value(js).unwrap())
+pub fn message_from(js: JsValue) -> Result<Message, JsError> {
+    let val = serde_wasm_bindgen::from_value(js)?;
+    Ok(Message::new(val))
 }
 
 #[wasm_bindgen]
@@ -729,7 +739,7 @@ impl Message {
     }
 
     pub fn reactions(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.reactions()).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner.reactions()).unwrap_or_default()
     }
 
     pub fn mentions(&self) -> Vec<String> {
@@ -745,11 +755,11 @@ impl Message {
     }
 
     pub fn attachments(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.attachments()).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner.attachments()).unwrap_or_default()
     }
 
     pub fn metadata(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.metadata()).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner.metadata()).unwrap_or_default()
     }
 
     pub fn replied(&self) -> Option<String> {

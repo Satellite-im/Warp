@@ -55,7 +55,7 @@ impl MultiPassBox {
             .await;
         match (single_id, list.is_empty()) {
             (true, true) => Err(Error::IdentityDoesntExist.into()),
-            (_, false) | (_, true) => Ok(serde_wasm_bindgen::to_value(&list).unwrap()),
+            (_, false) | (_, true) => Ok(serde_wasm_bindgen::to_value(&list).unwrap_or_default()),
         }
     }
 
@@ -148,7 +148,7 @@ impl MultiPassBox {
                 serde_wasm_bindgen::to_value(
                     &ok.iter().map(|i| i.to_string()).collect::<Vec<String>>(),
                 )
-                .unwrap()
+                .unwrap_or_default()
             })
     }
 
@@ -170,7 +170,7 @@ impl MultiPassBox {
                 serde_wasm_bindgen::to_value(
                     &ok.iter().map(|i| i.to_string()).collect::<Vec<String>>(),
                 )
-                .unwrap()
+                .unwrap_or_default()
             })
     }
 
@@ -208,7 +208,7 @@ impl MultiPassBox {
                 serde_wasm_bindgen::to_value(
                     &ok.iter().map(|i| i.to_string()).collect::<Vec<String>>(),
                 )
-                .unwrap()
+                .unwrap_or_default()
             })
     }
 
@@ -230,7 +230,7 @@ impl MultiPassBox {
                 serde_wasm_bindgen::to_value(
                     &ok.iter().map(|i| i.to_string()).collect::<Vec<String>>(),
                 )
-                .unwrap()
+                .unwrap_or_default()
             })
     }
 
@@ -546,6 +546,6 @@ impl IdentityImage {
 
     #[wasm_bindgen(js_name = image_type)]
     pub fn image_type_js(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.image_type()).unwrap()
+        serde_wasm_bindgen::to_value(&self.image_type()).unwrap_or_default()
     }
 }
