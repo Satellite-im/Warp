@@ -11,7 +11,6 @@ use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 
 use directory::Directory;
-use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use futures::Stream;
 
@@ -82,9 +81,7 @@ pub type ConstellationProgressStream = BoxStream<'static, Progression>;
 
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
-pub trait Constellation:
-    ConstellationEvent + Extension + Sync + Send + SingleHandle + DynClone
-{
+pub trait Constellation: ConstellationEvent + Extension + Sync + Send + SingleHandle {
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc>;
 
@@ -219,8 +216,6 @@ pub trait Constellation:
         Err(Error::Unimplemented)
     }
 }
-
-dyn_clone::clone_trait_object!(Constellation);
 
 #[async_trait::async_trait]
 pub trait ConstellationEvent: Sync + Send {
