@@ -1567,18 +1567,18 @@ mod test {
 
     #[async_test]
     async fn archive_unarchive_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![(
+        let accounts = create_accounts(vec![(
             None,
             None,
             Some("test::archive_unarchive_conversation".into()),
         )])
         .await?;
 
-        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
 
-        chat_a
+        instance_a
             .create_group_conversation(None, vec![], Default::default())
             .await?;
 
@@ -1592,22 +1592,22 @@ mod test {
                         match event {
                             RayGunEventKind::ConversationCreated{ conversation_id } => {
                                 c_id = conversation_id;
-                                chat_a.archived_conversation(conversation_id).await?;
+                                instance_a.archived_conversation(conversation_id).await?;
                             }
                             RayGunEventKind::ConversationArchived{ conversation_id } => {
                                 assert_eq!(conversation_id, c_id);
                                 assert!(!archived);
                                 assert!(!unarchived);
-                                let conversation = chat_a.get_conversation(c_id).await?;
+                                let conversation = instance_a.get_conversation(c_id).await?;
                                 assert!(conversation.archived());
                                 archived = true;
-                                chat_a.unarchived_conversation(conversation_id).await?;
+                                instance_a.unarchived_conversation(conversation_id).await?;
                             }
                             RayGunEventKind::ConversationUnarchived{ conversation_id } => {
                                 assert_eq!(conversation_id, c_id);
                                 assert!(archived);
                                 assert!(!unarchived);
-                                let conversation = chat_a.get_conversation(conversation_id).await?;
+                                let conversation = instance_a.get_conversation(conversation_id).await?;
                                 assert!(!conversation.archived());
                                 unarchived = true;
                             }
