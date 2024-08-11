@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -80,7 +79,6 @@ pub trait MultiPass:
     + Sync
     + Send
     + SingleHandle
-    + DynClone
 {
     /// Create an [`Identity`]
     async fn create_identity(
@@ -90,10 +88,8 @@ pub trait MultiPass:
     ) -> Result<IdentityProfile, Error>;
 
     /// Obtain an [`Identity`] using [`Identifier`]
-    fn get_identity(&self, id: Identifier) -> GetIdentity;
+    fn get_identity(&self, id: impl Into<Identifier>) -> GetIdentity;
 }
-
-dyn_clone::clone_trait_object!(MultiPass);
 
 #[async_trait::async_trait]
 pub trait LocalIdentity: Sync + Send {
@@ -253,7 +249,8 @@ pub struct GetIdentity {
 }
 
 impl GetIdentity {
-    pub fn new(identifier: Identifier, stream: BoxStream<'static, Identity>) -> Self {
+    pub fn new(identifier: impl Into<Identifier>, stream: BoxStream<'static, Identity>) -> Self {
+        let identifier = identifier.into();
         GetIdentity {
             identifier,
             stream: Some(stream),

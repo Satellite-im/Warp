@@ -5,27 +5,26 @@ use futures_timeout::TimeoutExt;
 use warp::crypto::rand::{self, Rng};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity};
-use warp::multipass::{MultiPass, MultiPassEventKind};
+use warp::multipass::{Friends, LocalIdentity, MultiPass, MultiPassEvent, MultiPassEventKind};
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::Config;
-use warp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::{WarpIpfs, WarpIpfsBuilder};
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, HtmlElement};
 
-async fn account(username: Option<&str>) -> Result<Box<dyn MultiPass>, Error> {
+async fn account(username: Option<&str>) -> Result<WarpIpfs, Error> {
     let tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let config = Config::minimal_testing();
-    let (mut account, _, _) = WarpIpfsBuilder::default()
+    let mut instance = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .set_config(config)
-        .finalize()
         .await;
 
-    account.create_identity(username, None).await?;
-    Ok(account)
+    instance.create_identity(username, None).await?;
+    Ok(instance)
 }
 
 fn username(ident: &Identity) -> String {

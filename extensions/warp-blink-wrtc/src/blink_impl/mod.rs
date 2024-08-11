@@ -58,7 +58,9 @@ impl Drop for DropHandler {
 }
 
 impl BlinkImpl {
-    pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Box<Self>> {
+    pub async fn new<M: MultiPass + SingleHandle + 'static>(
+        account: M,
+    ) -> anyhow::Result<Box<Self>> {
         log::trace!("initializing WebRTC");
 
         let (ui_event_ch, _rx) = broadcast::channel(1024);

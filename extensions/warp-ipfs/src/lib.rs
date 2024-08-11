@@ -121,32 +121,6 @@ impl WarpIpfsBuilder {
         self.tesseract = Some(tesseract);
         self
     }
-
-    // pub fn use_multipass(mut self) -> Self {
-    //     self.use_multipass = true;
-    //     self
-    // }
-
-    // pub fn use_constellation(mut self) -> Self {
-    //     self.use_constellation = true;
-    //     self
-    // }
-
-    // pub fn use_raygun(mut self) -> Self {
-    //     self.use_raygun = true;
-    //     self
-    // }
-
-    /// Creates trait objects of the
-    pub async fn finalize(self) -> (Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>) {
-        let instance = WarpIpfs::new(self.config, self.tesseract).await;
-
-        let mp = Box::new(instance.clone()) as Box<_>;
-        let rg = Box::new(instance.clone()) as Box<_>;
-        let fs = Box::new(instance) as Box<_>;
-
-        (mp, rg, fs)
-    }
 }
 
 impl core::future::IntoFuture for WarpIpfsBuilder {
@@ -849,7 +823,7 @@ impl MultiPass for WarpIpfs {
         Ok(profile)
     }
 
-    fn get_identity(&self, id: Identifier) -> GetIdentity {
+    fn get_identity(&self, id: impl Into<Identifier>) -> GetIdentity {
         let store = match self.direct_identity_store() {
             Ok(store) => store,
             _ => return GetIdentity::new(id, stream::empty().boxed()),

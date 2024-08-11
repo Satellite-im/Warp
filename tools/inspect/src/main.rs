@@ -5,14 +5,13 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::StreamExt;
 
-use warp::constellation::Constellation;
 use warp::crypto::zeroize::Zeroizing;
 use warp::multipass::identity::Identifier;
-use warp::multipass::MultiPass;
+use warp::multipass::{Friends, LocalIdentity, MultiPass};
 use warp::raygun::RayGun;
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::Discovery;
-use warp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::{WarpIpfs, WarpIpfsBuilder};
 
 #[derive(Debug, Parser)]
 #[clap(name = "inspect")]
@@ -34,7 +33,7 @@ async fn setup<P: AsRef<Path>>(
     path: P,
     keystore: Option<String>,
     passphrase: Zeroizing<String>,
-) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>)> {
+) -> anyhow::Result<WarpIpfs> {
     let path = path.as_ref();
     let keystore_path = path.join(keystore.unwrap_or("tesseract_store".into()));
 
@@ -46,15 +45,14 @@ async fn setup<P: AsRef<Path>>(
     config.ipfs_setting_mut().mdns.enable = false;
     *config.enable_relay_mut() = false;
 
-    let (identity, raygun, constellation) = WarpIpfsBuilder::default()
+    let instance = WarpIpfsBuilder::default()
         .set_tesseract(tesseract)
         .set_config(config)
-        .finalize()
         .await;
 
     //validating that account exist
-    let _ = identity.identity().await?;
-    Ok((identity, raygun, constellation))
+    _ = instance.identity().await?;
+    Ok(instance)
 }
 
 #[tokio::main]
@@ -72,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let start_time = Instant::now();
-    let (account, rg, _) = setup(&opt.path, opt.keystore.clone(), password).await?;
+    let instance = setup(&opt.path, opt.keystore.clone(), password).await?;
     let end_time = start_time.elapsed();
     println!(
         "Took {}ms to load the account, messaging and filesystem",
@@ -80,14 +78,14 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let start_time = Instant::now();
-    let identity = account.identity().await?;
+    let identity = instance.identity().await?;
     let end_time = start_time.elapsed();
     println!("Took {}ms to load the own identity", end_time.as_millis());
 
     println!("Username: {}#{}", identity.username(), identity.short_id());
 
     let start_time = Instant::now();
-    let mut friends = account.list_friends().await?;
+    let mut friends = instance.list_friends().await?;
     let end_time = start_time.elapsed();
     println!("Took {}ms to load friends list", end_time.as_millis());
 
@@ -98,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
         table.set_header(vec!["Username", "DID"]);
 
         let start_time = Instant::now();
-        let mut identites = account.get_identity(Identifier::DIDList(friends.clone()));
+        let mut identites = instance.get_identity(Identifier::DIDList(friends.clone()));
         let end_time = start_time.elapsed();
         println!("Took {}ms to load friends identities", end_time.as_millis());
 
@@ -120,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let start_time = Instant::now();
-    let conversations = rg.list_conversations().await?;
+    let conversations = instance.list_conversations().await?;
     let end_time = start_time.elapsed();
     println!(
         "Took {}ms to load list of conversations",
@@ -132,13 +130,13 @@ async fn main() -> anyhow::Result<()> {
     let mut table = Table::new();
     table.set_header(vec!["ID", "Name", "Type", "Recipients", "# of Messages"]);
     for convo in conversations {
-        let recipients = account
+        let recipients = instance
             .get_identity(Identifier::DIDList(convo.recipients()))
             .map(|id| format!("{}#{}", id.username(), id.short_id()))
             .collect::<Vec<_>>()
             .await;
 
-        let count = rg.get_message_count(convo.id()).await?;
+        let count = instance.get_message_count(convo.id()).await?;
 
         table.add_row(vec![
             convo.id().to_string(),
