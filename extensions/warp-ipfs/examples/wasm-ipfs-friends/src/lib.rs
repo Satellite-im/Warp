@@ -8,11 +8,11 @@ use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::{Friends, LocalIdentity, MultiPass, MultiPassEvent, MultiPassEventKind};
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::Config;
-use warp_ipfs::{WarpIpfs, WarpIpfsBuilder};
+use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, HtmlElement};
 
-async fn account(username: Option<&str>) -> Result<WarpIpfs, Error> {
+async fn account(username: Option<&str>) -> Result<WarpIpfsInstance, Error> {
     let tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;

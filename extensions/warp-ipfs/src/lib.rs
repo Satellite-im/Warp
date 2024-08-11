@@ -23,6 +23,12 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{error, info, warn, Instrument, Span};
 use uuid::Uuid;
 
+use crate::config::{Bootstrap, DiscoveryType};
+use crate::store::discovery::Discovery;
+use crate::store::phonebook::PhoneBook;
+use crate::store::{ecdh_decrypt, PeerIdExt};
+use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+use crate::utils::{ByteCollection, ReaderStream};
 use config::Config;
 use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
@@ -56,14 +62,8 @@ use warp::raygun::{
     RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
+use warp::warp::Warp;
 use warp::{Extension, SingleHandle};
-
-use crate::config::{Bootstrap, DiscoveryType};
-use crate::store::discovery::Discovery;
-use crate::store::phonebook::PhoneBook;
-use crate::store::{ecdh_decrypt, PeerIdExt};
-use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
-use crate::utils::{ByteCollection, ReaderStream};
 
 mod behaviour;
 pub mod config;
@@ -84,6 +84,8 @@ pub struct WarpIpfs {
     raygun_tx: EventSubscription<RayGunEventKind>,
     constellation_tx: EventSubscription<ConstellationEventKind>,
 }
+
+pub type WarpIpfsInstance = Warp<WarpIpfs, WarpIpfs, WarpIpfs>;
 
 struct Inner {
     config: Config,
@@ -125,7 +127,7 @@ impl WarpIpfsBuilder {
 
 impl core::future::IntoFuture for WarpIpfsBuilder {
     type IntoFuture = BoxFuture<'static, Self::Output>;
-    type Output = WarpIpfs;
+    type Output = WarpIpfsInstance;
 
     fn into_future(self) -> Self::IntoFuture {
         async move { WarpIpfs::new(self.config, self.tesseract).await }.boxed()
@@ -152,7 +154,7 @@ impl WarpIpfs {
 }
 
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: impl Into<Option<Tesseract>>) -> WarpIpfs {
+    pub async fn new(config: Config, tesseract: impl Into<Option<Tesseract>>) -> WarpIpfsInstance {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
@@ -214,7 +216,7 @@ impl WarpIpfs {
             _ = identity.initialize_store(false).await;
         }
 
-        identity
+        Warp::new(&identity, &identity, &identity)
     }
 
     async fn initialize_store(&self, init: bool) -> Result<(), Error> {

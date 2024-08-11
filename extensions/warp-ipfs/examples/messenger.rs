@@ -30,7 +30,7 @@ use warp::raygun::{
     RayGun, RayGunAttachment, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
-use warp_ipfs::{WarpIpfs, WarpIpfsBuilder};
+use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
 
 #[derive(Debug, Parser)]
 #[clap(name = "messenger")]
@@ -76,7 +76,7 @@ async fn setup<P: AsRef<Path>>(
     path: Option<P>,
     passphrase: Zeroizing<String>,
     opt: &Opt,
-) -> anyhow::Result<(WarpIpfs, Option<IdentityProfile>)> {
+) -> anyhow::Result<(WarpIpfsInstance, Option<IdentityProfile>)> {
     let mut config = match path.as_ref() {
         Some(path) => warp_ipfs::config::Config::production(path),
         None => warp_ipfs::config::Config::testing(),

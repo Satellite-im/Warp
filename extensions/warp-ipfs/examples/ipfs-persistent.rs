@@ -12,7 +12,7 @@ use warp::{
     constellation::{Constellation, Progression},
     multipass::MultiPass,
 };
-use warp_ipfs::{config::Config, WarpIpfs, WarpIpfsBuilder};
+use warp_ipfs::{config::Config, WarpIpfsBuilder, WarpIpfsInstance};
 
 #[derive(Debug, Parser)]
 #[clap(name = "")]
@@ -60,7 +60,7 @@ async fn setup_persistent<P: AsRef<Path>>(
     username: Option<&str>,
     path: P,
     opt: &Opt,
-) -> anyhow::Result<WarpIpfs> {
+) -> anyhow::Result<WarpIpfsInstance> {
     let path = path.as_ref();
 
     let mut config = Config::production(path);

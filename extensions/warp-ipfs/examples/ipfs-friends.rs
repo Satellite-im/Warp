@@ -6,9 +6,9 @@ use warp::crypto::rand::{self, prelude::*};
 use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::{Friends, LocalIdentity, MultiPass, MultiPassEvent, MultiPassEventKind};
 use warp_ipfs::config::Config;
-use warp_ipfs::{WarpIpfs, WarpIpfsBuilder};
+use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
 
-async fn account(username: Option<&str>) -> anyhow::Result<WarpIpfs> {
+async fn account(username: Option<&str>) -> anyhow::Result<WarpIpfsInstance> {
     let config = Config::development();
     let mut account = WarpIpfsBuilder::default().set_config(config).await;
 

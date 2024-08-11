@@ -18,7 +18,7 @@ use warp::multipass::{
     MultiPassEvent, MultiPassImportExport,
 };
 use warp_ipfs::config::{Bootstrap, Config, Discovery, DiscoveryType};
-use warp_ipfs::{WarpIpfs, WarpIpfsBuilder};
+use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
 
 #[derive(Debug, Parser)]
 #[clap(name = "identity-interface")]
@@ -61,7 +61,7 @@ async fn account(
     path: Option<PathBuf>,
     username: Option<&str>,
     opt: &Opt,
-) -> anyhow::Result<(WarpIpfs, Option<IdentityProfile>)> {
+) -> anyhow::Result<(WarpIpfsInstance, Option<IdentityProfile>)> {
     let mut config = match path.as_ref() {
         Some(path) => Config::production(path),
         None => Config::testing(),

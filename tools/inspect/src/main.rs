@@ -11,7 +11,7 @@ use warp::multipass::{Friends, LocalIdentity, MultiPass};
 use warp::raygun::RayGun;
 use warp::tesseract::Tesseract;
 use warp_ipfs::config::Discovery;
-use warp_ipfs::{WarpIpfs, WarpIpfsBuilder};
+use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
 
 #[derive(Debug, Parser)]
 #[clap(name = "inspect")]
@@ -33,7 +33,7 @@ async fn setup<P: AsRef<Path>>(
     path: P,
     keystore: Option<String>,
     passphrase: Zeroizing<String>,
-) -> anyhow::Result<WarpIpfs> {
+) -> anyhow::Result<WarpIpfsInstance> {
     let path = path.as_ref();
     let keystore_path = path.join(keystore.unwrap_or("tesseract_store".into()));
 
