@@ -4,16 +4,13 @@ use futures::StreamExt;
 
 use warp::crypto::rand::{self, prelude::*};
 use warp::multipass::identity::{Identifier, Identity};
-use warp::multipass::{MultiPass, MultiPassEventKind};
+use warp::multipass::{Friends, LocalIdentity, MultiPass, MultiPassEvent, MultiPassEventKind};
 use warp_ipfs::config::Config;
-use warp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::{WarpIpfs, WarpIpfsBuilder};
 
-async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
+async fn account(username: Option<&str>) -> anyhow::Result<WarpIpfs> {
     let config = Config::development();
-    let (mut account, _, _) = WarpIpfsBuilder::default()
-        .set_config(config)
-        .finalize()
-        .await;
+    let mut account = WarpIpfsBuilder::default().set_config(config).await;
 
     account
         .tesseract()
