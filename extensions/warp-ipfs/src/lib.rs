@@ -1613,6 +1613,18 @@ impl RayGun for WarpIpfs {
             .update_conversation_settings(conversation_id, settings)
             .await
     }
+
+    async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .archived_conversation(conversation_id)
+            .await
+    }
+
+    async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .unarchived_conversation(conversation_id)
+            .await
+    }
 }
 
 #[async_trait::async_trait]

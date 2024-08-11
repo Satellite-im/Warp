@@ -21,8 +21,12 @@ mod test {
 
     #[cfg(not(target_arch = "wasm32"))]
     use tokio::test as async_test;
+
     use warp::multipass::{Friends, MultiPassEvent};
     use warp::raygun::{RayGun, RayGunGroupConversation, RayGunStream};
+
+    use uuid::Uuid;
+    use warp::error::Error;
 
     #[async_test]
     async fn create_empty_group_conversation() -> anyhow::Result<()> {
@@ -1557,6 +1561,67 @@ mod test {
             }
         })
         .await?;
+
+        Ok(())
+    }
+
+    #[async_test]
+    async fn archive_unarchive_conversation() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![(
+            None,
+            None,
+            Some("test::archive_unarchive_conversation".into()),
+        )])
+        .await?;
+
+        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
+
+        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
+
+        chat_a
+            .create_group_conversation(None, vec![], Default::default())
+            .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            let mut c_id = Uuid::nil();
+            let mut archived = false;
+            let mut unarchived = false;
+            loop {
+                tokio::select! {
+                    Some(event) = chat_subscribe_a.next() => {
+                        match event {
+                            RayGunEventKind::ConversationCreated{ conversation_id } => {
+                                c_id = conversation_id;
+                                chat_a.archived_conversation(conversation_id).await?;
+                            }
+                            RayGunEventKind::ConversationArchived{ conversation_id } => {
+                                assert_eq!(conversation_id, c_id);
+                                assert!(!archived);
+                                assert!(!unarchived);
+                                let conversation = chat_a.get_conversation(c_id).await?;
+                                assert!(conversation.archived());
+                                archived = true;
+                                chat_a.unarchived_conversation(conversation_id).await?;
+                            }
+                            RayGunEventKind::ConversationUnarchived{ conversation_id } => {
+                                assert_eq!(conversation_id, c_id);
+                                assert!(archived);
+                                assert!(!unarchived);
+                                let conversation = chat_a.get_conversation(conversation_id).await?;
+                                assert!(!conversation.archived());
+                                unarchived = true;
+                            }
+                            RayGunEventKind::ConversationDeleted { .. } => unreachable!()
+                        }
+                    }
+                }
+                if c_id != Uuid::nil() && archived && unarchived {
+                    break;
+                }
+            }
+            Ok::<_, Error>(())
+        })
+        .await??;
 
         Ok(())
     }
