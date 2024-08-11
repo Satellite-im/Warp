@@ -2358,7 +2358,7 @@ impl IdentityStore {
 
     pub async fn profile_banner(&self) -> Result<IdentityImage, Error> {
         if self.config.store_setting().disable_images {
-            return Err(Error::InvalidIdentityPicture);
+            return Err(Error::InvalidIdentityBanner);
         }
 
         let document = self.own_identity_document().await?;
@@ -2369,7 +2369,7 @@ impl IdentityStore {
                 .map_err(|_| Error::InvalidIdentityBanner);
         }
 
-        Err(Error::InvalidIdentityPicture)
+        Err(Error::InvalidIdentityBanner)
     }
 
     #[tracing::instrument(skip(self))]
@@ -2421,7 +2421,7 @@ impl IdentityStore {
         if let Some(cid) = document.metadata.profile_banner {
             return get_image(&self.ipfs, cid, &[], true, Some(MAX_IMAGE_SIZE))
                 .await
-                .map_err(|_| Error::InvalidIdentityPicture);
+                .map_err(|_| Error::InvalidIdentityBanner);
         }
 
         Err(Error::InvalidIdentityBanner)
