@@ -13,7 +13,7 @@ mod test {
         },
     };
 
-    use crate::common::{create_accounts_and_chat, PROFILE_IMAGE};
+    use crate::common::{create_accounts, PROFILE_IMAGE};
 
     #[cfg(target_arch = "wasm32")]
     use wasm_bindgen_test::wasm_bindgen_test as async_test;
@@ -23,48 +23,47 @@ mod test {
 
     #[cfg(not(target_arch = "wasm32"))]
     use tokio::test as async_test;
+    use warp::constellation::Constellation;
+    use warp::multipass::{Friends, MultiPassEvent};
+    use warp::raygun::{RayGun, RayGunAttachment, RayGunEvents, RayGunStream};
 
     #[async_test]
     async fn create_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::create_conversation".into())),
             (None, None, Some("test::create_conversation".into())),
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
-
-        assert_eq!(id_a, id_b);
-
-        let conversation = chat_a.get_conversation(id_a).await?;
+        let conversation = instance_a.get_conversation(conversation_id).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
         assert_eq!(conversation.recipients().len(), 2);
         assert!(conversation.recipients().contains(&did_a));
@@ -74,45 +73,41 @@ mod test {
 
     #[async_test]
     async fn conversation_favorite() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::conversation_favorite".into())),
             (None, None, Some("test::conversation_favorite".into())),
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
-
-        assert_eq!(id_a, id_b);
-
-        let conversation = chat_a.get_conversation(id_a).await?;
+        let conversation = instance_a.get_conversation(conversation_id).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
         assert_eq!(conversation.recipients().len(), 2);
         assert!(conversation.recipients().contains(&did_a));
@@ -120,97 +115,95 @@ mod test {
         assert!(!conversation.favorite());
 
         // favorite conversation
-        chat_a.set_favorite_conversation(id_a, true).await?;
+        instance_a
+            .set_favorite_conversation(conversation_id, true)
+            .await?;
 
-        let conversation = chat_a.get_conversation(id_a).await?;
+        let conversation = instance_a.get_conversation(conversation_id).await?;
         assert!(conversation.favorite());
 
         // unmark conversation
-        chat_a.set_favorite_conversation(id_a, false).await?;
+        instance_a
+            .set_favorite_conversation(conversation_id, false)
+            .await?;
 
-        let conversation = chat_a.get_conversation(id_a).await?;
+        let conversation = instance_a.get_conversation(conversation_id).await?;
         assert!(!conversation.favorite());
         Ok(())
     }
 
     #[async_test]
     async fn destroy_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::destroy_conversation".into())),
             (None, None, Some("test::destroy_conversation".into())),
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
-
-        assert_eq!(id_a, id_b);
-
-        let conversation = chat_a.get_conversation(id_a).await?;
+        let conversation = instance_a.get_conversation(conversation_id).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
         assert_eq!(conversation.recipients().len(), 2);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
         let id = conversation.id();
 
-        chat_a.delete(id, None).await?;
+        instance_a.delete(id, None).await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
+            let mut a_del = false;
+            let mut b_del = false;
             loop {
-                if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    assert_eq!(conversation_id, id);
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationDeleted { conversation_id }) = chat_subscribe_a.next() => {
+                        assert_eq!(id, conversation_id);
+                        a_del = true;
+                    },
+                    Some(RayGunEventKind::ConversationDeleted { conversation_id }) = chat_subscribe_b.next() => {
+                        assert_eq!(id, conversation_id);
+                        b_del = true;
+                    },
+                }
+
+                if a_del && b_del {
                     break;
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    assert_eq!(conversation_id, id);
-                    break;
-                }
-            }
-        })
-        .await?;
         Ok(())
     }
 
     #[async_test]
     async fn send_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -224,40 +217,40 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
+        let mut conversation_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(conversation_id).await?;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
-
-        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
+        instance_a
+            .send(conversation_id, vec!["Hello, World".into()])
+            .await?;
 
         let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -266,7 +259,7 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -279,7 +272,7 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -291,7 +284,7 @@ mod test {
 
     #[async_test]
     async fn send_and_download_attachment_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -305,46 +298,44 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, mut fs_a, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
-
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+        let mut conversation_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(conversation_id).await?;
 
         //upload file to constellation to attach file from constellation
 
-        fs_a.put_buffer("image.png", PROFILE_IMAGE).await?;
+        instance_a.put_buffer("image.png", PROFILE_IMAGE).await?;
 
-        let (_, mut stream) = chat_a
+        let (_, mut stream) = instance_a
             .attach(
-                id_a,
+                conversation_id,
                 None,
                 vec![Location::Constellation {
                     path: "image.png".into(),
@@ -382,7 +373,7 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -395,7 +386,7 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break instance_b.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -410,8 +401,8 @@ mod test {
 
         assert_eq!(file.name(), "image.png");
 
-        let stream = chat_b
-            .download_stream(id_a, message_a.id(), "image.png")
+        let stream = instance_b
+            .download_stream(conversation_id, message_a.id(), "image.png")
             .await?;
 
         let data = stream.try_collect::<Vec<_>>().await?.concat();
@@ -423,7 +414,7 @@ mod test {
     #[async_test]
     async fn send_attachment_stream_and_download_attachment_in_conversation() -> anyhow::Result<()>
     {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -437,42 +428,40 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
+        let mut conversation_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(conversation_id).await?;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
-
-        let (_, mut stream) = chat_a
+        let (_, mut stream) = instance_a
             .attach(
-                id_a,
+                conversation_id,
                 None,
                 vec![Location::Stream {
                     name: "image.png".into(),
@@ -512,7 +501,7 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -525,7 +514,7 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break instance_b.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -540,8 +529,8 @@ mod test {
 
         assert_eq!(file.name(), "image.png");
 
-        let stream = chat_b
-            .download_stream(id_a, message_a.id(), "image.png")
+        let stream = instance_b
+            .download_stream(conversation_id, message_a.id(), "image.png")
             .await?;
 
         let data = stream.try_collect::<Vec<_>>().await?.concat();
@@ -552,7 +541,7 @@ mod test {
 
     #[async_test]
     async fn delete_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -566,40 +555,40 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
+        let mut conversation_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(conversation_id).await?;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
-
-        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
+        instance_a
+            .send(conversation_id, vec!["Hello, World".into()])
+            .await?;
 
         let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -608,7 +597,7 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -621,7 +610,7 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break instance_b.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -629,7 +618,9 @@ mod test {
 
         assert_eq!(message_a, message_b);
 
-        chat_a.delete(id_a, Some(message_a.id())).await?;
+        instance_a
+            .delete(conversation_id, Some(message_a.id()))
+            .await?;
 
         // Maybe cross check the message id and convo
         crate::common::timeout(Duration::from_secs(60), async {
@@ -655,7 +646,7 @@ mod test {
 
     #[async_test]
     async fn edit_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -669,40 +660,40 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
+        let mut conversation_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(conversation_id).await?;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
-
-        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
+        instance_a
+            .send(conversation_id, vec!["Hello, World".into()])
+            .await?;
 
         let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -711,7 +702,7 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -724,7 +715,7 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break instance_b.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -732,8 +723,8 @@ mod test {
 
         assert_eq!(message_a, message_b);
 
-        chat_a
-            .edit(id_a, message_a.id(), vec!["New Message".into()])
+        instance_a
+            .edit(conversation_id, message_a.id(), vec!["New Message".into()])
             .await?;
 
         let message_a = crate::common::timeout(Duration::from_secs(60), async {
@@ -743,7 +734,7 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -756,7 +747,7 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break instance_b.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -768,7 +759,7 @@ mod test {
 
     #[async_test]
     async fn react_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -782,40 +773,40 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
+        let mut conversation_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(conversation_id).await?;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
-
-        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
+        instance_a
+            .send(conversation_id, vec!["Hello, World".into()])
+            .await?;
 
         let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -824,7 +815,7 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -837,7 +828,7 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break instance_b.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -845,8 +836,13 @@ mod test {
 
         assert_eq!(message_a, message_b);
 
-        chat_a
-            .react(id_a, message_a.id(), ReactionState::Add, ":smile:".into())
+        instance_a
+            .react(
+                conversation_id,
+                message_a.id(),
+                ReactionState::Add,
+                ":smile:".into(),
+            )
             .await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
@@ -858,12 +854,11 @@ mod test {
                     reaction,
                 }) = conversation_a.next().await
                 {
-                    assert_eq!(id_a, conversation_id);
                     assert_eq!(message_id, message_a.id());
                     assert_eq!(did_key, did_a);
                     assert_eq!(reaction, ":smile:");
                     //Check the actual message itself
-                    let message = chat_a
+                    let message = instance_a
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
@@ -887,12 +882,11 @@ mod test {
                     reaction,
                 }) = conversation_b.next().await
                 {
-                    assert_eq!(id_b, conversation_id);
                     assert_eq!(message_id, message_b.id());
                     assert_eq!(did_key, did_a);
                     assert_eq!(reaction, ":smile:");
                     //Check the actual message itself
-                    let message = chat_b
+                    let message = instance_b
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
@@ -907,9 +901,9 @@ mod test {
         })
         .await?;
 
-        chat_a
+        instance_a
             .react(
-                id_a,
+                conversation_id,
                 message_a.id(),
                 ReactionState::Remove,
                 ":smile:".into(),
@@ -925,12 +919,11 @@ mod test {
                     reaction,
                 }) = conversation_a.next().await
                 {
-                    assert_eq!(id_a, conversation_id);
                     assert_eq!(message_id, message_a.id());
                     assert_eq!(did_key, did_a);
                     assert_eq!(reaction, ":smile:");
                     //Check the actual message itself
-                    let message = chat_a
+                    let message = instance_a
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
@@ -950,12 +943,11 @@ mod test {
                     reaction,
                 }) = conversation_b.next().await
                 {
-                    assert_eq!(id_b, conversation_id);
                     assert_eq!(message_id, message_b.id());
                     assert_eq!(did_key, did_a);
                     assert_eq!(reaction, ":smile:");
                     //Check the actual message itself
-                    let message = chat_b
+                    let message = instance_b
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
@@ -971,46 +963,46 @@ mod test {
 
     #[async_test]
     async fn pin_message_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (None, None, Some("test::pin_message_in_conversation".into())),
             (None, None, Some("test::pin_message_in_conversation".into())),
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
+        let mut conversation_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(conversation_id).await?;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
-
-        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
+        instance_a
+            .send(conversation_id, vec!["Hello, World".into()])
+            .await?;
 
         let message_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -1019,7 +1011,7 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    break chat_a.get_message(conversation_id, message_id).await;
+                    break instance_a.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -1032,7 +1024,7 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break instance_b.get_message(conversation_id, message_id).await;
                 }
             }
         })
@@ -1040,7 +1032,9 @@ mod test {
 
         assert_eq!(message_a, message_b);
 
-        chat_a.pin(id_a, message_a.id(), PinState::Pin).await?;
+        instance_a
+            .pin(conversation_id, message_a.id(), PinState::Pin)
+            .await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -1049,9 +1043,8 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    assert_eq!(id_a, conversation_id);
                     assert_eq!(message_id, message_a.id());
-                    let message = chat_a
+                    let message = instance_a
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
@@ -1069,9 +1062,8 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    assert_eq!(id_b, conversation_id);
                     assert_eq!(message_id, message_b.id());
-                    let message = chat_a
+                    let message = instance_a
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
@@ -1082,7 +1074,9 @@ mod test {
         })
         .await?;
 
-        chat_a.pin(id_a, message_a.id(), PinState::Unpin).await?;
+        instance_a
+            .pin(conversation_id, message_a.id(), PinState::Unpin)
+            .await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -1091,9 +1085,8 @@ mod test {
                     message_id,
                 }) = conversation_a.next().await
                 {
-                    assert_eq!(id_a, conversation_id);
                     assert_eq!(message_id, message_a.id());
-                    let message = chat_a
+                    let message = instance_a
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
@@ -1111,9 +1104,8 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    assert_eq!(id_b, conversation_id);
                     assert_eq!(message_id, message_b.id());
-                    let message = chat_a
+                    let message = instance_a
                         .get_message(conversation_id, message_id)
                         .await
                         .expect("Message exist");
@@ -1129,7 +1121,7 @@ mod test {
 
     #[async_test]
     async fn event_in_conversation() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -1143,49 +1135,48 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
+        let mut conversation_b = instance_b.get_conversation_stream(conversation_id).await?;
 
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
-
-        chat_a.send_event(id_a, MessageEvent::Typing).await?;
+        instance_a
+            .send_event(conversation_id, MessageEvent::Typing)
+            .await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::EventReceived {
-                    conversation_id,
+                    conversation_id: _,
                     did_key,
                     event,
                 }) = conversation_b.next().await
                 {
-                    assert_eq!(conversation_id, id_b);
                     assert_eq!(did_key, did_a);
                     assert_eq!(event, MessageEvent::Typing);
                     break;
@@ -1194,17 +1185,18 @@ mod test {
         })
         .await?;
 
-        chat_a.cancel_event(id_a, MessageEvent::Typing).await?;
+        instance_a
+            .cancel_event(conversation_id, MessageEvent::Typing)
+            .await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(MessageEventKind::EventCancelled {
-                    conversation_id,
+                    conversation_id: _,
                     did_key,
                     event,
                 }) = conversation_b.next().await
                 {
-                    assert_eq!(conversation_id, id_b);
                     assert_eq!(did_key, did_a);
                     assert_eq!(event, MessageEvent::Typing);
                     break;
@@ -1218,7 +1210,7 @@ mod test {
 
     #[async_test]
     async fn delete_conversation_when_blocked() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -1232,48 +1224,44 @@ mod test {
         ])
         .await?;
 
-        let (mut _account_a, mut chat_a, _, did_a, _) = accounts.first().cloned().unwrap();
-        let (mut _account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut account_subscribe_a = _account_a.multipass_subscribe().await?;
-        let mut account_subscribe_b = _account_b.multipass_subscribe().await?;
+        let mut account_subscribe_a = instance_a.multipass_subscribe().await?;
+        let mut account_subscribe_b = instance_b.multipass_subscribe().await?;
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
-        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
             loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_a.next().await
-                {
-                    break conversation_id;
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
                 }
             }
-        })
-        .await?;
+        }).await?;
 
-        let id_b = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
-                    chat_subscribe_b.next().await
-                {
-                    break conversation_id;
-                }
-            }
-        })
-        .await?;
-
-        assert_eq!(id_a, id_b);
-
-        let conversation = chat_a.get_conversation(id_a).await?;
+        let conversation = instance_a.get_conversation(conversation_id).await?;
         assert_eq!(conversation.conversation_type(), ConversationType::Direct);
         assert_eq!(conversation.recipients().len(), 2);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
 
-        _account_a.block(&did_b).await?;
+        instance_a.block(&did_b).await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
             loop {
