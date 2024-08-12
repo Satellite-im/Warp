@@ -346,10 +346,12 @@ where
         self.constellation.open_directory(path)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         self.constellation.put(name, path).await
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream, Error> {
         self.constellation.get(name, path).await
     }
