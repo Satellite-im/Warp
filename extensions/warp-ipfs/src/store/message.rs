@@ -2997,7 +2997,7 @@ impl ConversationInner {
     }
 
     pub async fn send_message_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessagingEvents,
     ) -> Result<(), Error> {
