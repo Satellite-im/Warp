@@ -53,6 +53,21 @@ where
     }
 }
 
+impl<M, R, C> Warp<M, R, C>
+where
+    M: MultiPass,
+    R: RayGun,
+    C: Constellation,
+{
+    pub fn from(multipass: M, raygun: R, constellation: C) -> Self {
+        Self {
+            multipass,
+            raygun,
+            constellation,
+        }
+    }
+}
+
 impl<M, R, C> Clone for Warp<M, R, C>
 where
     M: MultiPass + Clone,
@@ -65,6 +80,37 @@ where
             raygun: self.raygun.clone(),
             constellation: self.constellation.clone(),
         }
+    }
+}
+
+impl<M, R, C> Warp<M, R, C>
+where
+    M: MultiPass,
+    R: RayGun,
+    C: Constellation,
+{
+    pub fn multipass(&self) -> &M {
+        &self.multipass
+    }
+
+    pub fn raygun(&self) -> &R {
+        &self.raygun
+    }
+
+    pub fn constellation(&self) -> &C {
+        &self.constellation
+    }
+
+    pub fn multipass_mut(&mut self) -> &mut M {
+        &mut self.multipass
+    }
+
+    pub fn raygun_mut(&mut self) -> &mut R {
+        &mut self.raygun
+    }
+
+    pub fn constellation_mut(&mut self) -> &mut C {
+        &mut self.constellation
     }
 }
 
