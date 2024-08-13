@@ -25,7 +25,9 @@ mod test {
     use tokio::test as async_test;
     use warp::constellation::Constellation;
     use warp::multipass::{Friends, MultiPassEvent};
-    use warp::raygun::{RayGun, RayGunAttachment, RayGunEvents, RayGunStream};
+    use warp::raygun::{
+        RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEvents, RayGunStream,
+    };
 
     #[async_test]
     async fn create_conversation() -> anyhow::Result<()> {
@@ -963,7 +965,7 @@ mod test {
 
     #[async_test]
     async fn change_conversation_description() -> anyhow::Result<()> {
-        let accounts = create_accounts_and_chat(vec![
+        let accounts = create_accounts(vec![
             (
                 None,
                 None,
@@ -977,13 +979,13 @@ mod test {
         ])
         .await?;
 
-        let (_account_a, mut chat_a, _, _, _) = accounts.first().cloned().unwrap();
-        let (_account_b, mut chat_b, _, did_b, _) = accounts.last().cloned().unwrap();
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
 
-        let mut chat_subscribe_a = chat_a.raygun_subscribe().await?;
-        let mut chat_subscribe_b = chat_b.raygun_subscribe().await?;
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
-        chat_a.create_conversation(&did_b).await?;
+        instance_a.create_conversation(&did_b).await?;
 
         let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -1007,10 +1009,10 @@ mod test {
         })
         .await?;
 
-        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
-        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+        let mut conversation_a = instance_a.get_conversation_stream(id_a).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(id_b).await?;
 
-        chat_a
+        instance_a
             .set_conversation_description(id_a, Some("hello, world!"))
             .await?;
 
@@ -1044,10 +1046,10 @@ mod test {
         })
         .await?;
 
-        let conversation = chat_a.get_conversation(id_a).await?;
+        let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(conversation.description().as_deref(), Some("hello, world!"));
 
-        chat_a.set_conversation_description(id_a, None).await?;
+        instance_a.set_conversation_description(id_a, None).await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -1079,7 +1081,7 @@ mod test {
         })
         .await?;
 
-        let conversation = chat_a.get_conversation(id_a).await?;
+        let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(conversation.description(), None);
 
         Ok(())
