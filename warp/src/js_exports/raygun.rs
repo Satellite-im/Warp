@@ -748,7 +748,7 @@ impl Message {
         self.inner
             .attachments()
             .iter()
-            .map(|v| serde_wasm_bindgen::to_value(v).unwrap())
+            .filter_map(|v| serde_wasm_bindgen::to_value(v).ok())
             .collect()
     }
 
