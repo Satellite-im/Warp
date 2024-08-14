@@ -283,6 +283,49 @@ impl Config {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+impl Config {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = path))]
+    pub fn path_mut_wasm(&mut self, path: String) {
+        self.path = Some(PathBuf::from(&path))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = persist))]
+    pub fn persist_mut_wasm(&mut self, persist: bool) {
+        self.persist = persist
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = enable_relay))]
+    pub fn enable_relay_mut_wasm(&mut self, enable: bool) {
+        self.enable_relay = enable
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = save_phrase))]
+    pub fn save_phrase_mut_wasm(&mut self, save: bool) {
+        self.save_phrase = save
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = max_storage_size))]
+    pub fn max_storage_size_mut_wasm(&mut self, size: Option<usize>) {
+        self.max_storage_size = size
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = max_file_size))]
+    pub fn max_file_size_mut_wasm(&mut self, size: Option<usize>) {
+        self.max_file_size = size
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = set_thumbnail_size))]
+    pub fn thumbnail_size_mut_wasm(&mut self, size_x: u32, size_y: u32) {
+        self.thumbnail_size = (size_x, size_y)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = thumbnail_exact_format))]
+    pub fn thumbnail_exact_format_mut_wasm(&mut self, exact: bool) {
+        self.thumbnail_exact_format = exact
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         #[cfg(not(target_arch = "wasm32"))]
