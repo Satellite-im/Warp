@@ -453,7 +453,7 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
+        let inner = &*self.inner.read().await;
         inner.send_event(conversation_id, event).await
     }
 
@@ -462,7 +462,7 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
+        let inner = &*self.inner.read().await;
         inner.cancel_event(conversation_id, event).await
     }
 
@@ -3237,7 +3237,7 @@ impl ConversationInner {
     }
 
     pub async fn send_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
@@ -3253,7 +3253,7 @@ impl ConversationInner {
     }
 
     pub async fn cancel_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
@@ -3295,7 +3295,7 @@ impl ConversationInner {
     }
 
     pub async fn send_message_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessagingEvents,
     ) -> Result<(), Error> {
