@@ -396,6 +396,12 @@ async fn main() -> anyhow::Result<()> {
 
                             stream_map.insert(conversation_id, stream);
                         },
+                        warp::raygun::RayGunEventKind::ConversationArchived { conversation_id } => {
+                            writeln!(stdout, "Conversation {conversation_id} has been archived")?;
+                        },
+                        warp::raygun::RayGunEventKind::ConversationUnarchived { conversation_id } => {
+                            writeln!(stdout, "Conversation {conversation_id} has been unarchived")?;
+                        },
                         warp::raygun::RayGunEventKind::ConversationDeleted { conversation_id } => {
                             stream_map.remove(&conversation_id);
 

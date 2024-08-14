@@ -450,7 +450,7 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
+        let inner = &*self.inner.read().await;
         inner.send_event(conversation_id, event).await
     }
 
@@ -459,8 +459,18 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
+        let inner = &*self.inner.read().await;
         inner.cancel_event(conversation_id, event).await
+    }
+
+    pub async fn archived_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.archived_conversation(conversation_id).await
+    }
+
+    pub async fn unarchived_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.unarchived_conversation(conversation_id).await
     }
 }
 
@@ -2929,7 +2939,7 @@ impl ConversationInner {
     }
 
     pub async fn send_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
@@ -2945,7 +2955,7 @@ impl ConversationInner {
     }
 
     pub async fn cancel_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
@@ -2960,8 +2970,34 @@ impl ConversationInner {
         self.send_message_event(conversation_id, event).await
     }
 
+    pub async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let prev = conversation.archived;
+        conversation.archived = true;
+        self.set_document(conversation).await?;
+        if !prev {
+            self.event
+                .emit(RayGunEventKind::ConversationArchived { conversation_id })
+                .await;
+        }
+        Ok(())
+    }
+
+    pub async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let prev = conversation.archived;
+        conversation.archived = false;
+        self.set_document(conversation).await?;
+        if prev {
+            self.event
+                .emit(RayGunEventKind::ConversationUnarchived { conversation_id })
+                .await;
+        }
+        Ok(())
+    }
+
     pub async fn send_message_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessagingEvents,
     ) -> Result<(), Error> {
@@ -3339,6 +3375,7 @@ async fn process_conversation(
 
             //TODO: Resolve message list
             conversation.messages = None;
+            conversation.archived = false;
             conversation.favorite = false;
 
             this.set_document(conversation).await?;
@@ -3783,6 +3820,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = this.request_key(conversation_id, &did).await {
@@ -3810,6 +3848,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if can_emit {
@@ -3842,6 +3881,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3856,6 +3896,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3878,6 +3919,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
