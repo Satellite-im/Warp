@@ -66,8 +66,8 @@ use crate::{
 };
 
 use super::{
-    document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt, MAX_MESSAGE_SIZE,
-    SHUTTLE_TIMEOUT,
+    document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt, MAX_CONVERSATION_DESCRIPTION,
+    MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
 };
 
 const CHAT_DIRECTORY: &str = "chat_media";
@@ -463,6 +463,14 @@ impl MessageStore {
         inner.cancel_event(conversation_id, event).await
     }
 
+    pub async fn set_description(
+        &self,
+        conversation_id: Uuid,
+        desc: Option<&str>,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.set_description(conversation_id, desc).await
+    }
     pub async fn archived_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.archived_conversation(conversation_id).await
@@ -2508,6 +2516,58 @@ impl ConversationInner {
         Ok(stream)
     }
 
+    pub async fn set_description(
+        &mut self,
+        conversation_id: Uuid,
+        desc: Option<&str>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+        let own_did = &self.identity.did_key();
+
+        if conversation.conversation_type() == ConversationType::Group {
+            let Some(creator) = conversation.creator.as_ref() else {
+                return Err(Error::InvalidConversation);
+            };
+            if own_did != creator {
+                return Err(Error::InvalidConversation); //TODO:
+            }
+        }
+
+        if let Some(desc) = desc {
+            if desc.is_empty() || desc.len() > MAX_CONVERSATION_DESCRIPTION {
+                return Err(Error::InvalidLength {
+                    context: "description".into(),
+                    minimum: Some(1),
+                    maximum: Some(MAX_CONVERSATION_DESCRIPTION),
+                    current: desc.len(),
+                });
+            }
+        }
+
+        conversation.description = desc.map(ToString::to_string);
+
+        self.set_document(conversation).await?;
+
+        let conversation = self.get(conversation_id).await?;
+
+        let ev = MessageEventKind::ConversationDescriptionChanged {
+            conversation_id,
+            description: desc.map(ToString::to_string),
+        };
+
+        _ = tx.send(ev);
+
+        let event = MessagingEvents::UpdateConversation {
+            conversation,
+            kind: ConversationUpdateKind::ChangeDescription {
+                description: desc.map(ToString::to_string),
+            },
+        };
+
+        self.publish(conversation_id, None, event, true).await
+    }
+
     pub async fn add_restricted(
         &mut self,
         conversation_id: Uuid,
@@ -3925,6 +3985,34 @@ async fn message_event(
                     if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
                         conversation_id,
                         settings,
+                    }) {
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                ConversationUpdateKind::ChangeDescription { description } => {
+                    if let Some(desc) = description.as_ref() {
+                        if desc.is_empty() || desc.len() > MAX_CONVERSATION_DESCRIPTION {
+                            return Err(Error::InvalidLength {
+                                context: "description".into(),
+                                minimum: Some(1),
+                                maximum: Some(MAX_CONVERSATION_DESCRIPTION),
+                                current: desc.len(),
+                            });
+                        }
+
+                        if matches!(document.description.as_ref(), Some(current_desc) if current_desc == desc)
+                        {
+                            return Ok(());
+                        }
+                    }
+
+                    conversation.excluded = document.excluded;
+                    conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
+                    this.set_document(conversation).await?;
+                    if let Err(e) = tx.send(MessageEventKind::ConversationDescriptionChanged {
+                        conversation_id,
+                        description,
                     }) {
                         tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }

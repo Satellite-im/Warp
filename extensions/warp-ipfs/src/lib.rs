@@ -52,8 +52,8 @@ use warp::multipass::{
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventKind,
+    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
@@ -1730,6 +1730,19 @@ impl RayGunEvents for WarpIpfs {
     ) -> Result<(), Error> {
         self.messaging_store()?
             .cancel_event(conversation_id, event)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl RayGunConversationInformation for WarpIpfs {
+    async fn set_conversation_description(
+        &mut self,
+        conversation_id: Uuid,
+        description: Option<&str>,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .set_description(conversation_id, description)
             .await
     }
 }
