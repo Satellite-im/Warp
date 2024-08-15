@@ -268,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
             biased;
             Some(event) = account_stream.next() => {
                 match event {
-                    warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did } => {
+                    warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did, .. } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
@@ -279,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
                             new_account.accept_request(&did).await?;
                         }
                     },
-                    warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
+                    warp::multipass::MultiPassEventKind::FriendRequestSent { to: did, .. } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())

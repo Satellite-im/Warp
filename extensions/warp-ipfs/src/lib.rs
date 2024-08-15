@@ -42,7 +42,8 @@ use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
 use warp::module::Module;
 use warp::multipass::identity::{
-    Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
+    FriendRequest, Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate,
+    Relationship,
 };
 use warp::multipass::{
     identity, Friends, GetIdentity, IdentityImportOption, IdentityInformation, ImportLocation,
@@ -1337,12 +1338,12 @@ impl Friends for WarpIpfs {
         store.close_request(pubkey).await
     }
 
-    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.identity_store(true).await?;
         store.list_incoming_request().await
     }
 
-    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.identity_store(true).await?;
         store.list_outgoing_request().await
     }
