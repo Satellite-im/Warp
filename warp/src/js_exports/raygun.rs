@@ -744,8 +744,12 @@ impl Message {
         self.inner.lines()
     }
 
-    pub fn attachments(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.attachments()).unwrap()
+    pub fn attachments(&self) -> Vec<JsValue> {
+        self.inner
+            .attachments()
+            .iter()
+            .filter_map(|v| serde_wasm_bindgen::to_value(v).ok())
+            .collect()
     }
 
     pub fn metadata(&self) -> JsValue {

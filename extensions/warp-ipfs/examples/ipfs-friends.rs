@@ -73,14 +73,16 @@ async fn main() -> anyhow::Result<()> {
     println!("{} Outgoing request:", username(&ident_a));
 
     for outgoing in account_a.list_outgoing_request().await? {
-        let ident = account_a.get_identity(Identifier::from(outgoing)).await?;
+        let identity = outgoing.identity();
+        let ident = account_a.get_identity(Identifier::from(identity)).await?;
         println!("To: {}", username(&ident));
         println!();
     }
 
     println!("{} Incoming request:", username(&ident_b));
     for incoming in account_b.list_incoming_request().await? {
-        let ident = account_b.get_identity(Identifier::from(incoming)).await?;
+        let identity = incoming.identity();
+        let ident = account_b.get_identity(Identifier::from(identity)).await?;
 
         println!("From: {}", username(&ident));
         println!();

@@ -265,7 +265,7 @@ async fn main() -> anyhow::Result<()> {
             biased;
             Some(event) = account_stream.next() => {
                 match event {
-                    warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did } => {
+                    warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did, .. } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
@@ -276,7 +276,7 @@ async fn main() -> anyhow::Result<()> {
                             instance.accept_request(&did).await?;
                         }
                     },
-                    warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
+                    warp::multipass::MultiPassEventKind::FriendRequestSent { to: did, .. } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
@@ -1157,6 +1157,20 @@ async fn message_event_handle<M: MultiPass, R: RayGun>(
         } => {
             if main_conversation_id == conversation_id {
                 writeln!(stdout, ">>> Conversation settings updated: {settings}")?;
+            }
+        }
+        MessageEventKind::ConversationDescriptionChanged {
+            conversation_id,
+            description,
+        } => {
+            if main_conversation_id == conversation_id {
+                match description {
+                    Some(desc) => writeln!(
+                        stdout,
+                        ">>> Conversation description changed to: \"{desc}\""
+                    )?,
+                    None => writeln!(stdout, ">>> Conversation description removed")?,
+                }
             }
         }
     }

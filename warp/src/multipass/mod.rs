@@ -1,19 +1,19 @@
 #![allow(clippy::result_large_err)]
 
+use chrono::{DateTime, Utc};
+use futures::stream::BoxStream;
+use futures::{Stream, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures::stream::BoxStream;
-use futures::{Stream, StreamExt};
-use serde::{Deserialize, Serialize};
-
 use identity::Identity;
 
 use crate::crypto::DID;
 use crate::error::Error;
-use crate::multipass::identity::{Identifier, IdentityUpdate};
+use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 use crate::tesseract::Tesseract;
 use crate::{Extension, SingleHandle};
 
@@ -26,8 +26,8 @@ pub mod identity;
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
-    FriendRequestReceived { from: DID },
-    FriendRequestSent { to: DID },
+    FriendRequestReceived { from: DID, date: DateTime<Utc> },
+    FriendRequestSent { to: DID, date: DateTime<Utc> },
     IncomingFriendRequestRejected { did: DID },
     OutgoingFriendRequestRejected { did: DID },
     IncomingFriendRequestClosed { did: DID },
@@ -152,7 +152,7 @@ pub trait Friends: Sync + Send {
     }
 
     /// List the incoming friend request
-    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -162,7 +162,7 @@ pub trait Friends: Sync + Send {
     }
 
     /// List the outgoing friend request
-    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Err(Error::Unimplemented)
     }
 

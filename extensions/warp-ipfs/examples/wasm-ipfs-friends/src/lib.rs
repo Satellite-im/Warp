@@ -92,14 +92,16 @@ pub async fn run() -> Result<(), JsError> {
     body.append_p(&format!("{} Outgoing request:", username(&ident_a)))?;
 
     for outgoing in account_a.list_outgoing_request().await? {
-        let ident = account_a.get_identity(Identifier::from(outgoing)).await?;
+        let identity = outgoing.identity();
+        let ident = account_a.get_identity(Identifier::from(identity)).await?;
         body.append_p(&format!("To: {}", username(&ident)))?;
         body.append_p("")?;
     }
 
     body.append_p(&format!("{} Incoming request:", username(&ident_b)))?;
     for incoming in account_b.list_incoming_request().await? {
-        let ident = account_b.get_identity(Identifier::from(incoming)).await?;
+        let identity = incoming.identity();
+        let ident = account_b.get_identity(Identifier::from(identity)).await?;
 
         body.append_p(&format!("From: {}", username(&ident)))?;
         body.append_p("")?;

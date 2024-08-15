@@ -48,7 +48,8 @@ use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
 use warp::module::Module;
 use warp::multipass::identity::{
-    Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
+    FriendRequest, Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate,
+    Relationship,
 };
 use warp::multipass::{
     identity, Friends, GetIdentity, IdentityImportOption, IdentityInformation, ImportLocation,
@@ -58,8 +59,8 @@ use warp::multipass::{
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventKind,
+    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::warp::Warp;
@@ -1313,12 +1314,12 @@ impl Friends for WarpIpfs {
         store.close_request(pubkey).await
     }
 
-    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.identity_store(true).await?;
         store.list_incoming_request().await
     }
 
-    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.identity_store(true).await?;
         store.list_outgoing_request().await
     }
@@ -1706,6 +1707,19 @@ impl RayGunEvents for WarpIpfs {
     ) -> Result<(), Error> {
         self.messaging_store()?
             .cancel_event(conversation_id, event)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl RayGunConversationInformation for WarpIpfs {
+    async fn set_conversation_description(
+        &mut self,
+        conversation_id: Uuid,
+        description: Option<&str>,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .set_description(conversation_id, description)
             .await
     }
 }

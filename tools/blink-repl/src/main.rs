@@ -323,7 +323,7 @@ async fn handle_multipass_event_stream<M: MultiPass>(
     mut stream: MultiPassEventStream,
 ) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
-        if let MultiPassEventKind::FriendRequestReceived { from } = evt {
+        if let MultiPassEventKind::FriendRequestReceived { from, .. } = evt {
             let _ = multipass.accept_request(&from).await;
         }
     }

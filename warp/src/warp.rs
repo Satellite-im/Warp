@@ -8,8 +8,8 @@ use crate::crypto::DID;
 use crate::error::Error;
 use crate::module::Module;
 use crate::multipass::identity::{
-    Identifier, Identity, IdentityImage, IdentityProfile, IdentityStatus, IdentityUpdate, Platform,
-    Relationship,
+    FriendRequest, Identifier, Identity, IdentityImage, IdentityProfile, IdentityStatus,
+    IdentityUpdate, Platform, Relationship,
 };
 use crate::multipass::{
     Friends, GetIdentity, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity,
@@ -18,8 +18,8 @@ use crate::multipass::{
 use crate::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventStream,
+    RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::warp::dummy::Dummy;
@@ -310,7 +310,7 @@ where
     }
 
     /// List the incoming friend request
-    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         self.multipass.list_incoming_request().await
     }
 
@@ -320,7 +320,7 @@ where
     }
 
     /// List the outgoing friend request
-    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         self.multipass.list_outgoing_request().await
     }
 
@@ -651,6 +651,24 @@ where
         event: MessageEvent,
     ) -> Result<(), Error> {
         self.raygun.cancel_event(conversation_id, event).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<M, R, C> RayGunConversationInformation for Warp<M, R, C>
+where
+    C: Constellation,
+    M: MultiPass,
+    R: RayGun,
+{
+    async fn set_conversation_description(
+        &mut self,
+        conversation_id: Uuid,
+        description: Option<&str>,
+    ) -> Result<(), Error> {
+        self.raygun
+            .set_conversation_description(conversation_id, description)
+            .await
     }
 }
 

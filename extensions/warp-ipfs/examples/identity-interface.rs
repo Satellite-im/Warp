@@ -207,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
             event = event_stream.next() => {
                 if let Some(event) = event {
                     match event {
-                        warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did } => {
+                        warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did, .. } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .map(|ident| ident.username())
@@ -219,7 +219,7 @@ async fn main() -> anyhow::Result<()> {
                                 account.accept_request(&did).await?;
                             }
                         },
-                        warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
+                        warp::multipass::MultiPassEventKind::FriendRequestSent { to: did, .. } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .map(|ident| ident.username())
@@ -635,13 +635,14 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for request in list.iter() {
-                                 let username = match account.get_identity(Identifier::did_key(request.clone())).await {
+                                let identity = request.identity();
+                                let username = match account.get_identity(Identifier::did_key(identity.clone())).await {
                                     Ok(ident) => ident.username(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
                                     username.to_string(),
-                                    request.to_string()
+                                    identity.to_string(),
                                 ]);
                             }
                             writeln!(stdout, "{table}")?;
@@ -657,13 +658,14 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for request in list.iter() {
-                                let username = match account.get_identity(Identifier::did_key(request.clone())).await {
+                                let identity = request.identity();
+                                let username = match account.get_identity(Identifier::did_key(identity.clone())).await {
                                     Ok(ident) => ident.username(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
                                     username.to_string(),
-                                    request.to_string()
+                                    identity.to_string()
                                 ]);
                             }
                             writeln!(stdout, "{table}")?;

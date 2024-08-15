@@ -6,8 +6,8 @@ use crate::crypto::DID;
 use crate::error::Error;
 use crate::module::Module;
 use crate::multipass::identity::{
-    Identifier, Identity, IdentityImage, IdentityProfile, IdentityStatus, IdentityUpdate, Platform,
-    Relationship,
+    FriendRequest, Identifier, Identity, IdentityImage, IdentityProfile, IdentityStatus,
+    IdentityUpdate, Platform, Relationship,
 };
 use crate::multipass::{
     Friends, GetIdentity, IdentityInformation, LocalIdentity, MultiPass, MultiPassEvent,
@@ -15,8 +15,9 @@ use crate::multipass::{
 };
 use crate::raygun::{
     Conversation, ConversationSettings, EmbedState, GroupSettings, Message, MessageOptions,
-    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
+    RayGunConversationInformation, RayGunEvents, RayGunGroupConversation, RayGunStream,
+    ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::{Extension, SingleHandle};
@@ -110,7 +111,7 @@ impl Friends for Dummy {
     }
 
     /// List the incoming friend request
-    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -120,7 +121,7 @@ impl Friends for Dummy {
     }
 
     /// List the outgoing friend request
-    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -311,6 +312,17 @@ impl RayGunAttachment for Dummy {}
 
 #[async_trait::async_trait]
 impl RayGunEvents for Dummy {}
+
+#[async_trait::async_trait]
+impl RayGunConversationInformation for Dummy {
+    async fn set_conversation_description(
+        &mut self,
+        _: Uuid,
+        _: Option<&str>,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
 
 #[async_trait::async_trait]
 impl RayGun for Dummy {

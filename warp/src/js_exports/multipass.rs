@@ -144,12 +144,7 @@ impl MultiPassBox {
             .list_incoming_request()
             .await
             .map_err(|e| e.into())
-            .map(|ok| {
-                serde_wasm_bindgen::to_value(
-                    &ok.iter().map(|i| i.to_string()).collect::<Vec<String>>(),
-                )
-                .unwrap()
-            })
+            .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
     }
 
     /// Check to determine if a request been sent to the DID
@@ -166,12 +161,7 @@ impl MultiPassBox {
             .list_outgoing_request()
             .await
             .map_err(|e| e.into())
-            .map(|ok| {
-                serde_wasm_bindgen::to_value(
-                    &ok.iter().map(|i| i.to_string()).collect::<Vec<String>>(),
-                )
-                .unwrap()
-            })
+            .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
     }
 
     /// Remove friend from contacts
@@ -428,11 +418,13 @@ fn to_identifier_enum(option: Identifier, value: JsValue) -> Result<identity::Id
 impl From<multipass::MultiPassEventKind> for MultiPassEventKind {
     fn from(value: multipass::MultiPassEventKind) -> Self {
         match value {
-            multipass::MultiPassEventKind::FriendRequestReceived { from } => MultiPassEventKind {
-                kind: MultiPassEventKindEnum::FriendRequestReceived,
-                did: from.to_string(),
-            },
-            multipass::MultiPassEventKind::FriendRequestSent { to } => MultiPassEventKind {
+            multipass::MultiPassEventKind::FriendRequestReceived { from, .. } => {
+                MultiPassEventKind {
+                    kind: MultiPassEventKindEnum::FriendRequestReceived,
+                    did: from.to_string(),
+                }
+            }
+            multipass::MultiPassEventKind::FriendRequestSent { to, .. } => MultiPassEventKind {
                 kind: MultiPassEventKindEnum::FriendRequestSent,
                 did: to.to_string(),
             },
