@@ -1,3 +1,5 @@
+pub mod dummy;
+
 use crate::constellation::directory::Directory;
 use crate::constellation::{
     Constellation, ConstellationEvent, ConstellationEventStream, ConstellationProgressStream,
@@ -20,6 +22,7 @@ use crate::raygun::{
     RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use crate::tesseract::Tesseract;
+use crate::warp::dummy::Dummy;
 use crate::{Extension, SingleHandle};
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
@@ -68,6 +71,45 @@ where
     }
 }
 
+impl<M> Warp<M, Dummy, Dummy>
+where
+    M: MultiPass,
+{
+    pub fn from_multipass(multipass: M) -> Self {
+        Self {
+            multipass,
+            raygun: Dummy,
+            constellation: Dummy,
+        }
+    }
+}
+
+impl<R> Warp<Dummy, R, Dummy>
+where
+    R: RayGun,
+{
+    pub fn from_raygun(raygun: R) -> Self {
+        Self {
+            multipass: Dummy,
+            raygun,
+            constellation: Dummy,
+        }
+    }
+}
+
+impl<C> Warp<Dummy, Dummy, C>
+where
+    C: Constellation,
+{
+    pub fn from_constellation(constellation: C) -> Self {
+        Self {
+            multipass: Dummy,
+            raygun: Dummy,
+            constellation,
+        }
+    }
+}
+
 impl<M, R, C> Clone for Warp<M, R, C>
 where
     M: MultiPass + Clone,
@@ -93,12 +135,45 @@ where
         &self.multipass
     }
 
+    pub fn into_multipass(self) -> M {
+        self.multipass
+    }
+
+    pub fn split_multipass(&self) -> Warp<M, Dummy, Dummy>
+    where
+        M: Clone,
+    {
+        Warp::<M, Dummy, Dummy>::from_multipass(self.multipass.clone())
+    }
+
     pub fn raygun(&self) -> &R {
         &self.raygun
     }
 
+    pub fn into_raygun(self) -> R {
+        self.raygun
+    }
+
+    pub fn split_raygun(&self) -> Warp<Dummy, R, Dummy>
+    where
+        R: Clone,
+    {
+        Warp::<Dummy, R, Dummy>::from_raygun(self.raygun.clone())
+    }
+
     pub fn constellation(&self) -> &C {
         &self.constellation
+    }
+
+    pub fn into_constellation(self) -> C {
+        self.constellation
+    }
+
+    pub fn split_constellation(self) -> Warp<Dummy, Dummy, C>
+    where
+        C: Clone,
+    {
+        Warp::<Dummy, Dummy, C>::from_constellation(self.constellation.clone())
     }
 
     pub fn multipass_mut(&mut self) -> &mut M {
