@@ -4331,6 +4331,12 @@ async fn message_event(
                         }
                     }
 
+                    conversation.excluded = document.excluded;
+                    conversation.messages = document.messages;
+                    conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
+                    this.set_document(conversation).await?;
+
                     if let Err(e) = tx.send(MessageEventKind::ConversationDescriptionChanged {
                         conversation_id,
                         description,
