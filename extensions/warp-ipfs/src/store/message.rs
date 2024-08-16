@@ -4271,6 +4271,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
                     //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
@@ -4293,6 +4294,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) =
@@ -4306,6 +4308,7 @@ async fn message_event(
                     conversation.excluded = document.excluded;
                     conversation.messages = document.messages;
                     conversation.favorite = document.favorite;
+                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) =
