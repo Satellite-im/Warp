@@ -132,6 +132,31 @@ pub struct Relationship {
     blocked_by: bool,
 }
 
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct FriendRequest {
+    identity: DID,
+    date: DateTime<Utc>,
+}
+
+impl FriendRequest {
+    pub fn new(identity: DID, date: Option<DateTime<Utc>>) -> Self {
+        Self {
+            identity,
+            date: date.unwrap_or_else(Utc::now),
+        }
+    }
+}
+
+impl FriendRequest {
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+
+    pub fn identity(&self) -> &DID {
+        &self.identity
+    }
+}
+
 impl Relationship {
     pub fn set_friends(&mut self, val: bool) {
         self.friends = val;

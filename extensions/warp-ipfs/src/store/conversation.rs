@@ -68,6 +68,8 @@ pub struct ConversationDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banner: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
 }
 
@@ -181,6 +183,7 @@ impl ConversationDocument {
             deleted: false,
             icon: None,
             banner: None,
+            description: None,
         };
 
         if document.signature.is_some() {
@@ -274,6 +277,7 @@ impl ConversationDocument {
                     (!settings.members_can_change_name())
                         .then(|| self.name.as_deref().map(|s| s.as_bytes().to_vec()))
                         .flatten(),
+                    self.description.as_ref().map(|d| d.as_bytes().to_vec()),
                     Some(creator.to_string().as_bytes().to_vec()),
                     self.icon.map(|s| s.hash().digest().to_vec()),
                     self.banner.map(|s| s.hash().digest().to_vec()),
@@ -329,6 +333,7 @@ impl ConversationDocument {
                     [
                         Some(self.id().into_bytes().to_vec()),
                         // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                        self.description.as_ref().map(|d| d.as_bytes().to_vec()),
                         Some(creator.to_string().as_bytes().to_vec()),
                         Some(Vec::from_iter(
                             self.restrict
@@ -716,6 +721,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_settings(document.settings);
         conversation.set_modified(document.modified);
         conversation.set_favorite(document.favorite);
+        conversation.set_description(document.description.clone());
         conversation.set_archived(document.archived);
         conversation
     }

@@ -56,6 +56,7 @@ pub(crate) enum ConversationImageType {
     Icon,
     Banner,
 }
+pub const MAX_CONVERSATION_DESCRIPTION: usize = 256;
 
 pub(super) mod topics {
     use std::fmt::Display;
@@ -446,6 +447,7 @@ pub enum ConversationUpdateKind {
     AddedBanner,
     RemovedIcon,
     RemovedBanner,
+    ChangeDescription { description: Option<String> },
 }
 
 // Note that this are temporary

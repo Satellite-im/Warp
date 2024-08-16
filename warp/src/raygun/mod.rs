@@ -81,6 +81,10 @@ pub enum MessageEventKind {
     ConversationUpdatedBanner {
         conversation_id: Uuid,
     },
+    ConversationDescriptionChanged {
+        conversation_id: Uuid,
+        description: Option<String>,
+    },
     RecipientAdded {
         conversation_id: Uuid,
         recipient: DID,
@@ -395,6 +399,7 @@ pub struct Conversation {
     settings: ConversationSettings,
     archived: bool,
     recipients: Vec<DID>,
+    description: Option<String>,
 }
 
 impl core::hash::Hash for Conversation {
@@ -426,6 +431,7 @@ impl Default for Conversation {
             settings: ConversationSettings::default(),
             archived: false,
             recipients,
+            description: None,
         }
     }
 }
@@ -470,6 +476,10 @@ impl Conversation {
         self.recipients.clone()
     }
 
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
     pub fn archived(&self) -> bool {
         self.archived
     }
@@ -506,6 +516,10 @@ impl Conversation {
 
     pub fn set_recipients(&mut self, recipients: Vec<DID>) {
         self.recipients = recipients;
+    }
+
+    pub fn set_description(&mut self, description: impl Into<Option<String>>) {
+        self.description = description.into();
     }
 
     pub fn set_archived(&mut self, archived: bool) {
@@ -1037,6 +1051,7 @@ pub trait RayGun:
     + RayGunGroupConversation
     + RayGunAttachment
     + RayGunEvents
+    + RayGunConversationInformation
     + Extension
     + Sync
     + Send
@@ -1281,4 +1296,14 @@ pub trait RayGunEvents: Sync + Send {
     async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
+}
+
+#[async_trait::async_trait]
+pub trait RayGunConversationInformation: Sync + Send {
+    /// Set a description to a conversation
+    async fn set_conversation_description(
+        &mut self,
+        conversation_id: Uuid,
+        description: Option<&str>,
+    ) -> Result<(), Error>;
 }
