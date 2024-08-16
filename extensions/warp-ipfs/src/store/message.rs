@@ -4311,6 +4311,7 @@ async fn message_event(
                     if let Err(e) =
                         tx.send(MessageEventKind::ConversationUpdatedBanner { conversation_id })
                     {
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }
                 }
                 ConversationUpdateKind::ChangeDescription { description } => {
