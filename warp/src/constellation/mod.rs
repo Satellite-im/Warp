@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 use crate::{Extension, SingleHandle};
 use anyhow::anyhow;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 use directory::Directory;
@@ -166,13 +167,12 @@ pub trait Constellation:
     }
 
     /// Used to upload file to the filesystem with data from buffer
-    #[allow(clippy::ptr_arg)]
-    async fn put_buffer(&mut self, _: &str, _: &[u8]) -> Result<(), Error> {
+    async fn put_buffer(&mut self, _: &str, _: Bytes) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to download data from the filesystem into a buffer
-    async fn get_buffer(&self, _: &str) -> Result<Vec<u8>, Error> {
+    async fn get_buffer(&self, _: &str) -> Result<Bytes, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -181,7 +181,7 @@ pub trait Constellation:
         &mut self,
         _: &str,
         _: Option<usize>,
-        _: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        _: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
@@ -190,7 +190,7 @@ pub trait Constellation:
     async fn get_stream(
         &self,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 

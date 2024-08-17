@@ -21,7 +21,7 @@ pub async fn run() -> Result<(), JsError> {
 
     instance.create_identity(None, None).await?;
 
-    instance.put_buffer("image.png", IMAGE).await?;
+    instance.put_buffer("image.png", IMAGE.into()).await?;
 
     let data = instance.get_buffer("image.png").await?;
 
@@ -78,8 +78,9 @@ impl Body {
         Ok(())
     }
 
-    fn append_image(&self, mime: String, image: Vec<u8>) -> Result<(), JsError> {
+    fn append_image(&self, mime: String, image: impl Into<Vec<u8>>) -> Result<(), JsError> {
         use base64::prelude::*;
+        let image = image.into();
 
         let encoded_image = format!("data:{mime};base64, {}", BASE64_STANDARD.encode(image));
 

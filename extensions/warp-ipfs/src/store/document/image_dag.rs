@@ -106,7 +106,7 @@ pub async fn get_image(
 
     let mut id_img = IdentityImage::default();
 
-    id_img.set_data(image.into());
+    id_img.set_data(image);
     id_img.set_image_type(dag.mime);
 
     Ok(id_img)
