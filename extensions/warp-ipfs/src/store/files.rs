@@ -858,7 +858,7 @@ impl FileTask {
             })
             .await;
 
-            Ok(buffer.into())
+            Ok(buffer)
         }
         .boxed())
     }
