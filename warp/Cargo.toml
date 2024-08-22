@@ -74,6 +74,7 @@ console_error_panic_hook.workspace = true
 wasm-streams.workspace = true
 wasm-bindgen-futures.workspace = true
 serde-wasm-bindgen.workspace = true
+tracing-wasm.workspace = true
 
 [features]
 default = []
