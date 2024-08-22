@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     account.create_identity(None, None).await?;
 
     filesystem
-        .put_buffer("readme.txt", (&b"Hello, World!"[..]).into())
+        .put_buffer("readme.txt", b"Hello, World!")
         .await?;
 
     let buffer = filesystem.get_buffer("readme.txt").await?;

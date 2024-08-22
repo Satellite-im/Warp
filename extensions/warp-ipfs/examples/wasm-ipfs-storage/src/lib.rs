@@ -21,7 +21,7 @@ pub async fn run() -> Result<(), JsError> {
 
     instance.create_identity(None, None).await?;
 
-    instance.put_buffer("image.png", IMAGE.into()).await?;
+    instance.put_buffer("image.png", IMAGE).await?;
 
     let data = instance.get_buffer("image.png").await?;
 
