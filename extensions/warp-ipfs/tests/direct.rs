@@ -25,7 +25,9 @@ mod test {
     use tokio::test as async_test;
     use warp::constellation::Constellation;
     use warp::multipass::{Friends, MultiPassEvent};
-    use warp::raygun::{RayGun, RayGunAttachment, RayGunEvents, RayGunStream};
+    use warp::raygun::{
+        RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEvents, RayGunStream,
+    };
 
     #[async_test]
     async fn create_conversation() -> anyhow::Result<()> {
@@ -957,6 +959,130 @@ mod test {
             }
         })
         .await?;
+
+        Ok(())
+    }
+
+    #[async_test]
+    async fn change_conversation_description() -> anyhow::Result<()> {
+        let accounts = create_accounts(vec![
+            (
+                None,
+                None,
+                Some("test::change_conversation_description".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::change_conversation_description".into()),
+            ),
+        ])
+        .await?;
+
+        let (mut instance_a, _, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
+
+        instance_a.create_conversation(&did_b).await?;
+
+        let id_a = crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_a = instance_a.get_conversation_stream(id_a).await?;
+        let mut conversation_b = instance_b.get_conversation_stream(id_b).await?;
+
+        instance_a
+            .set_conversation_description(id_a, Some("hello, world!"))
+            .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationDescriptionChanged {
+                    conversation_id,
+                    description,
+                }) = conversation_a.next().await
+                {
+                    assert_eq!(id_a, conversation_id);
+                    assert_eq!(description, Some("hello, world!".into()));
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationDescriptionChanged {
+                    conversation_id,
+                    description,
+                }) = conversation_b.next().await
+                {
+                    assert_eq!(id_a, conversation_id);
+                    assert_eq!(description, Some("hello, world!".into()));
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = instance_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.description().as_deref(), Some("hello, world!"));
+
+        instance_a.set_conversation_description(id_a, None).await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationDescriptionChanged {
+                    conversation_id,
+                    description,
+                }) = conversation_a.next().await
+                {
+                    assert_eq!(id_a, conversation_id);
+                    assert_eq!(description, None);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::ConversationDescriptionChanged {
+                    conversation_id,
+                    description,
+                }) = conversation_b.next().await
+                {
+                    assert_eq!(id_a, conversation_id);
+                    assert_eq!(description, None);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = instance_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.description(), None);
 
         Ok(())
     }
