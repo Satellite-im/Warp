@@ -195,7 +195,7 @@ impl FileStore {
     pub async fn put_buffer(
         &mut self,
         name: impl Into<String>,
-        buffer: impl Into<Bytes>,
+        buffer: &[u8],
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -203,7 +203,7 @@ impl FileStore {
             .clone()
             .send(FileTaskCommand::PutBuffer {
                 name: name.into(),
-                buffer: buffer.into(),
+                buffer: Bytes::from(Vec::from(buffer)),
                 response: tx,
             })
             .await;

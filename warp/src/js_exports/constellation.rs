@@ -70,7 +70,7 @@ impl ConstellationBox {
 
     pub async fn put_buffer(&mut self, name: &str, buffer: &[u8]) -> Result<(), JsError> {
         self.inner
-            .put_buffer(name, bytes::Bytes::from(buffer.to_vec()))
+            .put_buffer(name, buffer)
             .await
             .map_err(|e| e.into())
     }

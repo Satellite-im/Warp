@@ -167,7 +167,7 @@ pub trait Constellation:
     }
 
     /// Used to upload file to the filesystem with data from buffer
-    async fn put_buffer(&mut self, _: &str, _: Bytes) -> Result<(), Error> {
+    async fn put_buffer(&mut self, _: &str, _: &[u8]) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 

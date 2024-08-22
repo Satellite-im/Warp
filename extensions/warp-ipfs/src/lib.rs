@@ -1778,7 +1778,7 @@ impl Constellation for WarpIpfs {
         self.file_store()?.get(name, path).await
     }
 
-    async fn put_buffer(&mut self, name: &str, buffer: Bytes) -> Result<(), Error> {
+    async fn put_buffer(&mut self, name: &str, buffer: &[u8]) -> Result<(), Error> {
         self.file_store()?.put_buffer(name, buffer).await
     }
 
