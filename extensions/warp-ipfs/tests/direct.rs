@@ -1489,7 +1489,8 @@ mod test {
                 Location::Stream {
                     name: "".into(),
                     size: Some(PROFILE_IMAGE.len()),
-                    stream: futures::stream::once(async { Ok(PROFILE_IMAGE.to_vec()) }).boxed(),
+                    stream: futures::stream::once(async { Ok(PROFILE_IMAGE.to_vec().into()) })
+                        .boxed(),
                 },
             )
             .await?;
@@ -1600,7 +1601,8 @@ mod test {
                 Location::Stream {
                     name: "".into(),
                     size: Some(PROFILE_IMAGE.len()),
-                    stream: futures::stream::once(async { Ok(PROFILE_IMAGE.to_vec()) }).boxed(),
+                    stream: futures::stream::once(async { Ok(PROFILE_IMAGE.to_vec().into()) })
+                        .boxed(),
                 },
             )
             .await?;
