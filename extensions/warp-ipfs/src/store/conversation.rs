@@ -696,11 +696,19 @@ impl From<&ConversationDocument> for Conversation {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageVersion {
+    #[default]
+    V0,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageDocument {
     pub id: Uuid,
     pub message_type: MessageType,
     pub conversation_id: Uuid,
+    pub version: MessageVersion,
     pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -825,6 +833,7 @@ impl MessageDocument {
             message_type,
             sender,
             conversation_id,
+            version: MessageVersion::default(),
             date,
             reactions,
             attachments,
@@ -849,20 +858,22 @@ impl MessageDocument {
             //       since an invalid public key also signals a invalid message.
             return false;
         };
-        let hash = sha256_iter(
-            [
-                Some(self.conversation_id.as_bytes().to_vec()),
-                Some(self.id.as_bytes().to_vec()),
-                Some(sender.public_key_bytes()),
-                Some(self.date.to_string().into_bytes()),
-                self.modified.map(|time| time.to_string().into_bytes()),
-                self.replied.map(|id| id.as_bytes().to_vec()),
-                self.attachments.map(|cid| cid.to_bytes()),
-                self.message.as_ref().map(|m| m.to_vec()),
-            ]
-            .into_iter(),
-            None,
-        );
+        let hash = match self.version {
+            MessageVersion::V0 => sha256_iter(
+                [
+                    Some(self.conversation_id.as_bytes().to_vec()),
+                    Some(self.id.as_bytes().to_vec()),
+                    Some(sender.public_key_bytes()),
+                    Some(self.date.to_string().into_bytes()),
+                    self.modified.map(|time| time.to_string().into_bytes()),
+                    self.replied.map(|id| id.as_bytes().to_vec()),
+                    self.attachments.map(|cid| cid.to_bytes()),
+                    self.message.as_ref().map(|m| m.to_vec()),
+                ]
+                .into_iter(),
+                None,
+            ),
+        };
 
         sender_pk.verify(&hash, signature.as_ref())
     }
