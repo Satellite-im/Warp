@@ -1,5 +1,4 @@
-use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
-
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{
     stream::{self, BoxStream},
@@ -9,6 +8,7 @@ use ipfs::{Ipfs, Keypair, PeerId};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 use uuid::Uuid;
 
 use warp::{
@@ -450,7 +450,7 @@ impl FileAttachmentDocument {
                 .await
                 .unwrap_or_default();
 
-            file.set_thumbnail(&data);
+            file.set_thumbnail(data);
         }
 
         // Note:
@@ -540,7 +540,7 @@ impl FileAttachmentDocument {
         ipfs: &Ipfs,
         members: &[PeerId],
         timeout: Option<Duration>,
-    ) -> BoxStream<'static, Result<Vec<u8>, std::io::Error>> {
+    ) -> BoxStream<'static, Result<Bytes, std::io::Error>> {
         let link = match Cid::from_str(&self.data) {
             Ok(link) => link,
             Err(e) => return stream::once(async { Err(std::io::Error::other(e)) }).boxed(),
@@ -551,7 +551,7 @@ impl FileAttachmentDocument {
             .cat(link)
             .providers(members)
             .timeout(timeout.unwrap_or(Duration::from_secs(60)))
-            .map(|result| result.map(|b| b.into()).map_err(std::io::Error::other));
+            .map(|result| result.map_err(std::io::Error::other));
 
         stream.boxed()
     }

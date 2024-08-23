@@ -1,5 +1,6 @@
 #![allow(clippy::result_large_err)]
 use crate::error::Error;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use mediatype;
@@ -50,7 +51,7 @@ pub struct File {
     /// Thumbnail of the `File`
     /// Note: This should be set if the file is an image, unless
     ///       one plans to add a generic thumbnail for the file
-    thumbnail: Arc<RwLock<Vec<u8>>>,
+    thumbnail: Arc<RwLock<Bytes>>,
 
     /// Format of the thumbnail
     thumbnail_format: Arc<RwLock<FormatType>>,
@@ -218,15 +219,15 @@ impl File {
     }
 
     /// Set the thumbnail to the file
-    pub fn set_thumbnail(&self, data: &[u8]) {
-        *self.thumbnail.write() = data.to_vec();
+    pub fn set_thumbnail(&self, data: impl Into<Bytes>) {
+        *self.thumbnail.write() = data.into();
         *self.modified.write() = Utc::now();
         self.signal();
     }
 
     /// Get the thumbnail from the file
     pub fn thumbnail(&self) -> Vec<u8> {
-        self.thumbnail.read().clone()
+        self.thumbnail.read().to_vec()
     }
 
     pub fn set_favorite(&self, fav: bool) {
