@@ -5,6 +5,7 @@ use futures_timer::Delay;
 use tokio_stream::StreamMap;
 use tracing::info;
 
+use bytes::Bytes;
 use std::{
     collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
     ffi::OsStr,
@@ -13,7 +14,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
 use web_time::Instant;
 
 use futures::{
@@ -72,7 +72,7 @@ use super::{
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
-pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
+pub type DownloadStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
 
 enum MessagingCommand {
     Receiver {
@@ -2486,7 +2486,7 @@ impl ConversationInner {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         let conversation = self.get(conversation_id).await?;
 
         let members = conversation

@@ -333,7 +333,9 @@ mod test {
 
         //upload file to constellation to attach file from constellation
 
-        instance_a.put_buffer("image.png", PROFILE_IMAGE).await?;
+        instance_a
+            .put_buffer("image.png", PROFILE_IMAGE.into())
+            .await?;
 
         let (_, mut stream) = instance_a
             .attach(
@@ -467,7 +469,7 @@ mod test {
                 None,
                 vec![Location::Stream {
                     name: "image.png".into(),
-                    stream: futures::stream::iter(vec![Ok(PROFILE_IMAGE.to_vec())]).boxed(),
+                    stream: futures::stream::iter(vec![Ok(PROFILE_IMAGE.into())]).boxed(),
                     size: Some(PROFILE_IMAGE.len()),
                 }],
                 vec![],

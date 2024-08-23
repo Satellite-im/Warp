@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 use chrono::{DateTime, Utc};
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use uuid::Uuid;
@@ -233,7 +234,7 @@ impl Item {
     }
 
     /// Set thumbnail of `Item`
-    pub fn set_thumbnail(&self, data: &[u8]) {
+    pub fn set_thumbnail(&self, data: impl Into<Bytes>) {
         match self {
             Item::File(file) => file.set_thumbnail(data),
             Item::Directory(directory) => directory.set_thumbnail(data),
