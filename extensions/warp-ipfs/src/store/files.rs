@@ -1,9 +1,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::ffi::OsStr;
 
-use std::{collections::VecDeque, path::PathBuf, sync::Arc};
-
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use std::{collections::VecDeque, path::PathBuf, sync::Arc};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -195,7 +195,7 @@ impl FileStore {
     pub async fn put_buffer(
         &mut self,
         name: impl Into<String>,
-        buffer: impl Into<Vec<u8>>,
+        buffer: &[u8],
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -203,14 +203,14 @@ impl FileStore {
             .clone()
             .send(FileTaskCommand::PutBuffer {
                 name: name.into(),
-                buffer: buffer.into(),
+                buffer: Bytes::from(Vec::from(buffer)),
                 response: tx,
             })
             .await;
         rx.await.map_err(anyhow::Error::from)??.await
     }
 
-    pub async fn get_buffer(&self, name: impl Into<String>) -> Result<Vec<u8>, Error> {
+    pub async fn get_buffer(&self, name: impl Into<String>) -> Result<Bytes, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_sender
@@ -228,7 +228,7 @@ impl FileStore {
         &mut self,
         name: impl Into<String>,
         total_size: impl Into<Option<usize>>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -248,7 +248,7 @@ impl FileStore {
     pub async fn get_stream(
         &self,
         name: impl Into<String>,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_sender
@@ -326,8 +326,8 @@ impl FileStore {
     }
 }
 
-type GetStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
-type GetBufferFutResult = BoxFuture<'static, Result<Vec<u8>, Error>>;
+type GetStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
+type GetBufferFutResult = BoxFuture<'static, Result<Bytes, Error>>;
 enum FileTaskCommand {
     #[cfg(not(target_arch = "wasm32"))]
     Put {
@@ -337,13 +337,13 @@ enum FileTaskCommand {
     },
     PutBuffer {
         name: String,
-        buffer: Vec<u8>,
+        buffer: Bytes,
         response: oneshot::Sender<Result<BoxFuture<'static, Result<(), Error>>, Error>>,
     },
     PutStream {
         name: String,
         total_size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
         response: oneshot::Sender<Result<ConstellationProgressStream, Error>>,
     },
     #[cfg(not(target_arch = "wasm32"))]
@@ -643,7 +643,7 @@ impl FileTask {
 
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
-                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail(thumbnail);
                     file.set_thumbnail_format(extension_type.into());
                     file.set_thumbnail_reference(&path.to_string());
                 }
@@ -735,7 +735,7 @@ impl FileTask {
     fn put_buffer(
         &self,
         name: String,
-        buffer: Vec<u8>,
+        buffer: Bytes,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let ipfs = self.ipfs.clone();
         let thumbnail_store = self.thumbnail_store.clone();
@@ -809,7 +809,7 @@ impl FileTask {
 
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
-                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail(thumbnail);
                     file.set_thumbnail_format(extension_type.into());
                     file.set_thumbnail_reference(&path.to_string());
                 }
@@ -835,7 +835,7 @@ impl FileTask {
     fn get_buffer(
         &self,
         name: impl Into<String>,
-    ) -> Result<BoxFuture<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxFuture<'static, Result<Bytes, Error>>, Error> {
         let name = name.into();
         let ipfs = self.ipfs.clone();
         let current_directory = self.current_directory()?;
@@ -858,7 +858,7 @@ impl FileTask {
             })
             .await;
 
-            Ok(buffer.into())
+            Ok(buffer)
         }
         .boxed())
     }
@@ -868,7 +868,7 @@ impl FileTask {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let (name, dest_path) = split_file_from_path(name)?;
 
@@ -1022,7 +1022,7 @@ impl FileTask {
 
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
-                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail(thumbnail);
                     file.set_thumbnail_format(extension_type.into());
                     file.set_thumbnail_reference(&path.to_string());
                 }
@@ -1060,7 +1060,7 @@ impl FileTask {
     fn get_stream(
         &self,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
@@ -1072,7 +1072,6 @@ impl FileTask {
 
         let stream = ipfs
             .cat_unixfs(path)
-            .map_ok(|bytes| bytes.into())
             .map_err(std::io::Error::other)
             .try_finally(move || async move {
                 let _ = tx
@@ -1198,7 +1197,7 @@ impl FileTask {
                 .await;
 
             if let Ok((extension_type, path, thumbnail)) = thumbnail_store.get(id).await {
-                file.set_thumbnail(&thumbnail);
+                file.set_thumbnail(thumbnail);
                 file.set_thumbnail_format(extension_type.into());
                 file.set_thumbnail_reference(&path.to_string());
             }

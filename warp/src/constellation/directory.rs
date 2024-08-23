@@ -2,6 +2,7 @@
 use super::file::File;
 use super::item::{FormatType, Item};
 use crate::error::Error;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use parking_lot::RwLock;
@@ -32,7 +33,7 @@ pub struct Directory {
     description: Arc<RwLock<String>>,
 
     /// Thumbnail of the `Directory`
-    thumbnail: Arc<RwLock<Vec<u8>>>,
+    thumbnail: Arc<RwLock<Bytes>>,
 
     /// Format of the thumbnail
     thumbnail_format: Arc<RwLock<FormatType>>,
@@ -592,8 +593,8 @@ impl Directory {
         self.thumbnail_format.read().clone()
     }
 
-    pub fn set_thumbnail(&self, desc: &[u8]) {
-        *self.thumbnail.write() = desc.to_vec();
+    pub fn set_thumbnail(&self, desc: impl Into<Bytes>) {
+        *self.thumbnail.write() = desc.into();
         self.signal();
     }
 
