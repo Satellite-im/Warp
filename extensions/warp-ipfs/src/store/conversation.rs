@@ -871,10 +871,10 @@ impl MessageDocument {
         self.message.as_ref().ok_or(Error::MessageNotFound)
     }
 
-    pub fn nonce_from_message(&self) -> Result<[u8; 12], Error> {
+    pub fn nonce_from_message(&self) -> Result<&[u8], Error> {
         let raw_encrypted_message = self.raw_encrypted_message()?;
         let (nonce, _) = super::extract_data_slice::<12>(raw_encrypted_message);
-        let nonce: [u8; 12] = nonce.try_into().map_err(anyhow::Error::from)?;
+        debug_assert_eq!(nonce.len(), 12);
         Ok(nonce)
     }
 
@@ -945,7 +945,7 @@ impl MessageDocument {
 
             let current_nonce = self.nonce_from_message()?;
 
-            if matches!(nonce, Some(nonce) if nonce.eq(&current_nonce)) {
+            if matches!(nonce, Some(nonce) if nonce.eq(current_nonce)) {
                 // Since the nonce from the current message matches the new one sent,
                 // we would consider this as an invalid message as a nonce should
                 // NOT be reused
