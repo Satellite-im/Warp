@@ -31,7 +31,7 @@ mod test {
     async fn upload_file() -> anyhow::Result<()> {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
-        fs.put_buffer("image.png", PROFILE_IMAGE).await?;
+        fs.put_buffer("image.png", PROFILE_IMAGE.into()).await?;
 
         assert!(root_directory.has_item("image.png"));
         Ok(())
@@ -41,7 +41,7 @@ mod test {
     async fn upload_file_stream() -> anyhow::Result<()> {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
-        let stream = stream::iter(vec![Ok(PROFILE_IMAGE.to_vec())]).boxed();
+        let stream = stream::iter(vec![Ok(PROFILE_IMAGE.into())]).boxed();
         let mut status = fs.put_stream("image.png", None, stream).await?;
         while let Some(progress) = status.next().await {
             match progress {
@@ -65,7 +65,7 @@ mod test {
     async fn get_file() -> anyhow::Result<()> {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
-        fs.put_buffer("image.png", PROFILE_IMAGE).await?;
+        fs.put_buffer("image.png", PROFILE_IMAGE.into()).await?;
 
         assert!(root_directory.has_item("image.png"));
 
@@ -79,7 +79,7 @@ mod test {
     async fn get_file_stream() -> anyhow::Result<()> {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
-        fs.put_buffer("image.png", PROFILE_IMAGE).await?;
+        fs.put_buffer("image.png", PROFILE_IMAGE.into()).await?;
 
         assert!(root_directory.has_item("image.png"));
 
@@ -94,7 +94,8 @@ mod test {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.create_directory("images", false).await?;
-        fs.put_buffer("/images/image.png", PROFILE_IMAGE).await?;
+        fs.put_buffer("/images/image.png", PROFILE_IMAGE.into())
+            .await?;
         let item = root_directory.get_item_by_path("/images/image.png")?;
         // Note: Checking the item name would be sure that the file was actually uploaded to the directory
         //       and not just be named after the directory
@@ -107,7 +108,7 @@ mod test {
     async fn rename_file_via_constellation() -> anyhow::Result<()> {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
-        fs.put_buffer("image.png", PROFILE_IMAGE).await?;
+        fs.put_buffer("image.png", PROFILE_IMAGE.into()).await?;
 
         assert!(root_directory.has_item("image.png"));
 
@@ -137,7 +138,7 @@ mod test {
         let root_directory = fs.root_directory();
         fs.create_directory("/my/storage", true).await?;
 
-        fs.put_buffer("/my/storage/image.png", PROFILE_IMAGE)
+        fs.put_buffer("/my/storage/image.png", PROFILE_IMAGE.into())
             .await?;
 
         fs.rename("/my/storage/image.png", "item.png").await?;
@@ -152,7 +153,7 @@ mod test {
     async fn remove_file() -> anyhow::Result<()> {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
-        fs.put_buffer("image.png", PROFILE_IMAGE).await?;
+        fs.put_buffer("image.png", PROFILE_IMAGE.into()).await?;
 
         assert!(root_directory.has_item("image.png"));
 
@@ -166,8 +167,9 @@ mod test {
     async fn check_thumbnail_of_file() -> anyhow::Result<()> {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
-        fs.put_buffer("image.png", PROFILE_IMAGE).await?;
-        fs.put_buffer("data.txt", &b"hello, world!"[..]).await?;
+        let data: &[u8] = b"hello, world!";
+        fs.put_buffer("image.png", PROFILE_IMAGE.into()).await?;
+        fs.put_buffer("data.txt", data.into()).await?;
 
         assert!(root_directory.has_item("image.png"));
         assert!(root_directory.has_item("data.txt"));

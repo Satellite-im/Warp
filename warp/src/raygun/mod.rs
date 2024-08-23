@@ -10,6 +10,7 @@ use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use core::ops::Range;
 use indexmap::IndexMap;
@@ -980,7 +981,7 @@ pub enum Location {
     Stream {
         name: String,
         size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     },
 }
 
@@ -1267,7 +1268,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Uuid,
         _: Uuid,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 }
