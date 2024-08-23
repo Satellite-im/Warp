@@ -5,6 +5,7 @@ use futures_timer::Delay;
 use tokio_stream::StreamMap;
 use tracing::info;
 
+use bytes::Bytes;
 use std::{
     collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
     ffi::OsStr,
@@ -13,7 +14,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
 use web_time::Instant;
 
 use futures::{
@@ -72,7 +72,7 @@ use super::{
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
-pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
+pub type DownloadStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
 
 enum MessagingCommand {
     Receiver {
@@ -2488,7 +2488,7 @@ impl ConversationInner {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         let conversation = self.get(conversation_id).await?;
 
         let members = conversation
@@ -3869,6 +3869,11 @@ async fn message_event(
             kind,
         } => {
             conversation.verify()?;
+            conversation.excluded = document.excluded;
+            conversation.messages = document.messages;
+            conversation.favorite = document.favorite;
+            conversation.archived = document.archived;
+
             match kind {
                 ConversationUpdateKind::AddParticipant { did } => {
                     if document.recipients.contains(&did) {
@@ -3879,10 +3884,6 @@ async fn message_event(
                         let _ = this.discovery.insert(&did).await.ok();
                     }
 
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = this.request_key(conversation_id, &did).await {
@@ -3903,14 +3904,10 @@ async fn message_event(
 
                     //Maybe remove participant from discovery?
 
-                    let can_emit = !document.excluded.contains_key(&did);
+                    let can_emit = !conversation.excluded.contains_key(&did);
 
-                    document.excluded.remove(&did);
+                    conversation.excluded.remove(&did);
 
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if can_emit {
@@ -3934,16 +3931,11 @@ async fn message_event(
                             maximum: Some(255),
                         });
                     }
-                    if let Some(current_name) = document.name() {
+                    if let Some(current_name) = document.name.as_ref() {
                         if current_name.eq(&name) {
                             return Ok(());
                         }
                     }
-
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3955,10 +3947,6 @@ async fn message_event(
                 }
 
                 ConversationUpdateKind::ChangeName { name: None } => {
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3970,19 +3958,11 @@ async fn message_event(
                 }
                 ConversationUpdateKind::AddRestricted { .. }
                 | ConversationUpdateKind::RemoveRestricted { .. } => {
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
                     //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                 }
                 ConversationUpdateKind::ChangeSettings { settings } => {
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
@@ -4009,10 +3989,6 @@ async fn message_event(
                         }
                     }
 
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
                     if let Err(e) = tx.send(MessageEventKind::ConversationDescriptionChanged {
                         conversation_id,

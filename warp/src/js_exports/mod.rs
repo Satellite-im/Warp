@@ -19,6 +19,11 @@ pub fn initialize() {
 }
 
 #[wasm_bindgen]
+pub fn trace() {
+    tracing_wasm::set_as_global_default();
+}
+
+#[wasm_bindgen]
 pub struct WarpInstance {
     multipass: MultiPassBox,
     raygun: RayGunBox,

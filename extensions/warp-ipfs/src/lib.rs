@@ -1,10 +1,4 @@
-use std::any::Any;
-use std::collections::HashSet;
-use std::ffi::OsStr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc::channel;
 use futures::future::BoxFuture;
@@ -18,6 +12,12 @@ use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
 use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use rust_ipfs::p2p::UpgradeVersion;
+use std::any::Any;
+use std::collections::HashSet;
+use std::ffi::OsStr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{error, info, warn, Instrument, Span};
@@ -1659,7 +1659,7 @@ impl RayGunAttachment for WarpIpfs {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         self.messaging_store()?
             .download_stream(conversation_id, message_id, file)
             .await
@@ -1782,7 +1782,7 @@ impl Constellation for WarpIpfs {
         self.file_store()?.put_buffer(name, buffer).await
     }
 
-    async fn get_buffer(&self, name: &str) -> Result<Vec<u8>, Error> {
+    async fn get_buffer(&self, name: &str) -> Result<Bytes, Error> {
         self.file_store()?.get_buffer(name).await
     }
 
@@ -1791,7 +1791,7 @@ impl Constellation for WarpIpfs {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?
             .put_stream(name, total_size, stream)
@@ -1802,7 +1802,7 @@ impl Constellation for WarpIpfs {
     async fn get_stream(
         &self,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         self.file_store()?.get_stream(name).await
     }
 

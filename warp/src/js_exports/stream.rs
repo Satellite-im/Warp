@@ -59,7 +59,7 @@ impl From<wasm_streams::ReadableStream> for InnerStream {
 }
 
 impl Stream for InnerStream {
-    type Item = std::io::Result<Vec<u8>>;
+    type Item = std::io::Result<bytes::Bytes>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
         match futures::ready!(Pin::new(&mut this.inner).poll_next(cx)) {
