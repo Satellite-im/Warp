@@ -24,6 +24,7 @@ use crate::raygun::{
 use crate::tesseract::Tesseract;
 use crate::warp::dummy::Dummy;
 use crate::{Extension, SingleHandle};
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 use std::any::Any;
@@ -481,7 +482,7 @@ where
         self.constellation.put_buffer(name, buffer).await
     }
 
-    async fn get_buffer(&self, name: &str) -> Result<Vec<u8>, Error> {
+    async fn get_buffer(&self, name: &str) -> Result<Bytes, Error> {
         self.constellation.get_buffer(name).await
     }
 
@@ -489,7 +490,7 @@ where
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         self.constellation
             .put_stream(name, total_size, stream)
@@ -499,7 +500,7 @@ where
     async fn get_stream(
         &self,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         self.constellation.get_stream(name).await
     }
 
@@ -623,7 +624,7 @@ where
         conversation_id: Uuid,
         message_id: Uuid,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         self.raygun
             .download_stream(conversation_id, message_id, name)
             .await

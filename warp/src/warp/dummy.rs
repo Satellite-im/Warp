@@ -21,6 +21,7 @@ use crate::raygun::{
 };
 use crate::tesseract::Tesseract;
 use crate::{Extension, SingleHandle};
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 use futures::StreamExt;
@@ -260,7 +261,7 @@ impl Constellation for Dummy {
         Err(Error::Unimplemented)
     }
 
-    async fn get_buffer(&self, _: &str) -> Result<Vec<u8>, Error> {
+    async fn get_buffer(&self, _: &str) -> Result<Bytes, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -268,7 +269,7 @@ impl Constellation for Dummy {
         &mut self,
         _: &str,
         _: Option<usize>,
-        _: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        _: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
@@ -276,7 +277,7 @@ impl Constellation for Dummy {
     async fn get_stream(
         &self,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 
