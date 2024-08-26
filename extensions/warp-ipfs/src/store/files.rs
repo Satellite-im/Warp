@@ -1110,12 +1110,7 @@ impl FileTask {
             return Err(Error::DirectoryNotEmpty);
         }
 
-        _remove(
-            &self.ipfs,
-            (!recursive).then_some(directory).as_ref(),
-            &item,
-        )
-        .await?;
+        _remove(&self.ipfs, &directory, &item).await?;
 
         _ = self.export().await;
 
@@ -1242,7 +1237,7 @@ fn split_file_from_path(name: impl Into<String>) -> Result<(String, Option<Strin
 }
 
 #[async_recursion::async_recursion]
-async fn _remove(ipfs: &Ipfs, root: Option<&Directory>, item: &Item) -> Result<(), Error> {
+async fn _remove(ipfs: &Ipfs, root: &Directory, item: &Item) -> Result<(), Error> {
     match item {
         Item::File(file) => {
             let reference = file
@@ -1260,11 +1255,9 @@ async fn _remove(ipfs: &Ipfs, root: Option<&Directory>, item: &Item) -> Result<(
                 ipfs.remove_pin(&cid).recursive().await?;
             }
 
-            if let Some(root) = root {
-                let name = item.name();
-                if let Err(e) = root.remove_item(&name) {
-                    tracing::error!(error = %e, item_name = %name, "unable to remove file");
-                }
+            let name = item.name();
+            if let Err(e) = root.remove_item(&name) {
+                tracing::error!(error = %e, item_name = %name, "unable to remove file");
             }
         }
         Item::Directory(directory) => {
@@ -1272,7 +1265,7 @@ async fn _remove(ipfs: &Ipfs, root: Option<&Directory>, item: &Item) -> Result<(
                 let name = item.name();
                 let item_type = item.item_type();
 
-                if let Err(e) = _remove(ipfs, root, &item).await {
+                if let Err(e) = _remove(ipfs, directory, &item).await {
                     tracing::error!(error = %e, item_type = %item_type, item_name = %name, "unable to remove item");
                     continue;
                 }
