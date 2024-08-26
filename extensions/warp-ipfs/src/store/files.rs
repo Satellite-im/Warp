@@ -1095,7 +1095,7 @@ impl FileTask {
         let name = name.trim();
 
         let item = match name {
-            "/" => directory.into(),
+            "/" => Item::from(&directory),
             path => directory.get_item_by_path(path)?,
         };
 
@@ -1107,10 +1107,15 @@ impl FileTask {
                 .map(|s| !s.get_items().is_empty())
                 .unwrap_or_default()
         {
-            return Err(Error::DirectoryNotEmpty); // directory not empty
+            return Err(Error::DirectoryNotEmpty);
         }
 
-        _remove(&self.ipfs, &item).await?;
+        _remove(
+            &self.ipfs,
+            (!recursive).then_some(directory).as_ref(),
+            &item,
+        )
+        .await?;
 
         _ = self.export().await;
 
@@ -1237,7 +1242,7 @@ fn split_file_from_path(name: impl Into<String>) -> Result<(String, Option<Strin
 }
 
 #[async_recursion::async_recursion]
-async fn _remove(ipfs: &Ipfs, item: &Item) -> Result<(), Error> {
+async fn _remove(ipfs: &Ipfs, root: Option<&Directory>, item: &Item) -> Result<(), Error> {
     match item {
         Item::File(file) => {
             let reference = file
@@ -1254,13 +1259,20 @@ async fn _remove(ipfs: &Ipfs, item: &Item) -> Result<(), Error> {
             if ipfs.is_pinned(&cid).await? {
                 ipfs.remove_pin(&cid).recursive().await?;
             }
+
+            if let Some(root) = root {
+                let name = item.name();
+                if let Err(e) = root.remove_item(&name) {
+                    tracing::error!(error = %e, item_name = %name, "unable to remove file");
+                }
+            }
         }
         Item::Directory(directory) => {
             for item in directory.get_items() {
                 let name = item.name();
                 let item_type = item.item_type();
 
-                if let Err(e) = _remove(ipfs, &item).await {
+                if let Err(e) = _remove(ipfs, root, &item).await {
                     tracing::error!(error = %e, item_type = %item_type, item_name = %name, "unable to remove item");
                     continue;
                 }
