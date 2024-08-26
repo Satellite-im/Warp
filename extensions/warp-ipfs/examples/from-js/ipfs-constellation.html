@@ -479,11 +479,14 @@
     ];
   </script>
   <body>
+    <h2>Description:</h2>
+    <p>This example takes an image encoded in a constant and uses constellation to store and then it. It then displays the retrieved thumbnail and image below. Then it fetches the file: 'circle.png', streams it into constellation, streams it out, and displays it below. </p>
     <h2>How to use this example:</h2>
-    <h3>1 - Make sure the wasm is compiled:</h3>
+    <h3>1 - Compile the wasm and serve the js examples:</h3>
     <pre>
-        wasm-pack build extensions/warp-ipfs --target web --out-dir ../../tools/wasm-example/www/wasm/warp-ipfs
+      cargo run --example from-js
     </pre>
     <h3>2 - Check ouput in the console</h3>
+    <p>Expected output: you should see CurrentProgress events as well as a ProgressComplete event logged. Below, you should also see the thumbnail and image of the satellite.im logo, followed by the image from the `circle.png` file.</p>
   </body>
 </html>

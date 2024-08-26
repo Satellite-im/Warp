@@ -37,15 +37,15 @@ pub struct Discovery {
 }
 
 impl Discovery {
-    pub fn new(ipfs: Ipfs, config: DiscoveryConfig, relays: Vec<Multiaddr>) -> Self {
+    pub fn new(ipfs: &Ipfs, config: &DiscoveryConfig, relays: &[Multiaddr]) -> Self {
         let (events, _) = tokio::sync::broadcast::channel(2048);
         Self {
-            ipfs,
-            config,
+            ipfs: ipfs.clone(),
+            config: config.clone(),
             entries: Arc::default(),
             task: Arc::default(),
             events,
-            relays,
+            relays: relays.to_vec(),
         }
     }
 

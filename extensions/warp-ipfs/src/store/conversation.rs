@@ -5,6 +5,7 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered},
     StreamExt, TryFutureExt,
 };
+use indexmap::IndexMap;
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -54,6 +55,8 @@ pub struct ConversationDocument {
     pub recipients: Vec<DID>,
     #[serde(default)]
     pub favorite: bool,
+    #[serde(default)]
+    pub archived: bool,
     pub excluded: HashMap<DID, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restrict: Vec<DID>,
@@ -61,6 +64,8 @@ pub struct ConversationDocument {
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
 }
@@ -166,12 +171,14 @@ impl ConversationDocument {
             created,
             modified,
             favorite: false,
+            archived: false,
             settings,
             excluded,
             messages,
             signature,
             restrict,
             deleted: false,
+            description: None,
         };
 
         if document.signature.is_some() {
@@ -263,6 +270,7 @@ impl ConversationDocument {
                 [
                     Some(self.id().into_bytes().to_vec()),
                     // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                    self.description.as_ref().map(|d| d.as_bytes().to_vec()),
                     Some(creator.to_string().as_bytes().to_vec()),
                     Some(Vec::from_iter(
                         self.restrict
@@ -316,6 +324,7 @@ impl ConversationDocument {
                     [
                         Some(self.id().into_bytes().to_vec()),
                         // self.name.as_deref().map(|s| s.as_bytes().to_vec()),
+                        self.description.as_ref().map(|d| d.as_bytes().to_vec()),
                         Some(creator.to_string().as_bytes().to_vec()),
                         Some(Vec::from_iter(
                             self.restrict
@@ -680,6 +689,8 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_settings(document.settings);
         conversation.set_modified(document.modified);
         conversation.set_favorite(document.favorite);
+        conversation.set_description(document.description.clone());
+        conversation.set_archived(document.archived);
         conversation
     }
 }
@@ -1039,7 +1050,7 @@ impl MessageDocument {
         }
 
         if let Some(cid) = self.reactions {
-            let reactions: BTreeMap<String, Vec<DID>> = ipfs
+            let reactions: IndexMap<String, Vec<DID>> = ipfs
                 .get_dag(cid)
                 .timeout(Duration::from_secs(10))
                 .set_local(local)

@@ -1,17 +1,19 @@
+use crate::{constellation::file::FileType, crypto::DID, error::Error};
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use derive_more::Display;
+use futures::stream::BoxStream;
+use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
+use std::hash::Hasher;
 use std::{
     fmt::{Debug, Display},
     vec,
 };
 
-use crate::{constellation::file::FileType, crypto::DID, error::Error};
-
-use chrono::{DateTime, Utc};
-use derive_more::Display;
-use futures::stream::BoxStream;
-use serde::{Deserialize, Serialize};
-
 pub const SHORT_ID_SIZE: usize = 8;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
@@ -26,6 +28,7 @@ pub enum IdentityStatus {
     Offline,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
@@ -92,15 +95,16 @@ impl IdentityProfile {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IdentityImage {
-    data: Vec<u8>,
+    data: Bytes,
     image_type: FileType,
 }
 
 impl IdentityImage {
-    pub fn set_data(&mut self, data: Vec<u8>) {
-        self.data = data
+    pub fn set_data(&mut self, data: impl Into<Bytes>) {
+        self.data = data.into()
     }
 
     pub fn set_image_type(&mut self, image_type: FileType) {
@@ -118,6 +122,7 @@ impl IdentityImage {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Relationship {
     friends: bool,
@@ -125,6 +130,31 @@ pub struct Relationship {
     sent_friend_request: bool,
     blocked: bool,
     blocked_by: bool,
+}
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct FriendRequest {
+    identity: DID,
+    date: DateTime<Utc>,
+}
+
+impl FriendRequest {
+    pub fn new(identity: DID, date: Option<DateTime<Utc>>) -> Self {
+        Self {
+            identity,
+            date: date.unwrap_or_else(Utc::now),
+        }
+    }
+}
+
+impl FriendRequest {
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+
+    pub fn identity(&self) -> &DID {
+        &self.identity
+    }
 }
 
 impl Relationship {
@@ -149,6 +179,7 @@ impl Relationship {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Relationship {
     pub fn friends(&self) -> bool {
         self.friends
@@ -206,7 +237,7 @@ impl Display for ShortId {
     }
 }
 
-#[derive(Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Identity {
     /// Username of the identity
@@ -226,6 +257,16 @@ pub struct Identity {
 
     /// Status message
     status_message: Option<String>,
+
+    /// Metadata
+    metadata: IndexMap<String, String>,
+}
+
+impl core::hash::Hash for Identity {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.short_id.hash(state);
+        self.did_key.hash(state);
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
@@ -274,6 +315,10 @@ impl Identity {
     pub fn set_modified(&mut self, time: DateTime<Utc>) {
         self.modified = time;
     }
+
+    pub fn set_metadata(&mut self, map: IndexMap<String, String>) {
+        self.metadata = map;
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
@@ -306,6 +351,11 @@ impl Identity {
     pub fn modified_wasm(&self) -> js_sys::Date {
         self.modified.into()
     }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = metadata))]
+    pub fn metadata_wasm(&self) -> wasm_bindgen::JsValue {
+        serde_wasm_bindgen::to_value(&self.metadata).expect("valid ser")
+    }
 }
 impl Identity {
     pub fn short_id(&self) -> ShortId {
@@ -322,6 +372,10 @@ impl Identity {
 
     pub fn modified(&self) -> DateTime<Utc> {
         self.modified
+    }
+
+    pub fn metadata(&self) -> &IndexMap<String, String> {
+        &self.metadata
     }
 }
 
@@ -394,6 +448,8 @@ pub enum IdentityUpdate {
     Picture(Vec<u8>),
     PicturePath(std::path::PathBuf),
     PictureStream(BoxStream<'static, Result<Vec<u8>, std::io::Error>>),
+    AddMetadataKey { key: String, value: String },
+    RemoveMetadataKey { key: String },
     ClearPicture,
     Banner(Vec<u8>),
     BannerPath(std::path::PathBuf),
@@ -427,6 +483,10 @@ impl Debug for IdentityUpdate {
                 write!(f, "IdentityUpdate::StatusMessage({status:?})")
             }
             IdentityUpdate::ClearStatusMessage => write!(f, "IdentityUpdate::ClearStatusMessage"),
+            IdentityUpdate::AddMetadataKey { .. } => write!(f, "IdentityUpdate::AddMetadataKey"),
+            IdentityUpdate::RemoveMetadataKey { .. } => {
+                write!(f, "IdentityUpdate::RemoveMetadataKey")
+            }
         }
     }
 }

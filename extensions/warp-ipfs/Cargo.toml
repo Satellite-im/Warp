@@ -12,7 +12,7 @@ warp.workspace = true
 futures-timeout.workspace = true
 futures-finally = "0.1.0-alpha.2"
 cbor4ii.workspace = true
-rust-ipfs = { workspace = true, features = ["webrtc_transport", "experimental_stream"] }
+rust-ipfs = { workspace = true, features = ["experimental_stream"] }
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 futures.workspace = true
@@ -30,6 +30,7 @@ tracing.workspace = true
 async-recursion = "1"
 
 chrono = { workspace = true }
+indexmap.workspace = true
 
 void.workspace = true
 

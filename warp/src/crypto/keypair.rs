@@ -76,7 +76,7 @@ pub fn did_from_mnemonic(mnemonic: &str, passphrase: Option<&str>) -> Result<DID
 }
 
 pub fn mnemonic_into_tesseract(
-    tesseract: &mut Tesseract,
+    tesseract: &Tesseract,
     mnemonic: &str,
     passphrase: Option<&str>,
     save_mnemonic: bool,

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Warp Wasm Test</title>
+  </head>
+  <script type="module">
+    import init, * as wasm from './built-wasm/warp-ipfs/warp_ipfs.js';
+    init().then(async (_exports) => {
+      console.log(wasm)
+
+      let warp = await new wasm.WarpIpfs(wasm.Config.minimal_basic(), null)
+
+      let tesseract = warp.multipass.tesseract()
+
+      const passphrase = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+      tesseract.unlock(passphrase)
+
+      try {
+        await warp.multipass.create_identity("bbbb", "baby bachelor bacon badge bag balance balcony ball bamboo banana banner because")
+        console.log(`created identity`)
+      } catch {
+        console.log(`identity already created`)
+      }
+      
+      let identity = await warp.multipass.identity()
+      console.log(identity)
+      console.log(identity.did_key())
+
+      let peer_identity_did_key = "did:key:z6MktkYpSH36kyXHCJUrKCaMoea8rVfucfdotvLCUy6akatn" //did_key of user a
+      let conversation_id = ""
+      try {
+        conversation_id = (await warp.raygun.create_conversation(peer_identity_did_key)).id()
+      } catch {
+        conversation_id = (await warp.raygun.list_conversations())[0].inner.id
+      }
+      console.log(conversation_id)
+
+      let asynciterator = await warp.raygun.get_conversation_stream(conversation_id);
+      let subscribe = { [Symbol.asyncIterator]() { return asynciterator } }
+      let raygun_reader = warp.raygun
+      async function subscribe_reader() {
+        for await (const value of subscribe) {
+          if (value.message_received) {
+            let conversation_id = value.message_received.conversation_id
+            let message_id = value.message_received.message_id
+            let message = await raygun_reader.get_message(conversation_id, message_id)
+            let lines = message.lines()
+            console.log(`got: ${lines}`)
+          }
+        }
+      };
+      subscribe_reader()
+
+      let raygun_sender = warp.raygun
+      async function sender() {
+        let i = 1;
+        while (true) {
+          await new Promise(r => setTimeout(r, 2000));
+          let msg = ["hello", i.toString()]
+          let msg_id = await raygun_sender.send(conversation_id, msg)
+          console.log(`sent: ${msg} `)
+          i++
+        }
+      }
+      sender()
+    });
+  </script>
+  <body>
+    <h2>Description:</h2>
+    <p>This example simulates a conversation between 2 users via separate browser windows. This is done by opening the user-a and user-b examples in separate browsers. If the users don't exist, they are re-created by recovering from the hardcoded seeds. They start a conversation, each sending a message every 2 seconds. This example has persistent state enabled (via minimal_basic setting) This means you will have to clear the localstorage & indexdb if you want it to start over from scratch.</p>
+    <h2>How to use this example:</h2>
+    <h3>1 - Compile the wasm and serve the js examples:</h3>
+    <pre>
+      cargo run --example from-js
+    </pre>
+    <h3>2 - Setup both users:</h3>
+    <p>Open <i>ipfs-persistent-chat-user-a.html</i> and <i>ipfs-persistent-chat-user-b.html</i> in 2 separate browsers (or private tab). This way it will be able to create it's own browser data without running into conflicts.</p>
+    <h3>3 - Check output in the console</h3>
+    <p>Expected output: you should see both 'got: msg' and 'sent: msg' in the logs. Note it could take 10 seconds before the messages start being sent.</p>
+  </body>
+</html>

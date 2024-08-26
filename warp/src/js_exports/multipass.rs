@@ -4,13 +4,15 @@ use crate::{
     js_exports::stream::AsyncIterator,
     multipass::{
         self,
-        identity::{self, Identity, IdentityProfile},
+        identity::{
+            self, Identity, IdentityImage, IdentityProfile, IdentityStatus, Platform, Relationship,
+        },
         MultiPass,
     },
     tesseract::Tesseract,
 };
 use futures::StreamExt;
-use js_sys::Uint8Array;
+use js_sys::{Array, Uint8Array};
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 
@@ -142,12 +144,7 @@ impl MultiPassBox {
             .list_incoming_request()
             .await
             .map_err(|e| e.into())
-            .map(|ok| {
-                serde_wasm_bindgen::to_value(
-                    &ok.iter().map(|i| i.to_string()).collect::<Vec<String>>(),
-                )
-                .unwrap()
-            })
+            .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
     }
 
     /// Check to determine if a request been sent to the DID
@@ -164,12 +161,7 @@ impl MultiPassBox {
             .list_outgoing_request()
             .await
             .map_err(|e| e.into())
-            .map(|ok| {
-                serde_wasm_bindgen::to_value(
-                    &ok.iter().map(|i| i.to_string()).collect::<Vec<String>>(),
-                )
-                .unwrap()
-            })
+            .map(|ok| serde_wasm_bindgen::to_value(&ok).unwrap())
     }
 
     /// Remove friend from contacts
@@ -241,6 +233,61 @@ impl MultiPassBox {
     }
 }
 
+/// impl IdentityInformation trait
+#[wasm_bindgen]
+impl MultiPassBox {
+    /// Profile picture belonging to the `Identity`
+    pub async fn identity_picture(
+        &self,
+        did: String,
+    ) -> Result<multipass::identity::IdentityImage, JsError> {
+        self.inner
+            .identity_picture(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Profile banner belonging to the `Identity`
+    pub async fn identity_banner(&self, did: String) -> Result<IdentityImage, JsError> {
+        self.inner
+            .identity_banner(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Identity status to determine if they are online or offline
+    pub async fn identity_status(&self, did: String) -> Result<IdentityStatus, JsError> {
+        self.inner
+            .identity_status(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Identity status to determine if they are online or offline
+    pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), JsError> {
+        self.inner
+            .set_identity_status(status)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Find the relationship with an existing identity.
+    pub async fn identity_relationship(&self, did: String) -> Result<Relationship, JsError> {
+        self.inner
+            .identity_relationship(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+
+    /// Returns the identity platform while online.
+    pub async fn identity_platform(&self, did: String) -> Result<Platform, JsError> {
+        self.inner
+            .identity_platform(&DID::from_str(&did).unwrap_or_default())
+            .await
+            .map_err(|e| e.into())
+    }
+}
+
 #[wasm_bindgen]
 pub enum IdentityUpdate {
     Username,
@@ -254,6 +301,8 @@ pub enum IdentityUpdate {
     ClearBanner,
     StatusMessage,
     ClearStatusMessage,
+    AddMetadataKey,
+    RemoveMetadataKey,
 }
 
 fn to_identity_update_enum(
@@ -301,6 +350,26 @@ fn to_identity_update_enum(
             }
         }
         IdentityUpdate::ClearStatusMessage => Ok(identity::IdentityUpdate::ClearStatusMessage),
+        IdentityUpdate::AddMetadataKey => {
+            let array: Array = value
+                .dyn_into()
+                .map_err(|_| JsError::new("key, value should be in an array"))?;
+            let key = array
+                .get(0)
+                .as_string()
+                .ok_or(JsError::new("key should be a string"))?;
+            let value = array
+                .get(1)
+                .as_string()
+                .ok_or(JsError::new("value should be a string"))?;
+            Ok(identity::IdentityUpdate::AddMetadataKey { key, value })
+        }
+        IdentityUpdate::RemoveMetadataKey => Ok(identity::IdentityUpdate::RemoveMetadataKey {
+            key: value
+                .as_string()
+                .ok_or(JsError::new("JsValue is not a string"))?
+                .into(),
+        }),
         _ => Err(JsError::new("IdentityUpdate variant not yet implemented")),
     }
 }
@@ -349,11 +418,13 @@ fn to_identifier_enum(option: Identifier, value: JsValue) -> Result<identity::Id
 impl From<multipass::MultiPassEventKind> for MultiPassEventKind {
     fn from(value: multipass::MultiPassEventKind) -> Self {
         match value {
-            multipass::MultiPassEventKind::FriendRequestReceived { from } => MultiPassEventKind {
-                kind: MultiPassEventKindEnum::FriendRequestReceived,
-                did: from.to_string(),
-            },
-            multipass::MultiPassEventKind::FriendRequestSent { to } => MultiPassEventKind {
+            multipass::MultiPassEventKind::FriendRequestReceived { from, .. } => {
+                MultiPassEventKind {
+                    kind: MultiPassEventKindEnum::FriendRequestReceived,
+                    did: from.to_string(),
+                }
+            }
+            multipass::MultiPassEventKind::FriendRequestSent { to, .. } => MultiPassEventKind {
                 kind: MultiPassEventKindEnum::FriendRequestSent,
                 did: to.to_string(),
             },
@@ -456,4 +527,17 @@ pub enum MultiPassEventKindEnum {
     BlockedBy,
     Unblocked,
     UnblockedBy,
+}
+
+#[wasm_bindgen]
+impl IdentityImage {
+    #[wasm_bindgen(js_name = data)]
+    pub fn data_js(&self) -> Vec<u8> {
+        self.data().to_vec()
+    }
+
+    #[wasm_bindgen(js_name = image_type)]
+    pub fn image_type_js(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.image_type()).unwrap()
+    }
 }

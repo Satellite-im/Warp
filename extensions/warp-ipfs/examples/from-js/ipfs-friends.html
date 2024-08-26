@@ -118,11 +118,14 @@
     });
   </script>
   <body>
+    <h2>Description:</h2>
+    <p>This example creates 2 users. User A sends a friend request to user B. User B listens for friend requests via event stream and accepts the request once received. Finally, user A removes user B as friend.</p>
     <h2>How to use this example:</h2>
-    <h3>1 - Make sure the wasm is compiled:</h3>
+    <h3>1 - Compile the wasm and serve the js examples:</h3>
     <pre>
-        wasm-pack build extensions/warp-ipfs --target web --out-dir ../../tools/wasm-example/www/wasm/warp-ipfs
+      cargo run --example from-js
     </pre>
     <h3>2 - Check ouput in the console</h3>
+    <p>Expected output: you should see logs indicating the friend was removed. Note it could take 10 seconds for the friend request to be received by user B.</p>
   </body>
 </html>

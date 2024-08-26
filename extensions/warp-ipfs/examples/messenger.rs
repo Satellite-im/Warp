@@ -268,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
             biased;
             Some(event) = account_stream.next() => {
                 match event {
-                    warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did } => {
+                    warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did, .. } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
@@ -279,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
                             new_account.accept_request(&did).await?;
                         }
                     },
-                    warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
+                    warp::multipass::MultiPassEventKind::FriendRequestSent { to: did, .. } => {
                         let username = new_account
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
@@ -395,6 +395,12 @@ async fn main() -> anyhow::Result<()> {
                             let stream = chat.get_conversation_stream(conversation_id).await?;
 
                             stream_map.insert(conversation_id, stream);
+                        },
+                        warp::raygun::RayGunEventKind::ConversationArchived { conversation_id } => {
+                            writeln!(stdout, "Conversation {conversation_id} has been archived")?;
+                        },
+                        warp::raygun::RayGunEventKind::ConversationUnarchived { conversation_id } => {
+                            writeln!(stdout, "Conversation {conversation_id} has been unarchived")?;
                         },
                         warp::raygun::RayGunEventKind::ConversationDeleted { conversation_id } => {
                             stream_map.remove(&conversation_id);
@@ -1155,6 +1161,20 @@ async fn message_event_handle(
         } => {
             if main_conversation_id == conversation_id {
                 writeln!(stdout, ">>> Conversation settings updated: {settings}")?;
+            }
+        }
+        MessageEventKind::ConversationDescriptionChanged {
+            conversation_id,
+            description,
+        } => {
+            if main_conversation_id == conversation_id {
+                match description {
+                    Some(desc) => writeln!(
+                        stdout,
+                        ">>> Conversation description changed to: \"{desc}\""
+                    )?,
+                    None => writeln!(stdout, ">>> Conversation description removed")?,
+                }
             }
         }
     }

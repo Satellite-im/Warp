@@ -1,16 +1,8 @@
-use std::any::Any;
-use std::collections::HashSet;
-use std::ffi::OsStr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc::channel;
 use futures::future::BoxFuture;
 use futures::stream::{self, BoxStream};
-#[cfg(not(target_arch = "wasm32"))]
-use futures::AsyncReadExt;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_timeout::TimeoutExt;
 use ipfs::p2p::{
@@ -20,6 +12,12 @@ use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
 use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use rust_ipfs::p2p::UpgradeVersion;
+use std::any::Any;
+use std::collections::HashSet;
+use std::ffi::OsStr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{error, info, warn, Instrument, Span};
@@ -44,7 +42,8 @@ use warp::crypto::{KeyMaterial, DID};
 use warp::error::Error;
 use warp::module::Module;
 use warp::multipass::identity::{
-    Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate, Relationship,
+    FriendRequest, Identifier, Identity, IdentityImage, IdentityProfile, IdentityUpdate,
+    Relationship,
 };
 use warp::multipass::{
     identity, Friends, GetIdentity, IdentityImportOption, IdentityInformation, ImportLocation,
@@ -54,8 +53,8 @@ use warp::multipass::{
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunEventKind, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventKind,
+    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
@@ -65,6 +64,7 @@ use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
 use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+use crate::utils::{ByteCollection, ReaderStream};
 
 mod behaviour;
 pub mod config;
@@ -641,24 +641,21 @@ impl WarpIpfs {
             }
         }
 
-        let discovery = Discovery::new(
-            ipfs.clone(),
-            self.inner.config.store_setting().discovery.clone(),
-            relays.clone(),
-        );
+        let discovery =
+            Discovery::new(&ipfs, &self.inner.config.store_setting().discovery, &relays);
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
         info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
-            ipfs.clone(),
+            &ipfs,
             &self.inner.config,
-            tesseract.clone(),
+            &tesseract,
             self.multipass_tx.clone(),
-            phonebook,
-            discovery.clone(),
+            &phonebook,
+            &discovery,
             id_sh_tx,
-            span.clone(),
+            &span,
         )
         .await?;
 
@@ -667,20 +664,20 @@ impl WarpIpfs {
         let root = identity_store.root_document();
 
         let filestore = FileStore::new(
-            ipfs.clone(),
-            root.clone(),
+            &ipfs,
+            root,
             &self.inner.config,
             self.constellation_tx.clone(),
-            span.clone(),
+            &span,
         )
-        .await?;
+        .await;
 
         let message_store = MessageStore::new(
             &ipfs,
             discovery,
-            filestore.clone(),
+            &filestore,
             self.raygun_tx.clone(),
-            identity_store.clone(),
+            &identity_store,
             msg_sh_tx,
         )
         .await;
@@ -781,14 +778,7 @@ impl Extension for WarpIpfs {
 
 impl SingleHandle for WarpIpfs {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
-        let ipfs = self
-            .inner
-            .components
-            .read()
-            .as_ref()
-            .map(|com| com.ipfs.clone())
-            .ok_or(Error::MultiPassExtensionUnavailable)?;
-        Ok(Box::new(ipfs) as Box<dyn Any>)
+        self.ipfs().map(|ipfs| Box::new(ipfs) as Box<_>)
     }
 }
 
@@ -835,11 +825,11 @@ impl MultiPass for WarpIpfs {
             ),
         };
 
-        let mut tesseract = self.tesseract.clone();
+        let tesseract = self.tesseract.clone();
         if !tesseract.exist("keypair") {
             warn!("Loading keypair generated from mnemonic phrase into tesseract");
             warp::crypto::keypair::mnemonic_into_tesseract(
-                &mut tesseract,
+                &tesseract,
                 &phrase,
                 None,
                 self.inner.config.save_phrase(),
@@ -898,7 +888,7 @@ impl LocalIdentity for WarpIpfs {
             Picture(Option<ExtensionType>),
             Banner(Option<ExtensionType>),
         }
-        let (opt, mut stream) = match option {
+        let (opt, stream) = match option {
             IdentityUpdate::Username(username) => {
                 let len = username.chars().count();
                 if !(4..=64).contains(&len) {
@@ -963,7 +953,7 @@ impl LocalIdentity for WarpIpfs {
                 }
                 let cursor = std::io::Cursor::new(data);
 
-                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+                let image = image::ImageReader::new(cursor).with_guessed_format()?;
 
                 let format = image
                     .format()
@@ -972,10 +962,11 @@ impl LocalIdentity for WarpIpfs {
 
                 let inner = image.into_inner();
 
-                let data = inner.into_inner();
+                let async_cursor = futures::io::Cursor::new(inner.into_inner());
 
-                let stream = stream::iter(vec![Ok(data)]).boxed();
-                (OptType::Picture(Some(format)), stream)
+                let stream =
+                    ReaderStream::from_reader_with_cap(async_cursor, 512, Some(MAX_IMAGE_SIZE));
+                (OptType::Picture(Some(format)), stream.boxed())
             }
             #[cfg(not(target_arch = "wasm32"))]
             IdentityUpdate::PicturePath(path) => {
@@ -1008,31 +999,23 @@ impl LocalIdentity for WarpIpfs {
 
                 tracing::trace!("image size = {}", len);
 
-                let stream = async_stream::stream! {
-                    let mut reader = file.compat();
-                    let mut buffer = vec![0u8; 512];
-                    loop {
-                        match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
-                            Ok(_n) => {
-                                yield Ok(buffer.clone());
-                                break;
-                            },
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                            Err(e) => {
-                                yield Err(e);
-                                break;
-                            }
-                        }
-                    }
-                };
+                let stream =
+                    ReaderStream::from_reader_with_cap(file.compat(), 512, Some(MAX_IMAGE_SIZE));
+
                 (OptType::Picture(Some(extension)), stream.boxed())
             }
             #[cfg(target_arch = "wasm32")]
             IdentityUpdate::PicturePath(_) => {
                 return Err(Error::Unimplemented);
             }
-            IdentityUpdate::PictureStream(stream) => (OptType::Picture(None), stream),
+            IdentityUpdate::PictureStream(stream) => {
+                let stream = ReaderStream::from_reader_with_cap(
+                    stream.into_async_read(),
+                    512,
+                    Some(MAX_IMAGE_SIZE),
+                );
+                (OptType::Picture(None), stream.boxed())
+            }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
                 if len == 0 || len > MAX_IMAGE_SIZE {
@@ -1046,7 +1029,7 @@ impl LocalIdentity for WarpIpfs {
 
                 let cursor = std::io::Cursor::new(data);
 
-                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+                let image = image::ImageReader::new(cursor).with_guessed_format()?;
 
                 let format = image
                     .format()
@@ -1055,10 +1038,12 @@ impl LocalIdentity for WarpIpfs {
 
                 let inner = image.into_inner();
 
-                let data = inner.into_inner();
+                let async_cursor = futures::io::Cursor::new(inner.into_inner());
 
-                let stream = stream::iter(vec![Ok(data)]).boxed();
-                (OptType::Banner(Some(format)), stream)
+                let stream =
+                    ReaderStream::from_reader_with_cap(async_cursor, 512, Some(MAX_IMAGE_SIZE));
+
+                (OptType::Banner(Some(format)), stream.boxed())
             }
             #[cfg(not(target_arch = "wasm32"))]
             IdentityUpdate::BannerPath(path) => {
@@ -1091,24 +1076,8 @@ impl LocalIdentity for WarpIpfs {
 
                 tracing::trace!("image size = {}", len);
 
-                let stream = async_stream::stream! {
-                    let mut reader = file.compat();
-                    let mut buffer = vec![0u8; 512];
-                    loop {
-                        match reader.read(&mut buffer).await {
-                            Ok(512) => yield Ok(buffer.clone()),
-                            Ok(_n) => {
-                                yield Ok(buffer.clone());
-                                break;
-                            },
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                            Err(e) => {
-                                yield Err(e);
-                                break;
-                            }
-                        }
-                    }
-                };
+                let stream =
+                    ReaderStream::from_reader_with_cap(file.compat(), 512, Some(2 * 1024 * 1024));
 
                 (OptType::Picture(Some(extension)), stream.boxed())
             }
@@ -1116,14 +1085,34 @@ impl LocalIdentity for WarpIpfs {
             IdentityUpdate::BannerPath(_) => {
                 return Err(Error::Unimplemented);
             }
-            IdentityUpdate::BannerStream(stream) => (OptType::Banner(None), stream),
+            IdentityUpdate::BannerStream(stream) => {
+                let stream = ReaderStream::from_reader_with_cap(
+                    stream.into_async_read(),
+                    512,
+                    Some(MAX_IMAGE_SIZE),
+                );
+                (OptType::Banner(None), stream.boxed())
+            }
+            //TODO: Likely tie this to the store itself when it comes to pushing the update logic to `IdentityStore`
+            IdentityUpdate::AddMetadataKey { key, value } => {
+                let root = store.root_document();
+                root.add_metadata_key(key, value).await?;
+
+                let _ = store.export_root_document().await;
+                store.push_to_all().await;
+                return Ok(());
+            }
+            IdentityUpdate::RemoveMetadataKey { key } => {
+                let root = store.root_document();
+                root.remove_metadata_key(key).await?;
+
+                let _ = store.export_root_document().await;
+                store.push_to_all().await;
+                return Ok(());
+            }
         };
 
-        let mut data = Vec::with_capacity(MAX_IMAGE_SIZE);
-
-        while let Some(s) = stream.try_next().await? {
-            data.extend(s);
-        }
+        let data = ByteCollection::new(stream).await?;
 
         let format = match opt {
             OptType::Picture(Some(format)) => format,
@@ -1133,7 +1122,7 @@ impl LocalIdentity for WarpIpfs {
 
                 let cursor = std::io::Cursor::new(&data);
 
-                let image = image::io::Reader::new(cursor).with_guessed_format()?;
+                let image = image::ImageReader::new(cursor).with_guessed_format()?;
 
                 image
                     .format()
@@ -1234,7 +1223,7 @@ impl MultiPassImportExport for WarpIpfs {
                 exported_document.verify()?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),
@@ -1267,7 +1256,7 @@ impl MultiPassImportExport for WarpIpfs {
                 exported_document.verify()?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),
@@ -1290,7 +1279,7 @@ impl MultiPassImportExport for WarpIpfs {
                     .map_err(|_| Error::PrivateKeyInvalid)?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
-                    &mut self.tesseract,
+                    &self.tesseract,
                     &passphrase,
                     None,
                     self.inner.config.save_phrase(),
@@ -1349,12 +1338,12 @@ impl Friends for WarpIpfs {
         store.close_request(pubkey).await
     }
 
-    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.identity_store(true).await?;
         store.list_incoming_request().await
     }
 
-    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.identity_store(true).await?;
         store.list_outgoing_request().await
     }
@@ -1625,6 +1614,18 @@ impl RayGun for WarpIpfs {
             .update_conversation_settings(conversation_id, settings)
             .await
     }
+
+    async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .archived_conversation(conversation_id)
+            .await
+    }
+
+    async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?
+            .unarchived_conversation(conversation_id)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -1658,7 +1659,7 @@ impl RayGunAttachment for WarpIpfs {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         self.messaging_store()?
             .download_stream(conversation_id, message_id, file)
             .await
@@ -1735,6 +1736,19 @@ impl RayGunEvents for WarpIpfs {
 }
 
 #[async_trait::async_trait]
+impl RayGunConversationInformation for WarpIpfs {
+    async fn set_conversation_description(
+        &mut self,
+        conversation_id: Uuid,
+        description: Option<&str>,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .set_description(conversation_id, description)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
 impl Constellation for WarpIpfs {
     fn modified(&self) -> DateTime<Utc> {
         self.file_store()
@@ -1768,7 +1782,7 @@ impl Constellation for WarpIpfs {
         self.file_store()?.put_buffer(name, buffer).await
     }
 
-    async fn get_buffer(&self, name: &str) -> Result<Vec<u8>, Error> {
+    async fn get_buffer(&self, name: &str) -> Result<Bytes, Error> {
         self.file_store()?.get_buffer(name).await
     }
 
@@ -1777,7 +1791,7 @@ impl Constellation for WarpIpfs {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         self.file_store()?
             .put_stream(name, total_size, stream)
@@ -1788,7 +1802,7 @@ impl Constellation for WarpIpfs {
     async fn get_stream(
         &self,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         self.file_store()?.get_stream(name).await
     }
 

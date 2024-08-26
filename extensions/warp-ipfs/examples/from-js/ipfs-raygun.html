@@ -77,11 +77,18 @@
     });
   </script>
   <body>
+    <h2>Description:</h2>
+    <p>This example creates 2 users in memory and has them start a conversation. Then they ping pong a message between each other, incrementing the counter in the message each time.</p>
     <h2>How to use this example:</h2>
-    <h3>1 - Make sure the wasm is compiled:</h3>
+    <h3>1 - Compile the wasm and serve the js examples:</h3>
     <pre>
-        wasm-pack build extensions/warp-ipfs --target web --out-dir ../../tools/wasm-example/www/wasm/warp-ipfs
+      cargo run --example from-js
     </pre>
-    <h3>2 - Check ouput in the console</h3>
+    <h3>2 - Check output in the console</h3>
+    <p>Expected output: you should the continuously incrementing message in the logs. Note it could take 10 seconds before the messages start being sent. It should look something like this:</p>
+    <li>username1 saw: hello,1</li>
+    <li>username2 saw: hello,2</li>
+    <li>username1 saw: hello,3</li>
+    <li>username2 saw: hello,4</li>
   </body>
 </html>

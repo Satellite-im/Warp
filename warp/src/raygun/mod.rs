@@ -10,10 +10,11 @@ use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use core::ops::Range;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -25,6 +26,8 @@ use self::group::GroupChat;
 #[serde(rename_all = "snake_case")]
 pub enum RayGunEventKind {
     ConversationCreated { conversation_id: Uuid },
+    ConversationArchived { conversation_id: Uuid },
+    ConversationUnarchived { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
 }
 
@@ -72,6 +75,10 @@ pub enum MessageEventKind {
     ConversationNameUpdated {
         conversation_id: Uuid,
         name: String,
+    },
+    ConversationDescriptionChanged {
+        conversation_id: Uuid,
+        description: Option<String>,
     },
     RecipientAdded {
         conversation_id: Uuid,
@@ -358,7 +365,9 @@ pub struct Conversation {
     favorite: bool,
     modified: DateTime<Utc>,
     settings: ConversationSettings,
+    archived: bool,
     recipients: Vec<DID>,
+    description: Option<String>,
 }
 
 impl core::hash::Hash for Conversation {
@@ -388,7 +397,9 @@ impl Default for Conversation {
             favorite: false,
             modified: timestamp,
             settings: ConversationSettings::default(),
+            archived: false,
             recipients,
+            description: None,
         }
     }
 }
@@ -432,6 +443,14 @@ impl Conversation {
     pub fn recipients(&self) -> Vec<DID> {
         self.recipients.clone()
     }
+
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    pub fn archived(&self) -> bool {
+        self.archived
+    }
 }
 
 impl Conversation {
@@ -465,6 +484,14 @@ impl Conversation {
 
     pub fn set_recipients(&mut self, recipients: Vec<DID>) {
         self.recipients = recipients;
+    }
+
+    pub fn set_description(&mut self, description: impl Into<Option<String>>) {
+        self.description = description.into();
+    }
+
+    pub fn set_archived(&mut self, archived: bool) {
+        self.archived = archived;
     }
 }
 
@@ -681,7 +708,7 @@ pub struct Message {
     pinned: bool,
 
     /// List of the reactions for the `Message`
-    reactions: BTreeMap<String, Vec<DID>>,
+    reactions: IndexMap<String, Vec<DID>>,
 
     /// List of users public keys mentioned in this message
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -699,7 +726,7 @@ pub struct Message {
 
     /// Metadata related to the message. Can be used externally, but more internally focused
     #[serde(flatten)]
-    metadata: HashMap<String, String>,
+    metadata: IndexMap<String, String>,
 }
 
 impl Default for Message {
@@ -712,12 +739,12 @@ impl Default for Message {
             date: Utc::now(),
             modified: None,
             pinned: false,
-            reactions: BTreeMap::new(),
+            reactions: IndexMap::new(),
             mentions: Vec::new(),
             replied: None,
             lines: Vec::new(),
             attachment: Vec::new(),
-            metadata: HashMap::new(),
+            metadata: IndexMap::new(),
         }
     }
 }
@@ -770,7 +797,7 @@ impl Message {
         self.pinned
     }
 
-    pub fn reactions(&self) -> BTreeMap<String, Vec<DID>> {
+    pub fn reactions(&self) -> IndexMap<String, Vec<DID>> {
         self.reactions.clone()
     }
 
@@ -786,7 +813,7 @@ impl Message {
         self.attachment.clone()
     }
 
-    pub fn metadata(&self) -> HashMap<String, String> {
+    pub fn metadata(&self) -> IndexMap<String, String> {
         self.metadata.clone()
     }
 
@@ -824,7 +851,7 @@ impl Message {
         self.pinned = pin
     }
 
-    pub fn set_reactions(&mut self, reaction: BTreeMap<String, Vec<DID>>) {
+    pub fn set_reactions(&mut self, reaction: IndexMap<String, Vec<DID>>) {
         self.reactions = reaction
     }
 
@@ -840,7 +867,7 @@ impl Message {
         self.attachment = attachments
     }
 
-    pub fn set_metadata(&mut self, metadata: HashMap<String, String>) {
+    pub fn set_metadata(&mut self, metadata: IndexMap<String, String>) {
         self.metadata = metadata
     }
 
@@ -855,7 +882,7 @@ impl Message {
         &mut self.pinned
     }
 
-    pub fn reactions_mut(&mut self) -> &mut BTreeMap<String, Vec<DID>> {
+    pub fn reactions_mut(&mut self) -> &mut IndexMap<String, Vec<DID>> {
         &mut self.reactions
     }
 
@@ -863,7 +890,7 @@ impl Message {
         &mut self.lines
     }
 
-    pub fn metadata_mut(&mut self) -> &mut HashMap<String, String> {
+    pub fn metadata_mut(&mut self) -> &mut IndexMap<String, String> {
         &mut self.metadata
     }
 }
@@ -921,7 +948,7 @@ pub enum Location {
     Stream {
         name: String,
         size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     },
 }
 
@@ -992,6 +1019,7 @@ pub trait RayGun:
     + RayGunGroupConversation
     + RayGunAttachment
     + RayGunEvents
+    + RayGunConversationInformation
     + Extension
     + Sync
     + Send
@@ -1119,6 +1147,12 @@ pub trait RayGun:
         conversation_id: Uuid,
         settings: ConversationSettings,
     ) -> Result<(), Error>;
+
+    /// Archive a conversation
+    async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error>;
+
+    /// Unarchived a conversation
+    async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 }
 
 dyn_clone::clone_trait_object!(RayGun);
@@ -1175,7 +1209,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Uuid,
         _: Uuid,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -1204,4 +1238,14 @@ pub trait RayGunEvents: Sync + Send {
     async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
+}
+
+#[async_trait::async_trait]
+pub trait RayGunConversationInformation: Sync + Send {
+    /// Set a description to a conversation
+    async fn set_conversation_description(
+        &mut self,
+        conversation_id: Uuid,
+        description: Option<&str>,
+    ) -> Result<(), Error>;
 }
