@@ -1269,7 +1269,7 @@ async fn _remove(ipfs: &Ipfs, root: &Directory, item: &Item) -> Result<(), Error
                     tracing::error!(error = %e, item_type = %item_type, item_name = %name, "unable to remove item");
                     continue;
                 }
-                if item.size() == 0 || item.item_type() == ItemType::FileItem {
+                if item.size() == 0 || item.item_type() == ItemType::DirectoryItem {
                     if let Err(e) = directory.remove_item(&name) {
                         tracing::error!(error = %e, item_type = %item_type, item_name = %name, "unable to remove item");
                     }
