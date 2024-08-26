@@ -1090,11 +1090,12 @@ impl FileTask {
 
     /// Used to remove data from the filesystem
     async fn remove(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
-        //TODO: Recursively delete directory but for now only support deleting a file
         let directory = self.current_directory()?;
 
+        let name = name.trim();
+
         let item = match name {
-            "/" => return Err(Error::InvalidDirectory),
+            "/" => directory.into(),
             path => directory.get_item_by_path(path)?,
         };
 
@@ -1106,7 +1107,7 @@ impl FileTask {
                 .map(|s| !s.get_items().is_empty())
                 .unwrap_or_default()
         {
-            return Err(Error::Other); // directory not empty
+            return Err(Error::DirectoryNotEmpty); // directory not empty
         }
 
         _remove(&self.ipfs, &item).await?;
@@ -1237,7 +1238,6 @@ fn split_file_from_path(name: impl Into<String>) -> Result<(String, Option<Strin
 
 #[async_recursion::async_recursion]
 async fn _remove(ipfs: &Ipfs, item: &Item) -> Result<(), Error> {
-    println!("{:?} --", item);
     match item {
         Item::File(file) => {
             let reference = file
