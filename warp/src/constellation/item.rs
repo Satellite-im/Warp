@@ -69,6 +69,12 @@ impl From<File> for Item {
     }
 }
 
+impl From<&File> for Item {
+    fn from(file: &File) -> Self {
+        Item::new_file(file.clone())
+    }
+}
+
 /// Used to convert `Directory` to `Item`
 ///
 /// #Examples
@@ -82,6 +88,12 @@ impl From<File> for Item {
 impl From<Directory> for Item {
     fn from(directory: Directory) -> Self {
         Item::new_directory(directory)
+    }
+}
+
+impl From<&Directory> for Item {
+    fn from(directory: &Directory) -> Self {
+        Item::new_directory(directory.clone())
     }
 }
 
