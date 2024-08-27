@@ -1,6 +1,9 @@
 use bytes::Bytes;
 use futures::channel::oneshot;
-use image::{ImageFormat, ImageReader};
+use image::{
+    codecs::gif::{GifDecoder, GifEncoder, Repeat},
+    AnimationDecoder, DynamicImage, Frame, ImageFormat, ImageReader,
+};
 use rust_ipfs::{Ipfs, IpfsPath};
 use std::{
     collections::BTreeMap,
@@ -203,23 +206,49 @@ impl ThumbnailGenerator {
 
                             let data = bytes.await.map(|b| b.to_vec())?;
                             let cursor = Cursor::new(data);
-                            let image = ImageReader::new(cursor)
-                                .with_guessed_format()?
-                                .decode()
-                                .map_err(anyhow::Error::from)?;
 
-                            let width = width.min(image.width());
-                            let height = height.min(image.height());
-
-                            let thumbnail = image.thumbnail(width, height);
                             let mut t_buffer = std::io::Cursor::new(Vec::new());
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
                             };
-                            thumbnail
-                                .write_to(&mut t_buffer, output_format)
-                                .map_err(anyhow::Error::from)?;
+                            if output_format == ImageFormat::Gif {
+                                let decoder = GifDecoder::new(cursor).map_err(|_| Error::Other)?;
+                                let frames = decoder
+                                    .into_frames()
+                                    .collect_frames()
+                                    .map_err(|_| Error::Other)?;
+                                let frames = frames.iter().map(|frame| {
+                                    let buffer = frame.buffer().clone();
+                                    let width = width.min(buffer.width());
+                                    let height = height.min(buffer.height());
+                                    let img =
+                                        DynamicImage::ImageRgba8(buffer).thumbnail(width, height);
+                                    Frame::from_parts(
+                                        img.into(),
+                                        frame.left(),
+                                        frame.top(),
+                                        frame.delay(),
+                                    )
+                                });
+                                let mut encoder = GifEncoder::new(&mut t_buffer);
+                                let _ = encoder.set_repeat(Repeat::Infinite);
+                                let _ = encoder.encode_frames(frames);
+                            } else {
+                                let image = ImageReader::new(cursor)
+                                    .with_guessed_format()?
+                                    .decode()
+                                    .map_err(anyhow::Error::from)?;
+
+                                let width = width.min(image.width());
+                                let height = height.min(image.height());
+
+                                let thumbnail = image.thumbnail(width, height);
+
+                                thumbnail
+                                    .write_to(&mut t_buffer, output_format)
+                                    .map_err(anyhow::Error::from)?;
+                            }
                             Ok::<_, Error>((
                                 ExtensionType::try_from(output_format)?,
                                 Bytes::from(t_buffer.into_inner()),
