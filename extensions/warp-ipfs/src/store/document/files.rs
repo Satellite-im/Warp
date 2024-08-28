@@ -121,7 +121,7 @@ impl DirectoryDocument {
                     .await
                     .unwrap_or_default();
 
-                directory.set_thumbnail(&data);
+                directory.set_thumbnail(data);
             }
         }
 
@@ -282,7 +282,7 @@ impl FileDocument {
                     .await
                     .unwrap_or_default();
 
-                file.set_thumbnail(&data);
+                file.set_thumbnail(data);
             }
         }
 

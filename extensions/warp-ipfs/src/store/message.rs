@@ -5,6 +5,7 @@ use futures_timer::Delay;
 use tokio_stream::StreamMap;
 use tracing::info;
 
+use bytes::Bytes;
 use std::{
     collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
     ffi::OsStr,
@@ -13,7 +14,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
 use web_time::Instant;
 
 use futures::{
@@ -66,13 +66,13 @@ use crate::{
 };
 
 use super::{
-    document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt, MAX_MESSAGE_SIZE,
-    SHUTTLE_TIMEOUT,
+    document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt, MAX_CONVERSATION_DESCRIPTION,
+    MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
 };
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
-pub type DownloadStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
+pub type DownloadStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
 
 enum MessagingCommand {
     Receiver {
@@ -450,7 +450,7 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
+        let inner = &*self.inner.read().await;
         inner.send_event(conversation_id, event).await
     }
 
@@ -459,10 +459,18 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
+        let inner = &*self.inner.read().await;
         inner.cancel_event(conversation_id, event).await
     }
 
+    pub async fn set_description(
+        &self,
+        conversation_id: Uuid,
+        desc: Option<&str>,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.set_description(conversation_id, desc).await
+    }
     pub async fn archived_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.archived_conversation(conversation_id).await
@@ -2478,7 +2486,7 @@ impl ConversationInner {
         conversation_id: Uuid,
         message_id: Uuid,
         file: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         let conversation = self.get(conversation_id).await?;
 
         let members = conversation
@@ -2506,6 +2514,58 @@ impl ConversationInner {
         let stream = attachment.download_stream(&self.ipfs, &members, None);
 
         Ok(stream)
+    }
+
+    pub async fn set_description(
+        &mut self,
+        conversation_id: Uuid,
+        desc: Option<&str>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get(conversation_id).await?;
+        let tx = self.subscribe(conversation_id).await?;
+        let own_did = &self.identity.did_key();
+
+        if conversation.conversation_type() == ConversationType::Group {
+            let Some(creator) = conversation.creator.as_ref() else {
+                return Err(Error::InvalidConversation);
+            };
+            if own_did != creator {
+                return Err(Error::InvalidConversation); //TODO:
+            }
+        }
+
+        if let Some(desc) = desc {
+            if desc.is_empty() || desc.len() > MAX_CONVERSATION_DESCRIPTION {
+                return Err(Error::InvalidLength {
+                    context: "description".into(),
+                    minimum: Some(1),
+                    maximum: Some(MAX_CONVERSATION_DESCRIPTION),
+                    current: desc.len(),
+                });
+            }
+        }
+
+        conversation.description = desc.map(ToString::to_string);
+
+        self.set_document(conversation).await?;
+
+        let conversation = self.get(conversation_id).await?;
+
+        let ev = MessageEventKind::ConversationDescriptionChanged {
+            conversation_id,
+            description: desc.map(ToString::to_string),
+        };
+
+        _ = tx.send(ev);
+
+        let event = MessagingEvents::UpdateConversation {
+            conversation,
+            kind: ConversationUpdateKind::ChangeDescription {
+                description: desc.map(ToString::to_string),
+            },
+        };
+
+        self.publish(conversation_id, None, event, true).await
     }
 
     pub async fn add_restricted(
@@ -2939,7 +2999,7 @@ impl ConversationInner {
     }
 
     pub async fn send_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
@@ -2955,7 +3015,7 @@ impl ConversationInner {
     }
 
     pub async fn cancel_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
@@ -2997,7 +3057,7 @@ impl ConversationInner {
     }
 
     pub async fn send_message_event(
-        &mut self,
+        &self,
         conversation_id: Uuid,
         event: MessagingEvents,
     ) -> Result<(), Error> {
@@ -3807,6 +3867,11 @@ async fn message_event(
             kind,
         } => {
             conversation.verify()?;
+            conversation.excluded = document.excluded;
+            conversation.messages = document.messages;
+            conversation.favorite = document.favorite;
+            conversation.archived = document.archived;
+
             match kind {
                 ConversationUpdateKind::AddParticipant { did } => {
                     if document.recipients.contains(&did) {
@@ -3817,10 +3882,6 @@ async fn message_event(
                         let _ = this.discovery.insert(&did).await.ok();
                     }
 
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = this.request_key(conversation_id, &did).await {
@@ -3841,14 +3902,10 @@ async fn message_event(
 
                     //Maybe remove participant from discovery?
 
-                    let can_emit = !document.excluded.contains_key(&did);
+                    let can_emit = !conversation.excluded.contains_key(&did);
 
-                    document.excluded.remove(&did);
+                    conversation.excluded.remove(&did);
 
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if can_emit {
@@ -3872,16 +3929,11 @@ async fn message_event(
                             maximum: Some(255),
                         });
                     }
-                    if let Some(current_name) = document.name() {
+                    if let Some(current_name) = document.name.as_ref() {
                         if current_name.eq(&name) {
                             return Ok(());
                         }
                     }
-
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3893,10 +3945,6 @@ async fn message_event(
                 }
 
                 ConversationUpdateKind::ChangeName { name: None } => {
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -3908,23 +3956,41 @@ async fn message_event(
                 }
                 ConversationUpdateKind::AddRestricted { .. }
                 | ConversationUpdateKind::RemoveRestricted { .. } => {
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
                     this.set_document(conversation).await?;
                     //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                 }
                 ConversationUpdateKind::ChangeSettings { settings } => {
-                    conversation.excluded = document.excluded;
-                    conversation.messages = document.messages;
-                    conversation.favorite = document.favorite;
-                    conversation.archived = document.archived;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
                         conversation_id,
                         settings,
+                    }) {
+                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                ConversationUpdateKind::ChangeDescription { description } => {
+                    if let Some(desc) = description.as_ref() {
+                        if desc.is_empty() || desc.len() > MAX_CONVERSATION_DESCRIPTION {
+                            return Err(Error::InvalidLength {
+                                context: "description".into(),
+                                minimum: Some(1),
+                                maximum: Some(MAX_CONVERSATION_DESCRIPTION),
+                                current: desc.len(),
+                            });
+                        }
+
+                        if matches!(document.description.as_ref(), Some(current_desc) if current_desc == desc)
+                        {
+                            return Ok(());
+                        }
+                    }
+
+                    this.set_document(conversation).await?;
+                    if let Err(e) = tx.send(MessageEventKind::ConversationDescriptionChanged {
+                        conversation_id,
+                        description,
                     }) {
                         tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }

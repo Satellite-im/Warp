@@ -10,6 +10,7 @@ use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use core::ops::Range;
 use indexmap::IndexMap;
@@ -74,6 +75,10 @@ pub enum MessageEventKind {
     ConversationNameUpdated {
         conversation_id: Uuid,
         name: String,
+    },
+    ConversationDescriptionChanged {
+        conversation_id: Uuid,
+        description: Option<String>,
     },
     RecipientAdded {
         conversation_id: Uuid,
@@ -362,6 +367,7 @@ pub struct Conversation {
     settings: ConversationSettings,
     archived: bool,
     recipients: Vec<DID>,
+    description: Option<String>,
 }
 
 impl core::hash::Hash for Conversation {
@@ -393,6 +399,7 @@ impl Default for Conversation {
             settings: ConversationSettings::default(),
             archived: false,
             recipients,
+            description: None,
         }
     }
 }
@@ -437,6 +444,10 @@ impl Conversation {
         self.recipients.clone()
     }
 
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
     pub fn archived(&self) -> bool {
         self.archived
     }
@@ -473,6 +484,10 @@ impl Conversation {
 
     pub fn set_recipients(&mut self, recipients: Vec<DID>) {
         self.recipients = recipients;
+    }
+
+    pub fn set_description(&mut self, description: impl Into<Option<String>>) {
+        self.description = description.into();
     }
 
     pub fn set_archived(&mut self, archived: bool) {
@@ -523,6 +538,14 @@ pub struct GroupSettings {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl GroupSettings {
+    #[cfg_attr(
+        target_arch = "wasm32",
+        wasm_bindgen::prelude::wasm_bindgen(constructor)
+    )]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn members_can_add_participants(&self) -> bool {
         self.members_can_add_participants
     }
@@ -933,7 +956,7 @@ pub enum Location {
     Stream {
         name: String,
         size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     },
 }
 
@@ -1004,6 +1027,7 @@ pub trait RayGun:
     + RayGunGroupConversation
     + RayGunAttachment
     + RayGunEvents
+    + RayGunConversationInformation
     + Extension
     + Sync
     + Send
@@ -1193,7 +1217,7 @@ pub trait RayGunAttachment: Sync + Send {
         _: Uuid,
         _: Uuid,
         _: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -1222,4 +1246,14 @@ pub trait RayGunEvents: Sync + Send {
     async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
+}
+
+#[async_trait::async_trait]
+pub trait RayGunConversationInformation: Sync + Send {
+    /// Set a description to a conversation
+    async fn set_conversation_description(
+        &mut self,
+        conversation_id: Uuid,
+        description: Option<&str>,
+    ) -> Result<(), Error>;
 }

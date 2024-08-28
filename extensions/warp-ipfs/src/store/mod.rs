@@ -48,6 +48,7 @@ pub const MAX_METADATA_KEY_LENGTH: usize = 32;
 pub const MAX_METADATA_VALUE_LENGTH: usize = 128;
 pub const MAX_METADATA_ENTRIES: usize = 20;
 pub const MAX_THUMBNAIL_STREAM_SIZE: usize = 20 * 1024 * 1024;
+pub const MAX_CONVERSATION_DESCRIPTION: usize = 256;
 
 pub(super) mod topics {
     use std::fmt::Display;
@@ -434,6 +435,7 @@ pub enum ConversationUpdateKind {
     RemoveRestricted { did: DID },
     ChangeName { name: Option<String> },
     ChangeSettings { settings: ConversationSettings },
+    ChangeDescription { description: Option<String> },
 }
 
 // Note that this are temporary

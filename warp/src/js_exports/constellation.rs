@@ -251,7 +251,7 @@ impl Directory {
         serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap()
     }
     pub fn set_thumbnail(&self, desc: &[u8]) {
-        self.inner.set_thumbnail(desc)
+        self.inner.set_thumbnail(desc.to_vec())
     }
     pub fn thumbnail(&self) -> Vec<u8> {
         self.inner.thumbnail()
@@ -335,7 +335,7 @@ impl File {
         serde_wasm_bindgen::to_value(&self.inner.thumbnail_format()).unwrap()
     }
     pub fn set_thumbnail(&self, data: &[u8]) {
-        self.inner.set_thumbnail(data)
+        self.inner.set_thumbnail(data.to_vec())
     }
     pub fn thumbnail(&self) -> Vec<u8> {
         self.inner.thumbnail()
@@ -479,7 +479,7 @@ impl Item {
         self.inner.set_description(desc)
     }
     pub fn set_thumbnail(&self, data: &[u8]) {
-        self.inner.set_thumbnail(data)
+        self.inner.set_thumbnail(data.to_vec())
     }
     pub fn set_thumbnail_format(&self, format: JsValue) {
         self.inner

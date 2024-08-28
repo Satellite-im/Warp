@@ -41,6 +41,8 @@ pub enum Error {
     FileNotFound,
     #[error("Directory cannot be found")]
     DirectoryNotFound,
+    #[error("Directory not empty")]
+    DirectoryNotEmpty,
 
     //PocketDimension Errors
     #[error("Pocket dimension extension is unavailable")]

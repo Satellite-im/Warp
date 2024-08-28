@@ -1,9 +1,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::ffi::OsStr;
 
-use std::{collections::VecDeque, path::PathBuf, sync::Arc};
-
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use std::{collections::VecDeque, path::PathBuf, sync::Arc};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -25,6 +25,7 @@ use warp::{
 };
 
 use parking_lot::RwLock;
+use warp::constellation::item::{Item, ItemType};
 
 use crate::{
     config::{self, Config},
@@ -195,7 +196,7 @@ impl FileStore {
     pub async fn put_buffer(
         &mut self,
         name: impl Into<String>,
-        buffer: impl Into<Vec<u8>>,
+        buffer: &[u8],
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -203,14 +204,14 @@ impl FileStore {
             .clone()
             .send(FileTaskCommand::PutBuffer {
                 name: name.into(),
-                buffer: buffer.into(),
+                buffer: Bytes::from(Vec::from(buffer)),
                 response: tx,
             })
             .await;
         rx.await.map_err(anyhow::Error::from)??.await
     }
 
-    pub async fn get_buffer(&self, name: impl Into<String>) -> Result<Vec<u8>, Error> {
+    pub async fn get_buffer(&self, name: impl Into<String>) -> Result<Bytes, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_sender
@@ -228,7 +229,7 @@ impl FileStore {
         &mut self,
         name: impl Into<String>,
         total_size: impl Into<Option<usize>>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
@@ -248,7 +249,7 @@ impl FileStore {
     pub async fn get_stream(
         &self,
         name: impl Into<String>,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .command_sender
@@ -326,8 +327,8 @@ impl FileStore {
     }
 }
 
-type GetStream = BoxStream<'static, Result<Vec<u8>, std::io::Error>>;
-type GetBufferFutResult = BoxFuture<'static, Result<Vec<u8>, Error>>;
+type GetStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
+type GetBufferFutResult = BoxFuture<'static, Result<Bytes, Error>>;
 enum FileTaskCommand {
     #[cfg(not(target_arch = "wasm32"))]
     Put {
@@ -337,13 +338,13 @@ enum FileTaskCommand {
     },
     PutBuffer {
         name: String,
-        buffer: Vec<u8>,
+        buffer: Bytes,
         response: oneshot::Sender<Result<BoxFuture<'static, Result<(), Error>>, Error>>,
     },
     PutStream {
         name: String,
         total_size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
         response: oneshot::Sender<Result<ConstellationProgressStream, Error>>,
     },
     #[cfg(not(target_arch = "wasm32"))]
@@ -643,7 +644,7 @@ impl FileTask {
 
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
-                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail(thumbnail);
                     file.set_thumbnail_format(extension_type.into());
                     file.set_thumbnail_reference(&path.to_string());
                 }
@@ -735,7 +736,7 @@ impl FileTask {
     fn put_buffer(
         &self,
         name: String,
-        buffer: Vec<u8>,
+        buffer: Bytes,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let ipfs = self.ipfs.clone();
         let thumbnail_store = self.thumbnail_store.clone();
@@ -809,7 +810,7 @@ impl FileTask {
 
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
-                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail(thumbnail);
                     file.set_thumbnail_format(extension_type.into());
                     file.set_thumbnail_reference(&path.to_string());
                 }
@@ -835,7 +836,7 @@ impl FileTask {
     fn get_buffer(
         &self,
         name: impl Into<String>,
-    ) -> Result<BoxFuture<'static, Result<Vec<u8>, Error>>, Error> {
+    ) -> Result<BoxFuture<'static, Result<Bytes, Error>>, Error> {
         let name = name.into();
         let ipfs = self.ipfs.clone();
         let current_directory = self.current_directory()?;
@@ -858,7 +859,7 @@ impl FileTask {
             })
             .await;
 
-            Ok(buffer.into())
+            Ok(buffer)
         }
         .boxed())
     }
@@ -868,7 +869,7 @@ impl FileTask {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
+        stream: BoxStream<'static, std::io::Result<Bytes>>,
     ) -> Result<ConstellationProgressStream, Error> {
         let (name, dest_path) = split_file_from_path(name)?;
 
@@ -1022,7 +1023,7 @@ impl FileTask {
 
             match thumbnail_store.get(ticket).await {
                 Ok((extension_type, path, thumbnail)) => {
-                    file.set_thumbnail(&thumbnail);
+                    file.set_thumbnail(thumbnail);
                     file.set_thumbnail_format(extension_type.into());
                     file.set_thumbnail_reference(&path.to_string());
                 }
@@ -1060,7 +1061,7 @@ impl FileTask {
     fn get_stream(
         &self,
         name: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, std::io::Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         let ipfs = self.ipfs.clone();
 
         let item = self.current_directory()?.get_item_by_path(name)?;
@@ -1072,7 +1073,6 @@ impl FileTask {
 
         let stream = ipfs
             .cat_unixfs(path)
-            .map_ok(|bytes| bytes.into())
             .map_err(std::io::Error::other)
             .try_finally(move || async move {
                 let _ = tx
@@ -1089,30 +1089,28 @@ impl FileTask {
     }
 
     /// Used to remove data from the filesystem
-    async fn remove(&mut self, name: &str, _: bool) -> Result<(), Error> {
-        let ipfs = self.ipfs.clone();
-        //TODO: Recursively delete directory but for now only support deleting a file
+    async fn remove(&mut self, name: &str, recursive: bool) -> Result<(), Error> {
         let directory = self.current_directory()?;
 
-        let item = directory.get_item_by_path(name)?;
+        let name = name.trim();
 
-        let file = item.get_file()?;
-        let reference = file
-            .reference()
-            .ok_or(Error::ObjectNotFound)?
-            .parse::<IpfsPath>()?; //Reference not found
+        let item = match name {
+            "/" => Item::from(&directory),
+            path => directory.get_item_by_path(path)?,
+        };
 
-        let cid = reference
-            .root()
-            .cid()
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
-
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid).recursive().await?;
+        if !recursive
+            && item.is_directory()
+            && item.size() > 0
+            && item
+                .directory()
+                .map(|s| !s.get_items().is_empty())
+                .unwrap_or_default()
+        {
+            return Err(Error::DirectoryNotEmpty);
         }
 
-        directory.remove_item(&item.name())?;
+        _remove(&self.ipfs, &directory, &item).await?;
 
         _ = self.export().await;
 
@@ -1198,7 +1196,7 @@ impl FileTask {
                 .await;
 
             if let Ok((extension_type, path, thumbnail)) = thumbnail_store.get(id).await {
-                file.set_thumbnail(&thumbnail);
+                file.set_thumbnail(thumbnail);
                 file.set_thumbnail_format(extension_type.into());
                 file.set_thumbnail_reference(&path.to_string());
             }
@@ -1236,4 +1234,49 @@ fn split_file_from_path(name: impl Into<String>) -> Result<(String, Option<Strin
     }
     let dest_path = (!split_path.is_empty()).then(|| split_path.join("/"));
     Ok((name.to_string(), dest_path))
+}
+
+#[async_recursion::async_recursion]
+async fn _remove(ipfs: &Ipfs, root: &Directory, item: &Item) -> Result<(), Error> {
+    match item {
+        Item::File(file) => {
+            let reference = file
+                .reference()
+                .ok_or(Error::ObjectNotFound)?
+                .parse::<IpfsPath>()?; //Reference not found
+
+            let cid = reference
+                .root()
+                .cid()
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
+
+            if ipfs.is_pinned(&cid).await? {
+                ipfs.remove_pin(&cid).recursive().await?;
+            }
+
+            let name = item.name();
+            if let Err(e) = root.remove_item(&name) {
+                tracing::error!(error = %e, item_name = %name, "unable to remove file");
+            }
+        }
+        Item::Directory(directory) => {
+            for item in directory.get_items() {
+                let name = item.name();
+                let item_type = item.item_type();
+
+                if let Err(e) = _remove(ipfs, directory, &item).await {
+                    tracing::error!(error = %e, item_type = %item_type, item_name = %name, "unable to remove item");
+                    continue;
+                }
+                if item.size() == 0 || item.item_type() == ItemType::DirectoryItem {
+                    if let Err(e) = directory.remove_item(&name) {
+                        tracing::error!(error = %e, item_type = %item_type, item_name = %name, "unable to remove item");
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

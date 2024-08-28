@@ -1,15 +1,15 @@
 use crate::{constellation::file::FileType, crypto::DID, error::Error};
-use std::hash::Hasher;
-use std::{
-    fmt::{Debug, Display},
-    vec,
-};
-
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use futures::stream::BoxStream;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::hash::Hasher;
+use std::{
+    fmt::{Debug, Display},
+    vec,
+};
 
 pub const SHORT_ID_SIZE: usize = 8;
 
@@ -98,13 +98,13 @@ impl IdentityProfile {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IdentityImage {
-    data: Vec<u8>,
+    data: Bytes,
     image_type: FileType,
 }
 
 impl IdentityImage {
-    pub fn set_data(&mut self, data: Vec<u8>) {
-        self.data = data
+    pub fn set_data(&mut self, data: impl Into<Bytes>) {
+        self.data = data.into()
     }
 
     pub fn set_image_type(&mut self, image_type: FileType) {
@@ -130,6 +130,31 @@ pub struct Relationship {
     sent_friend_request: bool,
     blocked: bool,
     blocked_by: bool,
+}
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct FriendRequest {
+    identity: DID,
+    date: DateTime<Utc>,
+}
+
+impl FriendRequest {
+    pub fn new(identity: DID, date: Option<DateTime<Utc>>) -> Self {
+        Self {
+            identity,
+            date: date.unwrap_or_else(Utc::now),
+        }
+    }
+}
+
+impl FriendRequest {
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+
+    pub fn identity(&self) -> &DID {
+        &self.identity
+    }
 }
 
 impl Relationship {

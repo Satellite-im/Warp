@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 use chrono::{DateTime, Utc};
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use uuid::Uuid;
@@ -68,6 +69,12 @@ impl From<File> for Item {
     }
 }
 
+impl From<&File> for Item {
+    fn from(file: &File) -> Self {
+        Item::new_file(file.clone())
+    }
+}
+
 /// Used to convert `Directory` to `Item`
 ///
 /// #Examples
@@ -81,6 +88,12 @@ impl From<File> for Item {
 impl From<Directory> for Item {
     fn from(directory: Directory) -> Self {
         Item::new_directory(directory)
+    }
+}
+
+impl From<&Directory> for Item {
+    fn from(directory: &Directory) -> Self {
+        Item::new_directory(directory.clone())
     }
 }
 
@@ -233,7 +246,7 @@ impl Item {
     }
 
     /// Set thumbnail of `Item`
-    pub fn set_thumbnail(&self, data: &[u8]) {
+    pub fn set_thumbnail(&self, data: impl Into<Bytes>) {
         match self {
             Item::File(file) => file.set_thumbnail(data),
             Item::Directory(directory) => directory.set_thumbnail(data),
