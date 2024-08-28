@@ -22,7 +22,7 @@ use warp::multipass::MultiPassEventKind;
 use crate::store::{event_subscription::EventSubscription, PeerIdExt};
 
 use futures::{channel::oneshot::Sender as OneshotSender, FutureExt, StreamExt};
-
+use rust_ipfs::libp2p::core::transport::PortUse;
 use warp::error::Error;
 
 use self::handler::In;
@@ -167,6 +167,7 @@ impl NetworkBehaviour for Behaviour {
         peer_id: PeerId,
         _: &Multiaddr,
         _: Endpoint,
+        _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(handler::Handler::new(self.entry.contains(&peer_id)))
     }

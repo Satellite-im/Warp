@@ -329,6 +329,7 @@ mod ext_behaviour {
         task::{Context, Poll},
     };
 
+    use rust_ipfs::libp2p::core::transport::PortUse;
     use rust_ipfs::libp2p::{
         core::Endpoint,
         swarm::{
@@ -398,6 +399,7 @@ mod ext_behaviour {
             _: PeerId,
             _: &Multiaddr,
             _: Endpoint,
+            _: PortUse,
         ) -> Result<THandler<Self>, ConnectionDenied> {
             Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
         }

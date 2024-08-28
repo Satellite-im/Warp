@@ -6,6 +6,8 @@ use std::{
 
 use futures::{channel::oneshot, FutureExt, StreamExt};
 use ipld_core::cid::Cid;
+use rust_ipfs::libp2p::core::transport::PortUse;
+use rust_ipfs::libp2p::request_response;
 use rust_ipfs::{
     libp2p::{
         core::Endpoint,
@@ -18,8 +20,6 @@ use rust_ipfs::{
     p2p::MultiaddrExt,
     Keypair, Multiaddr, NetworkBehaviour, PeerId,
 };
-
-use rust_ipfs::libp2p::request_response;
 use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
 
@@ -250,9 +250,15 @@ impl NetworkBehaviour for Behaviour {
         peer: PeerId,
         addr: &Multiaddr,
         role_override: Endpoint,
+        reuse: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        self.inner
-            .handle_established_outbound_connection(connection_id, peer, addr, role_override)
+        self.inner.handle_established_outbound_connection(
+            connection_id,
+            peer,
+            addr,
+            role_override,
+            reuse,
+        )
     }
 
     fn on_connection_handler_event(
