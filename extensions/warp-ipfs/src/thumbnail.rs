@@ -213,11 +213,11 @@ impl ThumbnailGenerator {
                                 (true, format) => format,
                             };
                             if output_format == ImageFormat::Gif {
-                                let decoder = GifDecoder::new(cursor).map_err(|_| Error::Other)?;
+                                let decoder = GifDecoder::new(cursor).map_err(anyhow::Error::from)?;
                                 let frames = decoder
                                     .into_frames()
                                     .collect_frames()
-                                    .map_err(|_| Error::Other)?;
+                                    .map_err(anyhow::Error::from)?;
                                 let frames = frames.iter().map(|frame| {
                                     let buffer = frame.buffer().clone();
                                     let width = width.min(buffer.width());
@@ -232,8 +232,8 @@ impl ThumbnailGenerator {
                                     )
                                 });
                                 let mut encoder = GifEncoder::new(&mut t_buffer);
-                                let _ = encoder.set_repeat(Repeat::Infinite);
-                                let _ = encoder.encode_frames(frames);
+                                encoder.set_repeat(Repeat::Infinite).map_err(anyhow::Error::from)?;
+                                encoder.encode_frames(frames).map_err(anyhow::Error::from)?;
                             } else {
                                 let image = ImageReader::new(cursor)
                                     .with_guessed_format()?
