@@ -25,7 +25,7 @@ use warp::{
     },
 };
 
-use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt};
+use crate::store::{ecdh_encrypt, ecdh_encrypt_with_nonce, DidExt, MAX_REACTIONS};
 
 use super::{
     document::FileAttachmentDocument, ecdh_decrypt, keystore::Keystore, topics::ConversationTopic,
@@ -768,6 +768,16 @@ impl MessageDocument {
         let modified = message.modified();
         let replied = message.replied();
         let lines = message.lines();
+        let reactions = message.reactions();
+
+        if reactions.len() > MAX_REACTIONS {
+            return Err(Error::InvalidLength {
+                context: "reactions".into(),
+                current: reactions.len(),
+                minimum: None,
+                maximum: Some(MAX_REACTIONS),
+            });
+        }
 
         let attachments = FuturesUnordered::from_iter(
             message
@@ -781,8 +791,6 @@ impl MessageDocument {
 
         let attachments =
             (!attachments.is_empty()).then_some(ipfs.dag().put().serialize(attachments).await?);
-
-        let reactions = message.reactions();
 
         let reactions =
             (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
@@ -922,6 +930,14 @@ impl MessageDocument {
         self.modified = message.modified();
 
         let reactions = message.reactions();
+        if reactions.len() > MAX_REACTIONS {
+            return Err(Error::InvalidLength {
+                context: "reactions".into(),
+                current: reactions.len(),
+                minimum: None,
+                maximum: Some(MAX_REACTIONS),
+            });
+        }
 
         self.reactions =
             (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
@@ -1057,6 +1073,15 @@ impl MessageDocument {
                 .deserialized()
                 .await
                 .unwrap_or_default();
+
+            if reactions.len() > MAX_REACTIONS {
+                return Err(Error::InvalidLength {
+                    context: "reactions".into(),
+                    current: reactions.len(),
+                    minimum: None,
+                    maximum: Some(MAX_REACTIONS),
+                });
+            }
 
             message.set_reactions(reactions);
         }
