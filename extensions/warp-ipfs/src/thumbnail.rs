@@ -10,7 +10,7 @@ use std::{
     ffi::OsStr,
     fmt::Display,
     hash::Hash,
-    io::{BufRead, BufReader, Seek},
+    io::{BufRead, Seek},
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -107,7 +107,7 @@ impl ThumbnailGenerator {
                     FileType::Mime(media) => match media.ty().as_str() {
                         "image" => tokio::task::spawn_blocking(move || {
                             let format: ImageFormat = extension.try_into()?;
-                            let file = BufReader::new(std::fs::File::open(own_path)?);
+                            let file = io::BufReader::new(std::fs::File::open(own_path)?);
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
