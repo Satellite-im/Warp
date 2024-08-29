@@ -1,12 +1,16 @@
 use bytes::Bytes;
 use futures::channel::oneshot;
-use image::{ImageFormat, ImageReader};
+use image::{
+    codecs::gif::{GifDecoder, GifEncoder, Repeat},
+    AnimationDecoder, DynamicImage, Frame, ImageFormat, ImageReader,
+};
 use rust_ipfs::{Ipfs, IpfsPath};
 use std::{
     collections::BTreeMap,
     ffi::OsStr,
     fmt::Display,
     hash::Hash,
+    io::{BufRead, Seek},
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -103,21 +107,12 @@ impl ThumbnailGenerator {
                     FileType::Mime(media) => match media.ty().as_str() {
                         "image" => tokio::task::spawn_blocking(move || {
                             let format: ImageFormat = extension.try_into()?;
-                            let image = image::open(own_path).map_err(anyhow::Error::from)?;
-                            let width = width.min(image.width());
-                            let height = height.min(image.height());
-
-                            let thumbnail = image.thumbnail(width, height);
-
-                            let mut t_buffer = Cursor::new(vec![]);
+                            let file = io::BufReader::new(std::fs::File::open(own_path)?);
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
                             };
-
-                            thumbnail
-                                .write_to(&mut t_buffer, output_format)
-                                .map_err(anyhow::Error::from)?;
+                            let t_buffer = generate_thumbnail(file, output_format, width, height)?;
                             Ok::<_, Error>((
                                 ExtensionType::try_from(output_format)?,
                                 Bytes::from(t_buffer.into_inner()),
@@ -203,23 +198,12 @@ impl ThumbnailGenerator {
 
                             let data = bytes.await.map(|b| b.to_vec())?;
                             let cursor = Cursor::new(data);
-                            let image = ImageReader::new(cursor)
-                                .with_guessed_format()?
-                                .decode()
-                                .map_err(anyhow::Error::from)?;
-
-                            let width = width.min(image.width());
-                            let height = height.min(image.height());
-
-                            let thumbnail = image.thumbnail(width, height);
-                            let mut t_buffer = std::io::Cursor::new(Vec::new());
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
                             };
-                            thumbnail
-                                .write_to(&mut t_buffer, output_format)
-                                .map_err(anyhow::Error::from)?;
+                            let t_buffer =
+                                generate_thumbnail(cursor, output_format, width, height)?;
                             Ok::<_, Error>((
                                 ExtensionType::try_from(output_format)?,
                                 Bytes::from(t_buffer.into_inner()),
@@ -289,23 +273,12 @@ impl ThumbnailGenerator {
                     FileType::Mime(media) => match media.ty().as_str() {
                         "image" => {
                             let format: ImageFormat = extension.try_into()?;
-                            let image = ImageReader::new(buffer)
-                                .with_guessed_format()?
-                                .decode()
-                                .map_err(anyhow::Error::from)?;
-
-                            let width = width.min(image.width());
-                            let height = height.min(image.height());
-
-                            let thumbnail = image.thumbnail(width, height);
-                            let mut t_buffer = Cursor::new(vec![]);
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
                             };
-                            thumbnail
-                                .write_to(&mut t_buffer, output_format)
-                                .map_err(anyhow::Error::from)?;
+                            let t_buffer =
+                                generate_thumbnail(buffer, output_format, width, height)?;
                             Ok::<_, Error>((
                                 ExtensionType::try_from(output_format)?,
                                 Bytes::from(t_buffer.into_inner()),
@@ -349,4 +322,37 @@ impl ThumbnailGenerator {
         let task = task.ok_or(Error::Other)?;
         task.await.map_err(anyhow::Error::from)?
     }
+}
+
+pub fn generate_thumbnail<R: BufRead + Seek>(
+    data: R,
+    output_format: ImageFormat,
+    width: u32,
+    height: u32,
+) -> Result<Cursor<Vec<u8>>, anyhow::Error> {
+    let mut t_buffer = Cursor::new(vec![]);
+    if output_format == ImageFormat::Gif {
+        let decoder = GifDecoder::new(data)?;
+        let frames = decoder.into_frames().collect_frames()?;
+        let frames = frames.iter().map(|frame| {
+            let buffer = frame.buffer().clone();
+            let width = width.min(buffer.width());
+            let height = height.min(buffer.height());
+            let img = DynamicImage::ImageRgba8(buffer).thumbnail(width, height);
+            Frame::from_parts(img.into(), frame.left(), frame.top(), frame.delay())
+        });
+        let mut encoder = GifEncoder::new(&mut t_buffer);
+        encoder.set_repeat(Repeat::Infinite)?;
+        encoder.encode_frames(frames)?;
+    } else {
+        let image = ImageReader::new(data).with_guessed_format()?.decode()?;
+
+        let width = width.min(image.width());
+        let height = height.min(image.height());
+
+        let thumbnail = image.thumbnail(width, height);
+
+        thumbnail.write_to(&mut t_buffer, output_format)?;
+    }
+    Ok(t_buffer)
 }
