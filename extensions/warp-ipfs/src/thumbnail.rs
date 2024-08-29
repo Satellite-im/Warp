@@ -9,7 +9,6 @@ use std::{
     collections::BTreeMap,
     ffi::OsStr,
     fmt::Display,
-    fs::File,
     hash::Hash,
     io::{BufRead, BufReader, Seek},
     path::PathBuf,
@@ -108,7 +107,7 @@ impl ThumbnailGenerator {
                     FileType::Mime(media) => match media.ty().as_str() {
                         "image" => tokio::task::spawn_blocking(move || {
                             let format: ImageFormat = extension.try_into()?;
-                            let file = BufReader::new(File::open(own_path)?);
+                            let file = BufReader::new(std::fs::File::open(own_path)?);
                             let output_format = match (output_exact, format) {
                                 (false, _) => ImageFormat::Jpeg,
                                 (true, format) => format,
@@ -330,14 +329,11 @@ pub fn generate_thumbnail<R: BufRead + Seek>(
     output_format: ImageFormat,
     width: u32,
     height: u32,
-) -> Result<Cursor<Vec<u8>>, rust_ipfs::Error> {
+) -> Result<Cursor<Vec<u8>>, anyhow::Error> {
     let mut t_buffer = Cursor::new(vec![]);
     if output_format == ImageFormat::Gif {
-        let decoder = GifDecoder::new(data).map_err(anyhow::Error::from)?;
-        let frames = decoder
-            .into_frames()
-            .collect_frames()
-            .map_err(anyhow::Error::from)?;
+        let decoder = GifDecoder::new(data)?;
+        let frames = decoder.into_frames().collect_frames()?;
         let frames = frames.iter().map(|frame| {
             let buffer = frame.buffer().clone();
             let width = width.min(buffer.width());
@@ -346,24 +342,17 @@ pub fn generate_thumbnail<R: BufRead + Seek>(
             Frame::from_parts(img.into(), frame.left(), frame.top(), frame.delay())
         });
         let mut encoder = GifEncoder::new(&mut t_buffer);
-        encoder
-            .set_repeat(Repeat::Infinite)
-            .map_err(anyhow::Error::from)?;
-        encoder.encode_frames(frames).map_err(anyhow::Error::from)?;
+        encoder.set_repeat(Repeat::Infinite)?;
+        encoder.encode_frames(frames)?;
     } else {
-        let image = ImageReader::new(data)
-            .with_guessed_format()?
-            .decode()
-            .map_err(anyhow::Error::from)?;
+        let image = ImageReader::new(data).with_guessed_format()?.decode()?;
 
         let width = width.min(image.width());
         let height = height.min(image.height());
 
         let thumbnail = image.thumbnail(width, height);
 
-        thumbnail
-            .write_to(&mut t_buffer, output_format)
-            .map_err(anyhow::Error::from)?;
+        thumbnail.write_to(&mut t_buffer, output_format)?;
     }
     Ok(t_buffer)
 }
