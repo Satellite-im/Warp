@@ -34,8 +34,7 @@ use crate::{
 };
 
 use super::{
-    document::root::RootDocumentMap,
-    event_subscription::EventSubscription,
+    document::root::RootDocumentMap, event_subscription::EventSubscription,
     MAX_THUMBNAIL_STREAM_SIZE,
 };
 
