@@ -67,7 +67,7 @@ use crate::{
 
 use super::{
     document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt, MAX_CONVERSATION_DESCRIPTION,
-    MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+    MAX_MESSAGE_SIZE, MAX_REACTIONS, SHUTTLE_TIMEOUT,
 };
 
 const CHAT_DIRECTORY: &str = "chat_media";
@@ -1988,6 +1988,15 @@ impl ConversationInner {
 
         match state {
             ReactionState::Add => {
+                if reactions.len() >= MAX_REACTIONS {
+                    return Err(Error::InvalidLength {
+                        context: "reactions".into(),
+                        current: reactions.len(),
+                        minimum: None,
+                        maximum: Some(MAX_REACTIONS),
+                    });
+                }
+
                 let entry = reactions.entry(emoji.clone()).or_default();
 
                 if entry.contains(&own_did) {
@@ -3799,6 +3808,15 @@ async fn message_event(
 
             match state {
                 ReactionState::Add => {
+                    if reactions.len() >= MAX_REACTIONS {
+                        return Err(Error::InvalidLength {
+                            context: "reactions".into(),
+                            current: reactions.len(),
+                            minimum: None,
+                            maximum: Some(MAX_REACTIONS),
+                        });
+                    }
+
                     let entry = reactions.entry(emoji.clone()).or_default();
 
                     if entry.contains(&reactor) {

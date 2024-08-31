@@ -1275,6 +1275,11 @@ async fn _remove(ipfs: &Ipfs, root: &Directory, item: &Item) -> Result<(), Error
                     }
                 }
             }
+            if directory.size() == 0 {
+                if let Err(e) = root.remove_item(&directory.name()) {
+                    tracing::error!(error = %e, item_name = %directory.name(), "unable to remove directory");
+                }
+            }
         }
     }
 
