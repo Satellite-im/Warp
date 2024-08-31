@@ -537,6 +537,14 @@ pub struct GroupSettings {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl GroupSettings {
+    #[cfg_attr(
+        target_arch = "wasm32",
+        wasm_bindgen::prelude::wasm_bindgen(constructor)
+    )]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn members_can_add_participants(&self) -> bool {
         self.members_can_add_participants
     }
