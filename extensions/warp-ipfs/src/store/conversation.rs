@@ -1410,8 +1410,10 @@ impl MessageReferenceList {
     pub async fn get(&self, ipfs: &Ipfs, message_id: Uuid) -> Result<MessageDocument, Error> {
         let cid = self.messages.ok_or(Error::MessageNotFound)?;
 
+        let path = IpfsPath::from(cid).sub_path(&message_id.to_string())?;
+
         if let Ok(message_document) = ipfs
-            .get_dag(IpfsPath::from(cid).sub_path(&message_id.to_string())?)
+            .get_dag(path)
             .timeout(Duration::from_secs(10))
             .deserialized()
             .await
