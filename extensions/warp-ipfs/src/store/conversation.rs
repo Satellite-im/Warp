@@ -1325,7 +1325,9 @@ impl MessageReferenceList {
             None => IndexMap::new(),
         };
 
-        if !list_refs.contains_key(&message.id.to_string()) {
+        let id = message.id.to_string();
+
+        if !list_refs.contains_key(&id) {
             let mut next_ref = match self.next {
                 Some(cid) => {
                     ipfs.get_dag(cid)
@@ -1342,9 +1344,11 @@ impl MessageReferenceList {
             return Ok(cid);
         }
 
-        let id = message.id.to_string();
+        let msg_ref = list_refs.get_mut(&id).expect("entry exist");
 
-        let msg_ref = list_refs.get_mut(&id).expect("message exist");
+        if msg_ref.is_none() {
+            return Err(Error::MessageNotFound);
+        }
 
         let cid = ipfs.dag().put().serialize(message).await?;
         msg_ref.replace(cid);
