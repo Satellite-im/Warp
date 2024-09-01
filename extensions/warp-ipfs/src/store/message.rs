@@ -35,7 +35,7 @@ use uuid::Uuid;
 use super::{
     document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
     MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_DESCRIPTION, MAX_CONVERSATION_ICON_SIZE,
-    MAX_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+    MAX_MESSAGE_SIZE, MAX_REACTIONS, SHUTTLE_TIMEOUT,
 };
 use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;
@@ -2050,6 +2050,15 @@ impl ConversationInner {
 
         match state {
             ReactionState::Add => {
+                if reactions.len() >= MAX_REACTIONS {
+                    return Err(Error::InvalidLength {
+                        context: "reactions".into(),
+                        current: reactions.len(),
+                        minimum: None,
+                        maximum: Some(MAX_REACTIONS),
+                    });
+                }
+
                 let entry = reactions.entry(emoji.clone()).or_default();
 
                 if entry.contains(&own_did) {
@@ -4097,6 +4106,15 @@ async fn message_event(
 
             match state {
                 ReactionState::Add => {
+                    if reactions.len() >= MAX_REACTIONS {
+                        return Err(Error::InvalidLength {
+                            context: "reactions".into(),
+                            current: reactions.len(),
+                            minimum: None,
+                            maximum: Some(MAX_REACTIONS),
+                        });
+                    }
+
                     let entry = reactions.entry(emoji.clone()).or_default();
 
                     if entry.contains(&reactor) {

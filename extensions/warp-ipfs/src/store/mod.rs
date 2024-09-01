@@ -57,6 +57,7 @@ pub(crate) enum ConversationImageType {
     Banner,
 }
 pub const MAX_CONVERSATION_DESCRIPTION: usize = 256;
+pub const MAX_REACTIONS: usize = 30;
 
 pub(super) mod topics {
     use std::fmt::Display;
