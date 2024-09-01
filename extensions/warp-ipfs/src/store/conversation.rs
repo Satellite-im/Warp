@@ -9,7 +9,6 @@ use indexmap::IndexMap;
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeMap;
 use std::{
     collections::{BTreeSet, HashMap},
     time::Duration,
@@ -1259,12 +1258,13 @@ impl<'d> Deserialize<'d> for MessageSignature {
     }
 }
 
+//TODO: Implement a defragmentation for the references
 const REFERENCE_LENGTH: usize = 500;
 
 #[derive(Default, Debug, Serialize, Deserialize, Copy, Clone)]
 pub struct MessageReferenceList {
-    pub messages: Option<Cid>,
-    pub next: Option<Cid>,
+    pub messages: Option<Cid>, // resolves to IndexMap<String, Option<Cid>>
+    pub next: Option<Cid>,     // resolves to MessageReferenceList
 }
 
 impl MessageReferenceList {
@@ -1274,12 +1274,13 @@ impl MessageReferenceList {
             Some(cid) => {
                 ipfs.get_dag(cid)
                     .timeout(Duration::from_secs(10))
-                    .deserialized::<BTreeMap<String, Cid>>()
+                    .deserialized::<IndexMap<String, Option<Cid>>>()
                     .await?
             }
-            None => BTreeMap::new(),
+            None => IndexMap::new(),
         };
 
+        //TODO: Might be worth to replace if it exist?
         if list_refs.contains_key(&message.id.to_string()) {
             return Err(Error::MessageFound);
         }
@@ -1304,7 +1305,7 @@ impl MessageReferenceList {
         let id = message.id.to_string();
 
         let cid = ipfs.dag().put().serialize(message).await?;
-        list_refs.insert(id, cid);
+        list_refs.insert(id, Some(cid));
 
         let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
         self.messages.replace(ref_cid);
@@ -1318,13 +1319,15 @@ impl MessageReferenceList {
             Some(cid) => {
                 ipfs.get_dag(cid)
                     .timeout(Duration::from_secs(10))
-                    .deserialized::<BTreeMap<String, Cid>>()
+                    .deserialized::<IndexMap<String, Option<Cid>>>()
                     .await?
             }
-            None => BTreeMap::new(),
+            None => IndexMap::new(),
         };
 
-        if !list_refs.contains_key(&message.id.to_string()) {
+        let id = message.id.to_string();
+
+        if !list_refs.contains_key(&id) {
             let mut next_ref = match self.next {
                 Some(cid) => {
                     ipfs.get_dag(cid)
@@ -1341,10 +1344,14 @@ impl MessageReferenceList {
             return Ok(cid);
         }
 
-        let id = message.id.to_string();
+        let msg_ref = list_refs.get_mut(&id).expect("entry exist");
+
+        if msg_ref.is_none() {
+            return Err(Error::MessageNotFound);
+        }
 
         let cid = ipfs.dag().put().serialize(message).await?;
-        list_refs.insert(id, cid);
+        msg_ref.replace(cid);
 
         let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
         self.messages.replace(ref_cid);
@@ -1362,7 +1369,7 @@ impl MessageReferenceList {
         let list = match ipfs
             .get_dag(cid)
             .timeout(Duration::from_secs(10))
-            .deserialized::<BTreeMap<String, Cid>>()
+            .deserialized::<IndexMap<String, Option<Cid>>>()
             .await
         {
             Ok(list) => list,
@@ -1373,7 +1380,11 @@ impl MessageReferenceList {
 
         let stream = async_stream::stream! {
             for message_cid in list.values() {
-                if let Ok(message_document) = ipfs.get_dag(*message_cid).deserialized::<MessageDocument>().await {
+                let Some(cid) = message_cid else {
+                    continue;
+                };
+
+                if let Ok(message_document) = ipfs.get_dag(*cid).deserialized::<MessageDocument>().await {
                     yield message_document;
                 }
             }
@@ -1403,8 +1414,10 @@ impl MessageReferenceList {
     pub async fn get(&self, ipfs: &Ipfs, message_id: Uuid) -> Result<MessageDocument, Error> {
         let cid = self.messages.ok_or(Error::MessageNotFound)?;
 
+        let path = IpfsPath::from(cid).sub_path(&message_id.to_string())?;
+
         if let Ok(message_document) = ipfs
-            .get_dag(IpfsPath::from(cid).sub_path(&message_id.to_string())?)
+            .get_dag(path)
             .timeout(Duration::from_secs(10))
             .deserialized()
             .await
@@ -1433,13 +1446,15 @@ impl MessageReferenceList {
         let Ok(list) = ipfs
             .get_dag(cid)
             .timeout(Duration::from_secs(10))
-            .deserialized::<BTreeMap<String, Cid>>()
+            .deserialized::<IndexMap<String, Option<Cid>>>()
             .await
         else {
             return false;
         };
 
-        if list.contains_key(&message_id.to_string()) {
+        let id = message_id.to_string();
+
+        if list.contains_key(&id) && list.get(&id).map(Option::is_some).unwrap_or_default() {
             return true;
         }
 
@@ -1464,15 +1479,14 @@ impl MessageReferenceList {
         let Ok(list) = ipfs
             .get_dag(cid)
             .timeout(Duration::from_secs(10))
-            .deserialized::<BTreeMap<String, Cid>>()
+            .deserialized::<IndexMap<String, Option<Cid>>>()
             .await
         else {
             return 0;
         };
 
-        // Instead of resolving all documents, we will assume the whole list
-        // is valid for the purpose of this message account.
-        let count = list.len();
+        // Only account messages that have not been marked None in this reference
+        let count = list.values().filter(|item| item.is_some()).count();
 
         let Some(next) = self.next else {
             return count;
@@ -1499,19 +1513,18 @@ impl MessageReferenceList {
         let mut list = ipfs
             .get_dag(cid)
             .local()
-            .deserialized::<BTreeMap<String, Cid>>()
+            .deserialized::<IndexMap<String, Option<Cid>>>()
             .await?;
 
-        if list.remove(id).is_some() {
-            match list.is_empty() {
-                true => {
-                    self.messages.take();
-                }
-                false => {
-                    let cid = ipfs.dag().put().serialize(list).await?;
-                    self.messages.replace(cid);
-                }
-            };
+        if let Some(item) = list.get_mut(id) {
+            if item.is_none() {
+                return Err(Error::MessageNotFound);
+            }
+
+            item.take();
+
+            let cid = ipfs.dag().put().serialize(list).await?;
+            self.messages.replace(cid);
 
             return Ok(());
         }
@@ -1526,14 +1539,25 @@ impl MessageReferenceList {
 
         refs.remove(ipfs, message_id).await?;
 
-        if refs.messages.is_none() {
-            self.next.take();
-            return Ok(());
-        }
         let cid = ipfs.dag().put().serialize(refs).await?;
 
         self.next.replace(cid);
 
         Ok(())
+    }
+
+    // Since we have `IndexMap<String, Option<Cid>>` where the value is an `Option`, it is possible that
+    // that there could be some fragmentation when it comes to removing messages. This function would consume
+    // the current `MessageReferenceList` and walk down the reference list via `MessageReferenceList::list`
+    // and pass on messages where map value is `Option::Some` into a new list reference. Once completed, return
+    // the new list
+    // TODO: Use in the near future under a schedule to shrink reference list
+    pub async fn shrink(self, ipfs: &Ipfs) -> Result<MessageReferenceList, Error> {
+        let mut new_list = MessageReferenceList::default();
+        let mut list = self.list(ipfs).await;
+        while let Some(message) = list.next().await {
+            new_list.insert(ipfs, message).await?;
+        }
+        Ok(new_list)
     }
 }
