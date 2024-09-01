@@ -1539,4 +1539,19 @@ impl MessageReferenceList {
 
         Ok(())
     }
+
+    // Since we have `IndexMap<String, Option<Cid>>` where the value is an `Option`, it is possible that
+    // that there could be some fragmentation when it comes to removing messages. This function would consume
+    // the current `MessageReferenceList` and walk down the reference list via `MessageReferenceList::list`
+    // and pass on messages where map value is `Option::Some` into a new list reference. Once completed, return
+    // the new list
+    // TODO: Use in the near future under a schedule to shrink reference list
+    pub async fn shrink(self, ipfs: &Ipfs) -> Result<MessageReferenceList, Error> {
+        let mut new_list = MessageReferenceList::default();
+        let mut list = self.list(ipfs).await;
+        while let Some(message) = list.next().await {
+            new_list.insert(ipfs, message).await?;
+        }
+        Ok(new_list)
+    }
 }
