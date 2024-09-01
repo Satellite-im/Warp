@@ -1556,7 +1556,7 @@ impl MessageReferenceList {
         let mut new_list = MessageReferenceList::default();
         let mut list = self.list(ipfs).await;
         while let Some(message) = list.next().await {
-            new_list.insert(ipfs, message).await?;
+            new_list.insert(ipfs, &message).await?;
         }
         Ok(new_list)
     }
