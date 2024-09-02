@@ -1159,6 +1159,10 @@ async fn message_event_handle<M: MultiPass, R: RayGun>(
                 writeln!(stdout, ">>> Conversation settings updated: {settings}")?;
             }
         }
+        MessageEventKind::ConversationUpdatedBanner { conversation_id }
+        | MessageEventKind::ConversationUpdatedIcon { conversation_id } => {
+            writeln!(stdout, "Conversation {conversation_id} has updated")?;
+        }
         MessageEventKind::ConversationDescriptionChanged {
             conversation_id,
             description,
