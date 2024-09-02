@@ -14,10 +14,10 @@ use crate::multipass::{
     MultiPassImportExport,
 };
 use crate::raygun::{
-    Conversation, ConversationSettings, EmbedState, GroupSettings, Message, MessageOptions,
-    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
-    RayGunConversationInformation, RayGunEvents, RayGunGroupConversation, RayGunStream,
-    ReactionState,
+    Conversation, ConversationImage, ConversationSettings, EmbedState, GroupSettings, Location,
+    Message, MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun,
+    RayGunAttachment, RayGunConversationInformation, RayGunEvents, RayGunGroupConversation,
+    RayGunStream, ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::{Extension, SingleHandle};
@@ -198,7 +198,7 @@ impl MultiPass for Dummy {
     }
 
     fn get_identity(&self, id: impl Into<Identifier>) -> GetIdentity {
-        return GetIdentity::new(id, futures::stream::empty().boxed());
+        GetIdentity::new(id, futures::stream::empty().boxed())
     }
 }
 
@@ -413,6 +413,30 @@ impl RayGun for Dummy {
         _: Uuid,
         _: ConversationSettings,
     ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn conversation_icon(&self, _: Uuid) -> Result<ConversationImage, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn conversation_banner(&self, _: Uuid) -> Result<ConversationImage, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn update_conversation_icon(&mut self, _: Uuid, _: Location) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn update_conversation_banner(&mut self, _: Uuid, _: Location) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn remove_conversation_icon(&mut self, _: Uuid) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn remove_conversation_banner(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 

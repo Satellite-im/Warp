@@ -16,10 +16,11 @@ use crate::multipass::{
     MultiPass, MultiPassEvent, MultiPassEventStream, MultiPassImportExport,
 };
 use crate::raygun::{
-    AttachmentEventStream, Conversation, ConversationSettings, EmbedState, GroupSettings, Location,
-    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventStream,
-    RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, ConversationImage, ConversationSettings, EmbedState,
+    GroupSettings, Location, Message, MessageEvent, MessageEventStream, MessageOptions,
+    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
+    RayGunConversationInformation, RayGunEventStream, RayGunEvents, RayGunGroupConversation,
+    RayGunStream, ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::warp::dummy::Dummy;
@@ -824,6 +825,44 @@ where
     ) -> Result<(), Error> {
         self.raygun
             .update_conversation_settings(conversation_id, settings)
+            .await
+    }
+
+    async fn conversation_icon(&self, conversation_id: Uuid) -> Result<ConversationImage, Error> {
+        self.raygun.conversation_icon(conversation_id).await
+    }
+
+    async fn conversation_banner(&self, conversation_id: Uuid) -> Result<ConversationImage, Error> {
+        self.raygun.conversation_banner(conversation_id).await
+    }
+
+    async fn update_conversation_icon(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        self.raygun
+            .update_conversation_icon(conversation_id, location)
+            .await
+    }
+
+    async fn update_conversation_banner(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        self.raygun
+            .update_conversation_banner(conversation_id, location)
+            .await
+    }
+
+    async fn remove_conversation_icon(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.raygun.remove_conversation_icon(conversation_id).await
+    }
+
+    async fn remove_conversation_banner(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        self.raygun
+            .remove_conversation_banner(conversation_id)
             .await
     }
 
