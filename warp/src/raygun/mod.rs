@@ -1,6 +1,6 @@
 pub mod group;
 
-use crate::constellation::file::File;
+use crate::constellation::file::{File, FileType};
 use crate::constellation::{ConstellationProgressStream, Progression};
 use crate::crypto::DID;
 use crate::error::Error;
@@ -75,6 +75,12 @@ pub enum MessageEventKind {
     ConversationNameUpdated {
         conversation_id: Uuid,
         name: String,
+    },
+    ConversationUpdatedIcon {
+        conversation_id: Uuid,
+    },
+    ConversationUpdatedBanner {
+        conversation_id: Uuid,
     },
     ConversationDescriptionChanged {
         conversation_id: Uuid,
@@ -342,6 +348,33 @@ impl PartialOrd for MessagePage {
 impl Ord for MessagePage {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.id.cmp(&other.id)
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ConversationImage {
+    data: Vec<u8>,
+    image_type: FileType,
+}
+
+impl ConversationImage {
+    pub fn set_data(&mut self, data: Vec<u8>) {
+        self.data = data
+    }
+
+    pub fn set_image_type(&mut self, image_type: FileType) {
+        self.image_type = image_type
+    }
+}
+
+impl ConversationImage {
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn image_type(&self) -> &FileType {
+        &self.image_type
     }
 }
 
@@ -1155,6 +1188,32 @@ pub trait RayGun:
         conversation_id: Uuid,
         settings: ConversationSettings,
     ) -> Result<(), Error>;
+
+    /// Provides [`ConversationImage`] of the conversation icon
+    async fn conversation_icon(&self, conversation_id: Uuid) -> Result<ConversationImage, Error>;
+
+    /// Provides [`ConversationImage`] of the conversation banner
+    async fn conversation_banner(&self, conversation_id: Uuid) -> Result<ConversationImage, Error>;
+
+    /// Updates [`Conversation`] icon
+    async fn update_conversation_icon(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error>;
+
+    /// Updates [`Conversation`] banner
+    async fn update_conversation_banner(
+        &mut self,
+        conversation_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error>;
+
+    /// Remove icon from [`Conversation`]
+    async fn remove_conversation_icon(&mut self, conversation_id: Uuid) -> Result<(), Error>;
+
+    /// Remove banner from [`Conversation`]
+    async fn remove_conversation_banner(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 
     /// Archive a conversation
     async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error>;
