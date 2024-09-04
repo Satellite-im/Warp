@@ -173,7 +173,7 @@ struct Opt {
     /// TLS Certificate when websocket is used
     /// Note: websocket required a signed certificate.
     #[clap(long)]
-    ws_tls_certificate: Option<PathBuf>,
+    ws_tls_certificate: Option<Vec<PathBuf>>,
 
     /// TLS Private Key when websocket is used
     #[clap(long)]
@@ -244,15 +244,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (ws_cert, ws_pk) = match (
-        opts.ws_tls_certificate
-            .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf)),
+        opts.ws_tls_certificate.map(|list| {
+            list.into_iter()
+                .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf))
+                .collect::<Vec<_>>()
+        }),
         opts.ws_tls_private_key
             .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf)),
     ) {
         (Some(cert), Some(prv)) => {
-            let cert = tokio::fs::read_to_string(cert).await.ok();
+            let mut certs = Vec::with_capacity(cert.len());
+            for c in cert {
+                let Ok(cert) = tokio::fs::read_to_string(c).await else {
+                    continue;
+                };
+                certs.push(cert);
+            }
+
             let prv = tokio::fs::read_to_string(prv).await.ok();
-            (cert, prv)
+            ((!certs.is_empty()).then_some(certs), prv)
         }
         _ => (None, None),
     };
