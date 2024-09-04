@@ -1437,4 +1437,231 @@ mod test {
         .await?;
         Ok(())
     }
+
+    #[async_test]
+    async fn set_conversation_icon() -> anyhow::Result<()> {
+        let accounts = create_accounts(vec![
+            (None, None, Some("test::set_conversation_icon".into())),
+            (None, None, Some("test::set_conversation_icon".into())),
+        ])
+        .await?;
+
+        let (mut instance_a, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
+
+        instance_a.create_conversation(&did_b).await?;
+
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
+            loop {
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
+                }
+            }
+        }).await?;
+
+        let conversation = instance_a.get_conversation(conversation_id).await?;
+        assert_eq!(conversation.conversation_type(), ConversationType::Direct);
+        assert_eq!(conversation.recipients().len(), 2);
+        assert!(conversation.recipients().contains(&did_a));
+        assert!(conversation.recipients().contains(&did_b));
+
+        let mut conversation_stream_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_stream_b = instance_b.get_conversation_stream(conversation_id).await?;
+
+        instance_a
+            .update_conversation_icon(
+                conversation_id,
+                Location::Stream {
+                    name: "".into(),
+                    size: Some(PROFILE_IMAGE.len()),
+                    stream: futures::stream::once(async { Ok(PROFILE_IMAGE.to_vec().into()) })
+                        .boxed(),
+                },
+            )
+            .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            let mut a_updated = false;
+            let mut b_updated = false;
+
+            loop {
+                tokio::select! {
+                    Some(MessageEventKind::ConversationUpdatedIcon { .. }) = conversation_stream_a.next() => {
+                        a_updated = true;
+                        let image = instance_a.conversation_icon(conversation_id).await?;
+                        assert_eq!(image.data(), PROFILE_IMAGE);
+                    },
+                    Some(MessageEventKind::ConversationUpdatedIcon { .. }) = conversation_stream_b.next() => {
+                        b_updated = true;
+                        let image = instance_b.conversation_icon(conversation_id).await?;
+                        assert_eq!(image.data(), PROFILE_IMAGE);
+                    }
+                }
+
+                if a_updated && b_updated {
+                    break Ok::<_, anyhow::Error>(())
+                }
+            }
+
+        }).await??;
+
+        instance_a.remove_conversation_icon(conversation_id).await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            let mut a_updated = false;
+            let mut b_updated = false;
+
+            loop {
+                tokio::select! {
+                    Some(MessageEventKind::ConversationUpdatedIcon { .. }) = conversation_stream_a.next() => {
+                        a_updated = true;
+                        let image = instance_a.conversation_icon(conversation_id).await;
+                        assert!(image.is_err());
+                    },
+                    Some(MessageEventKind::ConversationUpdatedIcon { .. }) = conversation_stream_b.next() => {
+                        b_updated = true;
+                        let image = instance_b.conversation_icon(conversation_id).await;
+                        assert!(image.is_err());
+                    }
+                }
+
+                if a_updated && b_updated {
+                    break Ok::<_, anyhow::Error>(())
+                }
+            }
+
+        }).await??;
+
+        Ok(())
+    }
+
+    #[async_test]
+    async fn set_conversation_banner() -> anyhow::Result<()> {
+        let accounts = create_accounts(vec![
+            (None, None, Some("test::set_conversation_banner".into())),
+            (None, None, Some("test::set_conversation_banner".into())),
+        ])
+        .await?;
+
+        let (mut instance_a, did_a, _) = accounts.first().cloned().unwrap();
+        let (mut instance_b, did_b, _) = accounts.last().cloned().unwrap();
+
+        let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
+        let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
+
+        instance_a.create_conversation(&did_b).await?;
+
+        let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
+            let mut id_a = None;
+            let mut id_b = None;
+            loop {
+                tokio::select! {
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_a.next() => {
+                        id_a.replace(conversation_id);
+                    },
+                    Some(RayGunEventKind::ConversationCreated { conversation_id }) = chat_subscribe_b.next() => {
+                        id_b.replace(conversation_id);
+                    },
+                }
+
+                if id_a.is_some() && id_b.is_some() {
+                    assert_eq!(id_a, id_b);
+                    break id_a.expect("valid conversation_id")
+                }
+            }
+        }).await?;
+
+        let conversation = instance_a.get_conversation(conversation_id).await?;
+        assert_eq!(conversation.conversation_type(), ConversationType::Direct);
+        assert_eq!(conversation.recipients().len(), 2);
+        assert!(conversation.recipients().contains(&did_a));
+        assert!(conversation.recipients().contains(&did_b));
+
+        let mut conversation_stream_a = instance_a.get_conversation_stream(conversation_id).await?;
+        let mut conversation_stream_b = instance_b.get_conversation_stream(conversation_id).await?;
+
+        instance_a
+            .update_conversation_banner(
+                conversation_id,
+                Location::Stream {
+                    name: "".into(),
+                    size: Some(PROFILE_IMAGE.len()),
+                    stream: futures::stream::once(async { Ok(PROFILE_IMAGE.to_vec().into()) })
+                        .boxed(),
+                },
+            )
+            .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            let mut a_updated = false;
+            let mut b_updated = false;
+
+            loop {
+                tokio::select! {
+                    Some(MessageEventKind::ConversationUpdatedBanner { .. }) = conversation_stream_a.next() => {
+                        a_updated = true;
+                        let image = instance_a.conversation_banner(conversation_id).await?;
+                        assert_eq!(image.data(), PROFILE_IMAGE);
+                    },
+                    Some(MessageEventKind::ConversationUpdatedBanner { .. }) = conversation_stream_b.next() => {
+                        b_updated = true;
+                        let image = instance_b.conversation_banner(conversation_id).await?;
+                        assert_eq!(image.data(), PROFILE_IMAGE);
+                    }
+                }
+
+                if a_updated && b_updated {
+                    break Ok::<_, anyhow::Error>(())
+                }
+            }
+
+
+        }).await??;
+
+        instance_a
+            .remove_conversation_banner(conversation_id)
+            .await?;
+
+        crate::common::timeout(Duration::from_secs(60), async {
+            let mut a_updated = false;
+            let mut b_updated = false;
+
+            loop {
+                tokio::select! {
+                    Some(MessageEventKind::ConversationUpdatedBanner { .. }) = conversation_stream_a.next() => {
+                        a_updated = true;
+                        let image = instance_a.conversation_banner(conversation_id).await;
+                        assert!(image.is_err());
+                    },
+                    Some(MessageEventKind::ConversationUpdatedBanner { .. }) = conversation_stream_b.next() => {
+                        b_updated = true;
+                        let image = instance_b.conversation_banner(conversation_id).await;
+                        assert!(image.is_err());
+                    }
+                }
+
+                if a_updated && b_updated {
+                    break Ok::<_, anyhow::Error>(())
+                }
+            }
+
+        }).await??;
+
+        Ok(())
+    }
 }

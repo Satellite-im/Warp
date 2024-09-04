@@ -48,7 +48,16 @@ pub const MAX_METADATA_KEY_LENGTH: usize = 32;
 pub const MAX_METADATA_VALUE_LENGTH: usize = 128;
 pub const MAX_METADATA_ENTRIES: usize = 20;
 pub const MAX_THUMBNAIL_STREAM_SIZE: usize = 20 * 1024 * 1024;
+pub const MAX_CONVERSATION_ICON_SIZE: usize = 4 * 1024 * 1024;
+pub const MAX_CONVERSATION_BANNER_SIZE: usize = 8 * 1024 * 1024;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ConversationImageType {
+    Icon,
+    Banner,
+}
 pub const MAX_CONVERSATION_DESCRIPTION: usize = 256;
+pub const MAX_REACTIONS: usize = 30;
 
 pub(super) mod topics {
     use std::fmt::Display;
@@ -435,6 +444,10 @@ pub enum ConversationUpdateKind {
     RemoveRestricted { did: DID },
     ChangeName { name: Option<String> },
     ChangeSettings { settings: ConversationSettings },
+    AddedIcon,
+    AddedBanner,
+    RemovedIcon,
+    RemovedBanner,
     ChangeDescription { description: Option<String> },
 }
 

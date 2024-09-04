@@ -1,5 +1,3 @@
-use std::{collections::BTreeMap, future::IntoFuture, sync::Arc};
-
 use chrono::Utc;
 use futures::{
     stream::{BoxStream, FuturesUnordered},
@@ -8,6 +6,8 @@ use futures::{
 use indexmap::IndexMap;
 use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
+use std::borrow::Borrow;
+use std::{collections::BTreeMap, future::IntoFuture, sync::Arc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -186,9 +186,9 @@ impl RootDocumentMap {
         inner.get_conversation_document(id).await
     }
 
-    pub async fn set_conversation_document(
+    pub async fn set_conversation_document<B: Borrow<ConversationDocument>>(
         &self,
-        document: ConversationDocument,
+        document: B,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.set_conversation_document(document).await
@@ -937,10 +937,11 @@ impl RootDocumentInner {
         Ok(document)
     }
 
-    async fn set_conversation_document(
+    async fn set_conversation_document<B: Borrow<ConversationDocument>>(
         &mut self,
-        conversation_document: ConversationDocument,
+        conversation_document: B,
     ) -> Result<(), Error> {
+        let conversation_document = conversation_document.borrow();
         conversation_document.verify()?;
         let mut document = self.get_root_document().await?;
 
