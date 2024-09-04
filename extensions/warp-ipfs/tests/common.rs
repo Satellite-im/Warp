@@ -1,6 +1,6 @@
 use futures::{stream, Future, StreamExt};
 use futures_timeout::TimeoutExt;
-use rust_ipfs::{Ipfs, Multiaddr, PeerId, Protocol};
+use rust_ipfs::{AddPeerOpt, Ipfs, Multiaddr, PeerId, Protocol};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use warp::{
@@ -36,11 +36,15 @@ pub async fn mesh_connect(nodes: Vec<Ipfs>) -> anyhow::Result<()> {
     let count = nodes.len();
 
     for i in 0..count {
-        for (j, (_, _, addrs)) in nodes.iter().enumerate() {
+        for (j, (_, id, addrs)) in nodes.iter().enumerate() {
             if i != j {
-                for addr in addrs {
-                    if let Err(_e) = nodes[i].0.connect(addr.clone()).await {}
+                let opt = AddPeerOpt::with_peer_id(*id).set_addresses(addrs.clone());
+                if let Err(e) = nodes[i].0.add_peer(opt).await {
+                    tracing::error!(peer_id = %id, ?addrs, error = %e, "unable to add peer and addresses. skipping");
+                    continue;
                 }
+
+                _ = nodes[i].0.connect(*id).await;
             }
         }
     }
