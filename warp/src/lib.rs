@@ -10,9 +10,6 @@ pub mod multipass;
 pub mod raygun;
 pub mod tesseract;
 
-#[cfg(target_arch = "wasm32")]
-pub mod js_exports;
-
 /// Used to downcast a specific type from an extension to share to another
 pub trait SingleHandle {
     fn handle(&self) -> Result<Box<dyn core::any::Any>, error::Error> {
