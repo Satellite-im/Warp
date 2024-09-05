@@ -160,25 +160,6 @@ impl core::future::IntoFuture for WarpIpfsBuilder {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-impl WarpIpfs {
-    #[cfg_attr(
-        target_arch = "wasm32",
-        wasm_bindgen::prelude::wasm_bindgen(constructor)
-    )]
-    pub async fn new_wasm(
-        config: Config,
-        tesseract: Option<Tesseract>,
-    ) -> warp::js_exports::WarpInstance {
-        let warp_ipfs = WarpIpfs::new(config, tesseract).await;
-        let mp = Box::new(warp_ipfs.clone()) as Box<_>;
-        let rg = Box::new(warp_ipfs.clone()) as Box<_>;
-        let fs = Box::new(warp_ipfs.clone()) as Box<_>;
-        warp::js_exports::WarpInstance::new(mp, rg, fs)
-    }
-}
-
 impl WarpIpfs {
     pub async fn new(config: Config, tesseract: impl Into<Option<Tesseract>>) -> WarpIpfs {
         let multipass_tx = EventSubscription::new();
