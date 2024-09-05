@@ -349,16 +349,13 @@ impl Default for Config {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Config {
     /// Default configuration for local development and writing test
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn development() -> Config {
         Config::default()
     }
 
     /// Test configuration. Used for in-memory
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
@@ -383,7 +380,6 @@ impl Config {
     }
 
     /// Minimal testing configuration. Used for in-memory
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn minimal_testing() -> Config {
         Config {
             bootstrap: Bootstrap::None,
@@ -403,7 +399,6 @@ impl Config {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn minimal_basic() -> Config {
         Config {
             persist: true,
@@ -425,7 +420,6 @@ impl Config {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[wasm_bindgen::prelude::wasm_bindgen]
     pub fn minimal_with_relay(addresses: Vec<String>) -> Config {
         Config {
             persist: true,
