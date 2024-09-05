@@ -95,7 +95,6 @@ impl IdentityProfile {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IdentityImage {
     data: Bytes,
