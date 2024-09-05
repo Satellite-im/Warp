@@ -373,11 +373,6 @@ impl Tesseract {
 /// Methods common to wasm and non wasm targets
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
-    /// To create an instance of Tesseract
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
-    pub fn new() -> Tesseract {
-        Tesseract::default()
-    }
 
     /// Enable the ability to autosave
     ///
