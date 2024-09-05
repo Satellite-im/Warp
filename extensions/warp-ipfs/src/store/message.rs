@@ -2952,7 +2952,7 @@ impl ConversationInner {
             mime: ext,
         };
 
-        let cid = self.ipfs.dag().put().serialize(dag).await?;
+        let cid = self.ipfs.put_dag(dag).await?;
 
         let kind = match image_type {
             ConversationImageType::Icon => {

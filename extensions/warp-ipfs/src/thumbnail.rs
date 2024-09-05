@@ -230,7 +230,7 @@ impl ThumbnailGenerator {
                     mime: ty.into(),
                 };
 
-                let cid = ipfs.dag().put().serialize(image_dag).await?;
+                let cid = ipfs.put_dag(image_dag).await?;
 
                 Ok((ty, IpfsPath::from(cid), data))
             };
@@ -305,7 +305,7 @@ impl ThumbnailGenerator {
                     mime: ty.into(),
                 };
 
-                let cid = ipfs.dag().put().serialize(image_dag).await?;
+                let cid = ipfs.put_dag(image_dag).await?;
 
                 Ok((ty, IpfsPath::from(cid), data))
             };

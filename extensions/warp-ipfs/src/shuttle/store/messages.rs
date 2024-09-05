@@ -199,12 +199,7 @@ impl MessageStorageInner {
             conversation_mailbox.insert(recipient.to_string(), cid);
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(conversation_mailbox)
-            .await?;
+        let cid = self.ipfs.put_dag(conversation_mailbox).await?;
 
         list.insert(conversation_id.to_string(), cid);
 
@@ -319,12 +314,7 @@ impl MessageStorageInner {
             *cid = new_cid;
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(conversation_mailbox)
-            .await?;
+        let cid = self.ipfs.put_dag(conversation_mailbox).await?;
 
         list.insert(conversation_id.to_string(), cid);
 
@@ -428,12 +418,7 @@ impl MessageStorageInner {
 
         conversation_mailbox.insert(member.to_string(), cid);
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(conversation_mailbox)
-            .await?;
+        let cid = self.ipfs.put_dag(conversation_mailbox).await?;
 
         list.insert(conversation_id.to_string(), cid);
 

@@ -417,13 +417,13 @@ impl RootDocumentInner {
 
         map.insert(key, val);
 
-        let cid = self.ipfs.dag().put().serialize(map).await?;
+        let cid = self.ipfs.put_dag(map).await?;
 
         document.metadata.arb_data = Some(cid);
 
         let identity = document.sign(self.keypair())?;
 
-        let cid = self.ipfs.dag().put().serialize(identity).await?;
+        let cid = self.ipfs.put_dag(identity).await?;
 
         root.identity = cid;
 
@@ -450,13 +450,13 @@ impl RootDocumentInner {
             return Err(Error::Other); //Entry Key Doesnt Exist
         }
 
-        let cid = self.ipfs.dag().put().serialize(map).await?;
+        let cid = self.ipfs.put_dag(map).await?;
 
         document.metadata.arb_data = Some(cid);
 
         let identity = document.sign(self.keypair())?;
 
-        let cid = self.ipfs.dag().put().serialize(identity).await?;
+        let cid = self.ipfs.put_dag(identity).await?;
 
         root.identity = cid;
 

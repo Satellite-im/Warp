@@ -1570,7 +1570,7 @@ impl MessageReferenceList {
 
         refs.remove(ipfs, message_id).await?;
 
-        let cid = ipfs.dag().put().serialize(refs).await?;
+        let cid = ipfs.put_dag(refs).await?;
 
         self.next.replace(cid);
 

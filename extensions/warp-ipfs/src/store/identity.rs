@@ -1638,7 +1638,7 @@ impl IdentityStore {
                     }
                 }
 
-                self.ipfs.dag().put().serialize(data).await?;
+                self.ipfs.put_dag(data).await?;
             }
         };
         Ok(())

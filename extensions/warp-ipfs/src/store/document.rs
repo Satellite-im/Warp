@@ -332,7 +332,7 @@ impl RootDocument {
         let mut document: IdentityDocument = data.identity.into();
 
         if !metadata.is_empty() {
-            let cid = ipfs.dag().put().serialize(metadata).await?;
+            let cid = ipfs.put_dag(metadata).await?;
             document.metadata.arb_data = Some(cid);
         }
 
