@@ -78,7 +78,6 @@ mod utils;
 const PUBSUB_MAX_BUF: usize = 8_388_608;
 
 #[derive(Clone)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct WarpIpfs {
     tesseract: Tesseract,
     inner: Arc<Inner>,
