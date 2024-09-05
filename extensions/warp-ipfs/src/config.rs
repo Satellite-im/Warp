@@ -167,7 +167,6 @@ impl Default for StoreSetting {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Config {
     path: Option<PathBuf>,
     persist: bool,
