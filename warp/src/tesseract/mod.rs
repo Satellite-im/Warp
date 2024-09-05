@@ -21,7 +21,6 @@ type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Clone, Debug)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Tesseract {
     inner: Arc<RwLock<TesseractInner>>,
 }
@@ -371,8 +370,11 @@ impl Tesseract {
 }
 
 /// Methods common to wasm and non wasm targets
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
+    /// To create an instance of Tesseract
+    pub fn new() -> Tesseract {
+        Tesseract::default()
+    }
 
     /// Enable the ability to autosave
     ///
@@ -527,12 +529,11 @@ impl Tesseract {
 
 /// Methods for wasm only
 #[cfg(target_arch = "wasm32")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
     /// Used to load contents from local storage
-    pub fn load_from_storage(&self) -> std::result::Result<(), JsError> {
+    pub fn load_from_storage(&self) -> std::result::Result<(), Error> {
         let inner = &mut self.inner.write();
-        inner.load_from_storage().map_err(|e| e.into())
+        inner.load_from_storage()
     }
 }
 
