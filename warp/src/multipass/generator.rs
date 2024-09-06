@@ -8,7 +8,6 @@
 ///
 /// assert!(name.len() <= 32);
 /// ```
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub fn generate_name() -> String {
     use rand::seq::SliceRandom;
     let mut rng = rand::thread_rng();

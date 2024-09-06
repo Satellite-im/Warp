@@ -12,9 +12,6 @@ use futures::{stream::BoxStream, StreamExt};
 use parking_lot::RwLock;
 use zeroize::Zeroize;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 use crate::{crypto::cipher::Cipher, error::Error};
 
 type Result<T> = std::result::Result<T, Error>;
@@ -25,7 +22,6 @@ pub struct Tesseract {
     inner: Arc<RwLock<TesseractInner>>,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TesseractEvent {
     Unlocked,

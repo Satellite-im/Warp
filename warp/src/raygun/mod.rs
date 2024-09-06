@@ -110,7 +110,6 @@ pub enum MessageEventKind {
     },
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[repr(C)]
@@ -351,7 +350,6 @@ impl Ord for MessagePage {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ConversationImage {
     data: Vec<u8>,
@@ -547,12 +545,10 @@ impl Default for ConversationSettings {
 /// Settings for a direct conversation.
 // Any future direct conversation settings go here.
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[repr(C)]
 pub struct DirectConversationSettings {}
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
 #[display(
     fmt = "Everyone can add participants: {}, Everyone can change name: {}",
@@ -569,12 +565,7 @@ pub struct GroupSettings {
     members_can_change_name: bool,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl GroupSettings {
-    #[cfg_attr(
-        target_arch = "wasm32",
-        wasm_bindgen::prelude::wasm_bindgen(constructor)
-    )]
     pub fn new() -> Self {
         Self::default()
     }
@@ -596,7 +587,6 @@ impl GroupSettings {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
 #[repr(C)]
 #[serde(rename_all = "snake_case")]
@@ -936,7 +926,6 @@ impl Message {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
 #[repr(C)]
@@ -954,7 +943,6 @@ pub enum MessageStatus {
     Delivered,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum ReactionState {
@@ -962,7 +950,6 @@ pub enum ReactionState {
     Remove,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum PinState {
@@ -970,7 +957,6 @@ pub enum PinState {
     Unpin,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum EmbedState {
