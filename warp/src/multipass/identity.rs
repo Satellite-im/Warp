@@ -252,7 +252,7 @@ impl Identity {
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
-    
+
     pub fn set_short_id<I: Into<ShortId>>(&mut self, id: I) {
         self.short_id = id.into()
     }
@@ -281,7 +281,7 @@ impl Identity {
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
     }
-    
+
     pub fn short_id(&self) -> ShortId {
         self.short_id
     }
