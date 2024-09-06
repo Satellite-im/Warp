@@ -12,23 +12,16 @@ use futures::{stream::BoxStream, StreamExt};
 use parking_lot::RwLock;
 use zeroize::Zeroize;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-#[cfg(target_arch = "wasm32")]
-use crate::js_exports::stream::AsyncIterator;
 use crate::{crypto::cipher::Cipher, error::Error};
 
 type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Clone, Debug)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Tesseract {
     inner: Arc<RwLock<TesseractInner>>,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TesseractEvent {
     Unlocked,
@@ -373,10 +366,8 @@ impl Tesseract {
 }
 
 /// Methods common to wasm and non wasm targets
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
     /// To create an instance of Tesseract
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> Tesseract {
         Tesseract::default()
     }
@@ -534,52 +525,11 @@ impl Tesseract {
 
 /// Methods for wasm only
 #[cfg(target_arch = "wasm32")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
-    #[wasm_bindgen(js_name = set)]
-    pub fn set_wasm(&self, key: &str, value: &str) -> std::result::Result<(), JsError> {
-        self.set(key, value).map_err(|e| e.into())
-    }
-
-    #[wasm_bindgen(js_name = retrieve)]
-    pub fn retrieve_wasm(&self, key: &str) -> std::result::Result<String, JsError> {
-        self.retrieve(key).map_err(|e| e.into())
-    }
-
-    #[wasm_bindgen(js_name = update_unlock)]
-    pub fn update_unlock_wasm(
-        &self,
-        old_passphrase: &[u8],
-        new_passphrase: &[u8],
-    ) -> std::result::Result<(), JsError> {
-        self.update_unlock(old_passphrase, new_passphrase)
-            .map_err(|e| e.into())
-    }
-
-    #[wasm_bindgen(js_name = delete)]
-    pub fn delete_wasm(&self, key: &str) -> std::result::Result<(), JsError> {
-        self.delete(key).map_err(|e| e.into())
-    }
-
-    #[wasm_bindgen(js_name = unlock)]
-    pub fn unlock_wasm(&self, passphrase: &[u8]) -> std::result::Result<(), JsError> {
-        self.unlock(passphrase).map_err(|e| e.into())
-    }
-
-    #[wasm_bindgen(js_name = save)]
-    pub fn save_wasm(&self) -> std::result::Result<(), JsError> {
-        self.save().map_err(|e| e.into())
-    }
-
-    #[wasm_bindgen(js_name = subscribe)]
-    pub fn subscribe_wasm(&self) -> AsyncIterator {
-        AsyncIterator::new(Box::pin(self.subscribe().map(|t| Into::<JsValue>::into(t))))
-    }
-
     /// Used to load contents from local storage
-    pub fn load_from_storage(&self) -> std::result::Result<(), JsError> {
+    pub fn load_from_storage(&self) -> std::result::Result<(), Error> {
         let inner = &mut self.inner.write();
-        inner.load_from_storage().map_err(|e| e.into())
+        inner.load_from_storage()
     }
 }
 
