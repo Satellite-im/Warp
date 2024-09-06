@@ -249,10 +249,12 @@ impl Constellation for Dummy {
         Err(Error::Unimplemented)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn put(&mut self, _: &str, _: &str) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get(&self, _: &str, _: &str) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
