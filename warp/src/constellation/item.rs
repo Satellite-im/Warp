@@ -41,7 +41,6 @@ impl From<FormatType> for FileType {
 /// The type that `Item` represents
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[repr(C)]
 pub enum ItemType {
     #[display(fmt = "file")]
