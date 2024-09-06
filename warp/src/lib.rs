@@ -9,9 +9,6 @@ pub mod module;
 pub mod multipass;
 pub mod raygun;
 pub mod tesseract;
-
-#[cfg(target_arch = "wasm32")]
-pub mod js_exports;
 pub mod warp;
 
 /// Used to downcast a specific type from an extension to share to another

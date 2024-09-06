@@ -78,7 +78,6 @@ mod utils;
 const PUBSUB_MAX_BUF: usize = 8_388_608;
 
 #[derive(Clone)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct WarpIpfs {
     tesseract: Tesseract,
     inner: Arc<Inner>,
@@ -133,25 +132,6 @@ impl core::future::IntoFuture for WarpIpfsBuilder {
 
     fn into_future(self) -> Self::IntoFuture {
         async move { WarpIpfs::new(self.config, self.tesseract).await }.boxed()
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-impl WarpIpfs {
-    #[cfg_attr(
-        target_arch = "wasm32",
-        wasm_bindgen::prelude::wasm_bindgen(constructor)
-    )]
-    pub async fn new_wasm(
-        config: Config,
-        tesseract: Option<Tesseract>,
-    ) -> warp::js_exports::WarpInstance {
-        let warp_ipfs = WarpIpfs::new(config, tesseract).await;
-        let mp = Box::new(warp_ipfs.clone()) as Box<_>;
-        let rg = Box::new(warp_ipfs.clone()) as Box<_>;
-        let fs = Box::new(warp_ipfs.clone()) as Box<_>;
-        warp::js_exports::WarpInstance::new(mp, rg, fs)
     }
 }
 
