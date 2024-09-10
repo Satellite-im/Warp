@@ -383,7 +383,6 @@ impl File {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Hash {
     #[serde(skip_serializing_if = "Option::is_none")]

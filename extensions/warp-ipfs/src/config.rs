@@ -90,7 +90,7 @@ impl Default for RelayClient {
             #[cfg(target_arch="wasm32")]
             relay_address: vec![
                 //NYC-1
-                "/ip4/167.71.93.202/tcp/4445/ws/p2p/12D3KooWSsn13GxHchpG6dtr7o6ARqSkcMtsBuojgL9XU9t1M1uE".parse().unwrap(),
+                "/dns4/nyc-3-dev.relay.satellite.im/tcp/4410/wss/p2p/12D3KooWKmRupXFyBqJtm6FAySPe6Krmi6v5i6SsQ96NMZ9J4Nns".parse().unwrap(),
             ],
             background: true,
             quorum: Default::default()
@@ -167,7 +167,6 @@ impl Default for StoreSetting {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Config {
     path: Option<PathBuf>,
     persist: bool,
@@ -283,44 +282,35 @@ impl Config {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Config {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn with_path(&mut self, path: String) {
         self.path = Some(PathBuf::from(&path))
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn set_persistence(&mut self, persist: bool) {
         self.persist = persist
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn set_relay_enabled(&mut self, enable: bool) {
         self.enable_relay = enable
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn set_save_phrase(&mut self, save: bool) {
         self.save_phrase = save
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn set_max_storage_size(&mut self, size: Option<usize>) {
         self.max_storage_size = size
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn set_max_file_size(&mut self, size: Option<usize>) {
         self.max_file_size = size
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn set_thumbnail_size(&mut self, size_x: u32, size_y: u32) {
         self.thumbnail_size = (size_x, size_y)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn with_thumbnail_exact_format(&mut self, exact: bool) {
         self.thumbnail_exact_format = exact
     }
@@ -359,16 +349,13 @@ impl Default for Config {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Config {
     /// Default configuration for local development and writing test
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn development() -> Config {
         Config::default()
     }
 
     /// Test configuration. Used for in-memory
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn testing() -> Config {
         Config {
             bootstrap: Bootstrap::Ipfs,
@@ -393,7 +380,6 @@ impl Config {
     }
 
     /// Minimal testing configuration. Used for in-memory
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn minimal_testing() -> Config {
         Config {
             bootstrap: Bootstrap::None,
@@ -413,7 +399,6 @@ impl Config {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
     pub fn minimal_basic() -> Config {
         Config {
             persist: true,
@@ -435,7 +420,6 @@ impl Config {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[wasm_bindgen::prelude::wasm_bindgen]
     pub fn minimal_with_relay(addresses: Vec<String>) -> Config {
         Config {
             persist: true,
