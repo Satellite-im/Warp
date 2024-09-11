@@ -9,6 +9,7 @@ pub mod module;
 pub mod multipass;
 pub mod raygun;
 pub mod tesseract;
+pub mod warp;
 
 /// Used to downcast a specific type from an extension to share to another
 pub trait SingleHandle {

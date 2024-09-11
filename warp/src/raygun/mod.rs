@@ -7,7 +7,6 @@ use crate::error::Error;
 use crate::{Extension, SingleHandle};
 
 use derive_more::Display;
-use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 
 use bytes::Bytes;
@@ -1051,7 +1050,6 @@ pub trait RayGun:
     + Sync
     + Send
     + SingleHandle
-    + DynClone
 {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
@@ -1207,8 +1205,6 @@ pub trait RayGun:
     /// Unarchived a conversation
     async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error>;
 }
-
-dyn_clone::clone_trait_object!(RayGun);
 
 #[async_trait::async_trait]
 pub trait RayGunGroupConversation: Sync + Send {

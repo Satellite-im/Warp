@@ -72,7 +72,7 @@ mod test {
         //used to wait for the nodes to discover eachother and provide their identity to each other
         let identity_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
-                if let Ok(id) = account_a.get_identity(did_b.clone().into()).await {
+                if let Ok(id) = account_a.get_identity(did_b).await {
                     break id;
                 }
             }
@@ -108,7 +108,7 @@ mod test {
 
         let identity_b = crate::common::timeout(Duration::from_secs(60), async {
             loop {
-                if let Ok(id) = account_a.get_identity(String::from("JaneDoe").into()).await {
+                if let Ok(id) = account_a.get_identity(String::from("JaneDoe")).await {
                     break id;
                 }
             }
@@ -124,10 +124,7 @@ mod test {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
-        let (mut account, _, _) = WarpIpfsBuilder::default()
-            .set_tesseract(tesseract)
-            .finalize()
-            .await;
+        let mut account = WarpIpfsBuilder::default().set_tesseract(tesseract).await;
 
         account
             .create_identity(
@@ -154,10 +151,7 @@ mod test {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
-        let (mut account, _, _) = WarpIpfsBuilder::default()
-            .set_tesseract(tesseract)
-            .finalize()
-            .await;
+        let mut account = WarpIpfsBuilder::default().set_tesseract(tesseract).await;
 
         account
             .create_identity(

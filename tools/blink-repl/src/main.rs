@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use warp::crypto::DID;
 use warp::multipass::identity::Identity;
+use warp::multipass::{LocalIdentity, MultiPassEvent};
 use warp::tesseract::Tesseract;
 use warp::{
     blink::{AudioTestEvent, Blink, BlinkEventKind, BlinkEventStream},
@@ -106,9 +107,9 @@ enum Repl {
     Q,
 }
 
-async fn handle_command(
+async fn handle_command<M: MultiPass>(
     blink: &mut Box<dyn Blink>,
-    multipass: &mut Box<dyn MultiPass>,
+    multipass: &mut M,
     own_id: &Identity,
     cmd: Repl,
 ) -> anyhow::Result<()> {
@@ -317,8 +318,8 @@ async fn handle_blink_event_stream(mut stream: BlinkEventStream) -> anyhow::Resu
     Ok(())
 }
 
-async fn handle_multipass_event_stream(
-    mut multipass: Box<dyn MultiPass>,
+async fn handle_multipass_event_stream<M: MultiPass>(
+    mut multipass: M,
     mut stream: MultiPassEventStream,
 ) -> anyhow::Result<()> {
     while let Some(evt) = stream.next().await {
@@ -358,10 +359,9 @@ async fn main() -> anyhow::Result<()> {
     config.ipfs_setting_mut().agent_version = Some(format!("uplink/{}", env!("CARGO_PKG_VERSION")));
     config.store_setting_mut().share_platform = true;
 
-    let (mut multipass, _, _) = WarpIpfsBuilder::default()
+    let mut instance = WarpIpfsBuilder::default()
         .set_tesseract(tesseract.clone())
         .set_config(config)
-        .finalize()
         .await;
 
     if new_account {
@@ -370,11 +370,11 @@ async fn main() -> anyhow::Result<()> {
             .take(7)
             .map(char::from)
             .collect();
-        multipass.create_identity(Some(&random_name), None).await?;
+        instance.create_identity(Some(&random_name), None).await?;
     }
 
     let own_identity = loop {
-        match multipass.identity().await {
+        match instance.identity().await {
             Ok(ident) => break ident,
             Err(e) => match e {
                 warp::error::Error::MultiPassExtensionUnavailable => {
@@ -388,7 +388,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut blink: Box<dyn Blink> = warp_blink_wrtc::BlinkImpl::new(multipass.clone()).await?;
+    let mut blink: Box<dyn Blink> = warp_blink_wrtc::BlinkImpl::new(instance.clone()).await?;
     let blink_event_stream = blink.get_event_stream().await?;
     let blink_handle = tokio::spawn(async {
         if let Err(e) = handle_blink_event_stream(blink_event_stream).await {
@@ -396,8 +396,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let multipass_event_stream = multipass.multipass_subscribe().await?;
-    let multipass2 = multipass.clone();
+    let multipass_event_stream = instance.multipass_subscribe().await?;
+    let multipass2 = instance.clone();
     let multipass_handle = tokio::spawn(async {
         if let Err(e) = handle_multipass_event_stream(multipass2, multipass_event_stream).await {
             println!("handle multipass event stream failed: {e}");
@@ -426,7 +426,7 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        if let Err(e) = handle_command(&mut blink, &mut multipass, &own_identity, cli).await {
+        if let Err(e) = handle_command(&mut blink, &mut instance, &own_identity, cli).await {
             println!("command failed: {e}");
         }
     }
