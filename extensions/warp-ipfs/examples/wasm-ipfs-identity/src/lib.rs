@@ -12,7 +12,7 @@ macro_rules! web_log {
     }
 }
 
-async fn update_name(account: &mut dyn MultiPass, name: &str) -> Result<(), Error> {
+async fn update_name<M: MultiPass>(account: &mut M, name: &str) -> Result<(), Error> {
     account
         .update_identity(IdentityUpdate::Username(name.to_string()))
         .await?;
@@ -21,7 +21,7 @@ async fn update_name(account: &mut dyn MultiPass, name: &str) -> Result<(), Erro
     Ok(())
 }
 
-async fn update_status(account: &mut dyn MultiPass, status: &str) -> Result<(), Error> {
+async fn update_status<M: MultiPass>(account: &mut M, status: &str) -> Result<(), Error> {
     account
         .update_identity(IdentityUpdate::StatusMessage(Some(status.to_string())))
         .await?;
@@ -37,19 +37,18 @@ pub async fn run() -> Result<(), JsError> {
     let tesseract = Tesseract::default();
     tesseract.unlock(b"super duper pass")?;
 
-    let (mut identity, _, _) = WarpIpfsBuilder::default()
+    let mut instance = WarpIpfsBuilder::default()
         .set_config(Config::minimal_testing())
         .set_tesseract(tesseract)
-        .finalize()
         .await;
 
-    let profile = identity.create_identity(None, None).await?;
+    let profile = instance.create_identity(None, None).await?;
 
     let ident = profile.identity();
 
     web_log!("Current Identity: {}", serde_json::to_string(&ident)?);
 
-    update_name(&mut *identity, &warp::multipass::generator::generate_name()).await?;
-    update_status(&mut *identity, "New status message").await?;
+    update_name(&mut instance, &warp::multipass::generator::generate_name()).await?;
+    update_status(&mut instance, "New status message").await?;
     Ok(())
 }

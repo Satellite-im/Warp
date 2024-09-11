@@ -15,19 +15,22 @@ use tokio_stream::StreamMap;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
-use warp::constellation::{Constellation, Progression};
+use warp::constellation::Progression;
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus};
-use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
+use warp::multipass::{
+    Friends, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity, MultiPass,
+    MultiPassEvent, MultiPassImportExport,
+};
 use warp::raygun::{
     AttachmentKind, ConversationSettings, GroupSettings, Location, Message, MessageEvent,
     MessageEventKind, MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState,
-    RayGun, ReactionState,
+    RayGun, RayGunAttachment, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
-use warp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
 
 #[derive(Debug, Parser)]
 #[clap(name = "messenger")]
@@ -73,10 +76,7 @@ async fn setup<P: AsRef<Path>>(
     path: Option<P>,
     passphrase: Zeroizing<String>,
     opt: &Opt,
-) -> anyhow::Result<(
-    (Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>),
-    Option<IdentityProfile>,
-)> {
+) -> anyhow::Result<(WarpIpfsInstance, Option<IdentityProfile>)> {
     let mut config = match path.as_ref() {
         Some(path) => warp_ipfs::config::Config::production(path),
         None => warp_ipfs::config::Config::testing(),
@@ -123,19 +123,16 @@ async fn setup<P: AsRef<Path>>(
         opt.wait.map(Duration::from_millis);
     config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
-    let (mut account, raygun, filesystem) = WarpIpfsBuilder::default()
-        .set_config(config)
-        .finalize()
-        .await;
+    let mut instance = WarpIpfsBuilder::default().set_config(config).await;
 
-    account.tesseract().unlock(passphrase.as_bytes())?;
+    instance.tesseract().unlock(passphrase.as_bytes())?;
 
     let mut profile = None;
 
-    if account.identity().await.is_err() {
+    if instance.identity().await.is_err() {
         match (opt.import.clone(), opt.phrase.clone()) {
             (Some(path), Some(passphrase)) => {
-                account
+                instance
                     .import_identity(IdentityImportOption::Locate {
                         location: ImportLocation::Local { path },
                         passphrase,
@@ -143,7 +140,7 @@ async fn setup<P: AsRef<Path>>(
                     .await?;
             }
             (None, Some(passphrase)) => {
-                account
+                instance
                     .import_identity(IdentityImportOption::Locate {
                         location: ImportLocation::Remote,
                         passphrase,
@@ -151,10 +148,10 @@ async fn setup<P: AsRef<Path>>(
                     .await?;
             }
             _ => {
-                profile = match account.create_identity(None, None).await {
+                profile = match instance.create_identity(None, None).await {
                     Ok(profile) => Some(profile),
                     Err(Error::IdentityExist) => {
-                        let identity = account.identity().await?;
+                        let identity = instance.identity().await?;
                         Some(IdentityProfile::new(identity, None))
                     }
                     Err(e) => return Err(e.into()),
@@ -162,7 +159,7 @@ async fn setup<P: AsRef<Path>>(
             }
         };
     }
-    Ok(((account, raygun, filesystem), profile))
+    Ok((instance, profile))
 }
 
 #[allow(clippy::clone_on_copy)]
@@ -190,8 +187,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Creating or obtaining account...");
-    let ((mut new_account, mut chat, _), profile) =
-        setup(opt.path.clone(), Zeroizing::new(password), &opt).await?;
+    let (mut instance, profile) = setup(opt.path.clone(), Zeroizing::new(password), &opt).await?;
 
     println!("Obtaining identity....");
     let identity = match profile {
@@ -204,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
         }
         None => {
             println!("Obtained identity....");
-            new_account.identity().await?
+            instance.identity().await?
         }
     };
 
@@ -243,10 +239,10 @@ async fn main() -> anyhow::Result<()> {
     writeln!(stdout, "DID: {}", identity.did_key())?;
 
     // loads all conversations, pushing their streams into the `StreamMap` to poll.
-    for conversation in chat.list_conversations().await.unwrap_or_default() {
+    for conversation in instance.list_conversations().await.unwrap_or_default() {
         let id = conversation.id();
 
-        let stream = chat.get_conversation_stream(id).await?;
+        let stream = instance.get_conversation_stream(id).await?;
         stream_map.insert(id, stream);
     }
 
@@ -260,27 +256,28 @@ async fn main() -> anyhow::Result<()> {
         writeln!(stdout, "Set conversation to {}", topic)?;
     }
 
-    let mut event_stream = chat.raygun_subscribe().await?;
-    let mut account_stream = new_account.multipass_subscribe().await?;
+    let mut event_stream = instance.raygun_subscribe().await?;
+    let mut account_stream = instance.multipass_subscribe().await?;
 
     loop {
+        let mut instance = instance.clone();
         tokio::select! {
             biased;
             Some(event) = account_stream.next() => {
                 match event {
                     warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did, .. } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
                         if !opt.autoaccept_friend {
                             writeln!(stdout, "> Pending request from {username}. Do \"/accept-request {did}\" to accept.")?;
                         } else {
-                            new_account.accept_request(&did).await?;
+                            instance.accept_request(&did).await?;
                         }
                     },
                     warp::multipass::MultiPassEventKind::FriendRequestSent { to: did, .. } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -288,7 +285,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> A request has been sent to {username}. Do \"/close-request {did}\" to if you wish to close the request")?;
                     }
                     warp::multipass::MultiPassEventKind::IncomingFriendRequestRejected { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -296,7 +293,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> You've rejected {username} request")?;
                     },
                     warp::multipass::MultiPassEventKind::OutgoingFriendRequestRejected { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -304,7 +301,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> {username} rejected your request")?;
                     },
                     warp::multipass::MultiPassEventKind::IncomingFriendRequestClosed { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -312,7 +309,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> {username} has retracted their request")?;
                     },
                     warp::multipass::MultiPassEventKind::OutgoingFriendRequestClosed { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -320,7 +317,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> Request for {username} has been retracted")?;
                     },
                     warp::multipass::MultiPassEventKind::FriendAdded { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -328,7 +325,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> You are now friends with {username}")?;
                     },
                     warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -336,7 +333,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> {username} has been removed from friends list")?;
                     },
                     warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -344,7 +341,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> {username} has came online")?;
                     },
                     warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -352,7 +349,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> {username} went offline")?;
                     },
                     warp::multipass::MultiPassEventKind::Blocked { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -360,14 +357,14 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> {username} was blocked")?;
                     },
                     warp::multipass::MultiPassEventKind::Unblocked { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
                         writeln!(stdout, "> {username} was unblocked")?;
                     },
                     warp::multipass::MultiPassEventKind::UnblockedBy { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -375,7 +372,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "> {username} unblocked you")?;
                     },
                     warp::multipass::MultiPassEventKind::BlockedBy { did } => {
-                        let username = new_account
+                        let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
                             .map(|ident| ident.username())
                             .unwrap_or_else(|_| did.to_string());
@@ -392,7 +389,7 @@ async fn main() -> anyhow::Result<()> {
                             topic = conversation_id;
                             writeln!(stdout, "Set conversation to {}", topic)?;
 
-                            let stream = chat.get_conversation_stream(conversation_id).await?;
+                            let stream = instance.get_conversation_stream(conversation_id).await?;
 
                             stream_map.insert(conversation_id, stream);
                         },
@@ -413,7 +410,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Some((conversation_id, event)) = stream_map.next() => {
-                if let Err(e) = message_event_handle(topic, event, &mut stdout, &*new_account, &*chat).await {
+                if let Err(e) = message_event_handle(topic, event, &mut stdout, &instance, &instance).await {
                     writeln!(stdout, "error while processing event from {conversation_id}: {e}")?;
                     continue;
                 }
@@ -426,7 +423,7 @@ async fn main() -> anyhow::Result<()> {
                     if !line.starts_with('/') {
                         if !line.is_empty() {
                             // All commands start with a `/`. Everything else is a message.
-                            if let Err(e) = chat.send(topic, vec![line.to_string()]).await {
+                            if let Err(e) = instance.send(topic, vec![line.to_string()]).await {
                                 writeln!(stdout, "Error sending message: {e}")?;
                             }
                         }
@@ -443,14 +440,14 @@ async fn main() -> anyhow::Result<()> {
                     };
                     match cmd {
                         CreateConversation(did) => {
-                            if let Err(e) = chat.create_conversation(&did).await {
+                            if let Err(e) = instance.create_conversation(&did).await {
                                 writeln!(stdout, "Error creating conversation: {e}")?;
                                 continue
                             }
                         },
                         AddRecipient(did) => {
                             let local_topic = topic;
-                            if let Err(e) = chat.add_recipient(local_topic, &did).await {
+                            if let Err(e) = instance.add_recipient(local_topic, &did).await {
                                 writeln!(stdout, "Error adding recipient: {e}")?;
                                 continue
                             }
@@ -459,7 +456,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         RemoveRecipient(did) => {
                             let local_topic = topic;
-                            if let Err(e) = chat.remove_recipient(local_topic, &did).await {
+                            if let Err(e) = instance.remove_recipient(local_topic, &did).await {
                                 writeln!(stdout, "Error removing recipient: {e}")?;
                                 continue
                             }
@@ -470,7 +467,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut settings = GroupSettings::default();
                             settings.set_members_can_add_participants(open);
                             settings.set_members_can_change_name(open);
-                            if let Err(e) = chat.create_group_conversation(
+                            if let Err(e) = instance.create_group_conversation(
                                 Some(name.to_string()),
                                 did_keys,
                                 settings,
@@ -480,7 +477,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                         },
                         RemoveConversation(conversation_id) => {
-                            if let Err(e) = chat.delete(conversation_id, None).await {
+                            if let Err(e) = instance.delete(conversation_id, None).await {
                                     writeln!(stdout, "Error deleting conversation: {e}")?;
                                     continue
                             }
@@ -494,7 +491,7 @@ async fn main() -> anyhow::Result<()> {
                         SetConversationName(name) => {
                             let topic = topic;
 
-                            if let Err(e) = chat.update_conversation_name(topic, &name).await {
+                            if let Err(e) = instance.update_conversation_name(topic, &name).await {
                                 writeln!(stdout, "Error updating conversation: {e}")?;
                                 continue
                             }
@@ -502,11 +499,11 @@ async fn main() -> anyhow::Result<()> {
                         ListConversations => {
                             let mut table = Table::new();
                             table.set_header(vec!["Name", "ID", "Created", "Updated", "Recipients"]);
-                            let list = chat.list_conversations().await?;
+                            let list = instance.list_conversations().await?;
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    let username = get_username(&*new_account,  recipient).await;
+                                    let username = get_username(&instance,  recipient).await;
                                     recipients.push(username);
                                 }
                                 let created = convo.created();
@@ -520,14 +517,14 @@ async fn main() -> anyhow::Result<()> {
                             let mut settings = GroupSettings::default();
                             settings.set_members_can_add_participants(open);
                             settings.set_members_can_change_name(open);
-                            if let Err(e) = chat.update_conversation_settings(topic, ConversationSettings::Group(settings)).await {
+                            if let Err(e) = instance.update_conversation_settings(topic, ConversationSettings::Group(settings)).await {
                                 writeln!(stdout, "Error updating group settings: {e}")?;
                                 continue
                             }
                         },
                         ListReferences(opt) => {
                             let local_topic = topic;
-                            let mut messages_stream = match chat.get_message_references(local_topic, opt).await {
+                            let mut messages_stream = match instance.get_message_references(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -539,7 +536,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Conversation ID", "Date", "Modified", "Sender", "Pinned"]);
                             while let Some(message) = messages_stream.next().await {
-                                let username = get_username(&*new_account,  message.sender()).await;
+                                let username = get_username(&instance,  message.sender()).await;
                                 table.add_row(vec![
                                     &message.id().to_string(),
                                     &message.conversation_id().to_string(),
@@ -554,7 +551,7 @@ async fn main() -> anyhow::Result<()> {
                         ListMessages(opt) => {
                             let local_topic = topic;
 
-                            let mut messages_stream = match chat.get_messages(local_topic, opt.set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
+                            let mut messages_stream = match instance.get_messages(local_topic, opt.set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -566,7 +563,7 @@ async fn main() -> anyhow::Result<()> {
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             while let Some(message) = messages_stream.next().await {
 
-                                let username = get_username(&*new_account, message.sender()).await;
+                                let username = get_username(&instance, message.sender()).await;
                                 let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
 
                                 table.add_row(vec![
@@ -587,7 +584,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         ListPages(opt) => {
                             let local_topic = topic;
-                            let pages = match chat.get_messages(local_topic, opt).await {
+                            let pages = match instance.get_messages(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -602,7 +599,7 @@ async fn main() -> anyhow::Result<()> {
                                     let page_id = page.id();
                                     for message in page.messages() {
 
-                                        let username = get_username(&*new_account, message.sender()).await;
+                                        let username = get_username(&instance, message.sender()).await;
                                         let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
 
                                         table.add_row(vec![
@@ -628,7 +625,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = topic;
-                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_first_message()).await.and_then(Vec::<Message>::try_from) {
+                            let messages = match instance.get_messages(local_topic, MessageOptions::default().set_first_message()).await.and_then(Vec::<Message>::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -636,7 +633,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(&*new_account, message.sender()).await;
+                                let username = get_username(&instance, message.sender()).await;
                                 let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
 
                                 table.add_row(vec![
@@ -658,7 +655,7 @@ async fn main() -> anyhow::Result<()> {
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = topic;
 
-                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_last_message()).await.and_then(Vec::<Message>::try_from) {
+                            let messages = match instance.get_messages(local_topic, MessageOptions::default().set_last_message()).await.and_then(Vec::<Message>::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -666,7 +663,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(&*new_account, message.sender()).await;
+                                let username = get_username(&instance, message.sender()).await;
                                 let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
 
                                 table.add_row(vec![
@@ -688,7 +685,7 @@ async fn main() -> anyhow::Result<()> {
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = topic;
 
-                            let mut messages_stream = match chat.get_messages(local_topic, MessageOptions::default().set_keyword(&keywords).set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
+                            let mut messages_stream = match instance.get_messages(local_topic, MessageOptions::default().set_keyword(&keywords).set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -698,7 +695,7 @@ async fn main() -> anyhow::Result<()> {
 
                             while let Some(message) = messages_stream.next().await {
 
-                                let username = get_username(&*new_account, message.sender()).await;
+                                let username = get_username(&instance, message.sender()).await;
                                 let emojis = message.reactions().keys().cloned().collect::<Vec<_>>();
 
                                 table.add_row(vec![
@@ -717,7 +714,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         EditMessage(message_id, message) => {
                             let conversation_id = topic;
-                            if let Err(e) = chat.edit(conversation_id, message_id, vec![message]).await {
+                            if let Err(e) = instance.edit(conversation_id, message_id, vec![message]).await {
                                 writeln!(stdout, "Error: {e}")?;
                                 continue
                             }
@@ -731,11 +728,10 @@ async fn main() -> anyhow::Result<()> {
 
                             let conversation_id = topic;
                             tokio::spawn({
-                                let mut chat = chat.clone();
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    let (_, mut stream) = match chat.attach(conversation_id, None, files, vec![]).await {
+                                    let (_, mut stream) = match instance.attach(conversation_id, None, files, vec![]).await {
                                         Ok(stream) => stream,
                                         Err(e) => {
                                             writeln!(stdout, "> Error: {e}")?;
@@ -768,7 +764,7 @@ async fn main() -> anyhow::Result<()> {
                             let conversation_id = topic;
 
                             writeln!(stdout, "Downloading....")?;
-                            let mut stream = match chat.download(conversation_id, message_id, file, path).await {
+                            let mut stream = match instance.download(conversation_id, message_id, file, path).await {
                                 Ok(stream) => stream,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -820,7 +816,7 @@ async fn main() -> anyhow::Result<()> {
                         React(message_id, state, code) => {
                             let conversation_id = topic;
 
-                            if let Err(e) = chat.react(conversation_id, message_id, state.into(), code).await {
+                            if let Err(e) = instance.react(conversation_id, message_id, state.into(), code).await {
                                 writeln!(stdout, "Error: {e}")?;
                                 continue;
                             }
@@ -829,7 +825,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Status(id) => {
                             let topic = topic;
-                            let status = match chat.message_status(topic, id).await {
+                            let status = match instance.message_status(topic, id).await {
                                 Ok(status) => status,
                                 Err(_e) => {
                                     writeln!(stdout, "Error getting message status: {_e}")?;
@@ -844,14 +840,14 @@ async fn main() -> anyhow::Result<()> {
                             match target {
                                 PinTarget::All => {
                                     tokio::spawn({
-                                        let mut chat = chat.clone();
+                                        let chat = instance.clone();
                                         let mut stdout = stdout.clone();
                                         async move {
                                             let messages = chat
                                                 .get_messages(topic, MessageOptions::default())
                                                 .await.and_then(Vec::<Message>::try_from).unwrap_or_default();
                                             for message in messages.iter() {
-                                                match chat.pin(topic, message.id(), PinState::Pin).await {
+                                                match instance.pin(topic, message.id(), PinState::Pin).await {
                                                     Ok(_) => writeln!(stdout, "Pinned {}", message.id()).is_ok(),
                                                     Err(e) => writeln!(stdout, "Error Pinning {}: {}", message.id(), e).is_ok()
                                                 };
@@ -860,7 +856,7 @@ async fn main() -> anyhow::Result<()> {
                                     });
                                 },
                                 PinTarget::Message(id) => {
-                                    if let Err(e) = chat.pin(topic, id, PinState::Pin).await {
+                                    if let Err(e) = instance.pin(topic, id, PinState::Pin).await {
                                         writeln!(stdout, "Error pinning message: {e}")?;
                                     }
                                 },
@@ -870,7 +866,7 @@ async fn main() -> anyhow::Result<()> {
                             match target {
                                 PinTarget::All => {
                                     tokio::spawn({
-                                        let mut chat = chat.clone();
+                                        let chat = instance.clone();
                                         let mut stdout = stdout.clone();
                                         let topic = topic;
                                         async move {
@@ -878,7 +874,7 @@ async fn main() -> anyhow::Result<()> {
                                                 .get_messages(topic, MessageOptions::default())
                                                 .await.and_then(Vec::<Message>::try_from).unwrap_or_default();
                                             for message in messages.iter() {
-                                                match chat.pin(topic, message.id(), PinState::Unpin).await {
+                                                match instance.pin(topic, message.id(), PinState::Unpin).await {
                                                     Ok(_) => writeln!(stdout, "Unpinned {}", message.id()).is_ok(),
                                                     Err(e) => writeln!(stdout, "Error Uninning {}: {}", message.id(), e).is_ok()
                                                 };
@@ -887,67 +883,67 @@ async fn main() -> anyhow::Result<()> {
                                     });
                                 },
                                 PinTarget::Message(id) => {
-                                    chat.pin(topic, id, PinState::Unpin).await?;
+                                    instance.pin(topic, id, PinState::Unpin).await?;
                                     writeln!(stdout, "Unpinned {id}")?;
                                 },
                             }
                         }
                         RemoveMessage(id) => {
                             let topic = topic;
-                            match chat.delete(topic, Some(id)).await {
+                            match instance.delete(topic, Some(id)).await {
                                 Ok(_) => writeln!(stdout, "Message {id} removed")?,
                                 Err(e) => writeln!(stdout, "Error removing message: {e}")?,
                             }
                         }
                         CountMessages => {
-                            let amount = chat.get_message_count(topic).await?;
+                            let amount = instance.get_message_count(topic).await?;
                             writeln!(stdout, "Conversation contains {amount} messages")?;
                         }
                         Block(did) => {
-                            if let Err(e) = new_account.block(&did).await {
+                            if let Err(e) = instance.block(&did).await {
                                 writeln!(stdout, "error blocking {did}: {e}")?;
                                 continue;
                             }
                         },
                         Unblock(did) => {
-                            if let Err(e) = new_account.unblock(&did).await {
+                            if let Err(e) = instance.unblock(&did).await {
                                 writeln!(stdout, "error unblocking {did}: {e}")?;
                                 continue;
                             }
                         }
                         SendRequest(did) => {
-                            if let Err(e) = new_account.send_request(&did).await {
+                            if let Err(e) = instance.send_request(&did).await {
                                 writeln!(stdout, "error sending request to {did}: {e}")?;
                                 continue;
                             }
                         },
                         DenyRequest(did) => {
-                            if let Err(e) = new_account.deny_request(&did).await {
+                            if let Err(e) = instance.deny_request(&did).await {
                                 writeln!(stdout, "error denying request to {did}: {e}")?;
                                 continue;
                             }
                         },
                         CloseRequest(did) => {
-                            if let Err(e) = new_account.close_request(&did).await {
+                            if let Err(e) = instance.close_request(&did).await {
                                 writeln!(stdout, "error close request to {did}: {e}")?;
                                 continue;
                             }
                         },
                         AcceptRequest(did) => {
-                            if let Err(e) = new_account.accept_request(&did).await {
+                            if let Err(e) = instance.accept_request(&did).await {
                                 writeln!(stdout, "error accepting request to {did}: {e}")?;
                                 continue;
                             }
                         },
                         Lookup(id) => {
-                            let identities = new_account.get_identity(id).collect::<Vec<_>>().await;
+                            let identities = instance.get_identity(id).collect::<Vec<_>>().await;
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status"]);
                             for identity in identities {
-                                let status = new_account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
-                                let platform = new_account.identity_platform(&identity.did_key()).await.unwrap_or_default();
-                                let profile_picture = new_account.identity_picture(&identity.did_key()).await.unwrap_or_default();
-                                let profile_banner = new_account.identity_banner(&identity.did_key()).await.unwrap_or_default();
+                                let status = instance.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
+                                let platform = instance.identity_platform(&identity.did_key()).await.unwrap_or_default();
+                                let profile_picture = instance.identity_picture(&identity.did_key()).await.unwrap_or_default();
+                                let profile_banner = instance.identity_banner(&identity.did_key()).await.unwrap_or_default();
                                 let created = identity.created();
                                 let modified = identity.modified();
 
@@ -978,7 +974,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_username(account: &dyn MultiPass, did: DID) -> String {
+async fn get_username<M: MultiPass>(account: &M, did: DID) -> String {
     account
         .get_identity(Identifier::did_key(did.clone()))
         .await
@@ -986,12 +982,12 @@ async fn get_username(account: &dyn MultiPass, did: DID) -> String {
         .unwrap_or(did.to_string())
 }
 
-async fn message_event_handle(
+async fn message_event_handle<M: MultiPass, R: RayGun>(
     main_conversation_id: Uuid,
     event: MessageEventKind,
     stdout: &mut SharedWriter,
-    multipass: &dyn MultiPass,
-    raygun: &dyn RayGun,
+    multipass: &M,
+    raygun: &R,
 ) -> anyhow::Result<()> {
     match event {
         MessageEventKind::MessageReceived {

@@ -7,11 +7,12 @@ use comfy_table::Table;
 use futures::{StreamExt, TryStreamExt};
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
+use warp::multipass::LocalIdentity;
 use warp::{
     constellation::{Constellation, Progression},
     multipass::MultiPass,
 };
-use warp_ipfs::{config::Config, WarpIpfsBuilder};
+use warp_ipfs::{config::Config, WarpIpfsBuilder, WarpIpfsInstance};
 
 #[derive(Debug, Parser)]
 #[clap(name = "")]
@@ -59,26 +60,23 @@ async fn setup_persistent<P: AsRef<Path>>(
     username: Option<&str>,
     path: P,
     opt: &Opt,
-) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn Constellation>)> {
+) -> anyhow::Result<WarpIpfsInstance> {
     let path = path.as_ref();
 
     let mut config = Config::production(path);
 
     config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
-    let (mut account, _, filesystem) = WarpIpfsBuilder::default()
-        .set_config(config)
-        .finalize()
-        .await;
+    let mut instance = WarpIpfsBuilder::default().set_config(config).await;
 
-    account
+    instance
         .tesseract()
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    if account.identity().await.is_err() {
-        account.create_identity(username, None).await?;
+    if instance.identity().await.is_err() {
+        instance.create_identity(username, None).await?;
     }
-    Ok((account, filesystem))
+    Ok(instance)
 }
 
 #[tokio::main]
@@ -86,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     _ = fdlimit::raise_fd_limit().is_ok();
 
-    let (_, mut filesystem) = setup_persistent(None, opt.path.clone(), &opt).await?;
+    let mut filesystem = setup_persistent(None, opt.path.clone(), &opt).await?;
 
     match opt.command {
         Command::UploadFile { local, remote } => {
