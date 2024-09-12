@@ -61,7 +61,7 @@ use crate::{
     },
 };
 
-use warp::raygun::ConversationImage;
+use warp::raygun::{group, ConversationImage};
 use warp::{
     constellation::{directory::Directory, ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
@@ -3412,8 +3412,19 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         };
 
-        if creator != &own_did {
-            return Err(Error::PublicKeyInvalid);
+        match conversation.settings {
+            ConversationSettings::Group(group_settings) => {
+                if !group_settings.user_has_permission(&own_did, Permission::SetRoles)
+                    && creator != &own_did
+                {
+                    return Err(Error::PublicKeyInvalid);
+                }
+            }
+            _ => {
+                if creator != &own_did {
+                    return Err(Error::PublicKeyInvalid);
+                }
+            }
         }
 
         conversation.settings = settings;
