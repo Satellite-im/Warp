@@ -406,7 +406,7 @@ impl RootDocument {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FileAttachmentDocument {
     pub id: Uuid,
     pub name: String,
