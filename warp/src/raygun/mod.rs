@@ -467,7 +467,7 @@ impl Conversation {
     }
 
     pub fn settings(&self) -> ConversationSettings {
-        self.settings
+        self.settings.clone()
     }
 
     pub fn recipients(&self) -> Vec<DID> {
@@ -525,7 +525,7 @@ impl Conversation {
     }
 }
 
-#[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
 pub enum ConversationSettings {
@@ -548,20 +548,32 @@ impl Default for ConversationSettings {
 #[repr(C)]
 pub struct DirectConversationSettings {}
 
-#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[display(
-    fmt = "Everyone can add participants: {}, Everyone can change name: {}",
-    "if self.members_can_add_participants {\"✅\"} else {\"❌\"}",
-    "if self.members_can_change_name {\"✅\"} else {\"❌\"}"
+    fmt = "Roles: {:?}",
+    "self.roles"
 )]
 #[repr(C)]
 pub struct GroupSettings {
-    // Everyone can add participants, if set to `true``.
+    // Roles to manage permissions. Key is the unique name of the role.
     #[serde(default)]
-    members_can_add_participants: bool,
-    // Everyone can change the name of the group.
-    #[serde(default)]
-    members_can_change_name: bool,
+    roles: IndexMap<String, Role>,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
+pub struct Role {
+    // Participants assigned to this role
+    participants: Vec<DID>,
+    // Permissions of this role
+    permissions: Vec<Permission>,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
+pub enum Permission {
+    All,
+    SetRoles,
+    ChangeGroupName,
+    AddParticipantsToGroup,
 }
 
 impl GroupSettings {
@@ -569,20 +581,21 @@ impl GroupSettings {
         Self::default()
     }
 
-    pub fn members_can_add_participants(&self) -> bool {
-        self.members_can_add_participants
+    pub fn roles(&mut self) -> IndexMap<String, Role> {
+        self.roles.clone()
     }
 
-    pub fn members_can_change_name(&self) -> bool {
-        self.members_can_change_name
+    pub fn set_roles(&mut self, roles: IndexMap<String, Role>) {
+        self.roles = roles;
     }
 
-    pub fn set_members_can_add_participants(&mut self, val: bool) {
-        self.members_can_add_participants = val;
-    }
-
-    pub fn set_members_can_change_name(&mut self, val: bool) {
-        self.members_can_change_name = val;
+    pub fn user_has_permission(&self, id: &DID, permission: Permission) -> bool {
+        for (_, role) in &self.roles {
+            if role.participants.contains(id) && (role.permissions.contains(&permission) || role.permissions.contains(&Permission::All)) {
+                return true;
+            }
+        }
+        false
     }
 }
 

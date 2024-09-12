@@ -68,7 +68,7 @@ use warp::{
     error::Error,
     multipass::MultiPassEventKind,
     raygun::{
-        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
+        Permission, AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
         ConversationType, DirectConversationSettings, GroupSettings, Location, LocationKind,
         MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
         MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
@@ -2756,8 +2756,8 @@ impl ConversationInner {
             });
         }
 
-        let settings = match conversation.settings {
-            ConversationSettings::Group(settings) => settings,
+        let settings = match &conversation.settings {
+            ConversationSettings::Group(settings) => settings.clone(),
             ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
         };
         assert_eq!(conversation.conversation_type(), ConversationType::Group);
@@ -2768,7 +2768,7 @@ impl ConversationInner {
 
         let own_did = &self.identity.did_key();
 
-        if !settings.members_can_change_name() && creator.ne(own_did) {
+        if !settings.user_has_permission(own_did, Permission::ChangeGroupName) && creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
         }
 
@@ -3036,8 +3036,8 @@ impl ConversationInner {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
 
-        let settings = match conversation.settings {
-            ConversationSettings::Group(settings) => settings,
+        let settings = match &conversation.settings {
+            ConversationSettings::Group(settings) => settings.clone(),
             ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
         };
         assert_eq!(conversation.conversation_type(), ConversationType::Group);
@@ -3048,7 +3048,7 @@ impl ConversationInner {
 
         let own_did = &self.identity.did_key();
 
-        if !settings.members_can_add_participants() && creator.ne(own_did) {
+        if !settings.user_has_permission(own_did, Permission::AddParticipantsToGroup) && creator.ne(own_did) {
             return Err(Error::PublicKeyInvalid);
         }
 
@@ -3419,14 +3419,14 @@ impl ConversationInner {
         let event = MessagingEvents::UpdateConversation {
             conversation: conversation.clone(),
             kind: ConversationUpdateKind::ChangeSettings {
-                settings: conversation.settings,
+                settings: conversation.settings.clone(),
             },
         };
 
         let tx = self.subscribe(conversation_id).await?;
         let _ = tx.send(MessageEventKind::ConversationSettingsUpdated {
             conversation_id,
-            settings: conversation.settings,
+            settings: conversation.settings.clone(),
         });
 
         self.publish(conversation_id, None, event, true).await

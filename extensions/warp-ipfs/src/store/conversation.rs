@@ -25,6 +25,7 @@ use warp::{
     crypto::{cipher::Cipher, hash::sha256_iter, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{
+        Permission,
         Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
         GroupSettings, Message, MessageOptions, MessagePage, MessageReference, MessageType,
         Messages, MessagesType,
@@ -257,14 +258,14 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, keypair: &Keypair) -> Result<(), Error> {
-        if let ConversationSettings::Group(settings) = self.settings {
+        if let ConversationSettings::Group(settings) = &self.settings {
             assert_eq!(self.conversation_type(), ConversationType::Group);
             let did = keypair.to_did()?;
             let Some(creator) = self.creator.clone() else {
                 return Err(Error::PublicKeyInvalid);
             };
 
-            if !settings.members_can_add_participants() && !creator.eq(&did) {
+            if !settings.user_has_permission(&did, Permission::AddParticipantsToGroup) && !creator.eq(&did) {
                 return Err(Error::PublicKeyInvalid);
             }
 
@@ -275,7 +276,7 @@ impl ConversationDocument {
             let construct = warp::crypto::hash::sha256_iter(
                 [
                     Some(self.id().into_bytes().to_vec()),
-                    (!settings.members_can_change_name())
+                    (!settings.user_has_permission(&did, Permission::ChangeGroupName))
                         .then(|| self.name.as_deref().map(|s| s.as_bytes().to_vec()))
                         .flatten(),
                     self.description.as_ref().map(|d| d.as_bytes().to_vec()),
@@ -287,7 +288,7 @@ impl ConversationDocument {
                             .iter()
                             .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                     )),
-                    (!settings.members_can_add_participants()).then_some(Vec::from_iter(
+                    (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup)).then_some(Vec::from_iter(
                         self.recipients
                             .iter()
                             .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
@@ -304,13 +305,14 @@ impl ConversationDocument {
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        if let ConversationSettings::Group(settings) = self.settings {
+        if let ConversationSettings::Group(settings) = &self.settings {
             assert_eq!(self.conversation_type(), ConversationType::Group);
             let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid);
             };
 
             let creator_pk = creator.to_public_key()?;
+            let did = creator_pk.to_did()?;
 
             let Some(signature) = &self.signature else {
                 return Err(Error::InvalidSignature);
@@ -341,7 +343,7 @@ impl ConversationDocument {
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                         )),
-                        (!settings.members_can_add_participants()).then_some(Vec::from_iter(
+                        (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup)).then_some(Vec::from_iter(
                             self.recipients
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
@@ -353,7 +355,7 @@ impl ConversationDocument {
                 ConversationVersion::V2 => warp::crypto::hash::sha256_iter(
                     [
                         Some(self.id().into_bytes().to_vec()),
-                        (!settings.members_can_change_name())
+                        (!settings.user_has_permission(&did, Permission::ChangeGroupName))
                             .then(|| self.name.as_deref().map(|s| s.as_bytes().to_vec()))
                             .flatten(),
                         Some(creator.to_string().as_bytes().to_vec()),
@@ -364,7 +366,7 @@ impl ConversationDocument {
                         )),
                         self.icon.map(|s| s.hash().digest().to_vec()),
                         self.banner.map(|s| s.hash().digest().to_vec()),
-                        (!settings.members_can_add_participants()).then_some(Vec::from_iter(
+                        (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup)).then_some(Vec::from_iter(
                             self.recipients
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
@@ -719,7 +721,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_creator(document.creator.clone());
         conversation.set_recipients(document.recipients());
         conversation.set_created(document.created);
-        conversation.set_settings(document.settings);
+        conversation.set_settings(document.settings.clone());
         conversation.set_modified(document.modified);
         conversation.set_favorite(document.favorite);
         conversation.set_description(document.description.clone());
