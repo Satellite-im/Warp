@@ -441,7 +441,7 @@ impl ConversationDocument {
 
     pub async fn get_message_list(&self, ipfs: &Ipfs) -> Result<BTreeSet<MessageDocument>, Error> {
         let refs = self.message_reference_list(ipfs).await?;
-        let list = refs.list(ipfs).await.collect::<BTreeSet<_>>().await;
+        let list = refs.list(ipfs).collect::<BTreeSet<_>>().await;
         Ok(list)
     }
 
@@ -1387,26 +1387,25 @@ impl MessageReferenceList {
         Ok(cid)
     }
 
-    #[async_recursion::async_recursion]
-    pub async fn list(&self, ipfs: &Ipfs) -> BoxStream<'_, MessageDocument> {
+    pub fn list(&self, ipfs: &Ipfs) -> BoxStream<'_, MessageDocument> {
         let cid = match self.messages {
             Some(cid) => cid,
             None => return stream::empty().boxed(),
         };
 
-        let list = match ipfs
-            .get_dag(cid)
-            .timeout(Duration::from_secs(10))
-            .deserialized::<IndexMap<String, Option<Cid>>>()
-            .await
-        {
-            Ok(list) => list,
-            Err(_) => return stream::empty().boxed(),
-        };
-
         let ipfs = ipfs.clone();
 
         let stream = async_stream::stream! {
+            let list = match ipfs
+                .get_dag(cid)
+                .timeout(Duration::from_secs(10))
+                .deserialized::<IndexMap<String, Option<Cid>>>()
+                .await
+            {
+                Ok(list) => list,
+                Err(_) => return
+            };
+
             for message_cid in list.values() {
                 let Some(cid) = message_cid else {
                     continue;
@@ -1428,7 +1427,7 @@ impl MessageReferenceList {
                     return;
                 };
 
-            let stream = refs.list(&ipfs).await;
+            let stream = refs.list(&ipfs);
 
             for await item in stream {
                 yield item;
@@ -1579,10 +1578,12 @@ impl MessageReferenceList {
     // the current `MessageReferenceList` and walk down the reference list via `MessageReferenceList::list`
     // and pass on messages where map value is `Option::Some` into a new list reference. Once completed, return
     // the new list
+    // Note: This should be used at the root of the `MessageReferenceList` and not any nested reference
+    //       to prevent possible fragmentation.
     // TODO: Use in the near future under a schedule to shrink reference list
     pub async fn shrink(self, ipfs: &Ipfs) -> Result<MessageReferenceList, Error> {
         let mut new_list = MessageReferenceList::default();
-        let mut list = self.list(ipfs).await;
+        let mut list = self.list(ipfs);
         while let Some(message) = list.next().await {
             new_list.insert(ipfs, &message).await?;
         }
