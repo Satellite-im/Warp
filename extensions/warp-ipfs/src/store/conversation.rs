@@ -25,10 +25,9 @@ use warp::{
     crypto::{cipher::Cipher, hash::sha256_iter, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{
-        Permission,
         Conversation, ConversationSettings, ConversationType, DirectConversationSettings,
         GroupSettings, Message, MessageOptions, MessagePage, MessageReference, MessageType,
-        Messages, MessagesType,
+        Messages, MessagesType, Permission,
     },
 };
 
@@ -265,7 +264,9 @@ impl ConversationDocument {
                 return Err(Error::PublicKeyInvalid);
             };
 
-            if !settings.user_has_permission(&did, Permission::AddParticipantsToGroup) && !creator.eq(&did) {
+            if !settings.user_has_permission(&did, Permission::AddParticipantsToGroup)
+                && !creator.eq(&did)
+            {
                 return Err(Error::PublicKeyInvalid);
             }
 
@@ -288,11 +289,12 @@ impl ConversationDocument {
                             .iter()
                             .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                     )),
-                    (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup)).then_some(Vec::from_iter(
-                        self.recipients
-                            .iter()
-                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                    )),
+                    (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup))
+                        .then_some(Vec::from_iter(
+                            self.recipients
+                                .iter()
+                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                        )),
                 ]
                 .into_iter(),
                 None,
@@ -343,11 +345,12 @@ impl ConversationDocument {
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                         )),
-                        (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup)).then_some(Vec::from_iter(
-                            self.recipients
-                                .iter()
-                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                        )),
+                        (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup))
+                            .then_some(Vec::from_iter(
+                                self.recipients
+                                    .iter()
+                                    .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                            )),
                     ]
                     .into_iter(),
                     None,
@@ -366,11 +369,12 @@ impl ConversationDocument {
                         )),
                         self.icon.map(|s| s.hash().digest().to_vec()),
                         self.banner.map(|s| s.hash().digest().to_vec()),
-                        (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup)).then_some(Vec::from_iter(
-                            self.recipients
-                                .iter()
-                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                        )),
+                        (!settings.user_has_permission(&did, Permission::AddParticipantsToGroup))
+                            .then_some(Vec::from_iter(
+                                self.recipients
+                                    .iter()
+                                    .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                            )),
                     ]
                     .into_iter(),
                     None,

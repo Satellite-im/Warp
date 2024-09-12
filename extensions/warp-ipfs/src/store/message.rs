@@ -68,10 +68,10 @@ use warp::{
     error::Error,
     multipass::MultiPassEventKind,
     raygun::{
-        Permission, AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
+        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
         ConversationType, DirectConversationSettings, GroupSettings, Location, LocationKind,
         MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
-        MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState,
+        MessageType, Messages, MessagesType, Permission, PinState, RayGunEventKind, ReactionState,
     },
 };
 
@@ -2768,7 +2768,9 @@ impl ConversationInner {
 
         let own_did = &self.identity.did_key();
 
-        if !settings.user_has_permission(own_did, Permission::ChangeGroupName) && creator.ne(own_did) {
+        if !settings.user_has_permission(own_did, Permission::ChangeGroupName)
+            && creator.ne(own_did)
+        {
             return Err(Error::PublicKeyInvalid);
         }
 
@@ -3048,7 +3050,9 @@ impl ConversationInner {
 
         let own_did = &self.identity.did_key();
 
-        if !settings.user_has_permission(own_did, Permission::AddParticipantsToGroup) && creator.ne(own_did) {
+        if !settings.user_has_permission(own_did, Permission::AddParticipantsToGroup)
+            && creator.ne(own_did)
+        {
             return Err(Error::PublicKeyInvalid);
         }
 

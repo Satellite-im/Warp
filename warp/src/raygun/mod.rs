@@ -549,10 +549,7 @@ impl Default for ConversationSettings {
 pub struct DirectConversationSettings {}
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Display)]
-#[display(
-    fmt = "Roles: {:?}",
-    "self.roles"
-)]
+#[display(fmt = "Roles: {:?}", "self.roles")]
 #[repr(C)]
 pub struct GroupSettings {
     // Roles to manage permissions. Key is the unique name of the role.
@@ -591,7 +588,10 @@ impl GroupSettings {
 
     pub fn user_has_permission(&self, id: &DID, permission: Permission) -> bool {
         for (_, role) in &self.roles {
-            if role.participants.contains(id) && (role.permissions.contains(&permission) || role.permissions.contains(&Permission::All)) {
+            if role.participants.contains(id)
+                && (role.permissions.contains(&permission)
+                    || role.permissions.contains(&Permission::All))
+            {
                 return true;
             }
         }
