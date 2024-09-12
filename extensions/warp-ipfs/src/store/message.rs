@@ -2544,11 +2544,9 @@ impl ConversationInner {
         }
 
         let attachment = message
-            .attachments(&self.ipfs)
-            .await
+            .attachments()
             .iter()
             .find(|attachment| attachment.name == file)
-            .cloned()
             .ok_or(Error::FileNotFound)?;
 
         let stream = attachment.download(&self.ipfs, path, &members, None);
@@ -2579,11 +2577,9 @@ impl ConversationInner {
         }
 
         let attachment = message
-            .attachments(&self.ipfs)
-            .await
+            .attachments()
             .iter()
             .find(|attachment| attachment.name == file)
-            .cloned()
             .ok_or(Error::FileNotFound)?;
 
         let stream = attachment.download_stream(&self.ipfs, &members, None);

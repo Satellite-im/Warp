@@ -743,16 +743,17 @@ pub struct MessageDocument {
     pub version: MessageVersion,
     pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reactions: Option<Cid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attachments: Option<Cid>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub reactions: IndexMap<String, Vec<DID>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<FileAttachmentDocument>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<DateTime<Utc>>,
     #[serde(default)]
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replied: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<MessageSignature>,
@@ -810,6 +811,16 @@ impl MessageDocument {
         let replied = message.replied();
         let lines = message.lines();
         let reactions = message.reactions();
+        let attachments = message.attachments();
+
+        if attachments.len() > MAX_ATTACHMENT {
+            return Err(Error::InvalidLength {
+                context: "attachments".into(),
+                current: attachments.len(),
+                minimum: None,
+                maximum: Some(MAX_ATTACHMENT),
+            });
+        }
 
         if reactions.len() > MAX_REACTIONS {
             return Err(Error::InvalidLength {
@@ -821,20 +832,13 @@ impl MessageDocument {
         }
 
         let attachments = FuturesUnordered::from_iter(
-            message
-                .attachments()
+            attachments
                 .iter()
                 .map(|file| FileAttachmentDocument::new(ipfs, file).into_future()),
         )
         .filter_map(|result| async move { result.ok() })
         .collect::<Vec<_>>()
         .await;
-
-        let attachments =
-            (!attachments.is_empty()).then_some(ipfs.dag().put().serialize(attachments).await?);
-
-        let reactions =
-            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
 
         if !lines.is_empty() {
             let lines_value_length: usize = lines
@@ -898,6 +902,16 @@ impl MessageDocument {
             //       since an invalid public key also signals a invalid message.
             return false;
         };
+
+        let attachments_hash = sha256_iter(
+            self.attachments
+                .iter()
+                .map(|attachment| attachment.data.as_bytes())
+                .map(Option::Some),
+            None,
+        );
+        let attachments_hash = (!attachments_hash.is_empty()).then_some(attachments_hash);
+
         let hash = match self.version {
             MessageVersion::V0 => sha256_iter(
                 [
@@ -907,7 +921,7 @@ impl MessageDocument {
                     Some(self.date.to_string().into_bytes()),
                     self.modified.map(|time| time.to_string().into_bytes()),
                     self.replied.map(|id| id.as_bytes().to_vec()),
-                    self.attachments.map(|cid| cid.to_bytes()),
+                    attachments_hash,
                     self.message.as_ref().map(|m| m.to_vec()),
                 ]
                 .into_iter(),
@@ -929,17 +943,8 @@ impl MessageDocument {
         Ok(nonce)
     }
 
-    pub async fn attachments(&self, ipfs: &Ipfs) -> Vec<FileAttachmentDocument> {
-        let cid = match self.attachments {
-            Some(cid) => cid,
-            None => return vec![],
-        };
-
-        ipfs.get_dag(cid)
-            .local()
-            .deserialized()
-            .await
-            .unwrap_or_default()
+    pub fn attachments(&self) -> &[FileAttachmentDocument] {
+        &self.attachments
     }
 
     pub async fn update(
@@ -979,8 +984,7 @@ impl MessageDocument {
             });
         }
 
-        self.reactions =
-            (!reactions.is_empty()).then_some(ipfs.dag().put().serialize(reactions).await?);
+        self.reactions = reactions;
 
         if message.lines() != old_message.lines() {
             let lines = message.lines();
@@ -1029,7 +1033,7 @@ impl MessageDocument {
                 (Either::Left(key), None) => ecdh_encrypt(keypair, Some(key), &bytes)?,
             };
 
-            self.message.replace(data.into());
+            self.message = (!data.is_empty()).then_some(data.into());
 
             match (sender.eq(did), signature) {
                 (true, None) => {
@@ -1074,56 +1078,38 @@ impl MessageDocument {
         message.set_pinned(self.pinned);
         message.set_replied(self.replied);
 
-        if let Some(cid) = self.attachments {
-            let attachments: Vec<FileAttachmentDocument> = ipfs
-                .get_dag(cid)
-                .timeout(Duration::from_secs(10))
-                .set_local(local)
-                .deserialized()
-                .await
-                .unwrap_or_default();
+        let attachments = self.attachments();
 
-            if attachments.len() > MAX_ATTACHMENT {
-                return Err(Error::InvalidLength {
-                    context: "attachments".into(),
-                    current: attachments.len(),
-                    minimum: None,
-                    maximum: Some(MAX_ATTACHMENT),
-                });
-            }
-
-            let files = FuturesUnordered::from_iter(
-                attachments
-                    .iter()
-                    .map(|document| document.resolve_to_file(ipfs, local).into_future()),
-            )
-            .filter_map(|result| async move { result.ok() })
-            .collect::<Vec<_>>()
-            .await;
-
-            message.set_attachment(files);
+        if self.attachments.len() > MAX_ATTACHMENT {
+            return Err(Error::InvalidLength {
+                context: "attachments".into(),
+                current: attachments.len(),
+                minimum: None,
+                maximum: Some(MAX_ATTACHMENT),
+            });
         }
 
-        if let Some(cid) = self.reactions {
-            let reactions: IndexMap<String, Vec<DID>> = ipfs
-                .get_dag(cid)
-                .timeout(Duration::from_secs(10))
-                .set_local(local)
-                .deserialized()
-                .await
-                .unwrap_or_default();
+        let files = FuturesUnordered::from_iter(
+            attachments
+                .iter()
+                .map(|document| document.resolve_to_file(ipfs, local).into_future()),
+        )
+        .filter_map(|result| async move { result.ok() })
+        .collect::<Vec<_>>()
+        .await;
 
-            if reactions.len() > MAX_REACTIONS {
-                return Err(Error::InvalidLength {
-                    context: "reactions".into(),
-                    current: reactions.len(),
-                    minimum: None,
-                    maximum: Some(MAX_REACTIONS),
-                });
-            }
+        message.set_attachment(files);
 
-            message.set_reactions(reactions);
+        if self.reactions.len() > MAX_REACTIONS {
+            return Err(Error::InvalidLength {
+                context: "reactions".into(),
+                current: self.reactions.len(),
+                minimum: None,
+                maximum: Some(MAX_REACTIONS),
+            });
         }
+
+        message.set_reactions(self.reactions.clone());
 
         let sender = self.sender.to_did();
 
@@ -1162,6 +1148,15 @@ impl MessageDocument {
             return Err(Error::PublicKeyInvalid);
         }
 
+        let attachments_hash = sha256_iter(
+            self.attachments
+                .iter()
+                .map(|attachment| attachment.data.as_bytes())
+                .map(Option::Some),
+            None,
+        );
+        let attachments_hash = (!attachments_hash.is_empty()).then_some(attachments_hash);
+
         let hash = sha256_iter(
             [
                 Some(self.conversation_id.as_bytes().to_vec()),
@@ -1170,7 +1165,7 @@ impl MessageDocument {
                 Some(self.date.to_string().into_bytes()),
                 self.modified.map(|time| time.to_string().into_bytes()),
                 self.replied.map(|id| id.as_bytes().to_vec()),
-                self.attachments.map(|cid| cid.to_bytes()),
+                attachments_hash,
                 self.message.as_ref().map(|m| m.to_vec()),
             ]
             .into_iter(),
