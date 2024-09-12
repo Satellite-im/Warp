@@ -1,9 +1,9 @@
 use warp::multipass::identity::IdentityUpdate;
-use warp::multipass::MultiPass;
+use warp::multipass::{LocalIdentity, MultiPass};
 use warp::tesseract::Tesseract;
 use warp_ipfs::WarpIpfsBuilder;
 
-async fn update_name(account: &mut Box<dyn MultiPass>, name: &str) -> anyhow::Result<()> {
+async fn update_name<M: MultiPass>(account: &mut M, name: &str) -> anyhow::Result<()> {
     account
         .update_identity(IdentityUpdate::Username(name.to_string()))
         .await?;
@@ -13,7 +13,7 @@ async fn update_name(account: &mut Box<dyn MultiPass>, name: &str) -> anyhow::Re
     Ok(())
 }
 
-async fn update_status(account: &mut Box<dyn MultiPass>, status: &str) -> anyhow::Result<()> {
+async fn update_status<M: MultiPass>(account: &mut M, status: &str) -> anyhow::Result<()> {
     account
         .update_identity(IdentityUpdate::StatusMessage(Some(status.to_string())))
         .await?;
@@ -28,10 +28,7 @@ async fn main() -> anyhow::Result<()> {
     let tesseract = Tesseract::default();
     tesseract.unlock(b"super duper pass")?;
 
-    let (mut identity, _, _) = WarpIpfsBuilder::default()
-        .set_tesseract(tesseract)
-        .finalize()
-        .await;
+    let mut identity = WarpIpfsBuilder::default().set_tesseract(tesseract).await;
 
     identity
         .tesseract()

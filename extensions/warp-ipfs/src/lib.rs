@@ -23,6 +23,12 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{error, info, warn, Instrument, Span};
 use uuid::Uuid;
 
+use crate::config::{Bootstrap, DiscoveryType};
+use crate::store::discovery::Discovery;
+use crate::store::phonebook::PhoneBook;
+use crate::store::{ecdh_decrypt, PeerIdExt};
+use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
+use crate::utils::{ByteCollection, ReaderStream};
 use config::Config;
 use store::document::ResolvedRootDocument;
 use store::event_subscription::EventSubscription;
@@ -58,14 +64,8 @@ use warp::raygun::{
     RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
+use warp::warp::Warp;
 use warp::{Extension, SingleHandle};
-
-use crate::config::{Bootstrap, DiscoveryType};
-use crate::store::discovery::Discovery;
-use crate::store::phonebook::PhoneBook;
-use crate::store::{ecdh_decrypt, PeerIdExt};
-use crate::store::{MAX_IMAGE_SIZE, MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH};
-use crate::utils::{ByteCollection, ReaderStream};
 
 mod behaviour;
 pub mod config;
@@ -85,6 +85,8 @@ pub struct WarpIpfs {
     raygun_tx: EventSubscription<RayGunEventKind>,
     constellation_tx: EventSubscription<ConstellationEventKind>,
 }
+
+pub type WarpIpfsInstance = Warp<WarpIpfs, WarpIpfs, WarpIpfs>;
 
 struct Inner {
     config: Config,
@@ -122,37 +124,11 @@ impl WarpIpfsBuilder {
         self.tesseract = Some(tesseract);
         self
     }
-
-    // pub fn use_multipass(mut self) -> Self {
-    //     self.use_multipass = true;
-    //     self
-    // }
-
-    // pub fn use_constellation(mut self) -> Self {
-    //     self.use_constellation = true;
-    //     self
-    // }
-
-    // pub fn use_raygun(mut self) -> Self {
-    //     self.use_raygun = true;
-    //     self
-    // }
-
-    /// Creates trait objects of the
-    pub async fn finalize(self) -> (Box<dyn MultiPass>, Box<dyn RayGun>, Box<dyn Constellation>) {
-        let instance = WarpIpfs::new(self.config, self.tesseract).await;
-
-        let mp = Box::new(instance.clone()) as Box<_>;
-        let rg = Box::new(instance.clone()) as Box<_>;
-        let fs = Box::new(instance) as Box<_>;
-
-        (mp, rg, fs)
-    }
 }
 
 impl core::future::IntoFuture for WarpIpfsBuilder {
     type IntoFuture = BoxFuture<'static, Self::Output>;
-    type Output = WarpIpfs;
+    type Output = WarpIpfsInstance;
 
     fn into_future(self) -> Self::IntoFuture {
         async move { WarpIpfs::new(self.config, self.tesseract).await }.boxed()
@@ -160,7 +136,7 @@ impl core::future::IntoFuture for WarpIpfsBuilder {
 }
 
 impl WarpIpfs {
-    pub async fn new(config: Config, tesseract: impl Into<Option<Tesseract>>) -> WarpIpfs {
+    pub async fn new(config: Config, tesseract: impl Into<Option<Tesseract>>) -> WarpIpfsInstance {
         let multipass_tx = EventSubscription::new();
         let raygun_tx = EventSubscription::new();
         let constellation_tx = EventSubscription::new();
@@ -222,7 +198,7 @@ impl WarpIpfs {
             _ = identity.initialize_store(false).await;
         }
 
-        identity
+        Warp::new(&identity, &identity, &identity)
     }
 
     async fn initialize_store(&self, init: bool) -> Result<(), Error> {
@@ -831,7 +807,7 @@ impl MultiPass for WarpIpfs {
         Ok(profile)
     }
 
-    fn get_identity(&self, id: Identifier) -> GetIdentity {
+    fn get_identity(&self, id: impl Into<Identifier>) -> GetIdentity {
         let store = match self.direct_identity_store() {
             Ok(store) => store,
             _ => return GetIdentity::new(id, stream::empty().boxed()),

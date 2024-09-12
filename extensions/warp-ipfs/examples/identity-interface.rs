@@ -13,9 +13,12 @@ use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, IdentityProfile, IdentityStatus, IdentityUpdate};
-use warp::multipass::{IdentityImportOption, ImportLocation, MultiPass};
+use warp::multipass::{
+    Friends, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity, MultiPass,
+    MultiPassEvent, MultiPassImportExport,
+};
 use warp_ipfs::config::{Bootstrap, Config, Discovery, DiscoveryType};
-use warp_ipfs::WarpIpfsBuilder;
+use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
 
 #[derive(Debug, Parser)]
 #[clap(name = "identity-interface")]
@@ -58,7 +61,7 @@ async fn account(
     path: Option<PathBuf>,
     username: Option<&str>,
     opt: &Opt,
-) -> anyhow::Result<(Box<dyn MultiPass>, Option<IdentityProfile>)> {
+) -> anyhow::Result<(WarpIpfsInstance, Option<IdentityProfile>)> {
     let mut config = match path.as_ref() {
         Some(path) => Config::production(path),
         None => Config::testing(),
@@ -107,21 +110,18 @@ async fn account(
 
     config.ipfs_setting_mut().mdns.enable = opt.mdns;
 
-    let (mut account, _, _) = WarpIpfsBuilder::default()
-        .set_config(config)
-        .finalize()
-        .await;
+    let mut instance = WarpIpfsBuilder::default().set_config(config).await;
 
-    account
+    instance
         .tesseract()
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let mut profile = None;
 
-    if account.identity().await.is_err() {
+    if instance.identity().await.is_err() {
         match (opt.import.clone(), opt.phrase.clone()) {
             (Some(path), Some(passphrase)) => {
-                account
+                instance
                     .import_identity(IdentityImportOption::Locate {
                         location: ImportLocation::Local { path },
                         passphrase,
@@ -129,7 +129,7 @@ async fn account(
                     .await?;
             }
             (None, Some(passphrase)) => {
-                account
+                instance
                     .import_identity(IdentityImportOption::Locate {
                         location: ImportLocation::Remote,
                         passphrase,
@@ -137,10 +137,10 @@ async fn account(
                     .await?;
             }
             _ => {
-                profile = match account.create_identity(username, None).await {
+                profile = match instance.create_identity(username, None).await {
                     Ok(profile) => Some(profile),
                     Err(Error::IdentityExist) => {
-                        let identity = account.identity().await?;
+                        let identity = instance.identity().await?;
                         Some(IdentityProfile::new(identity, None))
                     }
                     Err(e) => return Err(e.into()),
@@ -148,7 +148,7 @@ async fn account(
             }
         };
     }
-    Ok((account, profile))
+    Ok((instance, profile))
 }
 
 #[tokio::main]

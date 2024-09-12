@@ -10,7 +10,7 @@ use warp::{
 };
 use warp_ipfs::{
     config::{Bootstrap, Discovery},
-    WarpIpfs, WarpIpfsBuilder,
+    WarpIpfsBuilder, WarpIpfsInstance,
 };
 
 use std::time::Duration;
@@ -57,7 +57,7 @@ pub async fn create_account(
     username: Option<&str>,
     passphrase: Option<&str>,
     _: Option<String>,
-) -> anyhow::Result<(WarpIpfs, DID, Identity)> {
+) -> anyhow::Result<(WarpIpfsInstance, DID, Identity)> {
     let mut config = warp_ipfs::config::Config::development();
     *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
     config.ipfs_setting_mut().memory_transport = true;
@@ -82,7 +82,7 @@ pub async fn create_account(
 #[allow(dead_code)]
 pub async fn create_accounts(
     infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
-) -> anyhow::Result<Vec<(WarpIpfs, DID, Identity)>> {
+) -> anyhow::Result<Vec<(WarpIpfsInstance, DID, Identity)>> {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer().pretty())
         .with(EnvFilter::from_default_env())
