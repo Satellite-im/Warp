@@ -976,9 +976,9 @@ impl RootDocumentInner {
     }
 
     pub async fn list_conversation_stream(&self) -> BoxStream<'static, ConversationDocument> {
-        let document = match self.get_root_document().await.ok() {
-            Some(document) => document,
-            None => return futures::stream::empty().boxed(),
+        let document = match self.get_root_document().await {
+            Ok(document) => document,
+            Err(_) => return futures::stream::empty().boxed(),
         };
 
         let cid = match document.conversations {
