@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use core::ops::Range;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -103,9 +104,9 @@ pub enum MessageEventKind {
         did_key: DID,
         event: MessageEvent,
     },
-    ConversationSettingsUpdated {
+    ConversationPermissionsUpdated {
         conversation_id: Uuid,
-        settings: ConversationSettings,
+        permissions: HashMap<DID, Vec<GroupPermission>>,
     },
 }
 
@@ -394,7 +395,7 @@ pub struct Conversation {
     created: DateTime<Utc>,
     favorite: bool,
     modified: DateTime<Utc>,
-    settings: ConversationSettings,
+    permissions: HashMap<DID, Vec<GroupPermission>>,
     archived: bool,
     recipients: Vec<DID>,
     description: Option<String>,
@@ -426,7 +427,7 @@ impl Default for Conversation {
             created: timestamp,
             favorite: false,
             modified: timestamp,
-            settings: ConversationSettings::default(),
+            permissions: HashMap::new(),
             archived: false,
             recipients,
             description: None,
@@ -460,14 +461,15 @@ impl Conversation {
     }
 
     pub fn conversation_type(&self) -> ConversationType {
-        match self.settings {
-            ConversationSettings::Direct(_) => ConversationType::Direct,
-            ConversationSettings::Group(_) => ConversationType::Group,
+        if self.recipients.len() <= 2 {
+            ConversationType::Direct
+        } else {
+            ConversationType::Group
         }
     }
 
-    pub fn settings(&self) -> ConversationSettings {
-        self.settings.clone()
+    pub fn permissions(&self) -> HashMap<DID, Vec<GroupPermission>> {
+        self.permissions.clone()
     }
 
     pub fn recipients(&self) -> Vec<DID> {
@@ -508,8 +510,8 @@ impl Conversation {
         self.modified = modified;
     }
 
-    pub fn set_settings(&mut self, settings: ConversationSettings) {
-        self.settings = settings;
+    pub fn set_permissions(&mut self, permissions: HashMap<DID, Vec<GroupPermission>>) {
+        self.permissions = permissions;
     }
 
     pub fn set_recipients(&mut self, recipients: Vec<DID>) {
@@ -525,78 +527,10 @@ impl Conversation {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Display)]
-#[serde(rename_all = "lowercase")]
-#[repr(C)]
-pub enum ConversationSettings {
-    #[display(fmt = "direct settings {{ {_0} }}")]
-    Direct(DirectConversationSettings),
-    #[display(fmt = "group settings {{ {_0} }}")]
-    Group(GroupSettings),
-}
-
-impl Default for ConversationSettings {
-    fn default() -> Self {
-        Self::Direct(DirectConversationSettings::default())
-    }
-}
-
-/// Settings for a direct conversation.
-// Any future direct conversation settings go here.
-
-#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Display)]
-#[repr(C)]
-pub struct DirectConversationSettings {}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Display)]
-#[display(fmt = "Roles: {:?}", "self.roles")]
-#[repr(C)]
-pub struct GroupSettings {
-    // Roles to manage permissions. Key is the unique name of the role.
-    #[serde(default)]
-    roles: IndexMap<String, Role>,
-}
-
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-pub struct Role {
-    // Participants assigned to this role
-    participants: Vec<DID>,
-    // Permissions of this role
-    permissions: Vec<Permission>,
-}
-
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-pub enum Permission {
-    All,
-    SetRoles,
-    ChangeGroupName,
-    AddParticipantsToGroup,
-}
-
-impl GroupSettings {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn roles(&mut self) -> IndexMap<String, Role> {
-        self.roles.clone()
-    }
-
-    pub fn set_roles(&mut self, roles: IndexMap<String, Role>) {
-        self.roles = roles;
-    }
-
-    pub fn user_has_permission(&self, id: &DID, permission: Permission) -> bool {
-        for (_, role) in &self.roles {
-            if role.participants.contains(id)
-                && (role.permissions.contains(&permission)
-                    || role.permissions.contains(&Permission::All))
-            {
-                return true;
-            }
-        }
-        false
-    }
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub enum GroupPermission {
+    AddParticipants,
+    SetGroupName,
 }
 
 #[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
@@ -1073,7 +1007,7 @@ pub trait RayGun:
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
-        _: GroupSettings,
+        _: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
@@ -1179,11 +1113,11 @@ pub trait RayGun:
         state: EmbedState,
     ) -> Result<(), Error>;
 
-    /// Update conversation settings
-    async fn update_conversation_settings(
+    /// Update conversation permissions
+    async fn update_conversation_permissions(
         &mut self,
         conversation_id: Uuid,
-        settings: ConversationSettings,
+        permissions: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<(), Error>;
 
     /// Provides [`ConversationImage`] of the conversation icon

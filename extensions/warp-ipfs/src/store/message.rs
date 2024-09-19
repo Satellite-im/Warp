@@ -61,17 +61,17 @@ use crate::{
     },
 };
 
-use warp::raygun::{group, ConversationImage};
+use warp::raygun::{ConversationImage, GroupPermission};
 use warp::{
     constellation::{directory::Directory, ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
     error::Error,
     multipass::MultiPassEventKind,
     raygun::{
-        AttachmentEventStream, AttachmentKind, Conversation, ConversationSettings,
-        ConversationType, DirectConversationSettings, GroupSettings, Location, LocationKind,
-        MessageEvent, MessageEventKind, MessageOptions, MessageReference, MessageStatus,
-        MessageType, Messages, MessagesType, Permission, PinState, RayGunEventKind, ReactionState,
+        AttachmentEventStream, AttachmentKind, Conversation, ConversationType, Location,
+        LocationKind, MessageEvent, MessageEventKind, MessageOptions, MessageReference,
+        MessageStatus, MessageType, Messages, MessagesType, PinState, RayGunEventKind,
+        ReactionState,
     },
 };
 
@@ -242,11 +242,11 @@ impl MessageStore {
         &self,
         name: Option<String>,
         members: HashSet<DID>,
-        settings: GroupSettings,
+        permissions: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<Conversation, Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .create_group_conversation(name, members, settings)
+            .create_group_conversation(name, members, permissions)
             .await
     }
 
@@ -313,14 +313,14 @@ impl MessageStore {
         inner.update_conversation_name(conversation_id, name).await
     }
 
-    pub async fn update_conversation_settings(
+    pub async fn update_conversation_permissions(
         &self,
         conversation_id: Uuid,
-        settings: ConversationSettings,
+        permissions: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .update_conversation_settings(conversation_id, settings)
+            .update_conversation_permissions(conversation_id, permissions)
             .await
     }
 
@@ -983,12 +983,8 @@ impl ConversationInner {
             self.discovery.insert(did).await?;
         }
 
-        let settings = DirectConversationSettings::default();
-        let conversation = ConversationDocument::new_direct(
-            self.root.keypair(),
-            [own_did.clone(), did.clone()],
-            settings,
-        )?;
+        let conversation =
+            ConversationDocument::new_direct(self.root.keypair(), [own_did.clone(), did.clone()])?;
 
         let convo_id = conversation.id();
 
@@ -1000,7 +996,6 @@ impl ConversationInner {
 
         let event = ConversationEvents::NewConversation {
             recipient: own_did.clone(),
-            settings,
         };
 
         let bytes = ecdh_encrypt(self.root.keypair(), Some(did), serde_json::to_vec(&event)?)?;
@@ -1046,7 +1041,7 @@ impl ConversationInner {
         &mut self,
         name: Option<String>,
         mut recipients: HashSet<DID>,
-        settings: GroupSettings,
+        permissions: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<Conversation, Error> {
         let own_did = &self.identity.did_key();
 
@@ -1100,7 +1095,7 @@ impl ConversationInner {
             name,
             recipients,
             &restricted,
-            settings,
+            permissions,
         )?;
 
         let recipient = conversation.recipients();
@@ -2756,10 +2751,9 @@ impl ConversationInner {
             });
         }
 
-        let settings = match &conversation.settings {
-            ConversationSettings::Group(settings) => settings.clone(),
-            ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
-        };
+        if let ConversationType::Direct = &conversation.conversation_type() {
+            return Err(Error::InvalidConversation);
+        }
         assert_eq!(conversation.conversation_type(), ConversationType::Group);
 
         let Some(creator) = conversation.creator.clone() else {
@@ -2768,7 +2762,7 @@ impl ConversationInner {
 
         let own_did = &self.identity.did_key();
 
-        if !settings.user_has_permission(own_did, Permission::ChangeGroupName)
+        if !&conversation.has_permission(own_did, GroupPermission::SetGroupName)
             && creator.ne(own_did)
         {
             return Err(Error::PublicKeyInvalid);
@@ -3038,10 +3032,9 @@ impl ConversationInner {
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
 
-        let settings = match &conversation.settings {
-            ConversationSettings::Group(settings) => settings.clone(),
-            ConversationSettings::Direct(_) => return Err(Error::InvalidConversation),
-        };
+        if let ConversationType::Direct = &conversation.conversation_type() {
+            return Err(Error::InvalidConversation);
+        }
         assert_eq!(conversation.conversation_type(), ConversationType::Group);
 
         let Some(creator) = conversation.creator.clone() else {
@@ -3050,7 +3043,7 @@ impl ConversationInner {
 
         let own_did = &self.identity.did_key();
 
-        if !settings.user_has_permission(own_did, Permission::AddParticipantsToGroup)
+        if !conversation.has_permission(own_did, GroupPermission::AddParticipants)
             && creator.ne(own_did)
         {
             return Err(Error::PublicKeyInvalid);
@@ -3401,10 +3394,10 @@ impl ConversationInner {
         Ok(())
     }
 
-    pub async fn update_conversation_settings(
+    pub async fn update_conversation_permissions(
         &mut self,
         conversation_id: Uuid,
-        settings: ConversationSettings,
+        permissions: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         let own_did = self.identity.did_key();
@@ -3412,36 +3405,25 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         };
 
-        match conversation.settings {
-            ConversationSettings::Group(group_settings) => {
-                if !group_settings.user_has_permission(&own_did, Permission::SetRoles)
-                    && creator != &own_did
-                {
-                    return Err(Error::PublicKeyInvalid);
-                }
-            }
-            _ => {
-                if creator != &own_did {
-                    return Err(Error::PublicKeyInvalid);
-                }
-            }
+        if creator != &own_did {
+            return Err(Error::PublicKeyInvalid);
         }
 
-        conversation.settings = settings;
+        conversation.permissions = permissions;
         self.set_document(conversation).await?;
 
         let conversation = self.get(conversation_id).await?;
         let event = MessagingEvents::UpdateConversation {
             conversation: conversation.clone(),
-            kind: ConversationUpdateKind::ChangeSettings {
-                settings: conversation.settings.clone(),
+            kind: ConversationUpdateKind::ChangePermissions {
+                permissions: conversation.permissions.clone(),
             },
         };
 
         let tx = self.subscribe(conversation_id).await?;
-        let _ = tx.send(MessageEventKind::ConversationSettingsUpdated {
+        let _ = tx.send(MessageEventKind::ConversationPermissionsUpdated {
             conversation_id,
-            settings: conversation.settings.clone(),
+            permissions: conversation.permissions.clone(),
         });
 
         self.publish(conversation_id, None, event, true).await
@@ -3684,10 +3666,7 @@ async fn process_conversation(
     event: ConversationEvents,
 ) -> Result<(), Error> {
     match event {
-        ConversationEvents::NewConversation {
-            recipient,
-            settings,
-        } => {
+        ConversationEvents::NewConversation { recipient } => {
             let keypair = this.root.keypair();
             let did = this.identity.did_key();
             tracing::info!("New conversation event received from {recipient}");
@@ -3710,7 +3689,7 @@ async fn process_conversation(
             let list = [did.clone(), recipient];
             tracing::info!(%conversation_id, "Creating conversation");
 
-            let convo = ConversationDocument::new_direct(keypair, list, settings)?;
+            let convo = ConversationDocument::new_direct(keypair, list)?;
             let conversation_type = convo.conversation_type();
 
             this.set_document(convo).await?;
@@ -4291,12 +4270,12 @@ async fn message_event(
                     //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                 }
-                ConversationUpdateKind::ChangeSettings { settings } => {
+                ConversationUpdateKind::ChangePermissions { permissions } => {
                     this.set_document(conversation).await?;
 
-                    if let Err(e) = tx.send(MessageEventKind::ConversationSettingsUpdated {
+                    if let Err(e) = tx.send(MessageEventKind::ConversationPermissionsUpdated {
                         conversation_id,
-                        settings,
+                        permissions,
                     }) {
                         tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }

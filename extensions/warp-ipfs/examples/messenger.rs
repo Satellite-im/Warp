@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env::temp_dir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,9 +26,7 @@ use warp::multipass::{
     MultiPassEvent, MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentKind, ConversationSettings, GroupSettings, Location, Message, MessageEvent,
-    MessageEventKind, MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState,
-    RayGun, RayGunAttachment, RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentKind, GroupPermission, Location, Message, MessageEvent, MessageEventKind, MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, RayGunAttachment, RayGunGroupConversation, RayGunStream, ReactionState
 };
 use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
 use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
@@ -464,13 +463,16 @@ async fn main() -> anyhow::Result<()> {
 
                         },
                         CreateGroupConversation(name, did_keys, open) => {
-                            let mut settings = GroupSettings::default();
-                            settings.set_members_can_add_participants(open);
-                            settings.set_members_can_change_name(open);
+                            let mut permissions = HashMap::new();
+                            if open {
+                                for did in &did_keys {
+                                    permissions.insert(did.clone(), vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName]);
+                                }
+                            }
                             if let Err(e) = instance.create_group_conversation(
                                 Some(name.to_string()),
                                 did_keys,
-                                settings,
+                                permissions,
                             ).await {
                                 writeln!(stdout, "Error creating conversation: {e}")?;
                                 continue
@@ -514,12 +516,23 @@ async fn main() -> anyhow::Result<()> {
                         },
                         SetGroupOpen(open) => {
                             let topic = topic;
-                            let mut settings = GroupSettings::default();
-                            settings.set_members_can_add_participants(open);
-                            settings.set_members_can_change_name(open);
-                            if let Err(e) = instance.update_conversation_settings(topic, ConversationSettings::Group(settings)).await {
-                                writeln!(stdout, "Error updating group settings: {e}")?;
-                                continue
+                            match instance.get_conversation(topic).await {
+                                Err(e) => {
+                                    writeln!(stdout, "Error getting conversation: {e}")?;
+                                    continue
+                                }
+                                Ok(conversation) => {
+                                    let mut permissions = HashMap::new();
+                                    if open {
+                                        for did in &conversation.recipients() {
+                                            permissions.insert(did.clone(), vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName]);
+                                        }
+                                    }
+                                    if let Err(e) = instance.update_conversation_permissions(topic, permissions).await {
+                                        writeln!(stdout, "Error updating group permissions: {e}")?;
+                                        continue
+                                    }
+                                },
                             }
                         },
                         ListReferences(opt) => {
@@ -1151,12 +1164,12 @@ async fn message_event_handle<M: MultiPass, R: RayGun>(
                 writeln!(stdout, ">>> {username} was removed from {conversation_id}")?;
             }
         }
-        MessageEventKind::ConversationSettingsUpdated {
+        MessageEventKind::ConversationPermissionsUpdated {
             conversation_id,
-            settings,
+            permissions,
         } => {
             if main_conversation_id == conversation_id {
-                writeln!(stdout, ">>> Conversation settings updated: {settings}")?;
+                writeln!(stdout, ">>> Conversation permissions updated: {:?}", permissions)?;
             }
         }
         MessageEventKind::ConversationUpdatedBanner { conversation_id }

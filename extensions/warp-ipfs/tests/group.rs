@@ -1,15 +1,14 @@
 mod common;
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
+    use std::{collections::HashMap, time::Duration};
 
     use crate::common::create_accounts;
     use futures::StreamExt;
     use warp::{
         multipass::MultiPassEventKind,
         raygun::{
-            ConversationSettings, ConversationType, GroupSettings, MessageEventKind,
-            RayGunEventKind,
+            ConversationType, GroupPermission, MessageEventKind, RayGunEventKind
         },
     };
 
@@ -42,7 +41,7 @@ mod test {
         let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
 
         instance_a
-            .create_group_conversation(None, vec![], GroupSettings::default())
+            .create_group_conversation(None, vec![], HashMap::new())
             .await?;
 
         let id_a = crate::common::timeout(Duration::from_secs(60), async {
@@ -58,8 +57,8 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.settings(),
-            ConversationSettings::Group(GroupSettings::default()),
+            conversation.permissions(),
+            HashMap::new(),
         );
         assert_eq!(conversation.recipients().len(), 1);
         assert!(conversation.recipients().contains(&did_a));
@@ -81,7 +80,7 @@ mod test {
         let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
 
         instance_a
-            .create_group_conversation(None, vec![], GroupSettings::default())
+            .create_group_conversation(None, vec![], HashMap::new())
             .await?;
 
         let id_a = crate::common::timeout(Duration::from_secs(60), async {
@@ -156,7 +155,7 @@ mod test {
             .create_group_conversation(
                 None,
                 vec![did_b.clone(), did_c.clone()],
-                GroupSettings::default(),
+                HashMap::new(),
             )
             .await?;
 
@@ -198,8 +197,8 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.settings(),
-            ConversationSettings::Group(GroupSettings::default()),
+            conversation.permissions(),
+            HashMap::new(),
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -321,11 +320,12 @@ mod test {
         let mut chat_subscribe_c = instance_c.raygun_subscribe().await?;
         let mut chat_subscribe_d = instance_d.raygun_subscribe().await?;
 
-        let mut settings = GroupSettings::default();
-        settings.set_members_can_change_name(true);
+        let mut permissions = HashMap::new();
+        permissions.insert(did_b.clone(), vec![GroupPermission::SetGroupName]);
+        permissions.insert(did_c.clone(), vec![GroupPermission::SetGroupName]);
 
         instance_a
-            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], settings)
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], permissions.clone())
             .await?;
 
         let id_a = crate::common::timeout(Duration::from_secs(60), async {
@@ -440,8 +440,8 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.settings(),
-            ConversationSettings::Group(settings),
+            conversation.permissions(),
+            permissions,
         );
         assert_eq!(conversation.name().as_deref(), Some("test"));
         assert_eq!(conversation.recipients().len(), 4);
@@ -488,11 +488,12 @@ mod test {
         let mut chat_subscribe_c = instance_c.raygun_subscribe().await?;
         let mut chat_subscribe_d = instance_d.raygun_subscribe().await?;
 
-        let mut settings = GroupSettings::default();
-        settings.set_members_can_add_participants(true);
+        let mut permissions = HashMap::new();
+        permissions.insert(did_b.clone(), vec![GroupPermission::AddParticipants]);
+        permissions.insert(did_c.clone(), vec![GroupPermission::AddParticipants]);
 
         instance_a
-            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], settings)
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], permissions.clone())
             .await?;
 
         let id_a = crate::common::timeout(Duration::from_secs(60), async {
@@ -592,7 +593,8 @@ mod test {
         .await?;
 
         let ret = instance_b.update_conversation_name(id_b, "test").await;
-        if settings.members_can_change_name() {
+
+        if permissions[&did_b].contains(&GroupPermission::SetGroupName) && permissions[&did_c].contains(&GroupPermission::SetGroupName) {
             // Non-owner should be able to change the name.
             ret?;
         } else {
@@ -605,8 +607,8 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.settings(),
-            ConversationSettings::Group(settings),
+            conversation.permissions(),
+            permissions,
         );
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
@@ -656,7 +658,7 @@ mod test {
             .create_group_conversation(
                 None,
                 vec![did_b.clone(), did_c.clone()],
-                GroupSettings::default(),
+                HashMap::new(),
             )
             .await?;
 
@@ -758,8 +760,8 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.settings(),
-            ConversationSettings::Group(Default::default()),
+            conversation.permissions(),
+            HashMap::new(),
         );
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
@@ -829,11 +831,12 @@ mod test {
         let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
         let mut chat_subscribe_c = instance_c.raygun_subscribe().await?;
 
-        let mut settings = GroupSettings::default();
-        settings.set_members_can_add_participants(true);
+        let mut permissions = HashMap::new();
+        permissions.insert(did_b.clone(), vec![GroupPermission::AddParticipants]);
+        permissions.insert(did_c.clone(), vec![GroupPermission::AddParticipants]);
 
         instance_a
-            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], settings)
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], permissions)
             .await?;
 
         let id = crate::common::timeout(Duration::from_secs(60), async {
@@ -917,7 +920,7 @@ mod test {
             .create_group_conversation(
                 None,
                 vec![did_b.clone(), did_c.clone()],
-                GroupSettings::default(),
+                HashMap::new(),
             )
             .await?;
 
@@ -1081,8 +1084,8 @@ mod test {
         let conversation = instance_a.get_conversation(id_a).await?;
 
         assert_eq!(
-            conversation.settings(),
-            ConversationSettings::Group(GroupSettings::default()),
+            conversation.permissions(),
+            HashMap::new(),
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -1132,7 +1135,7 @@ mod test {
             .create_group_conversation(
                 None,
                 vec![did_b.clone(), did_c.clone(), did_d.clone()],
-                GroupSettings::default(),
+                HashMap::new(),
             )
             .await?;
 
@@ -1285,7 +1288,7 @@ mod test {
             .create_group_conversation(
                 None,
                 vec![did_b.clone(), did_c.clone()],
-                GroupSettings::default(),
+                HashMap::new(),
             )
             .await?;
 
@@ -1327,8 +1330,8 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.settings(),
-            ConversationSettings::Group(GroupSettings::default()),
+            conversation.permissions(),
+            HashMap::new(),
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
@@ -1443,7 +1446,7 @@ mod test {
             .create_group_conversation(
                 None,
                 vec![did_b.clone(), did_c.clone()],
-                GroupSettings::default(),
+                HashMap::new(),
             )
             .await?;
 
@@ -1485,8 +1488,8 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(
-            conversation.settings(),
-            ConversationSettings::Group(GroupSettings::default()),
+            conversation.permissions(),
+            HashMap::new(),
         );
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));

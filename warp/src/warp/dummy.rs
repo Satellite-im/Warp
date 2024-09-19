@@ -14,10 +14,10 @@ use crate::multipass::{
     MultiPassImportExport,
 };
 use crate::raygun::{
-    Conversation, ConversationImage, ConversationSettings, EmbedState, GroupSettings, Location,
-    Message, MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun,
-    RayGunAttachment, RayGunConversationInformation, RayGunEvents, RayGunGroupConversation,
-    RayGunStream, ReactionState,
+    Conversation, ConversationImage, EmbedState, GroupPermission, Location, Message,
+    MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
+    RayGunConversationInformation, RayGunEvents, RayGunGroupConversation, RayGunStream,
+    ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::{Extension, SingleHandle};
@@ -26,6 +26,7 @@ use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use std::any::Any;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -337,7 +338,7 @@ impl RayGun for Dummy {
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
-        _: GroupSettings,
+        _: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
@@ -410,10 +411,10 @@ impl RayGun for Dummy {
         Err(Error::Unimplemented)
     }
 
-    async fn update_conversation_settings(
+    async fn update_conversation_permissions(
         &mut self,
         _: Uuid,
-        _: ConversationSettings,
+        _: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }

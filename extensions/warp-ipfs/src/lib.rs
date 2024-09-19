@@ -13,6 +13,7 @@ use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use rust_ipfs::p2p::UpgradeVersion;
 use std::any::Any;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -57,11 +58,10 @@ use warp::multipass::{
     MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentEventStream, Conversation, ConversationImage, ConversationSettings, EmbedState,
-    GroupSettings, Location, Message, MessageEvent, MessageEventStream, MessageOptions,
-    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
-    RayGunConversationInformation, RayGunEventKind, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermission, Location,
+    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
+    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventKind,
+    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::warp::Warp;
@@ -1416,10 +1416,10 @@ impl RayGun for WarpIpfs {
         &mut self,
         name: Option<String>,
         recipients: Vec<DID>,
-        settings: GroupSettings,
+        permissions: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<Conversation, Error> {
         self.messaging_store()?
-            .create_group_conversation(name, HashSet::from_iter(recipients), settings)
+            .create_group_conversation(name, HashSet::from_iter(recipients), permissions)
             .await
     }
 
@@ -1562,13 +1562,13 @@ impl RayGun for WarpIpfs {
         Err(Error::Unimplemented)
     }
 
-    async fn update_conversation_settings(
+    async fn update_conversation_permissions(
         &mut self,
         conversation_id: Uuid,
-        settings: ConversationSettings,
+        permissions: HashMap<DID, Vec<GroupPermission>>,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .update_conversation_settings(conversation_id, settings)
+            .update_conversation_permissions(conversation_id, permissions)
             .await
     }
 

@@ -13,7 +13,7 @@ pub mod queue;
 use chrono::{DateTime, Utc};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 use uuid::Uuid;
 
 use ipfs::{libp2p::identity::KeyType, Keypair, PeerId, PublicKey};
@@ -27,9 +27,7 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{
-        ConversationSettings, DirectConversationSettings, MessageEvent, PinState, ReactionState,
-    },
+    raygun::{GroupPermission, MessageEvent, PinState, ReactionState},
 };
 
 pub const MAX_THUMBNAIL_SIZE: usize = 5_242_880;
@@ -333,7 +331,6 @@ where
 pub enum ConversationEvents {
     NewConversation {
         recipient: DID,
-        settings: DirectConversationSettings,
     },
     NewGroupConversation {
         conversation: ConversationDocument,
@@ -438,17 +435,31 @@ pub enum MessagingEvents {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationUpdateKind {
-    AddParticipant { did: DID },
-    RemoveParticipant { did: DID },
-    AddRestricted { did: DID },
-    RemoveRestricted { did: DID },
-    ChangeName { name: Option<String> },
-    ChangeSettings { settings: ConversationSettings },
+    AddParticipant {
+        did: DID,
+    },
+    RemoveParticipant {
+        did: DID,
+    },
+    AddRestricted {
+        did: DID,
+    },
+    RemoveRestricted {
+        did: DID,
+    },
+    ChangeName {
+        name: Option<String>,
+    },
+    ChangePermissions {
+        permissions: HashMap<DID, Vec<GroupPermission>>,
+    },
     AddedIcon,
     AddedBanner,
     RemovedIcon,
     RemovedBanner,
-    ChangeDescription { description: Option<String> },
+    ChangeDescription {
+        description: Option<String>,
+    },
 }
 
 // Note that this are temporary
