@@ -134,10 +134,10 @@ impl ConversationDocument {
         }
     }
     pub fn has_permission(&self, user: &DID, permission: GroupPermission) -> bool {
-        if let Some(value) = self.permissions.get(&user) {
+        if let Some(value) = self.permissions.get(user) {
             return value.contains(&permission);
         }
-        return false;
+        false
     }
 }
 
