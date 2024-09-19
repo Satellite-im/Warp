@@ -26,7 +26,9 @@ use warp::multipass::{
     MultiPassEvent, MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentKind, GroupPermission, Location, Message, MessageEvent, MessageEventKind, MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, RayGunAttachment, RayGunGroupConversation, RayGunStream, ReactionState
+    AttachmentKind, GroupPermission, Location, Message, MessageEvent, MessageEventKind,
+    MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun,
+    RayGunAttachment, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
 use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
@@ -1169,7 +1171,11 @@ async fn message_event_handle<M: MultiPass, R: RayGun>(
             permissions,
         } => {
             if main_conversation_id == conversation_id {
-                writeln!(stdout, ">>> Conversation permissions updated: {:?}", permissions)?;
+                writeln!(
+                    stdout,
+                    ">>> Conversation permissions updated: {:?}",
+                    permissions
+                )?;
             }
         }
         MessageEventKind::ConversationUpdatedBanner { conversation_id }
