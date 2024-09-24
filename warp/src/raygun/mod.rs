@@ -387,7 +387,7 @@ pub enum ConversationType {
 }
 
 impl ConversationType {
-    pub fn from_recipients(recipients: &Vec<DID>) -> Self {
+    pub fn from_recipients(recipients: &[DID]) -> Self {
         if recipients.len() <= 2 {
             Self::Direct
         } else {
@@ -405,8 +405,9 @@ pub trait ImplGroupPermissions {
     fn compare_with_new(
         &self,
         new: &Self,
-    ) -> (Vec<(DID, GroupPermission)>, Vec<(DID, GroupPermission)>);
+    ) -> (PermissionChanges, PermissionChanges);
 }
+pub type PermissionChanges = Vec<(DID, GroupPermission)>;
 
 impl ImplGroupPermissions for GroupPermissions {
     fn has_permission(&self, user: &DID, permission: GroupPermission) -> bool {
