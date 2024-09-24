@@ -386,16 +386,6 @@ pub enum ConversationType {
     Group,
 }
 
-impl ConversationType {
-    pub fn from_recipients(recipients: &[DID]) -> Self {
-        if recipients.len() <= 2 {
-            Self::Direct
-        } else {
-            Self::Group
-        }
-    }
-}
-
 pub type GroupPermissions = IndexMap<DID, IndexSet<GroupPermission>>;
 
 pub trait ImplGroupPermissions {
@@ -474,6 +464,7 @@ pub struct Conversation {
     favorite: bool,
     modified: DateTime<Utc>,
     permissions: GroupPermissions,
+    conversation_type: ConversationType,
     archived: bool,
     recipients: Vec<DID>,
     description: Option<String>,
@@ -505,6 +496,7 @@ impl Default for Conversation {
             created: timestamp,
             favorite: false,
             modified: timestamp,
+            conversation_type: ConversationType::Direct,
             permissions: GroupPermissions::new(),
             archived: false,
             recipients,
@@ -539,7 +531,7 @@ impl Conversation {
     }
 
     pub fn conversation_type(&self) -> ConversationType {
-        ConversationType::from_recipients(&self.recipients)
+        self.conversation_type
     }
 
     pub fn permissions(&self) -> GroupPermissions {

@@ -52,6 +52,7 @@ pub struct ConversationDocument {
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub permissions: GroupPermissions,
+    pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
     #[serde(default)]
     pub favorite: bool,
@@ -128,7 +129,7 @@ impl ConversationDocument {
     }
 
     pub fn conversation_type(&self) -> ConversationType {
-        ConversationType::from_recipients(&self.recipients)
+        self.conversation_type
     }
 }
 
@@ -140,6 +141,7 @@ impl ConversationDocument {
         mut recipients: Vec<DID>,
         restrict: Vec<DID>,
         id: Option<Uuid>,
+        conversation_type: ConversationType,
         permissions: GroupPermissions,
         created: Option<DateTime<Utc>>,
         modified: Option<DateTime<Utc>>,
@@ -173,6 +175,7 @@ impl ConversationDocument {
             modified,
             favorite: false,
             archived: false,
+            conversation_type,
             permissions,
             excluded,
             messages,
@@ -216,6 +219,7 @@ impl ConversationDocument {
             recipients.to_vec(),
             vec![],
             conversation_id,
+            ConversationType::Direct,
             GroupPermissions::new(),
             None,
             None,
@@ -239,6 +243,7 @@ impl ConversationDocument {
             recipients.into_iter().collect(),
             restrict.to_vec(),
             conversation_id,
+            ConversationType::Group,
             permissions,
             None,
             None,
