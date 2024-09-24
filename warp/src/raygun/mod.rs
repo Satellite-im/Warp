@@ -399,7 +399,9 @@ impl ConversationType {
 pub type GroupPermissions = IndexMap<DID, IndexSet<GroupPermission>>;
 
 pub trait ImplGroupPermissions {
+    /// Returns true if the permissions exists for the user
     fn has_permission(&self, user: &DID, permission: GroupPermission) -> bool;
+    /// Compares self with a `new` instance, and returns changed permissions via tuple: (added, removed)
     fn compare_with_new(
         &self,
         new: &Self,
@@ -408,7 +410,8 @@ pub trait ImplGroupPermissions {
 
 impl ImplGroupPermissions for GroupPermissions {
     fn has_permission(&self, user: &DID, permission: GroupPermission) -> bool {
-        self.iter().any(|(id, perms)| id == user && perms.contains(&permission))
+        self.iter()
+            .any(|(id, perms)| id == user && perms.contains(&permission))
     }
 
     fn compare_with_new(
