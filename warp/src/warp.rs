@@ -16,7 +16,7 @@ use crate::multipass::{
     MultiPass, MultiPassEvent, MultiPassEventStream, MultiPassImportExport,
 };
 use crate::raygun::{
-    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermission, Location,
+    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissions, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
     Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventStream,
     RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
@@ -28,7 +28,6 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 use std::any::Any;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -689,7 +688,7 @@ where
         &mut self,
         name: Option<String>,
         members: Vec<DID>,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<Conversation, Error> {
         self.raygun
             .create_group_conversation(name, members, permissions)
@@ -821,7 +820,7 @@ where
     async fn update_conversation_permissions(
         &mut self,
         conversation_id: Uuid,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<(), Error> {
         self.raygun
             .update_conversation_permissions(conversation_id, permissions)

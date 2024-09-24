@@ -12,9 +12,8 @@ use futures::stream::BoxStream;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use core::ops::Range;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -106,7 +105,8 @@ pub enum MessageEventKind {
     },
     ConversationPermissionsUpdated {
         conversation_id: Uuid,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        added: Vec<(DID, GroupPermission)>,
+        removed: Vec<(DID, GroupPermission)>,
     },
 }
 
@@ -386,6 +386,80 @@ pub enum ConversationType {
     Group,
 }
 
+impl ConversationType {
+    pub fn from_recipients(recipients: &Vec<DID>) -> Self {
+        if recipients.len() <= 2 {
+            Self::Direct
+        } else {
+            Self::Group
+        }
+    }
+}
+
+pub type GroupPermissions = IndexMap<DID, IndexSet<GroupPermission>>;
+
+pub trait ImplGroupPermissions {
+    fn has_permission(&self, user: &DID, permission: GroupPermission) -> bool;
+    fn compare_with_new(
+        &self,
+        new: &Self,
+    ) -> (Vec<(DID, GroupPermission)>, Vec<(DID, GroupPermission)>);
+}
+
+impl ImplGroupPermissions for GroupPermissions {
+    fn has_permission(&self, user: &DID, permission: GroupPermission) -> bool {
+        self.iter().any(|(id, perms)| id == user && perms.contains(&permission))
+    }
+
+    fn compare_with_new(
+        &self,
+        new: &Self,
+    ) -> (Vec<(DID, GroupPermission)>, Vec<(DID, GroupPermission)>) {
+        // determine what was added in new permissions
+        let mut added = Vec::new();
+        for (user, new_permissions) in new {
+            match self.get(user) {
+                // user already existed in in old permissions
+                Some(old_permissions) => {
+                    for new_permission in new_permissions {
+                        if !old_permissions.contains(new_permission) {
+                            added.push((user.clone(), *new_permission));
+                        }
+                    }
+                }
+                // user did not exist in old permissions
+                None => {
+                    for new_permission in new_permissions {
+                        added.push((user.clone(), *new_permission));
+                    }
+                }
+            }
+        }
+
+        // determine what was removed from old permissions
+        let mut removed = Vec::new();
+        for (user, old_permissions) in self {
+            match new.get(user) {
+                // user still exists in in new permissions
+                Some(new_permissions) => {
+                    for old_permission in old_permissions {
+                        if !new_permissions.contains(old_permission) {
+                            removed.push((user.clone(), *old_permission));
+                        }
+                    }
+                }
+                // user no longer exists in new permissions
+                None => {
+                    for old_permission in old_permissions {
+                        removed.push((user.clone(), *old_permission));
+                    }
+                }
+            }
+        }
+        (added, removed)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct Conversation {
     id: Uuid,
@@ -395,7 +469,7 @@ pub struct Conversation {
     created: DateTime<Utc>,
     favorite: bool,
     modified: DateTime<Utc>,
-    permissions: HashMap<DID, Vec<GroupPermission>>,
+    permissions: GroupPermissions,
     archived: bool,
     recipients: Vec<DID>,
     description: Option<String>,
@@ -427,7 +501,7 @@ impl Default for Conversation {
             created: timestamp,
             favorite: false,
             modified: timestamp,
-            permissions: HashMap::new(),
+            permissions: GroupPermissions::new(),
             archived: false,
             recipients,
             description: None,
@@ -461,14 +535,10 @@ impl Conversation {
     }
 
     pub fn conversation_type(&self) -> ConversationType {
-        if self.recipients.len() <= 2 {
-            ConversationType::Direct
-        } else {
-            ConversationType::Group
-        }
+        ConversationType::from_recipients(&self.recipients)
     }
 
-    pub fn permissions(&self) -> HashMap<DID, Vec<GroupPermission>> {
+    pub fn permissions(&self) -> GroupPermissions {
         self.permissions.clone()
     }
 
@@ -510,7 +580,7 @@ impl Conversation {
         self.modified = modified;
     }
 
-    pub fn set_permissions(&mut self, permissions: HashMap<DID, Vec<GroupPermission>>) {
+    pub fn set_permissions(&mut self, permissions: GroupPermissions) {
         self.permissions = permissions;
     }
 
@@ -527,7 +597,7 @@ impl Conversation {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub enum GroupPermission {
     AddParticipants,
     SetGroupName,
@@ -1007,7 +1077,7 @@ pub trait RayGun:
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
-        _: HashMap<DID, Vec<GroupPermission>>,
+        _: GroupPermissions,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
@@ -1117,7 +1187,7 @@ pub trait RayGun:
     async fn update_conversation_permissions(
         &mut self,
         conversation_id: Uuid,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<(), Error>;
 
     /// Provides [`ConversationImage`] of the conversation icon

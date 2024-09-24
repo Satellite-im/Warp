@@ -13,7 +13,6 @@ use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use rust_ipfs::p2p::UpgradeVersion;
 use std::any::Any;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -58,7 +57,7 @@ use warp::multipass::{
     MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermission, Location,
+    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissions, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
     Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventKind,
     RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
@@ -1416,7 +1415,7 @@ impl RayGun for WarpIpfs {
         &mut self,
         name: Option<String>,
         recipients: Vec<DID>,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<Conversation, Error> {
         self.messaging_store()?
             .create_group_conversation(name, HashSet::from_iter(recipients), permissions)
@@ -1565,7 +1564,7 @@ impl RayGun for WarpIpfs {
     async fn update_conversation_permissions(
         &mut self,
         conversation_id: Uuid,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<(), Error> {
         self.messaging_store()?
             .update_conversation_permissions(conversation_id, permissions)

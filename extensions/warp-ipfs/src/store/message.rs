@@ -61,17 +61,17 @@ use crate::{
     },
 };
 
-use warp::raygun::{ConversationImage, GroupPermission};
+use warp::raygun::{ConversationImage, GroupPermission, GroupPermissions};
 use warp::{
     constellation::{directory::Directory, ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
     error::Error,
     multipass::MultiPassEventKind,
     raygun::{
-        AttachmentEventStream, AttachmentKind, Conversation, ConversationType, Location,
-        LocationKind, MessageEvent, MessageEventKind, MessageOptions, MessageReference,
-        MessageStatus, MessageType, Messages, MessagesType, PinState, RayGunEventKind,
-        ReactionState,
+        AttachmentEventStream, AttachmentKind, Conversation, ConversationType,
+        ImplGroupPermissions, Location, LocationKind, MessageEvent, MessageEventKind,
+        MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType,
+        PinState, RayGunEventKind, ReactionState,
     },
 };
 
@@ -242,7 +242,7 @@ impl MessageStore {
         &self,
         name: Option<String>,
         members: HashSet<DID>,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<Conversation, Error> {
         let inner = &mut *self.inner.write().await;
         inner
@@ -316,7 +316,7 @@ impl MessageStore {
     pub async fn update_conversation_permissions(
         &self,
         conversation_id: Uuid,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
@@ -1041,7 +1041,7 @@ impl ConversationInner {
         &mut self,
         name: Option<String>,
         mut recipients: HashSet<DID>,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<Conversation, Error> {
         let own_did = &self.identity.did_key();
 
@@ -2762,7 +2762,9 @@ impl ConversationInner {
 
         let own_did = &self.identity.did_key();
 
-        if !&conversation.has_permission(own_did, GroupPermission::SetGroupName)
+        if !&conversation
+            .permissions
+            .has_permission(own_did, GroupPermission::SetGroupName)
             && creator.ne(own_did)
         {
             return Err(Error::PublicKeyInvalid);
@@ -3043,7 +3045,9 @@ impl ConversationInner {
 
         let own_did = &self.identity.did_key();
 
-        if !conversation.has_permission(own_did, GroupPermission::AddParticipants)
+        if !conversation
+            .permissions
+            .has_permission(own_did, GroupPermission::AddParticipants)
             && creator.ne(own_did)
         {
             return Err(Error::PublicKeyInvalid);
@@ -3397,7 +3401,7 @@ impl ConversationInner {
     pub async fn update_conversation_permissions(
         &mut self,
         conversation_id: Uuid,
-        permissions: HashMap<DID, Vec<GroupPermission>>,
+        permissions: GroupPermissions,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         let own_did = self.identity.did_key();
@@ -3408,6 +3412,8 @@ impl ConversationInner {
         if creator != &own_did {
             return Err(Error::PublicKeyInvalid);
         }
+
+        let (added, removed) = conversation.permissions.compare_with_new(&permissions);
 
         conversation.permissions = permissions;
         self.set_document(conversation).await?;
@@ -3423,7 +3429,8 @@ impl ConversationInner {
         let tx = self.subscribe(conversation_id).await?;
         let _ = tx.send(MessageEventKind::ConversationPermissionsUpdated {
             conversation_id,
-            permissions: conversation.permissions.clone(),
+            added,
+            removed,
         });
 
         self.publish(conversation_id, None, event, true).await
@@ -4271,11 +4278,14 @@ async fn message_event(
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                 }
                 ConversationUpdateKind::ChangePermissions { permissions } => {
+                    let (added, removed) = conversation.permissions.compare_with_new(&permissions);
+                    conversation.permissions = permissions;
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationPermissionsUpdated {
                         conversation_id,
-                        permissions,
+                        added,
+                        removed,
                     }) {
                         tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
                     }

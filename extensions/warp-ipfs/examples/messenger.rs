@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::env::temp_dir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -26,9 +25,9 @@ use warp::multipass::{
     MultiPassEvent, MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentKind, GroupPermission, Location, Message, MessageEvent, MessageEventKind,
-    MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState, RayGun,
-    RayGunAttachment, RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentKind, GroupPermission, GroupPermissions, Location, Message, MessageEvent,
+    MessageEventKind, MessageOptions, MessageStream, MessageType, Messages, MessagesType, PinState,
+    RayGun, RayGunAttachment, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp_ipfs::config::{Bootstrap, Discovery, DiscoveryType};
 use warp_ipfs::{WarpIpfsBuilder, WarpIpfsInstance};
@@ -465,10 +464,10 @@ async fn main() -> anyhow::Result<()> {
 
                         },
                         CreateGroupConversation(name, did_keys, open) => {
-                            let mut permissions = HashMap::new();
+                            let mut permissions = GroupPermissions::new();
                             if open {
                                 for did in &did_keys {
-                                    permissions.insert(did.clone(), vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName]);
+                                    permissions.insert(did.clone(), vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName].into_iter().collect());
                                 }
                             }
                             if let Err(e) = instance.create_group_conversation(
@@ -524,10 +523,10 @@ async fn main() -> anyhow::Result<()> {
                                     continue
                                 }
                                 Ok(conversation) => {
-                                    let mut permissions = HashMap::new();
+                                    let mut permissions = GroupPermissions::new();
                                     if open {
-                                        for did in &conversation.recipients() {
-                                            permissions.insert(did.clone(), vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName]);
+                                        for did in conversation.recipients() {
+                                            permissions.insert(did, vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName].into_iter().collect());
                                         }
                                     }
                                     if let Err(e) = instance.update_conversation_permissions(topic, permissions).await {
@@ -1168,13 +1167,14 @@ async fn message_event_handle<M: MultiPass, R: RayGun>(
         }
         MessageEventKind::ConversationPermissionsUpdated {
             conversation_id,
-            permissions,
+            added,
+            removed,
         } => {
             if main_conversation_id == conversation_id {
                 writeln!(
                     stdout,
-                    ">>> Conversation permissions updated: {:?}",
-                    permissions
+                    ">>> Conversation permissions updated. Added: {:?} Removed: {:?}",
+                    added, removed
                 )?;
             }
         }
