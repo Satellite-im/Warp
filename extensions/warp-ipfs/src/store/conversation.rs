@@ -265,21 +265,14 @@ impl ConversationDocument {
             let construct = warp::crypto::hash::sha256_iter(
                 [
                     Some(self.id().into_bytes().to_vec()),
-                    self.name.as_ref().map(|d| d.as_bytes().to_vec()),
-                    self.description.as_ref().map(|d| d.as_bytes().to_vec()),
                     Some(creator.to_string().as_bytes().to_vec()),
-                    self.icon.map(|s| s.hash().digest().to_vec()),
-                    self.banner.map(|s| s.hash().digest().to_vec()),
                     Some(Vec::from_iter(
                         self.restrict
                             .iter()
                             .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                     )),
-                    Some(Vec::from_iter(
-                        self.recipients
-                            .iter()
-                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                    )),
+                    self.icon.map(|s| s.hash().digest().to_vec()),
+                    self.banner.map(|s| s.hash().digest().to_vec()),
                 ]
                 .into_iter(),
                 None,
@@ -310,21 +303,14 @@ impl ConversationDocument {
                 ConversationVersion::V0 => warp::crypto::hash::sha256_iter(
                     [
                         Some(self.id().into_bytes().to_vec()),
-                        self.name.as_ref().map(|d| d.as_bytes().to_vec()),
-                        self.description.as_ref().map(|d| d.as_bytes().to_vec()),
                         Some(creator.to_string().as_bytes().to_vec()),
-                        self.icon.map(|s| s.hash().digest().to_vec()),
-                        self.banner.map(|s| s.hash().digest().to_vec()),
                         Some(Vec::from_iter(
                             self.restrict
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                         )),
-                        Some(Vec::from_iter(
-                            self.recipients
-                                .iter()
-                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                        )),
+                        self.icon.map(|s| s.hash().digest().to_vec()),
+                        self.banner.map(|s| s.hash().digest().to_vec()),
                     ]
                     .into_iter(),
                     None,
