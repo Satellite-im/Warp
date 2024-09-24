@@ -392,10 +392,7 @@ pub trait ImplGroupPermissions {
     /// Returns true if the permissions exists for the user
     fn has_permission(&self, user: &DID, permission: GroupPermission) -> bool;
     /// Compares self with a `new` instance, and returns changed permissions via tuple: (added, removed)
-    fn compare_with_new(
-        &self,
-        new: &Self,
-    ) -> (PermissionChanges, PermissionChanges);
+    fn compare_with_new(&self, new: &Self) -> (PermissionChanges, PermissionChanges);
 }
 pub type PermissionChanges = Vec<(DID, GroupPermission)>;
 

@@ -1407,7 +1407,7 @@ impl ConversationInner {
             e
         })?;
 
-        message_event(self, id, event).await?;
+        message_event(self, id, &sender, event).await?;
 
         Ok(())
     }
@@ -3870,6 +3870,7 @@ async fn process_conversation(
 async fn message_event(
     this: &mut ConversationInner,
     conversation_id: Uuid,
+    sender: &DID,
     events: MessagingEvents,
 ) -> Result<(), Error> {
     let mut document = this.get(conversation_id).await?;
@@ -4191,6 +4192,14 @@ async fn message_event(
 
             match kind {
                 ConversationUpdateKind::AddParticipant { did } => {
+                    if !document.creator.is_some_and(|c| &c == sender)
+                        && !document
+                            .permissions
+                            .has_permission(sender, GroupPermission::AddParticipants)
+                    {
+                        return Err(Error::Unauthorized);
+                    }
+
                     if document.recipients.contains(&did) {
                         return Ok(());
                     }
@@ -4213,9 +4222,14 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::RemoveParticipant { did } => {
+                    if !document.creator.is_some_and(|c| &c == sender) {
+                        return Err(Error::Unauthorized);
+                    }
                     if !document.recipients.contains(&did) {
                         return Err(Error::IdentityDoesntExist);
                     }
+
+                    document.permissions.shift_remove(&did);
 
                     //Maybe remove participant from discovery?
 
@@ -4235,6 +4249,14 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::ChangeName { name: Some(name) } => {
+                    if !document.creator.is_some_and(|c| &c == sender)
+                        && !document
+                            .permissions
+                            .has_permission(sender, GroupPermission::SetGroupName)
+                    {
+                        return Err(Error::Unauthorized);
+                    }
+
                     let name = name.trim();
                     let name_length = name.len();
 
@@ -4262,6 +4284,14 @@ async fn message_event(
                 }
 
                 ConversationUpdateKind::ChangeName { name: None } => {
+                    if !document.creator.is_some_and(|c| &c == sender)
+                        && !document
+                            .permissions
+                            .has_permission(sender, GroupPermission::SetGroupName)
+                    {
+                        return Err(Error::Unauthorized);
+                    }
+
                     this.set_document(conversation).await?;
 
                     if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -4273,11 +4303,18 @@ async fn message_event(
                 }
                 ConversationUpdateKind::AddRestricted { .. }
                 | ConversationUpdateKind::RemoveRestricted { .. } => {
+                    if !document.creator.is_some_and(|c| &c == sender) {
+                        return Err(Error::Unauthorized);
+                    }
                     this.set_document(conversation).await?;
                     //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                 }
                 ConversationUpdateKind::ChangePermissions { permissions } => {
+                    if !document.creator.is_some_and(|c| &c == sender) {
+                        return Err(Error::Unauthorized);
+                    }
+
                     let (added, removed) = conversation.permissions.compare_with_new(&permissions);
                     conversation.permissions = permissions;
                     this.set_document(conversation).await?;
@@ -4621,7 +4658,7 @@ async fn process_pending_payload(this: &mut ConversationInner) {
                 let key = store.get_latest(keypair, &sender)?;
                 let data = Cipher::direct_decrypt(&data, &key)?;
                 let event = serde_json::from_slice(&data)?;
-                message_event(this, conversation_id, event).await
+                message_event(this, conversation_id, &sender, event).await
             };
 
             if let Err(e) = fut.await {
