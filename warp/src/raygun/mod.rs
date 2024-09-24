@@ -576,6 +576,10 @@ impl Conversation {
         self.modified = modified;
     }
 
+    pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
+        self.conversation_type = conversation_type;
+    }
+
     pub fn set_permissions(&mut self, permissions: GroupPermissions) {
         self.permissions = permissions;
     }

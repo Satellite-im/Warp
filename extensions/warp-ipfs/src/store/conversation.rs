@@ -735,6 +735,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_creator(document.creator.clone());
         conversation.set_recipients(document.recipients());
         conversation.set_created(document.created);
+        conversation.set_conversation_type(document.conversation_type);
         conversation.set_permissions(document.permissions.clone());
         conversation.set_modified(document.modified);
         conversation.set_favorite(document.favorite);
