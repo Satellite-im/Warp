@@ -14,10 +14,10 @@ use crate::multipass::{
     MultiPassImportExport,
 };
 use crate::raygun::{
-    Conversation, ConversationImage, ConversationSettings, EmbedState, GroupSettings, Location,
-    Message, MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun,
-    RayGunAttachment, RayGunConversationInformation, RayGunEvents, RayGunGroupConversation,
-    RayGunStream, ReactionState,
+    Conversation, ConversationImage, EmbedState, GroupPermissions, Location, Message,
+    MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
+    RayGunConversationInformation, RayGunEvents, RayGunGroupConversation, RayGunStream,
+    ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::{Extension, SingleHandle};
@@ -337,7 +337,7 @@ impl RayGun for Dummy {
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
-        _: GroupSettings,
+        _: GroupPermissions,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
@@ -410,10 +410,10 @@ impl RayGun for Dummy {
         Err(Error::Unimplemented)
     }
 
-    async fn update_conversation_settings(
+    async fn update_conversation_permissions(
         &mut self,
         _: Uuid,
-        _: ConversationSettings,
+        _: GroupPermissions,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }

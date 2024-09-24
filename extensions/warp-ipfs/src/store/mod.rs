@@ -27,9 +27,7 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{
-        ConversationSettings, DirectConversationSettings, MessageEvent, PinState, ReactionState,
-    },
+    raygun::{GroupPermissions, MessageEvent, PinState, ReactionState},
 };
 
 pub const MAX_THUMBNAIL_SIZE: usize = 5_242_880;
@@ -333,7 +331,6 @@ where
 pub enum ConversationEvents {
     NewConversation {
         recipient: DID,
-        settings: DirectConversationSettings,
     },
     NewGroupConversation {
         conversation: ConversationDocument,
@@ -443,7 +440,7 @@ pub enum ConversationUpdateKind {
     AddRestricted { did: DID },
     RemoveRestricted { did: DID },
     ChangeName { name: Option<String> },
-    ChangeSettings { settings: ConversationSettings },
+    ChangePermissions { permissions: GroupPermissions },
     AddedIcon,
     AddedBanner,
     RemovedIcon,
