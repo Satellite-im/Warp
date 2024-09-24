@@ -388,6 +388,24 @@ pub enum ConversationType {
 
 pub type GroupPermissions = IndexMap<DID, IndexSet<GroupPermission>>;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum GroupPermissionOpt {
+    Map(GroupPermissions),
+    Single((DID, IndexSet<GroupPermission>)),
+}
+
+impl From<GroupPermissions> for GroupPermissionOpt {
+    fn from(val: GroupPermissions) -> Self {
+        GroupPermissionOpt::Map(val)
+    }
+}
+
+impl From<(DID, IndexSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (DID, IndexSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did, set))
+    }
+}
+
 pub trait ImplGroupPermissions {
     /// Returns true if the permissions exists for the user
     fn has_permission(&self, user: &DID, permission: GroupPermission) -> bool;
@@ -1181,10 +1199,10 @@ pub trait RayGun:
     ) -> Result<(), Error>;
 
     /// Update conversation permissions
-    async fn update_conversation_permissions(
+    async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error>;
 
     /// Provides [`ConversationImage`] of the conversation icon

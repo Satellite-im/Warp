@@ -57,10 +57,11 @@ use warp::multipass::{
     MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissions, Location,
-    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventKind,
-    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
+    GroupPermissions, Location, Message, MessageEvent, MessageEventStream, MessageOptions,
+    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
+    RayGunConversationInformation, RayGunEventKind, RayGunEventStream, RayGunEvents,
+    RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::warp::Warp;
@@ -1561,10 +1562,10 @@ impl RayGun for WarpIpfs {
         Err(Error::Unimplemented)
     }
 
-    async fn update_conversation_permissions(
+    async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         self.messaging_store()?
             .update_conversation_permissions(conversation_id, permissions)

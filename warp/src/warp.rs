@@ -16,10 +16,11 @@ use crate::multipass::{
     MultiPass, MultiPassEvent, MultiPassEventStream, MultiPassImportExport,
 };
 use crate::raygun::{
-    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissions, Location,
-    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventStream,
-    RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
+    GroupPermissions, Location, Message, MessageEvent, MessageEventStream, MessageOptions,
+    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
+    RayGunConversationInformation, RayGunEventStream, RayGunEvents, RayGunGroupConversation,
+    RayGunStream, ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::warp::dummy::Dummy;
@@ -817,10 +818,10 @@ where
         unreachable!()
     }
 
-    async fn update_conversation_permissions(
+    async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         self.raygun
             .update_conversation_permissions(conversation_id, permissions)

@@ -61,7 +61,7 @@ use crate::{
     },
 };
 
-use warp::raygun::{ConversationImage, GroupPermission, GroupPermissions};
+use warp::raygun::{ConversationImage, GroupPermission, GroupPermissionOpt, GroupPermissions};
 use warp::{
     constellation::{directory::Directory, ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
@@ -313,10 +313,10 @@ impl MessageStore {
         inner.update_conversation_name(conversation_id, name).await
     }
 
-    pub async fn update_conversation_permissions(
+    pub async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
@@ -3398,10 +3398,10 @@ impl ConversationInner {
         Ok(())
     }
 
-    pub async fn update_conversation_permissions(
+    pub async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         let own_did = self.identity.did_key();
@@ -3412,6 +3412,18 @@ impl ConversationInner {
         if creator != &own_did {
             return Err(Error::PublicKeyInvalid);
         }
+
+        let permissions = match permissions.into() {
+            GroupPermissionOpt::Map(permissions) => permissions,
+            GroupPermissionOpt::Single((id, set)) => {
+                let permissions = conversation.permissions.clone();
+                {
+                    let permissions = conversation.permissions.entry(id).or_default();
+                    *permissions = set;
+                }
+                permissions
+            }
+        };
 
         let (added, removed) = conversation.permissions.compare_with_new(&permissions);
 
