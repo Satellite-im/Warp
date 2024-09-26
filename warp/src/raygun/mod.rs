@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use core::ops::Range;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -404,6 +405,24 @@ impl From<GroupPermissions> for GroupPermissionOpt {
 impl From<(DID, IndexSet<GroupPermission>)> for GroupPermissionOpt {
     fn from((did, set): (DID, IndexSet<GroupPermission>)) -> Self {
         GroupPermissionOpt::Single((did, set))
+    }
+}
+
+impl From<(DID, BTreeSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (DID, BTreeSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did, IndexSet::from_iter(set)))
+    }
+}
+
+impl From<(DID, HashSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (DID, HashSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did, IndexSet::from_iter(set)))
+    }
+}
+
+impl From<(DID, Vec<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (DID, Vec<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did, IndexSet::from_iter(set)))
     }
 }
 
