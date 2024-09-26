@@ -389,6 +389,7 @@ pub enum ConversationType {
 pub type GroupPermissions = IndexMap<DID, IndexSet<GroupPermission>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum GroupPermissionOpt {
     Map(GroupPermissions),
     Single((DID, IndexSet<GroupPermission>)),
