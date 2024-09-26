@@ -58,10 +58,10 @@ use warp::multipass::{
 };
 use warp::raygun::{
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
-    GroupPermissions, Location, Message, MessageEvent, MessageEventStream, MessageOptions,
-    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
-    RayGunConversationInformation, RayGunEventKind, RayGunEventStream, RayGunEvents,
-    RayGunGroupConversation, RayGunStream, ReactionState,
+    Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
+    MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation,
+    RayGunEventKind, RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream,
+    ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::warp::Warp;
@@ -1412,11 +1412,11 @@ impl RayGun for WarpIpfs {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
-    async fn create_group_conversation(
+    async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         name: Option<String>,
         recipients: Vec<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         self.messaging_store()?
             .create_group_conversation(name, HashSet::from_iter(recipients), permissions)

@@ -23,6 +23,7 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered, SelectAll},
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
+use indexmap::IndexMap;
 use libipld::Cid;
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, PeerId};
 
@@ -61,7 +62,7 @@ use crate::{
     },
 };
 
-use warp::raygun::{ConversationImage, GroupPermission, GroupPermissionOpt, GroupPermissions};
+use warp::raygun::{ConversationImage, GroupPermission, GroupPermissionOpt};
 use warp::{
     constellation::{directory::Directory, ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
@@ -238,11 +239,11 @@ impl MessageStore {
         inner.create_conversation(did).await
     }
 
-    pub async fn create_group_conversation(
+    pub async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &self,
         name: Option<String>,
         members: HashSet<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         let inner = &mut *self.inner.write().await;
         inner
@@ -1037,11 +1038,11 @@ impl ConversationInner {
         Ok(Conversation::from(&conversation))
     }
 
-    pub async fn create_group_conversation(
+    pub async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         name: Option<String>,
         mut recipients: HashSet<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         let own_did = &self.identity.did_key();
 
@@ -1089,6 +1090,11 @@ impl ConversationInner {
         }
 
         let restricted = self.root.get_blocks().await.unwrap_or_default();
+
+        let permissions = match permissions.into() {
+            GroupPermissionOpt::Map(permissions) => permissions,
+            GroupPermissionOpt::Single((id, set)) => IndexMap::from_iter(vec![(id, set)]),
+        };
 
         let conversation = ConversationDocument::new_group(
             self.root.keypair(),

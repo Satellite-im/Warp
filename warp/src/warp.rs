@@ -17,10 +17,9 @@ use crate::multipass::{
 };
 use crate::raygun::{
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
-    GroupPermissions, Location, Message, MessageEvent, MessageEventStream, MessageOptions,
-    MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
-    RayGunConversationInformation, RayGunEventStream, RayGunEvents, RayGunGroupConversation,
-    RayGunStream, ReactionState,
+    Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
+    MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation,
+    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::warp::dummy::Dummy;
@@ -685,11 +684,11 @@ where
         self.raygun.create_conversation(identity).await
     }
 
-    async fn create_group_conversation(
+    async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         name: Option<String>,
         members: Vec<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         self.raygun
             .create_group_conversation(name, members, permissions)
