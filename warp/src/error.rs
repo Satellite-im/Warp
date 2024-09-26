@@ -246,6 +246,8 @@ pub enum Error {
     SpeakerMissing,
 
     //Misc
+    #[error("Unauthorized")]
+    Unauthorized,
     #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]
     InvalidLength {
         context: String,
