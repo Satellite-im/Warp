@@ -22,6 +22,7 @@ use std::time::Duration;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{error, info, warn, Instrument, Span};
 use uuid::Uuid;
+use indexmap::IndexSet;
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::store::discovery::Discovery;
@@ -57,6 +58,9 @@ use warp::multipass::{
     MultiPassImportExport,
 };
 use warp::raygun::{
+    community::{
+        CommunityChannel, CommunityChannelPermissions, Community, CommunityPermissions, RayGunCommunity, Role,
+    },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissions, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
     Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventKind,
@@ -1664,6 +1668,98 @@ impl RayGunAttachment for WarpIpfs {
             .download_stream(conversation_id, message_id, file)
             .await
     }
+}
+
+#[async_trait::async_trait]
+impl RayGunCommunity for WarpIpfs {
+
+    // async fn create_community(&mut self, owner: &DID, name: &str) -> Result<Community, Error> {
+    // }
+    // async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+    // }
+    // async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
+    // }
+
+    // async fn create_channel(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     channel_name: &str,
+    //     channel_type: CommunityChannelType
+    // ) -> Result<CommunityChannel, Error> {
+    // }
+    // async fn delete_channel(&mut self, community_id: Uuid, channel_id: Uuid) -> Result<(), Error> {
+    // }
+    // async fn get_channel(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     channel_id: Uuid,
+    // ) -> Result<CommunityChannel, Error> {
+    // }
+
+    // async fn edit_community_name(&mut self, community_id: Uuid, name: &str) -> Result<(), Error> {
+    // }
+    // async fn edit_community_description(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     description: Option<String>,
+    // ) -> Result<(), Error> {
+    // }
+    // async fn edit_community_roles(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     roles: IndexSet<Role>,
+    // ) -> Result<(), Error> {
+    // }
+    // async fn edit_community_permissions(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     permissions: CommunityPermissions,
+    // ) -> Result<(), Error> {
+    // }
+    // async fn add_community_member(&mut self, community_id: Uuid, member: DID) -> Result<(), Error> {
+    // }
+    // async fn remove_community_member(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     member: DID,
+    // ) -> Result<(), Error> {
+    // }
+
+    // async fn edit_channel_name(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     channel_id: Uuid,
+    //     name: &str,
+    // ) -> Result<(), Error> {
+    // }
+    // async fn edit_channel_description(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     channel_id: Uuid,
+    //     description: Option<String>,
+    // ) -> Result<(), Error> {
+    // }
+    // async fn edit_channel_permissions(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     channel_id: Uuid,
+    //     permissions: CommunityChannelPermissions,
+    // ) -> Result<(), Error> {
+    // }
+    // async fn send_channel_message(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     channel_id: Uuid,
+    //     message: &str,
+    // ) -> Result<(), Error> {
+    // }
+    // async fn delete_channel_message(
+    //     &mut self,
+    //     community_id: Uuid,
+    //     channel_id: Uuid,
+    //     message_id: Uuid,
+    // ) -> Result<(), Error> {
+    // }
 }
 
 #[async_trait::async_trait]

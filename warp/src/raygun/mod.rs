@@ -1,9 +1,11 @@
+pub mod community;
 pub mod group;
 
 use crate::constellation::file::{File, FileType};
 use crate::constellation::{ConstellationProgressStream, Progression};
 use crate::crypto::DID;
 use crate::error::Error;
+use crate::raygun::community::RayGunCommunity;
 use crate::{Extension, SingleHandle};
 
 use derive_more::Display;
@@ -1057,6 +1059,7 @@ impl Eq for Location {}
 pub trait RayGun:
     RayGunStream
     + RayGunGroupConversation
+    + RayGunCommunity
     + RayGunAttachment
     + RayGunEvents
     + RayGunConversationInformation
