@@ -15,7 +15,7 @@ use futures_timer::Delay;
 use indexmap::IndexMap;
 use ipfs::Keypair;
 use ipfs::{p2p::MultiaddrExt, Ipfs};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -1638,7 +1638,7 @@ impl IdentityStore {
                     }
                 }
 
-                self.ipfs.dag().put().serialize(data).await?;
+                self.ipfs.put_dag(data).await?;
             }
         };
         Ok(())
@@ -1752,7 +1752,7 @@ impl IdentityStore {
 
         let identity = identity.sign(self.root_document.keypair())?;
 
-        let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
+        let ident_cid = self.ipfs.put_dag(identity).await?;
 
         let root_document = RootDocument {
             identity: ident_cid,
@@ -2201,7 +2201,7 @@ impl IdentityStore {
 
         tracing::debug!("Updating document");
         let mut root_document = self.root_document.get().await?;
-        let ident_cid = self.ipfs.dag().put().serialize(identity).await?;
+        let ident_cid = self.ipfs.put_dag(identity).await?;
         root_document.identity = ident_cid;
 
         self.root_document
@@ -2430,8 +2430,8 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
         let ipfs = &self.ipfs;
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid).recursive().await?;
+        if ipfs.is_pinned(cid).await? {
+            ipfs.remove_pin(cid).recursive().await?;
         }
         Ok(())
     }

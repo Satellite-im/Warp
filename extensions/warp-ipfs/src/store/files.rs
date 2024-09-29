@@ -587,7 +587,7 @@ impl FileTask {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(path);
+            let mut stream = ipfs.add_unixfs(path);
 
             while let Some(status) = stream.next().await {
                 let name = name.clone();
@@ -606,7 +606,7 @@ impl FileTask {
                         written, error, ..
                     } => {
                         last_written = written;
-                        let error = error.map(Error::Any).unwrap_or(Error::Other);
+                        let error = error.into();
                         yield Progression::ProgressFailed {
                             name,
                             last_size: Some(last_written),
@@ -702,11 +702,10 @@ impl FileTask {
                     UnixfsStatus::FailedStatus {
                         written, error, ..
                     } => {
-                        let error = error.map(Error::Any).unwrap_or(Error::Other);
                         yield Progression::ProgressFailed {
                             name: name.to_string(),
                             last_size: Some(written),
-                            error,
+                            error: error.into(),
                         };
                         return;
                     }
@@ -786,7 +785,7 @@ impl FileTask {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(buffer);
+            let mut stream = ipfs.add_unixfs(buffer);
 
             while let Some(status) = stream.next().await {
                 match status {
@@ -794,9 +793,7 @@ impl FileTask {
                         returned_path = Some(path);
                         total_written = written;
                     }
-                    UnixfsStatus::FailedStatus { error, .. } => {
-                        return Err(error.map(Error::Any).unwrap_or(Error::Other))
-                    }
+                    UnixfsStatus::FailedStatus { error, .. } => return Err(error.into()),
                     _ => {}
                 }
             }
@@ -923,7 +920,7 @@ impl FileTask {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(stream);
+            let mut stream = ipfs.add_unixfs(stream);
 
             while let Some(status) = stream.next().await {
                 let n = name.clone();
@@ -942,7 +939,7 @@ impl FileTask {
                         written, error, ..
                     } => {
                         last_written = written;
-                        let error = error.map(Error::Any).unwrap_or(Error::Other);
+                        let error = error.into();
                         yield Progression::ProgressFailed {
                             name: n,
                             last_size: Some(last_written),
@@ -1251,8 +1248,8 @@ async fn _remove(ipfs: &Ipfs, root: &Directory, item: &Item) -> Result<(), Error
                 .copied()
                 .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
 
-            if ipfs.is_pinned(&cid).await? {
-                ipfs.remove_pin(&cid).recursive().await?;
+            if ipfs.is_pinned(cid).await? {
+                ipfs.remove_pin(cid).recursive().await?;
             }
 
             let name = item.name();

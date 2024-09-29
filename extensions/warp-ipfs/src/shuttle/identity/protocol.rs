@@ -1,4 +1,4 @@
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{libp2p::StreamProtocol, Keypair};
 use serde::{Deserialize, Serialize};
 use warp::{crypto::DID, multipass::identity::ShortId};

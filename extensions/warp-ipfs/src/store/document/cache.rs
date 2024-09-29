@@ -4,7 +4,7 @@ use futures::{
     stream::{BoxStream, FuturesUnordered},
     StreamExt, TryFutureExt,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
@@ -114,22 +114,22 @@ impl IdentityCacheInner {
                     return Ok(None);
                 }
 
-                let cid = self.ipfs.dag().put().serialize(document).await?;
+                let cid = self.ipfs.put_dag(document).await?;
 
                 list.insert(did_str, cid);
 
-                let cid = self.ipfs.dag().put().serialize(list).await?;
+                let cid = self.ipfs.put_dag(list).await?;
 
                 self.save(cid).await?;
 
                 Ok(Some(old_document))
             }
             None => {
-                let cid = self.ipfs.dag().put().serialize(document).await?;
+                let cid = self.ipfs.put_dag(document).await?;
 
                 list.insert(did_str, cid);
 
-                let cid = self.ipfs.dag().put().serialize(list).await?;
+                let cid = self.ipfs.put_dag(list).await?;
 
                 self.save(cid).await?;
 
@@ -139,8 +139,8 @@ impl IdentityCacheInner {
     }
 
     async fn save(&mut self, cid: Cid) -> Result<(), Error> {
-        if !self.ipfs.is_pinned(&cid).await? {
-            self.ipfs.insert_pin(&cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(cid).await? {
+            self.ipfs.insert_pin(cid).recursive().local().await?;
         }
 
         let old_cid = self.list.replace(cid);
@@ -161,7 +161,7 @@ impl IdentityCacheInner {
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid).recursive().await?;
+                self.ipfs.remove_pin(old_cid).recursive().await?;
             }
         }
 
@@ -209,7 +209,7 @@ impl IdentityCacheInner {
             return Err(Error::IdentityDoesntExist);
         }
 
-        let cid = self.ipfs.dag().put().serialize(list).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         self.save(cid).await?;
 
@@ -250,7 +250,7 @@ mod test {
 
     use chrono::Utc;
     use futures::StreamExt;
-    use rust_ipfs::{Keypair, UninitializedIpfsNoop};
+    use rust_ipfs::{Keypair, UninitializedIpfsDefault};
     use warp::{
         crypto::{
             rand::{self, seq::SliceRandom},
@@ -293,7 +293,7 @@ mod test {
     }
 
     async fn pregenerated_cache<const N: usize>() -> IdentityCache {
-        let ipfs = UninitializedIpfsNoop::new()
+        let ipfs = UninitializedIpfsDefault::new()
             .start()
             .await
             .expect("constructed ipfs instance");

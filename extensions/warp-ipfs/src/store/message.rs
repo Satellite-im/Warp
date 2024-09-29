@@ -24,7 +24,8 @@ use futures::{
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use indexmap::IndexMap;
-use libipld::Cid;
+use ipld_core::cid::Cid;
+
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, PeerId};
 
 use serde::{Deserialize, Serialize};
@@ -1204,7 +1205,7 @@ impl ConversationInner {
         let mut map = self.root.get_conversation_keystore_map().await?;
 
         let id = id.to_string();
-        let cid = self.ipfs.dag().put().serialize(document).await?;
+        let cid = self.ipfs.put_dag(document).await?;
 
         map.insert(id, cid);
 
@@ -1313,7 +1314,7 @@ impl ConversationInner {
             .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             .and_then(|cid_str| cid_str.parse::<Cid>().ok());
 
-        let cid = match self.ipfs.dag().put().serialize(&self.queue).pin(true).await {
+        let cid = match self.ipfs.put_dag(&self.queue).pin(true).await {
             Ok(cid) => cid,
             Err(e) => {
                 tracing::error!(error = %e, "unable to save queue");
@@ -1339,8 +1340,8 @@ impl ConversationInner {
         let old_cid = current_cid;
 
         if let Some(old_cid) = old_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
+            if old_cid != cid && self.ipfs.is_pinned(old_cid).await.unwrap_or_default() {
+                _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
     }
@@ -2954,7 +2955,7 @@ impl ConversationInner {
             mime: ext,
         };
 
-        let cid = self.ipfs.dag().put().serialize(dag).await?;
+        let cid = self.ipfs.put_dag(dag).await?;
 
         let kind = match image_type {
             ConversationImageType::Icon => {
@@ -4382,7 +4383,6 @@ async fn message_event(
                     }
 
                     this.set_document(conversation).await?;
-
                     if let Err(e) = tx.send(MessageEventKind::ConversationDescriptionChanged {
                         conversation_id,
                         description,

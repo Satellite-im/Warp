@@ -157,7 +157,7 @@ pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Result<(), Error> {
     use ds_key::DataStoreKey;
-    use libipld::Cid;
+    use ipld_core::cid::Cid;
 
     let path = path.as_ref();
     let ds = ipfs.repo().data_store();
@@ -191,7 +191,7 @@ pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
 
     // request queue
     if let Ok(data) = tokio::fs::read(path.join(".request_queue")).await {
-        let cid = ipfs.dag().put().serialize(&data).pin(true).await?;
+        let cid = ipfs.put_dag(&data).pin(true).await?;
         let key = ipfs.request_queue();
         let cid_str = cid.to_string();
         if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
@@ -201,7 +201,7 @@ pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
 
     // message queue
     if let Ok(data) = tokio::fs::read(path.join("messages").join(".messaging_queue")).await {
-        let cid = ipfs.dag().put().serialize(&data).pin(true).await?;
+        let cid = ipfs.put_dag(&data).pin(true).await?;
         let key = ipfs.messaging_queue();
         let cid_str = cid.to_string();
         if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
