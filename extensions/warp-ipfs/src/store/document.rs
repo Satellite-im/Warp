@@ -5,7 +5,7 @@ use futures::{
     StreamExt, TryFutureExt,
 };
 use ipfs::{Ipfs, Keypair, PeerId};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
@@ -332,13 +332,13 @@ impl RootDocument {
         let mut document: IdentityDocument = data.identity.into();
 
         if !metadata.is_empty() {
-            let cid = ipfs.dag().put().serialize(metadata).await?;
+            let cid = ipfs.put_dag(metadata).await?;
             document.metadata.arb_data = Some(cid);
         }
 
         let document = document.sign(keypair)?;
 
-        let identity = ipfs.dag().put().serialize(document).await?;
+        let identity = ipfs.put_dag(document).await?;
 
         let mut root_document = RootDocument {
             identity,
@@ -362,37 +362,36 @@ impl RootDocument {
         let has_keystore = !data.conversation_keystore.is_empty();
 
         if has_friends {
-            root_document.friends = ipfs.dag().put().serialize(data.friends).await.ok();
+            root_document.friends = ipfs.put_dag(data.friends).await.ok();
         }
 
         if has_blocks {
-            root_document.blocks = ipfs.dag().put().serialize(data.block_list).await.ok();
+            root_document.blocks = ipfs.put_dag(data.block_list).await.ok();
         }
 
         if has_block_by_list {
-            root_document.block_by = ipfs.dag().put().serialize(data.block_by_list).await.ok();
+            root_document.block_by = ipfs.put_dag(data.block_by_list).await.ok();
         }
 
         if has_requests {
-            root_document.request = ipfs.dag().put().serialize(data.request).await.ok();
+            root_document.request = ipfs.put_dag(data.request).await.ok();
         }
 
         if has_keystore {
             let mut pointer_map: BTreeMap<String, Cid> = BTreeMap::new();
             for (k, v) in data.conversation_keystore {
-                if let Ok(cid) = ipfs.dag().put().serialize(v).await {
+                if let Ok(cid) = ipfs.put_dag(v).await {
                     pointer_map.insert(k.to_string(), cid);
                 }
             }
 
-            root_document.conversations_keystore =
-                ipfs.dag().put().serialize(pointer_map).await.ok();
+            root_document.conversations_keystore = ipfs.put_dag(pointer_map).await.ok();
         }
 
         if let Some(root) = data.file_index {
             let cid = DirectoryDocument::new(ipfs, &root)
                 .and_then(|document| async move {
-                    let cid = ipfs.dag().put().serialize(document).await?;
+                    let cid = ipfs.put_dag(document).await?;
                     Ok(cid)
                 })
                 .await
@@ -443,8 +442,7 @@ impl FileAttachmentDocument {
             file.set_thumbnail_format(image.mime.into());
 
             let data = ipfs
-                .unixfs()
-                .cat(image.link)
+                .cat_unixfs(image.link)
                 .set_local(local)
                 .timeout(Duration::from_secs(10))
                 .await
@@ -477,8 +475,7 @@ impl FileAttachmentDocument {
         let name = self.name.clone();
 
         let stream = match Cid::from_str(&self.data).map(|cid| {
-            ipfs.unixfs()
-                .get(cid.into(), &path)
+            ipfs.get_unixfs(cid, &path)
                 .providers(members)
                 .timeout(timeout.unwrap_or(Duration::from_secs(60)))
         }) {
@@ -521,7 +518,7 @@ impl FileAttachmentDocument {
                         if let Err(e) = fs::remove_file(&path).await {
                             tracing::error!("Error removing file: {e}");
                         }
-                        let error = error.map(Error::Any).unwrap_or(Error::Other);
+                        let error = error.into();
                         yield Progression::ProgressFailed {
                             name: name.clone(),
                             last_size: Some(written),
@@ -547,8 +544,7 @@ impl FileAttachmentDocument {
         };
 
         let stream = ipfs
-            .unixfs()
-            .cat(link)
+            .cat_unixfs(link)
             .providers(members)
             .timeout(timeout.unwrap_or(Duration::from_secs(60)))
             .map(|result| result.map_err(std::io::Error::other));

@@ -13,7 +13,7 @@ use futures::{
     StreamExt, TryFutureExt,
 };
 use indexmap::IndexMap;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath, Keypair};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
@@ -349,7 +349,7 @@ impl ConversationDocument {
         list: MessageReferenceList,
     ) -> Result<(), Error> {
         self.modified = Utc::now();
-        let next_cid = ipfs.dag().put().serialize(list).await?;
+        let next_cid = ipfs.put_dag(list).await?;
         self.messages.replace(next_cid);
         Ok(())
     }
@@ -1268,17 +1268,17 @@ impl MessageReferenceList {
             };
 
             let cid = next_ref.insert(ipfs, message).await?;
-            let next_cid = ipfs.dag().put().serialize(next_ref).await?;
+            let next_cid = ipfs.put_dag(next_ref).await?;
             self.next.replace(next_cid);
             return Ok(cid);
         }
 
         let id = message.id.to_string();
 
-        let cid = ipfs.dag().put().serialize(message).await?;
+        let cid = ipfs.put_dag(message).await?;
         list_refs.insert(id, Some(cid));
 
-        let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
+        let ref_cid = ipfs.put_dag(list_refs).await?;
         self.messages.replace(ref_cid);
 
         Ok(cid)
@@ -1310,7 +1310,7 @@ impl MessageReferenceList {
             };
 
             let cid = next_ref.update(ipfs, message).await?;
-            let next_cid = ipfs.dag().put().serialize(next_ref).await?;
+            let next_cid = ipfs.put_dag(next_ref).await?;
             self.next.replace(next_cid);
             return Ok(cid);
         }
@@ -1321,10 +1321,10 @@ impl MessageReferenceList {
             return Err(Error::MessageNotFound);
         }
 
-        let cid = ipfs.dag().put().serialize(message).await?;
+        let cid = ipfs.put_dag(message).await?;
         msg_ref.replace(cid);
 
-        let ref_cid = ipfs.dag().put().serialize(list_refs).await?;
+        let ref_cid = ipfs.put_dag(list_refs).await?;
         self.messages.replace(ref_cid);
 
         Ok(cid)
@@ -1493,7 +1493,7 @@ impl MessageReferenceList {
 
             item.take();
 
-            let cid = ipfs.dag().put().serialize(list).await?;
+            let cid = ipfs.put_dag(list).await?;
             self.messages.replace(cid);
 
             return Ok(());
@@ -1509,7 +1509,7 @@ impl MessageReferenceList {
 
         refs.remove(ipfs, message_id).await?;
 
-        let cid = ipfs.dag().put().serialize(refs).await?;
+        let cid = ipfs.put_dag(refs).await?;
 
         self.next.replace(cid);
 

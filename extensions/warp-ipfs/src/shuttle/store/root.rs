@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use futures::TryFutureExt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -119,9 +119,7 @@ impl RootInner {
         // .await?;
 
         let cid = ipfs
-            .dag()
-            .put()
-            .serialize(self.root)
+            .put_dag(self.root)
             .pin(false)
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
@@ -133,7 +131,7 @@ impl RootInner {
         if let Some(old_cid) = old_cid {
             if old_cid != cid && ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning root block");
-                _ = ipfs.remove_pin(&old_cid).await;
+                _ = ipfs.remove_pin(old_cid).await;
             }
         }
 

@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use futures::{stream, Stream, StreamExt};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use std::path::PathBuf;
 use tokio::sync::RwLock;
@@ -193,32 +193,27 @@ impl MessageStorageInner {
             message_mailbox.insert(message_id.to_string(), message_cid);
 
             tracing::info!(%conversation_id, %recipient, "saving mailbox");
-            let cid = self.ipfs.dag().put().serialize(message_mailbox).await?;
+            let cid = self.ipfs.put_dag(message_mailbox).await?;
 
             tracing::info!(%conversation_id, %recipient, "storing mailbox into conversation index");
             conversation_mailbox.insert(recipient.to_string(), cid);
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(conversation_mailbox)
-            .await?;
+        let cid = self.ipfs.put_dag(conversation_mailbox).await?;
 
         list.insert(conversation_id.to_string(), cid);
 
-        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+        let root_cid = self.ipfs.put_dag(list).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
-            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(root_cid).recursive().local().await?;
         }
 
         let mut old_cid = self.list.replace(root_cid);
 
         if let Some(cid) = old_cid.take() {
             if cid != root_cid {
-                self.ipfs.remove_pin(&cid).recursive().await?;
+                self.ipfs.remove_pin(cid).recursive().await?;
             }
         }
 
@@ -247,17 +242,17 @@ impl MessageStorageInner {
 
         list.remove(&conversation_id.to_string());
 
-        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+        let root_cid = self.ipfs.put_dag(list).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
-            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(root_cid).recursive().local().await?;
         }
 
         let mut old_cid = self.list.replace(root_cid);
 
         if let Some(cid) = old_cid.take() {
             if cid != root_cid {
-                self.ipfs.remove_pin(&cid).recursive().await?;
+                self.ipfs.remove_pin(cid).recursive().await?;
             }
         }
 
@@ -312,33 +307,28 @@ impl MessageStorageInner {
 
             current_map.remove(&message_id.to_string());
 
-            let Ok(new_cid) = self.ipfs.dag().put().serialize(current_map).await else {
+            let Ok(new_cid) = self.ipfs.put_dag(current_map).await else {
                 continue;
             };
 
             *cid = new_cid;
         }
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(conversation_mailbox)
-            .await?;
+        let cid = self.ipfs.put_dag(conversation_mailbox).await?;
 
         list.insert(conversation_id.to_string(), cid);
 
-        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+        let root_cid = self.ipfs.put_dag(list).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
-            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(root_cid).recursive().local().await?;
         }
 
         let mut old_cid = self.list.replace(root_cid);
 
         if let Some(cid) = old_cid.take() {
             if cid != root_cid {
-                self.ipfs.remove_pin(&cid).recursive().await?;
+                self.ipfs.remove_pin(cid).recursive().await?;
             }
         }
 
@@ -424,30 +414,25 @@ impl MessageStorageInner {
             .remove(&message_id.to_string())
             .ok_or(Error::MessageNotFound)?;
 
-        let cid = self.ipfs.dag().put().serialize(message_mailbox).await?;
+        let cid = self.ipfs.put_dag(message_mailbox).await?;
 
         conversation_mailbox.insert(member.to_string(), cid);
 
-        let cid = self
-            .ipfs
-            .dag()
-            .put()
-            .serialize(conversation_mailbox)
-            .await?;
+        let cid = self.ipfs.put_dag(conversation_mailbox).await?;
 
         list.insert(conversation_id.to_string(), cid);
 
-        let root_cid = self.ipfs.dag().put().serialize(list).await?;
+        let root_cid = self.ipfs.put_dag(list).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
-            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(root_cid).recursive().local().await?;
         }
 
         let mut old_cid = self.list.replace(root_cid);
 
         if let Some(cid) = old_cid.take() {
             if cid != root_cid {
-                self.ipfs.remove_pin(&cid).recursive().await?;
+                self.ipfs.remove_pin(cid).recursive().await?;
             }
         }
 
