@@ -120,7 +120,3 @@ opus = { git = "https://github.com/Satellite-im/opus-rs", rev = "893b9f7e7e0cd00
 warp = { path = "./warp" }
 warp-ipfs = { path = "./extensions/warp-ipfs" }
 warp-blink-wrtc = { path = "./extensions/warp-blink-wrtc" }
-
-[patch.crates-io]
-rust-ipfs = { version = "0.12.0", git = "https://github.com/dariusc93/rust-ipfs", rev = "e2e5038b5e3236c3850bb19ed434426588b33843" }
-
