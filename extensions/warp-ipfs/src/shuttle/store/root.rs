@@ -131,7 +131,7 @@ impl RootInner {
         if let Some(old_cid) = old_cid {
             if old_cid != cid && ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning root block");
-                _ = ipfs.remove_pin(&old_cid).await;
+                _ = ipfs.remove_pin(old_cid).await;
             }
         }
 

@@ -340,7 +340,7 @@ impl RootDocumentInner {
         let root_cid = self.ipfs.put_dag(document).await?;
 
         self.ipfs
-            .insert_pin(&root_cid)
+            .insert_pin(root_cid)
             .set_local(local)
             .recursive()
             .await?;
@@ -362,8 +362,8 @@ impl RootDocumentInner {
         }
 
         if let Some(old_cid) = old_cid {
-            if old_cid != root_cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                if let Err(e) = self.ipfs.remove_pin(&old_cid).recursive().await {
+            if old_cid != root_cid && self.ipfs.is_pinned(old_cid).await.unwrap_or_default() {
+                if let Err(e) = self.ipfs.remove_pin(old_cid).recursive().await {
                     tracing::warn!(cid =? old_cid, "Failed to unpin root document: {e}");
                 }
             }

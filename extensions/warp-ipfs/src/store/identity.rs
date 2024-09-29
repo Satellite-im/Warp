@@ -2430,8 +2430,8 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
         let ipfs = &self.ipfs;
-        if ipfs.is_pinned(&cid).await? {
-            ipfs.remove_pin(&cid).recursive().await?;
+        if ipfs.is_pinned(cid).await? {
+            ipfs.remove_pin(cid).recursive().await?;
         }
         Ok(())
     }

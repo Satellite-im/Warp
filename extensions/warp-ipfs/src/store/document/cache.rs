@@ -139,8 +139,8 @@ impl IdentityCacheInner {
     }
 
     async fn save(&mut self, cid: Cid) -> Result<(), Error> {
-        if !self.ipfs.is_pinned(&cid).await? {
-            self.ipfs.insert_pin(&cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(cid).await? {
+            self.ipfs.insert_pin(cid).recursive().local().await?;
         }
 
         let old_cid = self.list.replace(cid);
@@ -161,7 +161,7 @@ impl IdentityCacheInner {
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid).recursive().await?;
+                self.ipfs.remove_pin(old_cid).recursive().await?;
             }
         }
 

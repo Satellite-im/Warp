@@ -214,8 +214,8 @@ impl Queue {
         let old_cid = current_cid;
 
         if let Some(old_cid) = old_cid {
-            if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
+            if old_cid != cid && self.ipfs.is_pinned(old_cid).await.unwrap_or_default() {
+                _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
     }

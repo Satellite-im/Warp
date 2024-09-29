@@ -205,15 +205,15 @@ impl MessageStorageInner {
 
         let root_cid = self.ipfs.put_dag(list).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
-            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(root_cid).recursive().local().await?;
         }
 
         let mut old_cid = self.list.replace(root_cid);
 
         if let Some(cid) = old_cid.take() {
             if cid != root_cid {
-                self.ipfs.remove_pin(&cid).recursive().await?;
+                self.ipfs.remove_pin(cid).recursive().await?;
             }
         }
 
@@ -244,15 +244,15 @@ impl MessageStorageInner {
 
         let root_cid = self.ipfs.put_dag(list).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
-            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(root_cid).recursive().local().await?;
         }
 
         let mut old_cid = self.list.replace(root_cid);
 
         if let Some(cid) = old_cid.take() {
             if cid != root_cid {
-                self.ipfs.remove_pin(&cid).recursive().await?;
+                self.ipfs.remove_pin(cid).recursive().await?;
             }
         }
 
@@ -320,15 +320,15 @@ impl MessageStorageInner {
 
         let root_cid = self.ipfs.put_dag(list).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
-            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(root_cid).recursive().local().await?;
         }
 
         let mut old_cid = self.list.replace(root_cid);
 
         if let Some(cid) = old_cid.take() {
             if cid != root_cid {
-                self.ipfs.remove_pin(&cid).recursive().await?;
+                self.ipfs.remove_pin(cid).recursive().await?;
             }
         }
 
@@ -424,15 +424,15 @@ impl MessageStorageInner {
 
         let root_cid = self.ipfs.put_dag(list).await?;
 
-        if !self.ipfs.is_pinned(&root_cid).await.unwrap_or_default() {
-            self.ipfs.insert_pin(&root_cid).recursive().local().await?;
+        if !self.ipfs.is_pinned(root_cid).await.unwrap_or_default() {
+            self.ipfs.insert_pin(root_cid).recursive().local().await?;
         }
 
         let mut old_cid = self.list.replace(root_cid);
 
         if let Some(cid) = old_cid.take() {
             if cid != root_cid {
-                self.ipfs.remove_pin(&cid).recursive().await?;
+                self.ipfs.remove_pin(cid).recursive().await?;
             }
         }
 

@@ -148,7 +148,7 @@ impl IdentityStorageInner {
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                _ = self.ipfs.remove_pin(&old_cid).await;
+                _ = self.ipfs.remove_pin(old_cid).await;
             }
         }
 
@@ -207,13 +207,13 @@ impl IdentityStorageInner {
 
         let cid = self.ipfs.put_dag(list).await?;
 
-        self.ipfs.insert_pin(&cid).recursive().await?;
+        self.ipfs.insert_pin(cid).recursive().await?;
 
         let old_cid = self.users.replace(cid);
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning identity package block");
-                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
+                _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
         self.root.set_user_documents(cid).await?;
@@ -423,7 +423,7 @@ impl IdentityStorageInner {
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
+                _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
 
@@ -482,7 +482,7 @@ impl IdentityStorageInner {
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
+                _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
 

@@ -1248,8 +1248,8 @@ async fn _remove(ipfs: &Ipfs, root: &Directory, item: &Item) -> Result<(), Error
                 .copied()
                 .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
 
-            if ipfs.is_pinned(&cid).await? {
-                ipfs.remove_pin(&cid).recursive().await?;
+            if ipfs.is_pinned(cid).await? {
+                ipfs.remove_pin(cid).recursive().await?;
             }
 
             let name = item.name();
