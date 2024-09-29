@@ -587,7 +587,7 @@ impl FileTask {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(path);
+            let mut stream = ipfs.add_unixfs(path);
 
             while let Some(status) = stream.next().await {
                 let name = name.clone();
@@ -785,7 +785,7 @@ impl FileTask {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(buffer);
+            let mut stream = ipfs.add_unixfs(buffer);
 
             while let Some(status) = stream.next().await {
                 match status {
@@ -920,7 +920,7 @@ impl FileTask {
             let mut total_written = 0;
             let mut returned_path = None;
 
-            let mut stream = ipfs.unixfs().add(stream);
+            let mut stream = ipfs.add_unixfs(stream);
 
             while let Some(status) = stream.next().await {
                 let n = name.clone();

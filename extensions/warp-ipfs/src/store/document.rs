@@ -442,8 +442,7 @@ impl FileAttachmentDocument {
             file.set_thumbnail_format(image.mime.into());
 
             let data = ipfs
-                .unixfs()
-                .cat(image.link)
+                .cat_unixfs(image.link)
                 .set_local(local)
                 .timeout(Duration::from_secs(10))
                 .await
@@ -545,8 +544,7 @@ impl FileAttachmentDocument {
         };
 
         let stream = ipfs
-            .unixfs()
-            .cat(link)
+            .cat_unixfs(link)
             .providers(members)
             .timeout(timeout.unwrap_or(Duration::from_secs(60)))
             .map(|result| result.map_err(std::io::Error::other));
