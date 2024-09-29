@@ -606,7 +606,7 @@ impl FileTask {
                         written, error, ..
                     } => {
                         last_written = written;
-                        let error = error.map(Error::Any).unwrap_or(Error::Other);
+                        let error = error.into();
                         yield Progression::ProgressFailed {
                             name,
                             last_size: Some(last_written),
@@ -702,11 +702,10 @@ impl FileTask {
                     UnixfsStatus::FailedStatus {
                         written, error, ..
                     } => {
-                        let error = error.map(Error::Any).unwrap_or(Error::Other);
                         yield Progression::ProgressFailed {
                             name: name.to_string(),
                             last_size: Some(written),
-                            error,
+                            error: error.into(),
                         };
                         return;
                     }
@@ -794,9 +793,7 @@ impl FileTask {
                         returned_path = Some(path);
                         total_written = written;
                     }
-                    UnixfsStatus::FailedStatus { error, .. } => {
-                        return Err(error.map(Error::Any).unwrap_or(Error::Other))
-                    }
+                    UnixfsStatus::FailedStatus { error, .. } => return Err(error.into()),
                     _ => {}
                 }
             }
@@ -942,7 +939,7 @@ impl FileTask {
                         written, error, ..
                     } => {
                         last_written = written;
-                        let error = error.map(Error::Any).unwrap_or(Error::Other);
+                        let error = error.into();
                         yield Progression::ProgressFailed {
                             name: n,
                             last_size: Some(last_written),

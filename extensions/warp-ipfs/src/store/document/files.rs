@@ -303,7 +303,7 @@ impl FileDocument {
 #[cfg(test)]
 mod test {
 
-    use rust_ipfs::{Ipfs, UninitializedIpfsNoop};
+    use rust_ipfs::{Ipfs, UninitializedIpfsDefault};
     use tracing::Span;
     use warp::constellation::directory::Directory;
     use warp::constellation::ConstellationEventKind;
@@ -332,7 +332,7 @@ mod test {
 
     #[tokio::test]
     async fn document_resolve_test() -> anyhow::Result<()> {
-        let ipfs = UninitializedIpfsNoop::new()
+        let ipfs = UninitializedIpfsDefault::new()
             .start()
             .await
             .expect("constructed ipfs instance");

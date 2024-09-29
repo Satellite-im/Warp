@@ -476,8 +476,7 @@ impl FileAttachmentDocument {
         let name = self.name.clone();
 
         let stream = match Cid::from_str(&self.data).map(|cid| {
-            ipfs.unixfs()
-                .get(cid.into(), &path)
+            ipfs.get_unixfs(cid, &path)
                 .providers(members)
                 .timeout(timeout.unwrap_or(Duration::from_secs(60)))
         }) {
@@ -520,7 +519,7 @@ impl FileAttachmentDocument {
                         if let Err(e) = fs::remove_file(&path).await {
                             tracing::error!("Error removing file: {e}");
                         }
-                        let error = error.map(Error::Any).unwrap_or(Error::Other);
+                        let error = error.into();
                         yield Progression::ProgressFailed {
                             name: name.clone(),
                             last_size: Some(written),

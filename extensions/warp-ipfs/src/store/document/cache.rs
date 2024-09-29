@@ -250,7 +250,7 @@ mod test {
 
     use chrono::Utc;
     use futures::StreamExt;
-    use rust_ipfs::{Keypair, UninitializedIpfsNoop};
+    use rust_ipfs::{Keypair, UninitializedIpfsDefault};
     use warp::{
         crypto::{
             rand::{self, seq::SliceRandom},
@@ -293,7 +293,7 @@ mod test {
     }
 
     async fn pregenerated_cache<const N: usize>() -> IdentityCache {
-        let ipfs = UninitializedIpfsNoop::new()
+        let ipfs = UninitializedIpfsDefault::new()
             .start()
             .await
             .expect("constructed ipfs instance");

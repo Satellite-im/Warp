@@ -43,19 +43,11 @@ pub async fn store_photo(
                 break (cid, written);
             }
             rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
-                let err = match error {
-                    Some(e) => {
-                        tracing::error!(
-                            "Error uploading picture with {written} bytes written with error: {e}"
-                        );
-                        e.into()
-                    }
-                    None => {
-                        tracing::error!("Error uploading picture with {written} bytes written");
-                        Error::OtherWithContext("Error uploading photo".into())
-                    }
-                };
-                return Err(err);
+                tracing::error!(
+                    "Error uploading picture with {written} bytes written with error: {error}"
+                );
+
+                return Err(error.into());
             }
         }
     };
