@@ -4,7 +4,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -54,7 +54,7 @@ impl DirectoryDocument {
         .collect::<Vec<_>>()
         .await;
 
-        let cid = ipfs.dag().put().serialize(items).await?;
+        let cid = ipfs.put_dag(items).await?;
 
         document.items = Some(cid);
 
@@ -142,12 +142,12 @@ impl ItemDocument {
         let document = match item {
             Item::File(file) => {
                 let document = FileDocument::new(ipfs, file).await?;
-                let cid = ipfs.dag().put().serialize(document).await?;
+                let cid = ipfs.put_dag(document).await?;
                 ItemDocument::File(cid)
             }
             Item::Directory(directory) => {
                 let document = DirectoryDocument::new(ipfs, directory).await?;
-                let cid = ipfs.dag().put().serialize(document).await?;
+                let cid = ipfs.put_dag(document).await?;
                 ItemDocument::Directory(cid)
             }
         };
@@ -303,7 +303,7 @@ impl FileDocument {
 #[cfg(test)]
 mod test {
 
-    use rust_ipfs::{Ipfs, UninitializedIpfsNoop};
+    use rust_ipfs::{Ipfs, UninitializedIpfsDefault};
     use tracing::Span;
     use warp::constellation::directory::Directory;
     use warp::constellation::ConstellationEventKind;
@@ -332,7 +332,7 @@ mod test {
 
     #[tokio::test]
     async fn document_resolve_test() -> anyhow::Result<()> {
-        let ipfs = UninitializedIpfsNoop::new()
+        let ipfs = UninitializedIpfsDefault::new()
             .start()
             .await
             .expect("constructed ipfs instance");

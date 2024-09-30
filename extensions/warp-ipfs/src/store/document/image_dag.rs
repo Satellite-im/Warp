@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
 use warp::{constellation::file::FileType, error::Error, multipass::identity::IdentityImage};
@@ -43,19 +43,11 @@ pub async fn store_photo(
                 break (cid, written);
             }
             rust_ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
-                let err = match error {
-                    Some(e) => {
-                        tracing::error!(
-                            "Error uploading picture with {written} bytes written with error: {e}"
-                        );
-                        e.into()
-                    }
-                    None => {
-                        tracing::error!("Error uploading picture with {written} bytes written");
-                        Error::OtherWithContext("Error uploading photo".into())
-                    }
-                };
-                return Err(err);
+                tracing::error!(
+                    "Error uploading picture with {written} bytes written with error: {error}"
+                );
+
+                return Err(error.into());
             }
         }
     };
@@ -66,7 +58,7 @@ pub async fn store_photo(
         mime: file_type,
     };
 
-    let cid = ipfs.dag().put().serialize(dag).pin(true).await?;
+    let cid = ipfs.put_dag(dag).pin(true).await?;
 
     Ok(cid)
 }

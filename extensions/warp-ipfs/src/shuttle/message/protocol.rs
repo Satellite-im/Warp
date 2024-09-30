@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{libp2p::StreamProtocol, Keypair};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

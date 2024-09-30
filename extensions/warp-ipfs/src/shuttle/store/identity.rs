@@ -4,7 +4,7 @@ use futures::{
     stream::{BoxStream, FuturesUnordered},
     StreamExt,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
@@ -142,13 +142,13 @@ impl IdentityStorageInner {
 
         list.insert(did_str, root_cid);
 
-        let cid = self.ipfs.dag().put().serialize(list).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         let old_cid = self.users.replace(cid);
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
-                _ = self.ipfs.remove_pin(&old_cid).await;
+                _ = self.ipfs.remove_pin(old_cid).await;
             }
         }
 
@@ -205,15 +205,15 @@ impl IdentityStorageInner {
 
         list.insert(did.to_string(), document);
 
-        let cid = self.ipfs.dag().put().serialize(list).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
-        self.ipfs.insert_pin(&cid).recursive().await?;
+        self.ipfs.insert_pin(cid).recursive().await?;
 
         let old_cid = self.users.replace(cid);
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning identity package block");
-                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
+                _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
         self.root.set_user_documents(cid).await?;
@@ -412,18 +412,18 @@ impl IdentityStorageInner {
 
         let remaining = mailbox.len();
 
-        let cid = self.ipfs.dag().put().serialize(mailbox).await?;
+        let cid = self.ipfs.put_dag(mailbox).await?;
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list).pin(true).await?;
+        let cid = self.ipfs.put_dag(list).pin(true).await?;
 
         let old_cid = self.mailbox.replace(cid);
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
+                _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
 
@@ -471,18 +471,18 @@ impl IdentityStorageInner {
 
         mailbox.push(request.clone());
 
-        let cid = self.ipfs.dag().put().serialize(mailbox).await?;
+        let cid = self.ipfs.put_dag(mailbox).await?;
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.dag().put().serialize(list).pin(true).await?;
+        let cid = self.ipfs.put_dag(list).pin(true).await?;
 
         let old_cid = self.mailbox.replace(cid);
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
                 tracing::debug!(cid = %old_cid, "unpinning identity mailbox block");
-                _ = self.ipfs.remove_pin(&old_cid).recursive().await;
+                _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
 
@@ -519,7 +519,7 @@ impl IdentityStorageInner {
     //         return Err(Error::IdentityDoesntExist);
     //     }
 
-    //     let cid = self.ipfs.dag().put().serialize(list)?.await?;
+    //     let cid = self.ipfs.put_dag(list)?.await?;
 
     //     let old_cid = self.list.replace(cid);
 
