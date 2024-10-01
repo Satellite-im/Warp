@@ -143,13 +143,13 @@ impl Cipher {
     }
 
     /// Encrypts and embeds private key into async stream
-    pub async fn self_encrypt_async_stream<'a>(
+    pub fn self_encrypt_async_stream<'a>(
         stream: impl Stream<Item = std::io::Result<Vec<u8>>> + Unpin + Send + 'a,
     ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
         let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_owned())));
 
-        let cipher_stream = cipher.encrypt_async_stream(stream).await?;
+        let cipher_stream = cipher.encrypt_async_stream(stream)?;
 
         let stream = key_stream.chain(cipher_stream);
         Ok(stream)
@@ -169,13 +169,13 @@ impl Cipher {
         cipher.decrypt_async_stream(stream).await
     }
 
-    pub async fn self_encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+    pub fn self_encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         reader: R,
     ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
         let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_owned())));
 
-        let cipher_stream = cipher.encrypt_async_read_to_stream(reader).await?;
+        let cipher_stream = cipher.encrypt_async_read_to_stream(reader)?;
         let stream = key_stream.chain(cipher_stream);
         Ok(stream)
     }
@@ -192,7 +192,7 @@ impl Cipher {
     }
 
     /// Encrypts data from async stream into another async stream
-    pub async fn encrypt_async_stream<'a>(
+    pub fn encrypt_async_stream<'a>(
         &self,
         stream: impl Stream<Item = std::io::Result<Vec<u8>>> + Unpin + Send + 'a,
     ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
@@ -295,7 +295,7 @@ impl Cipher {
     }
 
     /// Encrypts data from async reader into async stream
-    pub async fn encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+    pub fn encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         &self,
         mut reader: R,
     ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
@@ -589,8 +589,7 @@ mod test {
         let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
 
         let cipher_stream = cipher
-            .encrypt_async_stream(base)
-            .await?
+            .encrypt_async_stream(base)?
             .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
             .boxed();
 
@@ -620,8 +619,7 @@ mod test {
         let mut message = Cursor::new("this is my message");
 
         let cipher_stream = cipher
-            .encrypt_async_read_to_stream(&mut message)
-            .await?
+            .encrypt_async_read_to_stream(&mut message)?
             .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)));
 
         let mut cipher_reader = cipher_stream.into_async_read();
@@ -653,8 +651,7 @@ mod test {
         let message = b"this is my message";
         let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
 
-        let cipher_stream = Cipher::self_encrypt_async_stream(base)
-            .await?
+        let cipher_stream = Cipher::self_encrypt_async_stream(base)?
             .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
             .boxed();
 
