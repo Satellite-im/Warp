@@ -254,7 +254,6 @@ impl WarpIpfs {
             return Err(Error::IdentityExist);
         }
 
-        let tesseract = self.tesseract.clone();
         let peer_id = keypair.public().to_peer_id();
 
         let did = peer_id.to_did().expect("Valid conversion");
@@ -417,13 +416,6 @@ impl WarpIpfs {
         }
 
         let ipfs = uninitialized.start().await?;
-
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(path) = self.inner.config.path() {
-            if let Err(e) = store::migrate_to_ds(&ipfs, path).await {
-                tracing::warn!(error = %e, "failed to migrate to datastore");
-            }
-        }
 
         if self.inner.config.enable_relay() {
             let mut relay_peers = HashSet::new();
@@ -606,7 +598,6 @@ impl WarpIpfs {
         let identity_store = IdentityStore::new(
             &ipfs,
             &self.inner.config,
-            &tesseract,
             self.multipass_tx.clone(),
             &phonebook,
             &discovery,

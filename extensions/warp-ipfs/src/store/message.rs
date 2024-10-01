@@ -205,7 +205,7 @@ impl MessageStore {
         Ok(inner.contains(id).await)
     }
 
-    pub async fn set(&self, document: ConversationDocument) -> Result<(), Error> {
+    pub async fn set<B: BorrowMut<ConversationDocument>>(&self, document: B) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.set_document(document).await
     }
