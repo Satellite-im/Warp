@@ -16,8 +16,8 @@ pub struct CommunityInvite {
     expiry: Option<DateTime<Utc>>,
 }
 impl CommunityInvite {
-    pub fn target_user(&self) -> Option<DID> {
-        self.target_user
+    pub fn target_user(&self) -> &Option<DID> {
+        &self.target_user
     }
     pub fn created(&self) -> DateTime<Utc> {
         self.created
