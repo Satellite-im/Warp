@@ -24,7 +24,9 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered, SelectAll},
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
+use indexmap::IndexMap;
 use ipld_core::cid::Cid;
+
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, PeerId};
 
 use serde::{Deserialize, Serialize};
@@ -67,7 +69,7 @@ use warp::raygun::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType, CommunityInvite, CommunityPermissions,
         RayGunCommunity, Role,
     },
-    ConversationImage, GroupPermission, GroupPermissions,
+    ConversationImage, GroupPermission, GroupPermissionOpt,
 };
 use warp::{
     constellation::{directory::Directory, ConstellationProgressStream, Progression},
@@ -245,11 +247,11 @@ impl MessageStore {
         inner.create_conversation(did).await
     }
 
-    pub async fn create_group_conversation(
+    pub async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &self,
         name: Option<String>,
         members: HashSet<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         let inner = &mut *self.inner.write().await;
         inner
@@ -320,10 +322,10 @@ impl MessageStore {
         inner.update_conversation_name(conversation_id, name).await
     }
 
-    pub async fn update_conversation_permissions(
+    pub async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
@@ -1221,11 +1223,11 @@ impl ConversationInner {
         Ok(Conversation::from(&conversation))
     }
 
-    pub async fn create_group_conversation(
+    pub async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         name: Option<String>,
         mut recipients: HashSet<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         let own_did = &self.identity.did_key();
 
@@ -1273,6 +1275,11 @@ impl ConversationInner {
         }
 
         let restricted = self.root.get_blocks().await.unwrap_or_default();
+
+        let permissions = match permissions.into() {
+            GroupPermissionOpt::Map(permissions) => permissions,
+            GroupPermissionOpt::Single((id, set)) => IndexMap::from_iter(vec![(id, set)]),
+        };
 
         let conversation = ConversationDocument::new_group(
             self.root.keypair(),
@@ -3582,10 +3589,10 @@ impl ConversationInner {
         Ok(())
     }
 
-    pub async fn update_conversation_permissions(
+    pub async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         let own_did = self.identity.did_key();
@@ -3596,6 +3603,18 @@ impl ConversationInner {
         if creator != &own_did {
             return Err(Error::PublicKeyInvalid);
         }
+
+        let permissions = match permissions.into() {
+            GroupPermissionOpt::Map(permissions) => permissions,
+            GroupPermissionOpt::Single((id, set)) => {
+                let permissions = conversation.permissions.clone();
+                {
+                    let permissions = conversation.permissions.entry(id).or_default();
+                    *permissions = set;
+                }
+                permissions
+            }
+        };
 
         let (added, removed) = conversation.permissions.compare_with_new(&permissions);
 
