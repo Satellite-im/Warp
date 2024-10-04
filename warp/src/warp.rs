@@ -17,7 +17,8 @@ use crate::multipass::{
 };
 use crate::raygun::{
     community::{
-        CommunityChannel, CommunityChannelPermissions, CommunityChannelType, Community, CommunityPermissions, RayGunCommunity, Role,
+        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
+        CommunityInvite, CommunityPermissions, RayGunCommunity, Role,
     },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissions, Location,
     Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
@@ -567,8 +568,8 @@ where
     M: MultiPass,
     R: RayGun,
 {
-    async fn create_community(&mut self, owner: &DID, name: &str) -> Result<Community, Error> {
-        self.raygun.create_community(owner, name).await
+    async fn create_community(&mut self, name: &str) -> Result<Community, Error> {
+        self.raygun.create_community(name).await
     }
     async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
         self.raygun.delete_community(community_id).await
@@ -577,13 +578,36 @@ where
         self.raygun.get_community(community_id).await
     }
 
+    async fn create_invite(
+        &mut self,
+        community_id: Uuid,
+        invite: CommunityInvite,
+    ) -> Result<Uuid, Error> {
+        self.raygun.create_invite(community_id, invite).await
+    }
+    async fn delete_invite(&mut self, community_id: Uuid, invite_id: Uuid) -> Result<(), Error> {
+        self.raygun.delete_invite(community_id, invite_id).await
+    }
+    async fn get_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<CommunityInvite, Error> {
+        self.raygun.get_invite(community_id, invite_id).await
+    }
+    async fn accept_invite(&mut self, community_id: Uuid, invite_id: Uuid) -> Result<(), Error> {
+        self.raygun.accept_invite(community_id, invite_id).await
+    }
+
     async fn create_channel(
         &mut self,
         community_id: Uuid,
         channel_name: &str,
         channel_type: CommunityChannelType,
     ) -> Result<CommunityChannel, Error> {
-        self.raygun.create_channel(community_id, channel_name, channel_type).await
+        self.raygun
+            .create_channel(community_id, channel_name, channel_type)
+            .await
     }
     async fn delete_channel(&mut self, community_id: Uuid, channel_id: Uuid) -> Result<(), Error> {
         self.raygun.delete_channel(community_id, channel_id).await
@@ -623,9 +647,6 @@ where
         self.raygun
             .edit_community_permissions(community_id, permissions)
             .await
-    }
-    async fn add_community_member(&mut self, community_id: Uuid, member: DID) -> Result<(), Error> {
-        self.raygun.add_community_member(community_id, member).await
     }
     async fn remove_community_member(
         &mut self,
