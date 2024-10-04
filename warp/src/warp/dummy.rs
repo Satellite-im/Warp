@@ -14,7 +14,7 @@ use crate::multipass::{
     MultiPassImportExport,
 };
 use crate::raygun::{
-    Conversation, ConversationImage, EmbedState, GroupPermissions, Location, Message,
+    Conversation, ConversationImage, EmbedState, GroupPermissionOpt, Location, Message,
     MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
     RayGunConversationInformation, RayGunEvents, RayGunGroupConversation, RayGunStream,
     ReactionState,
@@ -333,11 +333,11 @@ impl RayGun for Dummy {
         Err(Error::Unimplemented)
     }
 
-    async fn create_group_conversation(
+    async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
-        _: GroupPermissions,
+        _: P,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
@@ -410,10 +410,10 @@ impl RayGun for Dummy {
         Err(Error::Unimplemented)
     }
 
-    async fn update_conversation_permissions(
+    async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         _: Uuid,
-        _: GroupPermissions,
+        _: P,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }

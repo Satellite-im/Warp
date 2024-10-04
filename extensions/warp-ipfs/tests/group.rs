@@ -216,7 +216,7 @@ mod test {
         let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
         instance_a
-            .create_group_conversation(None, vec![did_b.clone()], Default::default())
+            .create_group_conversation(None, vec![did_b.clone()], GroupPermissions::default())
             .await?;
 
         let id_a = crate::common::timeout(Duration::from_secs(60), async {
@@ -325,11 +325,7 @@ mod test {
         );
 
         instance_a
-            .create_group_conversation(
-                None,
-                vec![did_b.clone(), did_c.clone()],
-                permissions.clone(),
-            )
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()], &permissions)
             .await?;
 
         let id_a = crate::common::timeout(Duration::from_secs(60), async {
@@ -1586,7 +1582,7 @@ mod test {
         let mut chat_subscribe_a = instance_a.raygun_subscribe().await?;
 
         instance_a
-            .create_group_conversation(None, vec![], Default::default())
+            .create_group_conversation(None, vec![], GroupPermissions::default())
             .await?;
 
         crate::common::timeout(Duration::from_secs(60), async {
