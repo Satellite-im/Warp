@@ -11,9 +11,20 @@ pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<Role>>;
 pub type CommunityChannelPermissions = IndexMap<CommunityChannelPermission, IndexSet<Role>>;
 
 pub struct CommunityInvite {
-    user_id: Option<DID>,
+    target_user: Option<DID>,
     created: DateTime<Utc>,
     expiry: Option<DateTime<Utc>>,
+}
+impl CommunityInvite {
+    pub fn target_user(&self) -> Option<DID> {
+        self.target_user
+    }
+    pub fn created(&self) -> DateTime<Utc> {
+        self.created
+    }
+    pub fn expiry(&self) -> Option<DateTime<Utc>> {
+        self.expiry
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +71,9 @@ impl Community {
     }
     pub fn permissions(&self) -> &CommunityPermissions {
         &self.permissions
+    }
+    pub fn invites(&self) -> &IndexSet<Uuid> {
+        &self.invites
     }
 }
 
